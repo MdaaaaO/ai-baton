@@ -145,6 +145,14 @@ class WorkspaceRules(unittest.TestCase):
             self.assertEqual(r.returncode, 0)
             self.assertEqual(r.stdout, (KIT / "WORKSPACE.md").read_text(encoding="utf-8"))  # stdout = session context
             self.assertIn("export CLAUDE_PROJECT_DIR=", (Path(tmp) / "env").read_text(encoding="utf-8"))  # never mixed into stdout
+            broken = Path(tmp) / "broken-kit"  # no WORKSPACE.md in the kit: a visible line in the session, never silence
+            (broken / "context-db" / "bin").mkdir(parents=True)
+            for f in (KIT / "context-db" / "bin").glob("*.py"):
+                (broken / "context-db" / "bin" / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+            r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(broken), "CLAUDE_PROJECT_DIR": str(ws)},
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0)
+            self.assertIn("could not load WORKSPACE.md", r.stdout)
 
 
 class KitHealthOnAPluginInstall(unittest.TestCase):

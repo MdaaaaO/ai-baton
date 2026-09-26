@@ -439,10 +439,7 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
             break
     if root is None or (root / ".claude" / "WORKSPACE.md").is_file():
         return ""
-    try:
-        return (kit / "WORKSPACE.md").read_text(encoding="utf-8")
-    except OSError:
-        return ""
+    return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
 
 
 def main(argv: list[str]) -> int:

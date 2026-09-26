@@ -178,7 +178,12 @@ check "plugin path: CLAUDE.md imports no .claude/WORKSPACE.md and no Makefile is
 printf 'include .claude/workspace.mk\n' > "$WS/Makefile"; printf '@.claude/WORKSPACE.md\n' >> "$WS/CLAUDE.md"
 set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/plugin/cache-kit/setup.sh" 2>&1)"; RC=$?; set -e
 check "plugin path: a dangling import/include is named, never added (#3)" '[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "remove that line (the plugin" && printf "%s" "$OUT" | grep -q "every make fails: remove that line"'
-rm -f "$WS/Makefile"
+mkdir -p "$WS/.claude"; printf 'rules\n' > "$WS/.claude/WORKSPACE.md"; printf 'include .claude/workspace.mk\n' > "$WS/Makefile"; : > "$WS/.claude/workspace.mk"
+sed -i.bak '/^@\.claude\/WORKSPACE\.md$/d' "$WS/CLAUDE.md" && rm -f "$WS/CLAUDE.md.bak"
+set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/plugin/cache-kit/setup.sh" --refresh-seeds 2>&1)"; RC=$?; set -e
+check "plugin path: a .claude/ copy nobody imports is named, a working include is not 'nothing to include' (#3)" '[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "loads nowhere" && printf "%s" "$OUT" | grep -q "includes .claude/workspace.mk (the file exists)"'
+check "plugin path: --refresh-seeds never proposes the WORKSPACE.md import back (#3)" '! printf "%s" "$OUT" | grep -q "^ *+@.claude/WORKSPACE.md"'
+rm -f "$WS/Makefile" "$WS/.claude/WORKSPACE.md" "$WS/.claude/workspace.mk"
 check "settings.local.json is seeded under <root>/.claude/, nothing is written below the plugin dir" '[ -f "$WS/.claude/settings.local.json" ] && [ ! -e "$WORK/plugin/cache-kit/settings.local.json" ] && [ -z "$(find "$WORK/plugin/cache-kit" -type f -newer "$WORK/plugin/stamp" -not -path "*/__pycache__*" 2>/dev/null)" ]'
 mkdir -p "$WORK/plugin/proj"
 set +e

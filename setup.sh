@@ -258,17 +258,28 @@ fi
 # A plugin install (#3) has no kit files in <root>/.claude/: the plugin's SessionStart hook injects WORKSPACE.md
 # (`kit_profile.py workspace-rules`), so the seeded CLAUDE.md drops that import and the Makefile gets no include —
 # workspace.mk's targets (claude_sync, sign*, releases) drive a `.claude/` clone.
-if [ "$(basename "$HERE")" = ".claude" ]; then CLONE=1; else CLONE=0; fi
+# CLAUDE_TPL is the template this path seeds from — also what --refresh-seeds diffs against, so it never proposes the
+# import back.
+if [ "$(basename "$HERE")" = ".claude" ]; then CLONE=1; CLAUDE_TPL="$HERE/CLAUDE.example.md"
+else
+  CLONE=0; CLAUDE_TPL="$(mktemp "${TMPDIR:-/tmp}/claude-md-tpl.XXXXXX")"; trap 'rm -f "$CLAUDE_TPL"' EXIT
+  sed '/^@\.claude\/WORKSPACE\.md$/d' "$HERE/CLAUDE.example.md" > "$CLAUDE_TPL"
+fi
 if [ ! -f "$PROJECTS/CLAUDE.md" ] && [ "$CLONE" -eq 0 ]; then
-  sed '/^@\.claude\/WORKSPACE\.md$/d' "$HERE/CLAUDE.example.md" > "$PROJECTS/.CLAUDE.md.seed"
-  seed "$PROJECTS/.CLAUDE.md.seed" "$PROJECTS/CLAUDE.md"; rm -f "$PROJECTS/.CLAUDE.md.seed"
+  seed "$CLAUDE_TPL" "$PROJECTS/CLAUDE.md"
   echo "  created CLAUDE.md from CLAUDE.example.md — EDIT the preamble (who you are); it imports .context/reference/environment.md (the plugin's SessionStart hook injects WORKSPACE.md)"
 elif [ ! -f "$PROJECTS/CLAUDE.md" ]; then
   seed "$HERE/CLAUDE.example.md" "$PROJECTS/CLAUDE.md"
   echo "  created CLAUDE.md from .claude/CLAUDE.example.md — EDIT the preamble (who you are); it imports .claude/WORKSPACE.md + .context/reference/environment.md"
 else
-  if [ "$CLONE" -eq 0 ] && grep -q '^@.claude/WORKSPACE.md' "$PROJECTS/CLAUDE.md" && [ ! -f "$PROJECTS/.claude/WORKSPACE.md" ]; then
+  if grep -q '^@.claude/WORKSPACE.md' "$PROJECTS/CLAUDE.md"; then IMP=1; else IMP=0; fi
+  if [ -f "$PROJECTS/.claude/WORKSPACE.md" ]; then WSF=1; else WSF=0; fi
+  if [ "$CLONE" -eq 0 ] && [ "$IMP" -eq 1 ] && [ "$WSF" -eq 0 ]; then
     echo "  CLAUDE.md imports .claude/WORKSPACE.md, which a plugin install does not have — remove that line (the plugin's SessionStart hook injects WORKSPACE.md)"
+  elif [ "$CLONE" -eq 0 ] && [ "$IMP" -eq 1 ]; then
+    echo "  CLAUDE.md imports .claude/WORKSPACE.md (a copy in .claude/ — the plugin's hook stays quiet so it does not load twice)"
+  elif [ "$CLONE" -eq 0 ] && [ "$WSF" -eq 1 ]; then
+    echo "  .claude/WORKSPACE.md exists but CLAUDE.md does NOT import it, and the plugin's hook skips a workspace with its own copy — WORKSPACE.md loads nowhere: add the line @.claude/WORKSPACE.md, or delete the copy"
   elif [ "$CLONE" -eq 0 ]; then
     echo "  CLAUDE.md present (WORKSPACE.md comes from the plugin's SessionStart hook)"
   elif grep -q '^@.claude/WORKSPACE.md' "$PROJECTS/CLAUDE.md"; then
@@ -285,6 +296,8 @@ fi
 if [ "$CLONE" -eq 0 ]; then
   if [ -f "$PROJECTS/Makefile" ] && grep -q '^include .claude/workspace.mk' "$PROJECTS/Makefile" && [ ! -f "$PROJECTS/.claude/workspace.mk" ]; then
     echo "  Makefile includes .claude/workspace.mk, which a plugin install does not have — every make fails: remove that line"
+  elif [ -f "$PROJECTS/Makefile" ] && grep -q '^include .claude/workspace.mk' "$PROJECTS/Makefile"; then
+    echo "  Makefile present, includes .claude/workspace.mk (the file exists)"
   else
     echo "  Makefile: nothing to include on a plugin install (workspace.mk drives a .claude/ clone)"
   fi
@@ -323,7 +336,7 @@ fi
 seed_pairs() {
   printf '%s\t%s\n' "$HERE/context-db/context-README.template.md" "$CONTEXT/README.md"
   printf '%s\t%s\n' "$HERE/environment-template/environment.md" "$ENV_DOC"
-  printf '%s\t%s\n' "$HERE/CLAUDE.example.md" "$PROJECTS/CLAUDE.md"
+  printf '%s\t%s\n' "$CLAUDE_TPL" "$PROJECTS/CLAUDE.md"
   printf '%s\t%s\n' "$HERE/context-db/_templates/self-assessment-charter.md" "$CONTEXT/self-assessment/README.md"
 }
 stale_seeds=0
