@@ -23,7 +23,9 @@ workspace, the root `CLAUDE.md` imports, the root `Makefile` include, the git ho
 **Env store location: one place on both paths.** `.context/reference/env/` next to the workspace — it is *project*
 data (one machine = one environment = one workspace root), not plugin data, so `${CLAUDE_PLUGIN_DATA}` is not used
 for it. `kit_profile.context_root()` resolves `CONTEXT_ROOT`, then the `.context/` beside the kit (clone path, also
-from a worktree), then `CLAUDE_PROJECT_DIR/.context` (plugin path).
+from a worktree), then `CLAUDE_PROJECT_DIR/.context` (plugin path; the SessionStart hook exports it for Bash), then —
+on a plugin install only, when neither variable is set — the nearest `.context/reference/env/config.json` above the
+current directory, stopping below `$HOME` (#3).
 
 **Nothing stateful under the plugin root.** `${CLAUDE_PLUGIN_ROOT}` changes on every update; state is `.context/`
 (or `${CLAUDE_PLUGIN_DATA}` for plugin-private caches, none today). Skills cross-reference each other by name

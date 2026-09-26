@@ -78,6 +78,7 @@ class ContextRoot(unittest.TestCase):
             kit = fake_install(Path(tmp))
             ws = Path(tmp) / "ws"
             (ws / ".context" / "reference" / "env").mkdir(parents=True)
+            (ws / ".context" / "reference" / "env" / "config.json").write_text("{}", encoding="utf-8")
             (ws / "repo" / "src").mkdir(parents=True)
             self.assertEqual(self.resolve(kit, ws / "repo" / "src", {}), ws / ".context")  # walks up from a repo dir
             self.assertEqual(self.resolve(kit, Path(tmp), {"CLAUDE_PROJECT_DIR": str(ws)}), ws / ".context")  # the hook's export
@@ -88,6 +89,17 @@ class ContextRoot(unittest.TestCase):
             kit = fake_install(Path(tmp))
             (Path(tmp) / "repo" / ".context").mkdir(parents=True)  # some repo's own .context/ (no env store)
             self.assertEqual(self.resolve(kit, Path(tmp) / "repo", {}), kit.parent / ".context")
+            (Path(tmp) / "repo" / ".context" / "reference" / "env").mkdir(parents=True)  # an empty env dir is not a store
+            self.assertEqual(self.resolve(kit, Path(tmp) / "repo", {}), kit.parent / ".context")
+
+    def test_a_checkout_never_walks_up(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            (kit / ".git").mkdir()  # the same tree as a checkout
+            ws = Path(tmp) / "ws"
+            (ws / ".context" / "reference" / "env").mkdir(parents=True)
+            (ws / ".context" / "reference" / "env" / "config.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(self.resolve(kit, ws, {}), kit.parent / ".context")
 
 
 class SessionEnvHook(unittest.TestCase):
