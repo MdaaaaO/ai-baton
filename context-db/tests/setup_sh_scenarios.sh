@@ -186,7 +186,7 @@ check "plugin path: --refresh-seeds never proposes the WORKSPACE.md import back 
 rm -f "$WS/Makefile" "$WS/.claude/WORKSPACE.md" "$WS/.claude/workspace.mk"
 # a git-tracked plugin dir (a marketplace checkout): CLAUDE.md's age check still reads the kit's history (#3)
 git -C "$WORK/plugin/cache-kit" init -q && git -C "$WORK/plugin/cache-kit" add -A >/dev/null 2>&1 \
-  && git -C "$WORK/plugin/cache-kit" -c user.name=t -c user.email=t@example.invalid commit -q -m seed >/dev/null 2>&1
+  && git -C "$WORK/plugin/cache-kit" -c user.name=t -c user.email=t commit -q -m seed >/dev/null 2>&1
 python3 -c 'import os, sys; os.utime(sys.argv[1], (946684800, 946684800))' "$WS/CLAUDE.md"  # 2000-01-01
 set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/plugin/cache-kit/setup.sh" --refresh-seeds 2>&1)"; RC=$?; set -e
 check "git-tracked plugin dir: a stale CLAUDE.md is detected against the kit template, diffed against the trimmed one (#3)" '[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "seed CLAUDE.md predates its template CLAUDE.example.md" && ! printf "%s" "$OUT" | grep -q "^ *+@.claude/WORKSPACE.md"'
