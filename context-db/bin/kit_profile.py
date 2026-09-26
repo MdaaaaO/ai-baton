@@ -48,8 +48,10 @@ def context_root() -> Path:
     """`CONTEXT_ROOT`, else the `.context/` beside the kit — also found from a kit worktree
     (`<root>/.worktrees/<name>/`), where the sibling is two levels up. On the plugin path (#118) the kit sits in
     Claude Code's plugin cache: `CLAUDE_PROJECT_DIR` (hooks get it, and the SessionStart hook re-exports it), else
-    the nearest `.context/` above the current directory — the Bash tool starts in the project dir but is not
-    handed `CLAUDE_PROJECT_DIR` (#3)."""
+    the nearest env store above the current directory — the Bash tool starts in the project dir but is not handed
+    `CLAUDE_PROJECT_DIR` (#3). The walk-up is the last resort and a plugin install's only: it runs when neither
+    variable is set, requires a real env store (`config.json`, not just a `.context/` dir), stops below `$HOME`, and
+    the nearest store wins — as git picks the nearest repo. A clone never walks up (its store is beside the kit)."""
     env = os.environ.get("CONTEXT_ROOT", "").strip()
     if env:
         return Path(env)
@@ -59,6 +61,8 @@ def context_root() -> Path:
     proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
     if proj and (Path(proj) / ".context").is_dir():
         return Path(proj) / ".context"
+    if (KIT / ".git").exists() or not (KIT / ".claude-plugin" / "plugin.json").is_file():
+        return KIT.parent / ".context"  # a checkout: its store is beside it or named by a variable, never guessed
     home = Path.home().resolve()
     try:
         cwd = Path.cwd().resolve()
@@ -67,7 +71,7 @@ def context_root() -> Path:
     for base in (cwd, *cwd.parents):
         if base == home:  # never `~/.context` (#168: the home dir is not a workspace root)
             break
-        if (base / ".context" / "reference" / "env").is_dir():
+        if (base / ".context" / "reference" / "env" / "config.json").is_file():
             return base / ".context"
     return KIT.parent / ".context"
 
