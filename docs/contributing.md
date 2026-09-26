@@ -205,25 +205,15 @@ against a blank store, the unittest suite, the plugin manifests, `py_compile`, `
 (`check_links.py`), the tier-0 review gate (`review_gate.py`) and `kit-health --ci` (the leak scan on the blank
 store, no writes). Third-party actions are pinned by commit SHA and bumped by Dependabot.
 
-Two kinds of runner, split by what the job executes (#120; GitHub's hardening guide: a self-hosted runner
-"should almost never be used for public repositories"):
-
-- **Every workflow a pull request triggers runs on GitHub-hosted `ubuntu-latest`** — `ci`, `pr-title` and
-  `claude-review` (#158). The job runs the PR's code, and once the repo is public that code can come from anyone. A
-  fork's PR runs there with no secrets (GitHub's rule), so `ci` and `pr-title` still check it; the reviewer needs
-  its token and does not run for a fork — the owner reviews outside PRs by hand (decision, 2026-09-26). Each
-  hosted job is a fresh VM, so parallel reviews no longer race on one shared Claude Code install (#119).
-- **The self-hosted runner** (labels `self-hosted, linux, x64` — workflows name no machine) keeps only the jobs
-  that execute code already on `main` and check out no pull request: `release` and `main-guard` (push to main)
-  and `auto-merge` (`workflow_run` — always the copy of the file on main; it reads PR metadata, never PR code).
-  `tests/test_ci_hygiene.py` fails when a pull-request-triggered workflow names it. Those jobs run only while
-  the runner's host is on and its service is up (`sudo ./svc.sh status` in the runner directory); a merge that
-  lands while it is down waits with its checks queued.
-
-Re-registering it: `gh api -X POST repos/<owner>/ai-baton/actions/runners/registration-token
---jq .token`, then in the runner directory: `./config.sh --url https://github.com/<owner>/ai-baton
---token <it> --name <runner-name> --labels self-hosted,linux,x64 --replace`, `sudo ./svc.sh install &&
-sudo ./svc.sh start`.
+Every workflow runs on GitHub-hosted `ubuntu-latest` — free for a public repository, and GitHub's hardening guide
+says a self-hosted runner "should almost never be used for public repositories". A job triggered by a pull request
+runs the PR's code, which can come from anyone: a fork's PR runs with no secrets (GitHub's rule), so `ci` and
+`pr-title` still check it; the reviewer needs its token and does not run for a fork — the owner reviews outside PRs
+by hand. Workflow runs from outside contributors wait for the owner's approval (repository setting), and
+`.github/CODEOWNERS` puts every change to `.github/workflows/` under the owner's review. `release` and `main-guard`
+(push to main) and `auto-merge` (`workflow_run`, always the copy on main) check out no pull request.
+`tests/test_ci_hygiene.py` fails when any workflow names a self-hosted runner. Each hosted job is a fresh VM, so
+parallel reviews never race on one shared Claude Code install (#119).
 
 ## Testing
 

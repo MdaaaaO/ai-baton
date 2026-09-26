@@ -7,7 +7,7 @@ name: main-guard
 # server-side backstop: it cannot block the push (same 403), but on every push to `main` it checks that
 # the pushed commit is the squash of a merged PR and, when it is not, opens (or comments on) a tracking
 # issue so the bypass does not go unnoticed.
-# Stays on the self-hosted runner: push-to-main only, and it checks nothing out (docs/contributing.md § Where CI runs).
+# Runs on GitHub-hosted runners like every workflow: push-to-main only, and it checks nothing out (docs/contributing.md § Where CI runs).
 
 on:
   push:
@@ -25,7 +25,7 @@ concurrency:
 jobs:
   guard:
     name: guard
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: The pushed commit must be a squash-merged PR

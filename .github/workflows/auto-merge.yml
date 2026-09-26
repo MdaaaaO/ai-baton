@@ -15,8 +15,8 @@
 # read/write), not github.token: a merge by github.token creates a push that triggers NO workflow, so
 # `ci`, `main-guard` and `release` would never run on main. Without the secret the job says so and stops.
 #
-# Stays on the self-hosted runner: `workflow_run` always executes the copy of this file on main, and the job checks
-# out nothing — a pull request's code never reaches the runner (docs/contributing.md § Where CI runs; #120).
+# Runs on GitHub-hosted runners like every workflow (docs/contributing.md § Where CI runs). `workflow_run` always
+# executes the copy of this file on main, and the job checks out nothing — it reads PR metadata, never PR code.
 name: auto-merge
 
 on:
@@ -37,7 +37,7 @@ jobs:
   merge:
     name: merge
     if: github.event.workflow_run.event == 'pull_request'
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       REPO: ${{ github.repository }}

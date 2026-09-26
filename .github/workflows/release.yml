@@ -3,8 +3,8 @@ name: release
 # The CI half of a kit release (docs/contributing.md § Releases). On every push to main: when the pushed commit
 # is a squash-merged `chore(release): X.Y.Z`, check VERSION agrees, tag that commit vX.Y.Z and publish a
 # GitHub Release whose notes are the version's CHANGELOG.md section. Any other commit: a no-op.
-# Inline rather than conventional-release's reusable tag.yml. Stays on the self-hosted runner: it runs only on a push
-# to main, i.e. code that was already merged — never a pull request's (docs/contributing.md § Where CI runs; #120).
+# Inline rather than conventional-release's reusable tag.yml. Runs on GitHub-hosted runners like every workflow; only on a
+# push to main, i.e. code that was already merged — never a pull request's (docs/contributing.md § Where CI runs).
 # Nothing is published as a package — the kit is no library.
 
 on:
@@ -21,7 +21,7 @@ concurrency:
 jobs:
   tag:
     name: tag
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write  # push the tag, create the release

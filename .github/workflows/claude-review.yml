@@ -17,8 +17,8 @@ name: claude-review
 #
 # Read-only: contents: read. It can comment; it can never push.
 #
-# Hosting (#120): a pull request's code runs here, so both jobs run on GitHub-hosted runners, never the
-# self-hosted one — a fork's PR gets no secrets and therefore no reviewer (the owner reviews outside PRs by
+# Hosting (#120): a pull request's code runs here, so both jobs run on GitHub-hosted runners like every
+# workflow — a fork's PR gets no secrets and therefore no reviewer (the owner reviews outside PRs by
 # hand); each hosted job is a fresh VM, so parallel reviews never race on one shared install (#119).
 #
 # A PR that edits THIS file gets no review: for pull_request events GitHub runs the PR's copy, and the

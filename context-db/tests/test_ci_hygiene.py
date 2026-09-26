@@ -1,5 +1,5 @@
-"""CI hygiene (#81): third-party actions pinned by commit SHA, Dependabot keeps them fresh, `pull_request` jobs on the
-self-hosted runner refuse forks, and `kit-health --ci` runs against a blank store without writing anything.
+"""CI hygiene (#81): third-party actions pinned by commit SHA, Dependabot keeps them fresh, every job runs on GitHub-hosted
+runners, and `kit-health --ci` runs against a blank store without writing anything.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import os
@@ -44,8 +44,8 @@ class Pins(unittest.TestCase):
 
 
 class Hosting(unittest.TestCase):
-    """#120: a workflow a pull request triggers runs on GitHub-hosted runners — the PR's code never reaches the
-    self-hosted runner; a self-hosted job belongs to a push or workflow_run workflow only."""
+    """A public repository runs every job on GitHub-hosted runners — no workflow names a self-hosted runner, so
+    neither a pull request's code nor a push can reach a maintainer's machine."""
 
     @staticmethod
     def code(wf: Path) -> str:
@@ -56,23 +56,14 @@ class Hosting(unittest.TestCase):
     def triggers(text: str) -> str:
         return text.split("\njobs:", 1)[0]
 
-    def test_pull_request_workflows_never_run_self_hosted(self):
-        for wf in workflows():
-            text = self.code(wf)
-            # block style (`on:\n  pull_request:`) and flow style (`on: [push, pull_request]`, `on: pull_request`) alike
-            if re.search(r"\bpull_request(?:_target|_review_comment)?\b", self.triggers(text)):
-                self.assertNotIn("self-hosted", text, f"{wf.name}: a pull-request-triggered workflow names the self-hosted runner")
-
-    def test_self_hosted_jobs_belong_to_push_or_workflow_run(self):
+    def test_no_workflow_runs_self_hosted(self):
         seen = 0
         for wf in workflows():
             text = self.code(wf)
-            if "self-hosted" not in text:  # inline list or `- self-hosted` on its own line, both count
-                continue
             seen += 1
-            self.assertRegex(self.triggers(text), r"\b(push|workflow_run)\b", f"{wf.name}: self-hosted, but not a push/workflow_run workflow")
-            self.assertNotRegex(self.triggers(text), r"\bpull_request", f"{wf.name}: self-hosted and pull-request-triggered")
-            self.assertNotIn("pull_request.head", text, f"{wf.name}: a self-hosted job reads a pull request head")
+            self.assertNotIn("self-hosted", text, f"{wf.name}: names a self-hosted runner")  # inline list or `- self-hosted`
+            for runner in re.findall(r"runs-on:\s*(.+)", text):
+                self.assertRegex(runner.strip(), r"^(ubuntu|macos|windows)-", f"{wf.name}: runs-on {runner.strip()} is not a GitHub-hosted label")
         self.assertGreater(seen, 0)
 
     def test_comment_triggered_jobs_only_answer_writers(self):

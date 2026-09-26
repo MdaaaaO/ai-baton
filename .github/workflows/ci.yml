@@ -7,10 +7,9 @@ name: ci
 # compiles, every shell script parses. Stdlib only, so nothing is installed. `make -C .claude/context-db ci`
 # reproduces it locally.
 #
-# Runs on GitHub-hosted runners (docs/contributing.md § Where CI runs): a job triggered by a pull request executes the
-# PR's code, and a fork's PR may come from anyone once the repo is public — so PR-triggered jobs never run on the
-# self-hosted runner (GitHub's hardening guide; #120). A fork's PR runs here without secrets, which is all these
-# checks need.
+# Runs on GitHub-hosted runners like every workflow (docs/contributing.md § Where CI runs): a job triggered by a pull
+# request executes the PR's code, and a fork's PR may come from anyone. A fork's PR runs here without secrets, which
+# is all these checks need.
 
 on:
   push:

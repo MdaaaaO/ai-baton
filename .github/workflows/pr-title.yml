@@ -5,7 +5,7 @@ name: pr-title
 #   conventional-release check-title — the types .conventional-release.toml knows (what the changelog groups by)
 #   commit_style.py title            — the kit's own rule on top (≤ 72 chars, no trailing period; docs/commit-style.md)
 # Inline rather than conventional-release's reusable pr-title.yml, so the kit's own rule runs in the same job.
-# PR-triggered, so it runs on GitHub-hosted runners, never the self-hosted one (docs/contributing.md § Where CI runs; #120).
+# Runs on GitHub-hosted runners like every workflow (docs/contributing.md § Where CI runs).
 
 on:
   pull_request:
