@@ -43,7 +43,7 @@ Also failed: a bare value with a ` #` in it (YAML cuts it there — quote it), a
 - **Cross-reference other skills by name** (`pr-watch`, `/pr-watch`), never by path — a `skills/<x>/SKILL.md`
   literal fails; a script of another skill that a step runs is cited by its path at that one point.
 - **Own paths exist**: every `scripts/…` / `references/…` the body cites must be a file beside it.
-- **The kit is `$BATON/`**, never `.claude/`: a plugin install has no kit there (`kit-verify` fails it; `packaging.md` § Kit root).
+- **The kit is `$BATON/`**, never `.claude/`: a plugin install has no kit there (`kit-verify` fails it; `docs/packaging.md` § Kit root).
 - **Machine-only steps become a handoff artefact** the user runs (a queued job, a `commit.sh`), never a pasted
   one-liner or a silent substitute.
 - **Capability tier ships a `README.md`** (≤ 30 lines): what it needs, what it does without it, one example.
