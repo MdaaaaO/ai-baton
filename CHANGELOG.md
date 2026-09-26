@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.1.1 (2026-09-26)
+
+
+### Bug Fixes
+
+* **kit-health:** diagnose a plugin install correctly ([#4](https://github.com/MdaaaaO/ai-baton/issues/4)) ([57c3e72](https://github.com/MdaaaaO/ai-baton/commit/57c3e7226b7b2ac31e62e564a23d35e776ea6008))
+* **kit-health:** load WORKSPACE.md on a plugin install ([#6](https://github.com/MdaaaaO/ai-baton/issues/6)) ([6bb3016](https://github.com/MdaaaaO/ai-baton/commit/6bb3016ddc4af4630a13f49e057c317d5ec858ab))
+* **kit:** reach the kit through $BATON on both install paths ([#8](https://github.com/MdaaaaO/ai-baton/issues/8)) ([3a53b7f](https://github.com/MdaaaaO/ai-baton/commit/3a53b7fc9acef37b416dbe9eab4e581ba00af7c9))
+
+
+### Documentation
+
+* **readme:** drop the issue link from the home-directory warning ([a7b8c02](https://github.com/MdaaaaO/ai-baton/commit/a7b8c02bf325a13f3f8715e94df7ed39eaf042c7))
+
+
+### CI
+
+* **github:** require the maintainer's review on workflow changes ([2dcdd24](https://github.com/MdaaaaO/ai-baton/commit/2dcdd246c52a0b346759269db20165f887d6b94b))
+* **github:** run every workflow on GitHub-hosted runners ([#1](https://github.com/MdaaaaO/ai-baton/issues/1)) ([46adad1](https://github.com/MdaaaaO/ai-baton/commit/46adad1b680d0fb489beb1098513f35e8bfc8d7d))
+
 ## 0.1.0 (2026-09-26)
 
 First public release.
