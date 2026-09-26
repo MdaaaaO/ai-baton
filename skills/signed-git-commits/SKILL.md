@@ -3,7 +3,7 @@ name: signed-git-commits
 description: The why and the discipline behind signed/SSH commits where the machine that edits cannot sign or push: worktree-first branching, exact staging, message-to-file, rebase signing quirks, the gh-token prefix. The hand-off itself runs through `sign-queue`, never pasted git commands. Read when committing or pushing in a repo with a signed-commits ruleset (`systems.signed_commits`).
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "6"
+  version: "7"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
   requires: "signed_commits"
@@ -102,7 +102,7 @@ corrupting the user's working tree or silently dropping files.
    `gh auth status` is genuinely logged out there — the proxy injects credentials at the
    network layer, invisibly to `gh` itself — so `gh` refuses to run until it sees *some*
    token. The placeholder is `github.sandbox_token_prefix` in the env config (`NAME=value`);
-   prefix every `gh` invocation with it, or `eval "$(python3 .claude/context-db/bin/kit_profile.py gh-env)"`
+   prefix every `gh` invocation with it, or `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"`
    once per shell (skill `gh-cli`). This covers `pr create`, `pr view`, `pr checks`, `api`
    (including writes) — anything going over HTTPS. Where the prefix is empty, `gh` is logged
    in natively: call it bare. Plain `curl`
@@ -121,7 +121,7 @@ git -C <worktree> status --short      # must show exactly the intended file(s)
 Write the full message to an absolute path under `<workspace root>/.worktrees/`, e.g. `$PWD/.worktrees/KEY-1340-fix-commit-msg.txt`
 (outside the worktree), then enqueue via the `sign-queue` skill:
 ```
-sh .claude/skills/sign-queue/enqueue.sh \
+sh $BATON/skills/sign-queue/enqueue.sh \
    key-1340-fix <abs-worktree> <branch> \
    $PWD/.worktrees/KEY-1340-fix-commit-msg.txt \
    --by <your-session> --files "<path/to/changed_file>"

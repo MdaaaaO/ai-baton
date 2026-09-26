@@ -44,9 +44,8 @@ current directory, stopping below `$HOME` (#3).
   and `Makefile` — the conventions the plugin cannot install. Run from a plugin install (a directory not named
   `.claude/`) the script takes `CLAUDE_PROJECT_DIR`, else the current directory, as the workspace root, and seeds the
   ignored `settings.local.json` in `<root>/.claude/` (the directory Claude Code reads project settings from) — nothing
-  is written below the plugin cache; `PROJECTS=/path` overrides. Until the skill bodies resolve the engine through
-  `${CLAUDE_PLUGIN_ROOT}` (open item below) a plugin install alone gives the skills whose bodies need no engine
-  script; the full kit still wants the clone.
+  is written below the plugin cache; `PROJECTS=/path` overrides. Skill and agent bodies reach the kit as `$BATON/…` (§ Kit root below), so the engine-backed skills work from
+  a plugin install too.
 
   **Always-on rules on the plugin path (#3).** A plugin cannot ship a CLAUDE.md, and a plugin install puts no kit
   file in `<root>/.claude/`. So the SessionStart hook prints `WORKSPACE.md` (`kit_profile.py workspace-rules`), and
@@ -57,6 +56,15 @@ current directory, stopping below `$HOME` (#3).
   A leftover import or include is flagged by `setup.sh` and is an error in `kit-health` § 4 (it checks the targets,
   not just the lines). The engine finds `.context/` through the `CLAUDE_PROJECT_DIR` the same hook exports (the
   Bash tool isn't handed it), else by walking up from the current directory.
+
+## Kit root — `$BATON` (#3)
+
+Unit bodies and `WORKSPACE.md` never spell the kit's location: they write `$BATON/context-db/bin/…`,
+`$BATON/skills/<name>/…`. On a clone `settings.json` sets `BATON=.claude` (relative to the workspace root, where
+sessions run); on a plugin install the SessionStart hook exports `BATON=${CLAUDE_PLUGIN_ROOT}` via `$CLAUDE_ENV_FILE`
+(`kit_profile.py session-env`). `kit-verify` fails a unit or `WORKSPACE.md` that writes a kit path as `.claude/…`;
+the workspace's own `.claude/` (settings.local.json, the sign-queue state), `~/.claude/` and a repo's
+`<repo>/.claude/commit-style` are not kit paths. Scripts find the kit relative to themselves, never through `$BATON`.
 
 ## Identity (#116)
 
@@ -92,10 +100,9 @@ and nothing reserved or impersonating is used. A future rename is a one-line cha
 
 ## Open items (follow-ups, not this decision)
 
-- Skill bodies invoke the engine as `python3 .claude/context-db/bin/…` — the clone layout. On the plugin path the
-  same script is `${CLAUDE_PLUGIN_ROOT}/context-db/bin/…`, which Claude Code substitutes only for plugin-loaded
-  skills. A resolver that works on both paths (an env variable the clone path sets too, or a `kit` launcher on
-  `PATH` written by `setup.sh`) is the next packaging PR; until then the clone path is the supported full install.
+- `sign-queue` keeps its job queue under the kit (`.claude/sign-queue/`); on a plugin install that is the plugin
+  cache, which an update deletes. The queue needs a workspace home before signed-commit environments use the plugin
+  path (#7).
 - `install.sh` for agents without a marketplace (symlink `skills/` into `~/.claude/skills`) — the clone path already
   serves them (`~/.claude/skills` shadows `.claude/skills`, so a symlink there is a choice, not a need).
 - Skipped on purpose (amendment on #118): a second agent's manifest pair, a toolchain submodule, a package tap —

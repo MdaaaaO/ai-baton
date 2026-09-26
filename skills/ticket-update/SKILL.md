@@ -2,7 +2,7 @@
 name: ticket-update
 description: How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes.
 metadata:
-  version: "5"
+  version: "6"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -14,7 +14,7 @@ The comment stream on a ticket **is** its trace: reading top-to-bottom should te
 no duplication. Each comment adds only what changed since the last. Precise over verbose — senior
 readers get the TLDR line; detail only where it carries evidence.
 
-**Pick the adapter first:** `python3 .claude/context-db/bin/kit_profile.py get tracker.kind` (from the
+**Pick the adapter first:** `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the
 workspace root). The grammar, cadence and flush below are tracker-neutral; the posting/sync mechanics
 follow **exactly one** adapter. Any other kind → say "no tracker adapter for kind X in this environment"
 and stop.

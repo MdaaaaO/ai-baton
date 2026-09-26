@@ -3,7 +3,7 @@ name: aws-sso-login
 description: Get AWS access via the SSO device-code flow: starts `aws sso login --no-browser` in the background, hands the user the URL and code to approve, verifies, then kubectl/aws work. Use whenever aws/kubectl fails with "SSO session … expired or is otherwise invalid" or before any stage/prod AWS or EKS check.
 compatibility: "Designed for Claude Code; needs aws_sso (systems.*)"
 metadata:
-  version: "6"
+  version: "7"
   updated: "2026-09-26"
   reviewed: "2026-09-25"
   requires: "aws_sso"
@@ -20,7 +20,7 @@ approved and writes the token cache. The same flow works on a machine with a bro
 ## Profiles (legacy per-profile SSO style — keep it that way)
 
 Profile names and account ids are env facts (`aws.md` in the store), never literals here. Resolve them first
-(`K="python3 .claude/context-db/bin/kb.py"`; `$K list aws` shows every row):
+(`K="python3 $BATON/context-db/bin/kb.py"`; `$K list aws` shows every row):
 
 | fact | what it is | used by |
 |---|---|---|

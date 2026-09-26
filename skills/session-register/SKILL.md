@@ -2,7 +2,7 @@
 name: session-register
 description: Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh; each heartbeat refreshes the row's stats line from the transcript. Invoke at the start of any session working an epic/feature, whenever responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree.
 metadata:
-  version: "9"
+  version: "10"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -43,14 +43,14 @@ worktree.
    `<feature>`, `<repo>-<ticket-key>`, `<repo>`), get your `ref` from `ListAgents` (your own row):
 
    ```sh
-   make -C .claude/context-db session-register NAME=<name> REF=<ref> EPIC=<tracker-key> \
+   make -C $BATON/context-db session-register NAME=<name> REF=<ref> EPIC=<tracker-key> \
         REPOS=<repo[,repo]> WORKING="<current ticket/PR in one line>" \
         RESP="<what you own; what others should coordinate with you on>"
    ```
    Then open `.context/sessions/<name>.md` and fill the body with anything another session
    needs (what you own vs. don't, in-flight worktrees/PRs). **Override it whenever your
    responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
-   edit the body directly and `make -C .claude/context-db session-index`.
+   edit the body directly and `make -C $BATON/context-db session-index`.
 4. **Re-arm the PR watches.** `Monitor`s die with the session that armed them, so a restarted or
    successor session owns PRs that nobody is watching. For **every open PR you now own** (the
    `## Open PRs` list in the predecessor's session file, the context doc's *What was built* /
@@ -74,12 +74,12 @@ Your entry must show a heartbeat within the last 12h or it is treated as stale.
 
 - **On every flush** (per-step, per `CLAUDE.md` § Cost & context hygiene) also run:
   ```sh
-  make -C .claude/context-db session-touch NAME=<name> WORKING="<what you're on now>"
+  make -C $BATON/context-db session-touch NAME=<name> WORKING="<what you're on now>"
   ```
   Active sessions stay fresh automatically this way.
 - **Backstop heartbeat — pure shell, zero model turns.** Right after registering, run once:
   ```sh
-  bash .claude/skills/session-register/heartbeat.sh <name> "<current focus>"
+  bash $BATON/skills/session-register/heartbeat.sh <name> "<current focus>"
   ```
   It finds the `claude` process that owns this session, detaches itself (`setsid nohup` — the Bash
   tool kills its process group after ~10 min otherwise), touches your row every 6h while that process
@@ -95,7 +95,7 @@ Your entry must show a heartbeat within the last 12h or it is treated as stale.
 
 Every `session-register` / `session-touch` / `session-end` (yours or the heartbeat's) refreshes the
 row's `stats:` line from the session transcript (`~/.claude/projects/*/<session-id>.jsonl`, found via
-`$CLAUDE_CODE_SESSION_ID`; engine: `.claude/context-db/bin/session_stats.py`) — **zero model turns**:
+`$CLAUDE_CODE_SESSION_ID`; engine: `$BATON/context-db/bin/session_stats.py`) — **zero model turns**:
 
 `<n> turns · <h>h · ctx peak/avg · cache-read · out · ~$ (list price) · compactions · tool calls ·
 PRs referenced (gh pr create calls) · tickets referenced (created / comments / transitions) · sign
@@ -105,7 +105,7 @@ jobs · Slack drafts`
   one turn. Spend is a list-price floor at `SESSION_STATS_PRICES` (default Opus-4-class
   `15,18.75,1.5,75` $/Mtok in/cache-write/cache-read/out) for the **main session only** — subagents
   are their own transcripts. PRs/tickets are *referenced in tool inputs* (touched), not "owned".
-- `make -C .claude/context-db session-stats` prints the full block (window, prompts, token split,
+- `make -C $BATON/context-db session-stats` prints the full block (window, prompts, token split,
   top tools, delegation, PR/ticket lists, hand-offs) — what `session-handoff` pastes into the wind-down
   entry. `NOSTATS=1` skips the refresh; `SESSION_ID=<uuid>` derives stats for another session.
 - On `session-end` the block is written under `## Session stats` in your session file and one row is
@@ -115,7 +115,7 @@ jobs · Slack drafts`
 ## 3. On end (part of `session-handoff`)
 
 ```sh
-make -C .claude/context-db session-end NAME=<name> NEXT=$(python3 .claude/context-db/bin/kit_profile.py scratch)/next.md
+make -C $BATON/context-db session-end NAME=<name> NEXT=$(python3 $BATON/context-db/bin/kit_profile.py scratch)/next.md
 ```
 Marks the row `ended`, stores the `NEXT` file as your `## Next session` hand-off prompt (its first line
 in the index's Ended table; `session-handoff` step 10 says what goes in it — an ended session **without**

@@ -3,7 +3,7 @@
 #
 # Zero-model-turn heartbeat for the live session registry (.context/SESSION_INDEX.md).
 # Run it ONCE from the owning Claude session as a plain Bash tool call:
-#     bash .claude/skills/session-register/heartbeat.sh <name> "<focus>"
+#     bash $BATON/skills/session-register/heartbeat.sh <name> "<focus>"
 # It resolves the owning `claude` process from its own ancestry, then re-executes itself detached
 # (setsid + nohup — the Bash tool kills its process group after ~10 min otherwise) and returns.
 # The detached copy touches the registry row every INTERVAL (default 6h) while that claude process
@@ -22,8 +22,8 @@ set -u
 NAME=${1:?usage: heartbeat.sh <session-name> ["<working on>"] [interval-seconds]}
 WORKING=${2:-}
 INTERVAL=${3:-21600}
-ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
-MK="make -s -C $ROOT/.claude/context-db"
+KITDIR=$(cd "$(dirname "$0")/../.." && pwd)  # the kit itself: a .claude/ clone or the plugin root (#3)
+MK="make -s -C $KITDIR/context-db"
 LOG=/tmp/heartbeat-$NAME.log
 PIDFILE=/tmp/heartbeat-$NAME.pid
 SESSION_ID=${CLAUDE_CODE_SESSION_ID:-}

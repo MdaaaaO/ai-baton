@@ -17,9 +17,9 @@ user-invocable: true
 
 ## 1. Detect
 
-- <Capability tier only: `python3 .claude/context-db/bin/kit_profile.py get systems.<flag>` — `False` →
+- <Capability tier only: `python3 $BATON/context-db/bin/kit_profile.py get systems.<flag>` — `False` →
   print `my-skill: not applicable here (systems.<flag> is false)` and stop.>
-- <Each fact the body reads: `python3 .claude/context-db/bin/kb.py get <system>.<kind> <name>`. Missing →
+- <Each fact the body reads: `python3 $BATON/context-db/bin/kb.py get <system>.<kind> <name>`. Missing →
   `kb.py discover <system>.<kind> <name>` prints the tool call and the verify clause; run it, verify, write back
   with `kb.py set … --from tool:<name>`. Inside a fork return exactly `NEEDS <system>.<kind> <name>` instead.>
 

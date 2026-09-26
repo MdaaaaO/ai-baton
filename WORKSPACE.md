@@ -5,7 +5,7 @@ who the user is, then imports this file and the environment's prose (`.context/r
 Everything below holds everywhere; whatever differs between environments — tracker, chat, ids, repo
 map, capabilities — lives in the env store (values) and `environment.md` (prose), local to the machine.
 Identity is `WORKSPACE_*` (plugin `/config`, else `.claude/settings.local.json`), never here.
-Kit reference: `.claude/README.md`; `docs/contributing.md` § Versioning.
+Kit reference: `$BATON/README.md`; `docs/contributing.md` § Versioning.
 
 ## Layout
 
@@ -18,11 +18,11 @@ its own git repo), `.context/` (the knowledge base, below), `.worktrees/` and `e
 Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't load it by default:
 
 1. **Find first:** read `.context/INDEX.md` (the generated catalog) and open only the leaf docs the
-   task needs. Narrow with `make -C .claude/context-db find DOMAIN=<domain>` or `find TAG=<tag>`.
-2. **Persist:** `make -C .claude/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug> TITLE="…"`
+   task needs. Narrow with `make -C $BATON/context-db find DOMAIN=<domain>` or `find TAG=<tag>`.
+2. **Persist:** `make -C $BATON/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug> TITLE="…"`
    (types: epic, reference, repo, meeting, 1on1, oncall, self-assessment, pr-review, log), edit the
-   scaffold, then `make -C .claude/context-db index` (also after any hand edit); `make -C
-   .claude/context-db verify` is the schema/freshness gate.
+   scaffold, then `make -C $BATON/context-db index` (also after any hand edit); `make -C
+   $BATON/context-db verify` is the schema/freshness gate.
 3. **Domains are folders:** core `reference/`, `repos/`, `pr-reviews/`, `meetings/`, `1on1/`,
    `self-assessment/`, `on-call/`, `archive/`; the environment adds its own (`domains` in the env
    config). Repo deep-dives are `.context/repos/<repo>.md` (links + TLDRs; the repo's own `CLAUDE.md`
@@ -131,7 +131,7 @@ Cost ≈ turns × prefix size: everything read into context is re-billed every l
   flush decision. Registry heartbeats are pure shell, never a `/loop`.
 - **Keep big output out of the transcript** — pipe to counts/filters or a scratch file.
 - **Flush at every step.** When a ticket/PR/epic step lands: context doc (Session log + section), tick
-  `.context/reference/priorities.md` where it exists, `make -C .claude/context-db index`, then
+  `.context/reference/priorities.md` where it exists, `make -C $BATON/context-db index`, then
   `session-touch NAME=<name>`; the `MEMORY.md` index if a memory note changed. Durable state on
   disk at every step is the real guard against compaction drift.
 - **Scope → flush → end.** Work a ticket/PR, flush, end the session — don't let a session sprawl.

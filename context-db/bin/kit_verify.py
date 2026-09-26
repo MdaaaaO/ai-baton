@@ -245,7 +245,7 @@ def check_identity_options(errors: list[str], man: dict) -> None:
                       "would load no always-on rules (#3)")
 
 
-MAKE_TARGET = re.compile(r"make(?:\s+-s)?\s+-C\s+\.claude/context-db(?:\s+-s)?\s+([a-z][a-z_-]*)\b")
+MAKE_TARGET = re.compile(r"make(?:\s+-s)?\s+-C\s+(?:\.claude|\$BATON)/context-db(?:\s+-s)?\s+([a-z][a-z_-]*)\b")
 MAKEFILE = KIT / "context-db" / "Makefile"
 DOC_FILES = ("README.md", "CONTRIBUTING.md", "WORKSPACE.md", "docs")
 
@@ -277,6 +277,16 @@ def check_make_targets(errors: list[str], files=None) -> None:
             if target not in have:
                 errors.append(f"{rel}:{n}: cites `make -C .claude/context-db {target}` but the Makefile has no such target "
                               f"(targets: {', '.join(sorted(have))})")
+
+
+def check_workspace_kit_paths(errors: list[str]) -> None:
+    """WORKSPACE.md loads into every session on both install paths: its commands reach the kit as `$BATON/…` (#3)."""
+    p = KIT / "WORKSPACE.md"
+    if not p.is_file():
+        return
+    for n, line in enumerate(p.read_text(encoding="utf-8", errors="replace").split("\n"), 1):
+        for m in HARDCODED_KIT_PATH.finditer(line):
+            errors.append(f"WORKSPACE.md:{n}: cites `{m.group(0)}` — write `$BATON/…`, the kit root on both install paths (#3)")
 
 
 def check_always_on_budget(errors: list[str]) -> None:
@@ -315,8 +325,13 @@ BODY_MAX_LINES = 500  # evolve Tier 0's cap on a skill body
 # `skills/<x>/SKILL.md` or a bare `skills/<x>/` in a body: another skill referenced by PATH. The contract is by name
 # (docs/contributing.md § Skills) — installed paths differ per host and a plugin root moves on every update. A script or
 # reference file of another skill that a step runs (`skills/<x>/scripts/…`) is the one allowed path form.
-CROSS_SKILL = re.compile(r"(?<![\w/-])(?:~/|\$HOME/|\$\{HOME\}/)?(?:\.claude/)?skills/([\w-]+)/(?:SKILL\.md|README\.md)?(?=[`\s)'\"]|$)")
-OWN_PATH = re.compile(r"`(?:[\w.-]+\s+)?((?:\.claude/(?:skills/[\w-]+|agents)/)?(?:scripts|references|reference)/[\w./-]+)")
+CROSS_SKILL = re.compile(r"(?<![\w/-])(?:~/|\$HOME/|\$\{HOME\}/)?(?:\.claude/|\$BATON/)?skills/([\w-]+)/(?:SKILL\.md|README\.md)?(?=[`\s)'\"]|$)")
+OWN_PATH = re.compile(r"`(?:[\w.-]+\s+)?((?:(?:\.claude|\$BATON)/(?:skills/[\w-]+|agents)/)?(?:scripts|references|reference)/[\w./-]+)")
+
+# A kit path spelled the clone way. Not the workspace's own `.claude/` (settings.local.json, the sign-queue state dir),
+# `~/.claude/` (the harness) or a repo's `<repo>/.claude/commit-style` — the lookbehind skips a path segment before it.
+HARDCODED_KIT_PATH = re.compile(r"(?<![~\w>*/.$-])\.claude/(?:context-db|skills/|agents/|docs/|hooks/|README\.md|setup\.sh|"
+                                r"environment-template/)[\w./<>-]*")
 
 
 def check_body(p: Path, rel, body: str, errors: list[str]) -> None:
@@ -330,6 +345,8 @@ def check_body(p: Path, rel, body: str, errors: list[str]) -> None:
             errors.append(f"{rel}: cites `make -C .claude/context-db {target}` (body line {n}) but the Makefile has no such target")
     for m in OWN_PATH.finditer(body):
         cited = m.group(1)
+        if cited.startswith("$BATON/"):  # the kit root on both install paths (#3) — resolve it like the clone path
+            cited = ".claude/" + cited[len("$BATON/"):]
         if any(c in cited for c in "*<{$"):
             continue  # a glob or a placeholder, not a file
         if cited.startswith(".claude/"):
@@ -341,6 +358,11 @@ def check_body(p: Path, rel, body: str, errors: list[str]) -> None:
             target = unit_dir / cited
         if not target.exists() and not target.with_suffix("").exists():
             errors.append(f"{rel}: cites `{cited}` but {target.relative_to(KIT.parent) if target.is_relative_to(KIT.parent) else target} does not exist")
+    for n, line in enumerate(body.split("\n"), 1):
+        for m in HARDCODED_KIT_PATH.finditer(line):
+            errors.append(f"{rel}: body line {n} cites `{m.group(0)}` — the kit is not at `.claude/` on a plugin install; "
+                          "write `$BATON/…` (the kit root on both paths: settings.json on a clone, the SessionStart hook "
+                          "on the plugin path, #3)")
     for m in CROSS_SKILL.finditer(body):
         if m.group(1) != unit_dir.name:
             errors.append(f"{rel}: cites `{m.group(0)}` — cross-reference a skill by name (`{m.group(1)}`, `/{m.group(1)}`), never by "
@@ -479,6 +501,7 @@ def main(argv: list[str] | None = None) -> int:
         skipped.append("always-on budget and description total (kit-wide; run without paths)")
     else:
         check_always_on_budget(errors)
+        check_workspace_kit_paths(errors)
         check_plugin_manifest(errors)
         check_make_targets(errors)
     desc_total = 0

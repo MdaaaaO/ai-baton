@@ -12,6 +12,6 @@ and the skill is never invoked.
 **Example:**
 
 > **claude:** stages exactly the intended files in the worktree, writes the message to a file and runs
-> `sh .claude/skills/sign-queue/enqueue.sh …` → `queued job 3: <branch> (2 files)`.
+> `sh $BATON/skills/sign-queue/enqueue.sh …` → `queued job 3: <branch> (2 files)`.
 >
 > **user (on the host):** `make sign` → the job is signed, pushed and removed from the queue.

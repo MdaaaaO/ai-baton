@@ -2,7 +2,7 @@
 name: pr-open
 description: Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`.
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-26"
   reviewed: "2026-09-25"
   facts: "slack.enabled,slack.review-venue,slack.channel,github.review_bot,github.owner_teams,github.signed_commits,tracker.kind,tracker.url_template"
@@ -14,13 +14,13 @@ A PR is not open until all of this is done, in this order. Owner decision (2026-
 draft a message in slack for review in the correct help channel / team channel (draft!)" — that step runs
 only where the environment has Slack (`systems.slack`); everything else holds in every environment.
 
-**Read the config first** (from the workspace root; `K=python3 .claude/context-db/bin/kit_profile.py`):
+**Read the config first** (from the workspace root; `K=python3 $BATON/context-db/bin/kit_profile.py`):
 `$K get tracker.kind`, `tracker.url_template`, `github.review_bot`, `github.owner_teams`,
 `github.signed_commits`, `labels.shared`, `labels.repos.<repo>` (may be absent), `slack.enabled`,
 `slack.repo_channels.<owner/repo>`, `commits.default` / `commits.repos.<owner/repo>` (§ Commit style). Never hardcode any of these values.
 
 0. **Branch & push**: work in a worktree under `.worktrees/`. **Commit style first**: `python3
-   .claude/context-db/bin/commit_style.py resolve --dir <worktree>` names the convention (Conventional Commits
+   $BATON/context-db/bin/commit_style.py resolve --dir <worktree>` names the convention (Conventional Commits
    unless the repo overrides it — § Commit style); every commit subject passes `commit_style.py check --dir
    <worktree> <msg-file>` before it is made or enqueued, and the PR title passes `commit_style.py title --dir
    <worktree> "<title>"` — same shape as the (squash) commit subject. If `github.signed_commits` (=
@@ -65,7 +65,7 @@ only where the environment has Slack (`systems.slack`); everything else holds in
       were created.
    Dependabot's `dependencies` / `python` / `github_actions` are automatic — never add them by hand.
    (An environment's per-repo map belongs in its env config → `labels.repos`; the prose per repo in `.context/reference/environment.md`.)
-4. **Watch**: arm `/pr-watch` on the head sha (`.claude/skills/pr-watch/pr-watch.sh <o/r> <n> <head>`).
+4. **Watch**: arm `/pr-watch` on the head sha (`$BATON/skills/pr-watch/pr-watch.sh <o/r> <n> <head>`).
 5. **Tracker**: comment the PR link on the ticket (`ticket-update`). Where `tracker.kind` is `jira` and the
    PR is the ticket's deliverable, move it to *In Review* (`tracker.transitions.in_review`). Where it is
    `github`, the `Closes #<n>` in the body is the link; add the issue's in-review label if the repo uses one.
@@ -126,8 +126,8 @@ without reading the diff — and nothing that the PR does not raise.
 **Procedure**
 1. From the workspace root, with the branch pushed or the diff local:
    ```
-   python3 .claude/skills/pr-open/diagram-plan.py --repo <repo-dir> [--base origin/main] [--type bugfix|refactor|feature]
-   python3 .claude/skills/pr-open/diagram-plan.py --pr <owner/repo> <n>      # after create: files + type label from GitHub
+   python3 $BATON/skills/pr-open/diagram-plan.py --repo <repo-dir> [--base origin/main] [--type bugfix|refactor|feature]
+   python3 $BATON/skills/pr-open/diagram-plan.py --pr <owner/repo> <n>      # after create: files + type label from GitHub
    ```
    `--repo` takes the clone's **directory** (the worktree you are about to push): `git diff` runs there and
    the env-config overlay key is read from its `origin` — sessions run from the workspace root, so a bare
@@ -146,7 +146,7 @@ without reading the diff — and nothing that the PR does not raise.
    `NO MARKER`. On drift, redraw in the same turn as the code (a new route file, a dropped RPC, a model added
    to the PR). The `pr-watch` head-move event is the reminder.
 
-**Facet → question matrix.** The one copy is the script: `python3 .claude/skills/pr-open/diagram-plan.py --explain`
+**Facet → question matrix.** The one copy is the script: `python3 $BATON/skills/pr-open/diagram-plan.py --explain`
 prints every facet with its globs (first match wins; the env-config overlay before the defaults) and the WHERE /
 WHAT / RUNS answer each facet raises, `—` where a question is not raised, `only when …` where it is conditional.
 Read it there when a plan surprises you; never copy it into this file (it drifted here before, #57).
@@ -164,7 +164,7 @@ route modules that are UI) go into the env config — `diagrams.repos.<owner/rep
 - **GitHub renders ```` ```mermaid ```` natively** on PR bodies and comments — no images, nothing to upload.
   Jira does **not**: a ticket gets the PR link, never the diagram source.
 - **Validate before publishing.** A syntax error renders as a red box for every reviewer. Parse every block
-  with the mermaid library: `node .claude/skills/pr-open/mermaid-check.mjs <body.md>…` from a scratchpad dir
+  with the mermaid library: `node $BATON/skills/pr-open/mermaid-check.mjs <body.md>…` from a scratchpad dir
   after `npm i --no-audit --no-fund mermaid@11 jsdom dompurify` (prints `OK (<type>)` / `FAIL <error>` per block, exit
   non-zero on any failure) — or, if that is impossible, re-read against these traps: a `;` inside sequence
   text **terminates the statement** (use `—`/`,` or parentheses); one message per line; quote node labels with
@@ -182,8 +182,8 @@ route modules that are UI) go into the env config — `diagrams.repos.<owner/rep
 ## Commit style — Conventional Commits by default, the repo may override
 
 Owner decision, 2026-09-25: "by default we want to follow conventional commits if the repo doesn't override it"
-(core rule, `WORKSPACE.md` § Rules → Workflow & scope; spec `.claude/docs/commit-style.md`). The resolver is
-`python3 .claude/context-db/bin/commit_style.py` — repo marker (`<repo>/.claude/commit-style`: `conventional` |
+(core rule, `WORKSPACE.md` § Rules → Workflow & scope; spec `$BATON/docs/commit-style.md`). The resolver is
+`python3 $BATON/context-db/bin/commit_style.py` — repo marker (`<repo>/.claude/commit-style`: `conventional` |
 `ticket-key` | `free`, or a commitlint config → conventional) → env config `commits.repos.<owner/repo>` →
 `commits.default` → `conventional`. Never decide the style by reading the repo's recent log: a repo that drifted
 is not a repo that overrode.

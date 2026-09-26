@@ -2,7 +2,7 @@
 name: triage
 description: Cheap read-only triage worker (Sonnet, low effort, no CLAUDE.md). Runs the forked skills pr-event-brief and alerts-sweep, and any read-and-summarise delegation where the main session only needs a short brief. Never posts to GitHub, the tracker or chat and never decides for the main session.
 metadata:
-  version: "5"
+  version: "6"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 model: sonnet
@@ -38,7 +38,7 @@ what to read and what shape of brief to return. Rules that always apply:
   runs `/env-init <system>.<kind> <name>` (the fact's discovery manifest, the user round where the user is) and
   re-runs you. This is the kit-wide forked-worker contract (`env-init` § Rules); `NO-OP` on an unread source is
   the failure it prevents.
-- `gh` token: run `eval "$(python3 .claude/context-db/bin/kit_profile.py gh-env)"` once before the first `gh` call — it exports the
+- `gh` token: run `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"` once before the first `gh` call — it exports the
   `github.sandbox_token_prefix` placeholder where a sandbox proxy injects credentials and nothing where `gh` is logged
   in natively. Never set a token value by hand.
   Paginate every listing (`gh api --paginate "...?per_page=100"`) — 30 items per page has hidden verdicts before.

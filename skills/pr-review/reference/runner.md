@@ -10,7 +10,7 @@ only the sheet, the walk with the user, the post, and the KB write-back.
 
 ```
 Agent(
-  subagent_type: "review-runner",            # .claude/agents/review-runner.md — Opus, no CLAUDE.md
+  subagent_type: "review-runner",            # $BATON/agents/review-runner.md — Opus, no CLAUDE.md
   description: "review-runner <repo>#<pr>",
   prompt: <template below>
 )
@@ -33,7 +33,7 @@ fix in the script, not a prompt to repeat.
 
 ```
 Review-runner for <owner/repo>#<pr>. Flags: <--deep | none>. Mode is decided by fetch-context.sh.
-Follow your agent definition (.claude/agents/review-runner.md): pr-review steps 1–4 only, write
+Follow your agent definition ($BATON/agents/review-runner.md): pr-review steps 1–4 only, write
 $CTX/triage.json (+ traps.json, ff.json), return the REVIEW SHEET block with CTX/NEEDS/NOTE lines
 and nothing else. Do not post anything anywhere and do not ask questions.
 Extra context from the queue: <pr-scan row: prio, why-now, size, human reviews, threads/bot>.
@@ -62,7 +62,7 @@ The runner itself is not re-used for deep dives — it has returned and its cont
 
 ## `--auto` (trivial PRs flagged `A` by pr-scan)
 
-Spawn the **Sonnet `auto-runner`** (`.claude/agents/auto-runner.md`, ≤ 15 turns) — not the Opus review-runner;
+Spawn the **Sonnet `auto-runner`** (`$BATON/agents/auto-runner.md`, ≤ 15 turns) — not the Opus review-runner;
 one per `A` row, in parallel when several. Only rows whose `src` is `direct` or `team` (the gate already
 refuses sweep rows: "not in the user's review scope").
 

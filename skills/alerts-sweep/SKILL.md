@@ -3,7 +3,7 @@ name: alerts-sweep
 description: Sonnet-forked sweep of the airflow-alerts Slack channel: reads messages since the last-swept timestamp, classifies each against the pattern KB, advances the timestamp, and returns exactly NO-OP when nothing needs the main session, or `NEEDS <system>.<kind> <name>` for a missing env fact (resolved with `/env-init`). Arm with `/loop 20m /alerts-sweep`; never acts on an alert itself.
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
-  version: "6"
+  version: "7"
   updated: "2026-09-26"
   reviewed: "2026-09-25"
   requires: "airflow,slack"
@@ -23,7 +23,7 @@ you may edit only `STATE` and `KB`.
 
 ## Steps
 
-0. `python3 .claude/context-db/bin/kb.py get <system>.<kind> <name>` for each of `slack.channel airflow-alerts`
+0. `python3 $BATON/context-db/bin/kb.py get <system>.<kind> <name>` for each of `slack.channel airflow-alerts`
    → `CHANNEL`, `airflow.path alerts-state` → `STATE`, `airflow.path alerts-kb` → `KB`. Both paths are relative
    to the workspace root and must start with `.context/` — that is the whole write scope of this fork. If any
    `get` exits non-zero, or a path is absolute, contains a `..` segment or is not under `.context/`, return `NEEDS <system>.<kind> <name>`
@@ -41,7 +41,7 @@ you may edit only `STATE` and `KB`.
 4. For each KNOWN alert append one line under `## Recurrence log` at the end of `KB`
    (create the heading if missing): `- <YYYY-MM-DD> <slack ts> <dag>/<task> — <KB entry title>`.
 5. Advance the state: `sed -i -E 's/(\*\*Last swept through:\*\* ts `)[0-9.]+/\1<newest ts>/' "$STATE"`
-   and set its frontmatter `updated:` to today. Then `make -C .claude/context-db index >/dev/null`.
+   and set its frontmatter `updated:` to today. Then `make -C $BATON/context-db index >/dev/null`.
 6. Return.
 
 ## Return value

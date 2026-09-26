@@ -167,6 +167,36 @@ class WorkspaceRules(unittest.TestCase):
             self.assertIn("could not load WORKSPACE.md", r.stdout)
 
 
+class KitPathResolver(unittest.TestCase):
+    """Finding 1 of #3: unit bodies reach the kit as `$BATON/…` — `.claude` on a clone (settings.json), the plugin root
+    on a plugin install (the SessionStart hook)."""
+
+    def test_both_paths_set_baton(self):
+        self.assertEqual(json.loads((KIT / "settings.json").read_text(encoding="utf-8"))["env"]["BATON"], ".claude")
+        env = kit_profile.session_env({"CLAUDE_PLUGIN_ROOT": "/cache/kit/1.0.0", "CLAUDE_PROJECT_DIR": "/ws"})
+        self.assertEqual((env["BATON"], env["CLAUDE_PROJECT_DIR"]), ("/cache/kit/1.0.0", "/ws"))
+        self.assertNotIn("BATON", kit_profile.session_env({}))
+
+    def test_hardcoded_kit_paths_are_findings_workspace_paths_are_not(self):
+        import kit_verify
+        hits = lambda line: [m.group(0) for m in kit_verify.HARDCODED_KIT_PATH.finditer(line)]
+        self.assertEqual(hits("run `python3 .claude/context-db/bin/kb.py get x`"), [".claude/context-db/bin/kb.py"])
+        self.assertEqual(hits("`bash .claude/skills/pr-review/scripts/fetch-context.sh`"), [".claude/skills/pr-review/scripts/fetch-context.sh"])
+        for fine in ("`$BATON/context-db/bin/kb.py`", "`~/.claude/projects/*/*.jsonl`", "`<repo>/.claude/commit-style`",
+                     "`.claude/settings.local.json`", "`.claude/sign-queue/logs`", "`**/.claude/**`"):
+            self.assertEqual(hits(fine), [], fine)
+        self.assertEqual([t for _n, t in kit_verify.cited_make_targets("`make -C $BATON/context-db index`")], ["index"])
+
+    def test_no_unit_or_workspace_body_hardcodes_the_kit_path(self):
+        import kit_verify
+        errors: list[str] = []
+        kit_verify.check_workspace_kit_paths(errors)
+        for p in [*sorted((KIT / "skills").rglob("*.md")), *sorted((KIT / "agents").glob("*.md"))]:
+            for n, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):
+                errors += [f"{p.relative_to(KIT)}:{n}: {m.group(0)}" for m in kit_verify.HARDCODED_KIT_PATH.finditer(line)]
+        self.assertEqual(errors, [])
+
+
 class KitHealthOnAPluginInstall(unittest.TestCase):
     def load(self, kit: Path, ws: Path):
         spec = importlib.util.spec_from_file_location("kit_health_plugin_test", KIT / "skills" / "kit-health" / "kit-health.py")

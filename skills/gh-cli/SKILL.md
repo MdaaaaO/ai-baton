@@ -2,7 +2,7 @@
 name: gh-cli
 description: How to query GitHub with `gh` without tripping the known traps: auth (native login vs a proxy token prefix), `--jq` has no `--arg`, search rate limits and caps, `reviewed-by` and `review-requested` semantics, review pagination, missing `--json` fields on older gh (wait with `wait-checks.sh`), and writes that silently fail. Load before any non-trivial `gh api`, `gh search` or `gh pr` work.
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-26"
   reviewed: "2026-09-25"
 ---
@@ -14,13 +14,13 @@ before writing a loop; copy the recipes in § Recipes rather than improvising.
 
 ## Auth & environment
 
-- **`<org>` below is this environment's GitHub org** (`python3 .claude/context-db/bin/kit_profile.py get github.org`);
+- **`<org>` below is this environment's GitHub org** (`python3 $BATON/context-db/bin/kit_profile.py get github.org`);
   the bot logins to exclude are `github.bots`, the review bot is `github.review_bot`. Never hardcode either.
 
 - **Token: `github.sandbox_token_prefix`** (`kit_profile.py get github.sandbox_token_prefix`). Where a
   sandbox proxy injects the real token at the network layer, it holds a placeholder `NAME=value` —
   `gh` only needs a non-empty token to stop prompting, and `gh auth status` saying "not logged in" is
-  expected there. Apply it with `eval "$(python3 .claude/context-db/bin/kit_profile.py gh-env)"` (shell)
+  expected there. Apply it with `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"` (shell)
   or `kit_profile.gh_env()` (Python) — the kit's scripts already do. **Empty = `gh` is logged in
   natively: call it bare** — a placeholder token on such a host overrides the real login and every call
   answers 401. **A native login wins over the prefix**: where `gh auth token` succeeds without any token
@@ -34,7 +34,7 @@ before writing a loop; copy the recipes in § Recipes rather than improvising.
   later `gh pr merge` works with the same token.
 - **Foreground `sleep` is blocked** by the harness. Anything that must pace itself (search
   sweeps) runs with `run_in_background: true`; poll its output file, don't re-run it.
-- **Scratch files go to `$(python3 .claude/context-db/bin/kit_profile.py scratch)`** (per session, exists on every machine —
+- **Scratch files go to `$(python3 $BATON/context-db/bin/kit_profile.py scratch)`** (per session, exists on every machine —
   a job-directory variable one kind of machine exports is unset on the others), never a bare `/tmp` (shared between sessions) and never the
   transcript (a 100-row JSON dump is re-billed every turn).
 
@@ -87,7 +87,7 @@ echo "rows=$(wc -l < sizes.jsonl) errs=$(wc -l < err.txt)"   # both, always
 
 Paced search sweep (background):
 ```sh
-ORG=$(python3 .claude/context-db/bin/kit_profile.py get github.org)
+ORG=$(python3 $BATON/context-db/bin/kit_profile.py get github.org)
 for l in "${LOGINS[@]}"; do for w in <window-start-1> <window-start-2>; do
   n=$(gh api -X GET search/issues -f q="author:$l type:pr user:$ORG is:merged merged:>=$w" --jq .total_count 2>>err.txt)
   printf '%s\tauthored\t%s\t%s\n' "$l" "$w" "$n" >> cells.tsv; sleep 2.2
@@ -110,7 +110,7 @@ failed query is none of them — it must end the wait loudly, never read as "not
 
 | Waiting for | Use | Exit |
 |---|---|---|
-| Every check on a PR head / commit | `bash .claude/skills/gh-cli/wait-checks.sh <owner/repo> <pr\|sha> [timeout=900] [interval=20]` — check runs + suites + legacy statuses via REST, portable; done only when the finished set holds for two polls | 0 passed · 1 a check failed · 2 bad args / query failed (stderr) · 124 deadline |
+| Every check on a PR head / commit | `bash $BATON/skills/gh-cli/wait-checks.sh <owner/repo> <pr\|sha> [timeout=900] [interval=20]` — check runs + suites + legacy statuses via REST, portable; done only when the finished set holds for two polls | 0 passed · 1 a check failed · 2 bad args / query failed (stderr) · 124 deadline |
 | One workflow run you know the id of (e.g. an `@claude review` mention run — it runs on the default branch, not the PR head) | `timeout 900 gh run watch <run-id> --exit-status` — find the id with `gh run list -R <o/r> --workflow <file> -L 3` and take the run created just after your trigger (`createdAt` ≥ your comment's `created_at`) whose jobs did not skip — not "the latest `issue_comment` run": the bot's own reply comment starts one more run that skips | 0 success · non-zero failed · 124 deadline |
 | A new comment or review | count **all pages** and keep the exit status of `gh`, not of a pipe: `ids=$(gh api --paginate "repos/<o/r>/issues/<n>/comments?per_page=100" --jq '.[].id') \|\| exit 2; n=$(printf '%s' "$ids" \| grep -c .)` (`pulls/<n>/reviews`, `pulls/<n>/comments` for reviews / inline comments); poll until `n` grows, same deadline. A bare `--jq length` stops at 30 (one page); `gh … \| wc -l \|\| exit 2` never exits (the pipe's status is `wc`'s). | — |
 

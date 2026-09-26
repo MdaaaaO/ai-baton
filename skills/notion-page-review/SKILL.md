@@ -3,7 +3,7 @@ name: notion-page-review
 description: Review a Notion page tree (page, sub-pages, every comment thread) against the user's position, walk each proposed comment with them (Comment, Update wording, Skip, batches of 4), and post only the approved ones as thread replies or anchored inline comments. Invoke when the user asks to "go through", "catch up on" or "comment on" a Notion page with comments.
 compatibility: "Designed for Claude Code; needs notion (systems.*)"
 metadata:
-  version: "5"
+  version: "6"
   updated: "2026-09-26"
   reviewed: "2026-09-25"
   requires: "notion"
@@ -23,7 +23,7 @@ every single comment's wording before it goes out, (3) comments land where peopl
 2. `notion-get-comments` on every page with `include_all_blocks: true` → the thread map:
    `discussion://<page>/<block>/<discussion>` → who said what, when, resolved or not.
 3. Record per page: sections, anchors (exact phrases), and every thread with its full id. Keep these
-   ids in a scratch file (`$(python3 .claude/context-db/bin/kit_profile.py scratch)/<page>-threads.md`) — you will need them after a compaction.
+   ids in a scratch file (`$(python3 $BATON/context-db/bin/kit_profile.py scratch)/<page>-threads.md`) — you will need them after a compaction.
 4. Pull the user's side from `.context/` (INDEX.md → the initiative's context doc, the last 1:1 / team
    meeting notes, the merged plan). Do **not** propose from memory of the page; propose from the fetch.
 
@@ -39,7 +39,7 @@ Rules for the proposals:
 - One idea per comment. Team-meeting rulings may be cited ("today's session", "<colleague> on <date>"); **private
   1:1 agreements are not claimed** — leave those "open for discussion" unless the user says otherwise.
 - Questions for one expert are **not** a Notion comment. Before building the list, read
-  `python3 .claude/context-db/bin/kit_profile.py get systems.slack` once — never infer Slack from loaded MCP
+  `python3 $BATON/context-db/bin/kit_profile.py get systems.slack` once — never infer Slack from loaded MCP
   tools. Where it is true they become a Slack draft to that person (`slack-draft`) with the page link + the
   exact section to comment on; otherwise they go in the overview below as *redirected* — recipient,
   section, question — for the user to route themselves, and into the § 5 flush. The rule: a question
@@ -75,7 +75,7 @@ Rules for the proposals:
 - Meeting/context doc: a "Notion comments posted" section — per item: `#n page/section → comment id`,
   skipped items with the reason, redirected items (recipient + the Slack draft id where `systems.slack`).
 - Update the thread-id map in the context doc if the page will be revisited.
-- `make -C .claude/context-db index && … verify && … session-touch NAME=<name>`.
+- `make -C $BATON/context-db index && … verify && … session-touch NAME=<name>`.
 
 ## Gotchas seen
 

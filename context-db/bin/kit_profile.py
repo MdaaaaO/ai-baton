@@ -412,12 +412,16 @@ def plugin_install(kit: Path | None = None, environ: dict | None = None) -> dict
 def session_env(environ: dict | None = None) -> dict[str, str]:
     """What the plugin's SessionStart hook exports into `$CLAUDE_ENV_FILE` so every later Bash command sees it: the
     identity options (`identity_env`) plus `CLAUDE_PROJECT_DIR`, which hooks get and the Bash tool does not — without
-    it the engine cannot find the workspace's `.context/` from a plugin install (#3)."""
+    it the engine cannot find the workspace's `.context/` from a plugin install — and `BATON`, the kit root that skill
+    bodies call the engine through (`$BATON/context-db/bin/…`) (#3)."""
     env = os.environ if environ is None else environ
     out = identity_env(env)
     proj = str(env.get("CLAUDE_PROJECT_DIR", "")).strip()
     if proj:
         out["CLAUDE_PROJECT_DIR"] = proj
+    root = str(env.get("CLAUDE_PLUGIN_ROOT", "")).strip()
+    if root:  # `$BATON/…` in skill bodies = the kit on both paths; a clone sets BATON=.claude in settings.json (#3)
+        out["BATON"] = root
     return out
 
 

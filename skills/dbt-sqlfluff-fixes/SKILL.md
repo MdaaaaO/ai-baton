@@ -3,7 +3,7 @@ name: dbt-sqlfluff-fixes
 description: Recognise and fix the sqlfluff violations that keep recurring in dbt models: WHERE/ON line breaks, OVER-clause-in-OR-chain indent fights, short aliases, AS alignment, nested CASE. Use when writing or editing a dbt .sql model, or when a PR's lint-models check fails and you need the exact reviewdog findings fixed in one CI round.
 compatibility: "Designed for Claude Code; needs dbt (systems.*)"
 metadata:
-  version: "5"
+  version: "6"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
   requires: "dbt"
@@ -26,7 +26,7 @@ below — some of its indent rules (see LT02 note) are genuinely inconsistent in
 that aren't worth reverse-engineering. Get the exact findings instead:
 
 ```bash
-# Apply github.sandbox_token_prefix first where one is set: eval "$(python3 .claude/context-db/bin/kit_profile.py gh-env)"
+# Apply github.sandbox_token_prefix first where one is set: eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"
 # From a failed lint-models job (get the job id from `gh pr checks <PR>`):
 gh api repos/<owner/repo>/actions/jobs/<job_id>/logs \
   | grep -E "LT0|AL0|CP0|RF0|ST0" | grep -v "level=INFO\|reviewdog:"

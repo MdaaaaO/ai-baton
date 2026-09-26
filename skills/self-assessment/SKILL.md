@@ -2,7 +2,7 @@
 name: self-assessment
 description: Compose the user's weekly self-assessment for a PAST ISO week or range, sourced only from `.context/` and the systems of record, never live sessions. Writes the week file plus the report block and ledger card the env config asks for, back-filling from the systems of record when `.context/` has no coverage. Invoke as "self-assessment for last week" or "for W37".
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -19,9 +19,9 @@ optional bonus if they happen to already exist; the source sweep is the authorit
 The full charter (three purposes, fixed week-file format, initiatives model, contribution protocol)
 lives in `.context/self-assessment/README.md` — **step 0: if it exists, read it for the format;
 otherwise use the default scope from `self_assessment.scope` and continue** (`setup.sh` seeds the
-charter from `.claude/context-db/_templates/self-assessment-charter.md` on a fresh environment, but a
+charter from `$BATON/context-db/_templates/self-assessment-charter.md` on a fresh environment, but a
 session must not block on it being there). **The default** without a charter: compose the week file
-in the fixed section order the scaffold template already carries (`make -C .claude/context-db new
+in the fixed section order the scaffold template already carries (`make -C $BATON/context-db new
 TYPE=self-assessment` → `_templates/self-assessment.md` — Scope/Sources, Shipped, Collaboration &
 reviews, Impact, Learnings, Next week, Blockers/risks, an optional Landed-just-after tail, and the
 report block only where `self_assessment.report` is `lattice`); "work" is whatever
@@ -30,14 +30,14 @@ initiatives model or contribution protocol to honour without the charter, so ski
 initiatives gap-fill and inbox contribution rules. This skill *sequences the sourcing* and states the
 rules a cold session gets wrong.
 
-**Config-driven.** Read `self_assessment` first (`python3 .claude/context-db/bin/kit_profile.py get
+**Config-driven.** Read `self_assessment` first (`python3 $BATON/context-db/bin/kit_profile.py get
 self_assessment`): `scope` is the one sentence that defines what counts as "work" this week — **quote it
 at the top of the method** and drop anything outside it; `sources` gates each sweep in step 3 (a source
 not in the list is skipped silently); `report` picks the deliverable in step 9; `ledger` (bool) gates step 10 — on
 means this machine has the `Artifact` tool and wants every composed week on the update-ledger page, off means
 step 10 is not applicable here; `ledger_url` is the page step 10 republishes (empty until the first run creates
 it); `report_url` is the form the ledger links to (optional). A store without the `ledger` key reads as off —
-`python3 .claude/context-db/bin/kb.py config-set self_assessment.ledger true` turns it on.
+`python3 $BATON/context-db/bin/kb.py config-set self_assessment.ledger true` turns it on.
 
 ## Arguments
 
@@ -127,7 +127,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      AND updated >= <Mon> AND updated <= <Sun>` — use created/resolved/transition dates, not just current
      status, to place each item in the right week.
    - **`.context/` history — always; sweep BOTH live docs AND `.context/archive/*-log.md`.** Since the 30KB
-     guardrail (`make -C .claude/context-db verify` warns past 30KB), a live doc keeps only the newest tail;
+     guardrail (`make -C $BATON/context-db verify` warns past 30KB), a live doc keeps only the newest tail;
      **recent-but-not-newest history — including a just-finished week after a trim — lives in
      `archive/<slug>-log.md`** (newest-first). Archive↔live pairs share the slug
      (`archive/<slug>-log.md` ↔ `<domain>/<slug>.md`). Date-grep both:
@@ -161,7 +161,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
    - **If nothing arbitrates, drop the contested digit** rather than pick one — a vaguer true
      statement beats a precise wrong one.
 5. **Compose `weeks/2026-Wnn.md`** in the charter's fixed format
-   (`make -C .claude/context-db new TYPE=self-assessment DOMAIN=self-assessment SLUG=2026-Wnn` if the file is
+   (`make -C $BATON/context-db new TYPE=self-assessment DOMAIN=self-assessment SLUG=2026-Wnn` if the file is
    new — it always scaffolds into `weeks/`, creating that folder the first time — else edit). Set **`status: archived`** in the
    frontmatter once the week is reconciled — a completed week is a closed record and this self-exempts it from
    the 30KB verify guardrail. A mid-week compose stays `status: active` and says **"week in progress — re-run
@@ -177,7 +177,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
    initiatives no live session owns, gap-fill) the `initiatives/<slug>.md` arcs the week touched; a
    new multi-week effort gets a new initiative doc.
 7. **Move processed drops** to `inbox/archive/`.
-8. **`make -C .claude/context-db index && make -C .claude/context-db verify`** (the week file should NOT appear in the
+8. **`make -C $BATON/context-db index && make -C $BATON/context-db verify`** (the week file should NOT appear in the
    >30KB warning — it's `status: archived`).
 9. **Deliver per `self_assessment.report`:**
    - `lattice` (needs `systems.lattice`) — hand the user the paste-ready block at the end of the week file (the
@@ -193,9 +193,9 @@ it); `report_url` is the form the ledger links to (optional). A store without th
     ledger is one private Artifact page holding every composed week as a copy-ready card (copy button writes
     `text/html` + `text/plain` so links survive the paste; tick list in the viewer's browser), and skipping the
     card is the failure this step exists to prevent.
-    1. `python3 .claude/context-db/bin/kit_profile.py get self_assessment.ledger_url`.
+    1. `python3 $BATON/context-db/bin/kit_profile.py get self_assessment.ledger_url`.
     2. **URL set** → `Artifact read` with that `url` and `path: index.html` (saves the live page locally), then
-       `python3 .claude/skills/self-assessment/ledger.py build --page <saved index.html> --week <the week file
+       `python3 $BATON/skills/self-assessment/ledger.py build --page <saved index.html> --week <the week file
        step 5 wrote> [--week …] --out <scratch>/ledger.html`. It replaces the card
        with the same id (a re-run updates in place), appends a new one, sorts by week and refreshes the masthead
        count + date range. Republish **with `url`** = the configured URL and the same `file_path` — publishing
@@ -203,7 +203,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
     3. **URL empty** (first run on this machine) → `ledger.py build --init --week <every week file in the domain> --out
        <scratch>/ledger.html --title "Update Ledger" --eyebrow "<team · user>" [--report-url <self_assessment.report_url>]`
        (template `ledger-template.html` next to the script), publish it as a new private Artifact (icon
-       `calendar`), then `python3 .claude/context-db/bin/kb.py config-set self_assessment.ledger_url <url>` so
+       `calendar`), then `python3 $BATON/context-db/bin/kb.py config-set self_assessment.ledger_url <url>` so
        no later run creates a second page. The store is local — every environment gets its own ledger.
     4. `ledger.py check <html>` runs inside `build` (unique ids, ≥3 sections per card, no local paths in
        bullets, no unfilled placeholders); on a hit nothing is written to `--out` (the page lands in

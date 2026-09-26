@@ -2,7 +2,7 @@
 name: pr-scan
 description: Sonnet-forked sweep that builds the user's PR review queue: direct review requests, CODEOWNERS team requests, then open PRs in the configured repos, minus bots, drafts, stale and already-reviewed heads. Returns a ≤8-row table (review state, unresolved threads, bot verdict, trivial PRs flagged `A` with an `AUTO:` line) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`.
 metadata:
-  version: "7"
+  version: "8"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 argument-hint: "[--days N] [--limit N] [--repo owner/name]"
@@ -22,7 +22,7 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
 
 1. Run the sweep (it takes 1–4 minutes; set the Bash timeout to 300000):
    ```sh
-   bash .claude/skills/pr-scan/pr-scan.sh --mark $ARGUMENTS
+   bash $BATON/skills/pr-scan/pr-scan.sh --mark $ARGUMENTS
    ```
    It prints a ranked table and a `summary:` line, and exits **non-zero when any `gh` call failed after
    its retry** (`errors=<n>`; `retries=` counts calls that needed the second attempt, `failed=` the PRs
@@ -70,7 +70,7 @@ Column rules:
 - `Size` — `lines/files` (no spaces).
 - `Humans · Thr · Bot` — last state per human reviewer (`APP`/`CHA`/`COM`, comma-joined, `–` if none) · unresolved
   thread count · review-bot Assessment on this head (`🟢`/`🟡`/`🔴`, `–` if none).
-- `Author · Title` — first name from the profile's `github.display_names` map (`python3 .claude/context-db/bin/kit_profile.py get github.display_names`),
+- `Author · Title` — first name from the profile's `github.display_names` map (`python3 $BATON/context-db/bin/kit_profile.py get github.display_names`),
   otherwise the login verbatim (never a capitalised login) · title truncated to 45 characters with `…`; never wrap a cell.
 - Header line: date **and** time as `YYYY-MM-DD HH:MM UTC` (from `date -u`), counts from the summary line; `dropped:` lists only
   non-zero buckets.
@@ -88,7 +88,7 @@ Small docs-only PRs and dependency **patch** bumps (minor only for dev tooling, 
 approved on the user's behalf without a walk. Two layers, both outside this fork:
 
 1. **Gate — deterministic, no model.** `pr-scan.sh` pre-filters on size and runs
-   `.claude/skills/pr-review/scripts/trivial-check.py <repo> <pr>` (config block `auto_approve` in
+   `$BATON/skills/pr-review/scripts/trivial-check.py <repo> <pr>` (config block `auto_approve` in
    `config.json`: **ownership first** — the user must be a requested reviewer, directly or via a team in `owner_teams`
    (the env config's `github.owner_teams`); `src=sweep` rows never run the gate (a sweep row is not a review request); then classes, globs, hard excludes `.github/**`/`.claude/**`/CODEOWNERS, size caps, CI +
    review-bot-green requirement per repo, no human CHANGES_REQUESTED, 0 unresolved threads).

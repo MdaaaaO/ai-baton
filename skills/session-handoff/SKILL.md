@@ -2,7 +2,7 @@
 name: session-handoff
 description: Flush durable knowledge before a session ends or a ticket/PR/epic step lands: the context doc, priorities, indexes, the session's stats (context doc, session file, cross-session ledger) and the paste-ready next-session prompt the successor starts from. Invoke when finishing a piece of work, before ending a session, or on "wrap up / hand off / update context".
 metadata:
-  version: "5"
+  version: "6"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -13,20 +13,20 @@ user-invocable: true
 A compacted transcript has already lost the nuance; the knowledge only survives if it is written
 to the durable docs. Run this close-out whenever a ticket/PR/epic step lands, or before ending a
 session. It implements the **§ Cost & context hygiene "Flush at every step"** and **"Scope → flush →
-end"** rules in `.claude/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
+end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 
 ## Checklist
 
 1. **Context doc** — the initiative's local living doc in its domain folder (the `.context/` file,
    *not* the tracker epic; e.g. `.context/<domain>/<key>-<slug>.md` or `.context/<domain>/epics/<slug>.md`) — find it in
-   `.context/INDEX.md` or with `make -C .claude/context-db find DOMAIN=<domain>`:
+   `.context/INDEX.md` or with `make -C $BATON/context-db find DOMAIN=<domain>`:
    - Add a dated one-liner to the **Session log** (newest first).
    - Update the relevant fixed section (*What was built* — PRs per repo; *Key decisions & gotchas*;
      *Infra/secrets locations*; *Remaining work*) with anything durable you learned or shipped. Keep
      the doc lean — long history goes to `.context/archive/<slug>-log.md`.
    - **Cap the Session log.** Keep only the newest entries in the doc (roughly the last few days,
      ~6 max); move the older tail verbatim to `.context/archive/<slug>-log.md` (newest-first).
-     `make -C .claude/context-db verify` warns when an active doc tops **30KB** — an oversized doc thrashes
+     `make -C $BATON/context-db verify` warns when an active doc tops **30KB** — an oversized doc thrashes
      any session that re-reads it after a compact, so split it when you see the warning (or before).
    - Reference every ticket/PR as a clickable link (§ Rules).
 2. **Priorities** — where `.context/reference/priorities.md` exists, tick the matching checkbox(es)
@@ -34,12 +34,12 @@ end"** rules in `.claude/WORKSPACE.md` (the shared body of the root `CLAUDE.md`)
 3. **Task-specific docs** — if you did a PR review, update `.context/pr-reviews/<repo>.md`
    and its README; if on-call, append `.context/on-call/rotations/<week>.md`; if it's Thursday and
    you're the self-assessment session, append `.context/self-assessment/weeks/<week>.md`. New docs
-   are created with `make -C .claude/context-db new TYPE=… DOMAIN=… SLUG=…`.
+   are created with `make -C $BATON/context-db new TYPE=… DOMAIN=… SLUG=…`.
 4. **Memory** — only if a *situational* fact worth recalling emerged (not an always-on rule — those
    go to `CLAUDE.md` § Rules). Write or update the note **and** add or fix its one-line entry in
    `MEMORY.md`. Prefer updating an existing note over adding a duplicate; delete notes proven wrong.
-5. **Index integrity** — after adding or editing any `.context/` doc, run `make -C .claude/context-db index`
-   (regenerates `INDEX.md`) and `make -C .claude/context-db verify` (schema + freshness gate). If you added a
+5. **Index integrity** — after adding or editing any `.context/` doc, run `make -C $BATON/context-db index`
+   (regenerates `INDEX.md`) and `make -C $BATON/context-db verify` (schema + freshness gate). If you added a
    skill, add its trigger to `WORKSPACE.md` § Skills. If you added a memory note, confirm it has a
    `MEMORY.md` line (no orphans). Every `[[wikilink]]` should resolve.
 6. **Signing** — only where the env config has `systems.signed_commits: true`: pending commits go through
@@ -52,7 +52,7 @@ end"** rules in `.claude/WORKSPACE.md` (the shared body of the root `CLAUDE.md`)
    costs a full-prefix wake-up per expiry, a parked session costs nothing (owner decision, 2026-09-22; `pr-watch`
    § Park when the gates are not yours).
 8. **Session stats — record them (owner decision, 2026-09-19: "stats for geeks").** Run
-   `make -C .claude/context-db session-stats` (zero model turns; derived from the transcript via
+   `make -C $BATON/context-db session-stats` (zero model turns; derived from the transcript via
    `$CLAUDE_CODE_SESSION_ID`) and put:
    - the **one-liner** (the `stats:` value the registry row carries: turns · hours · ctx peak/avg ·
      cache-read · out · ~$ · compactions · tool calls · PRs · tickets · sign jobs · drafts) into the
@@ -71,7 +71,7 @@ end"** rules in `.claude/WORKSPACE.md` (the shared body of the root `CLAUDE.md`)
    `.context/sessions/<name>.md` (every open PR you own: `repo#n`, current head, what it waits on):
    your `pr-watch` `Monitor`s died with step 7, and the successor's `session-register` startup step
    re-arms exactly that list. Then mark the session ended:
-   `make -C .claude/context-db session-end NAME=<name> NEXT=<prompt file>` (step 10 writes the file; or
+   `make -C $BATON/context-db session-end NAME=<name> NEXT=<prompt file>` (step 10 writes the file; or
    `session-touch` if you're only pausing). The registry row carries **~$ est.** (list-price estimate of
    the main session, subagents excluded) and the prompt as their own columns.
    Keeps `.context/SESSION_INDEX.md` honest about who is still live, and `session-end` is what writes
@@ -81,10 +81,10 @@ end"** rules in `.claude/WORKSPACE.md` (the shared body of the root `CLAUDE.md`)
     the session `NAME` to register (successor of `<this name>`), the epic, the files to read first
     (context doc sections, exports), what it owns and must NOT touch, the first task with its ticket,
     open follow-ups (drafts by `draft_id`, pending verdicts), and the open PRs / watchers to re-arm
-    (or "none"). Run `python3 .claude/context-db/bin/kit_profile.py scratch` once and use the **printed path**
+    (or "none"). Run `python3 $BATON/context-db/bin/kit_profile.py scratch` once and use the **printed path**
     (a per-session dir that exists on every machine — never a bare `/tmp` path, which sessions overwrite; shell
     variables do not survive between tool calls, so the Write call takes the literal path) for `<dir>/next.md`, then
-    pass the same path to the registry step: `make -C .claude/context-db session-end NAME=<name> NEXT=<dir>/next.md`
+    pass the same path to the registry step: `make -C $BATON/context-db session-end NAME=<name> NEXT=<dir>/next.md`
     (`session-touch … NEXT=` when only pausing). It lands in `## Next session` of your session file,
     and its first line in the **Next-session prompt** column of `SESSION_INDEX.md` — the successor's
     `session-register` startup reads it from there. Then **end

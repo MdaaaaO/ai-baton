@@ -2,7 +2,7 @@
 name: pr-review
 description: Review someone else's PR as the user: snapshot, repo trap KB, Opus review-runner pass, verified claims, walk each finding with the user (Post, Deep dive, Body only, Skip), post ONE review after approval, reply in threads, write learnings back; trivial PRs (pr-scan `A`) take the Sonnet auto-approve path. For PRs pr-scan surfaces or the user names; never the user's own.
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-09-26"
   reviewed: "2026-09-26"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
@@ -21,7 +21,7 @@ proportionality, event policy, follow-up ledger; `review-writing.md` — how pos
 `slop.md` — AI-residue lens; `runner.md` — delegating steps 1–4 to the `review-runner` child). State: `.context/state/pr-review/` (config, ledger, `.submitted/`; override with `PR_REVIEW_HOME`). Knowledge:
 `.context/pr-reviews/<repo>.md` (+ `README.md` standards). The scripts apply `github.sandbox_token_prefix`.
 **Environment gates:** env-specific enrichment runs only where the env config turns it on
-(`python3 .claude/context-db/bin/kit_profile.py get systems.<x>`); a false flag skips that step with one
+(`python3 $BATON/context-db/bin/kit_profile.py get systems.<x>`); a false flag skips that step with one
 `<System> enrichment: n/a in this environment` line in the 5a overview — never an improvised substitute.
 
 ## Where each step runs (cost model, 2026-09-19)
@@ -31,8 +31,8 @@ enter its prefix — everything read there is re-billed on every later tick. The
 
 | Steps | Runs in | What enters the main prefix |
 |---|---|---|
-| 1–4 snapshot · KB · review pass · verification | **`review-runner` child** — `Agent(subagent_type: "review-runner")`, Opus `effort: medium`, ≤ 60 turns, no CLAUDE.md (`.claude/agents/review-runner.md`; prompt + return contract in `reference/runner.md`). It works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`, `kb-traps.md`) — no `gh api contents`, `git show` or CI-log polling | its return only: the 5a overview + `CTX:` / `NEEDS:` / `NOTE:` lines (≤ 3K tokens) |
-| `--auto` trivial-PR pass | **`auto-runner` child** — Sonnet, ≤ 15 turns (`.claude/agents/auto-runner.md`) | `AUTO:` / `CTX:` / `NEEDS:` lines |
+| 1–4 snapshot · KB · review pass · verification | **`review-runner` child** — `Agent(subagent_type: "review-runner")`, Opus `effort: medium`, ≤ 60 turns, no CLAUDE.md (`$BATON/agents/review-runner.md`; prompt + return contract in `reference/runner.md`). It works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`, `kb-traps.md`) — no `gh api contents`, `git show` or CI-log polling | its return only: the 5a overview + `CTX:` / `NEEDS:` / `NOTE:` lines (≤ 3K tokens) |
+| `--auto` trivial-PR pass | **`auto-runner` child** — Sonnet, ≤ 15 turns (`$BATON/agents/auto-runner.md`) | `AUTO:` / `CTX:` / `NEEDS:` lines |
 | 5 walk · 6 post · 7 replies | **main session** — AskUserQuestion needs the user; the post carries their login | `$CTX/triage.json`, `request.json` / `replies.json`, the script previews |
 | 5b deep dives | one-question `opus` `Agent` spawned from the main session | its ≤ 10-line answer |
 | 8 KB write-back | main session, sourced from `triage.json` `evidence` + the walk decisions | the KB's `## Known traps` slice |
@@ -52,7 +52,7 @@ reading in parallel is fine; two reviews on one PR are not.
 ## 1. Snapshot *(runner)*
 
 ```sh
-bash .claude/skills/pr-review/scripts/fetch-context.sh <owner/repo> <pr>
+bash $BATON/skills/pr-review/scripts/fetch-context.sh <owner/repo> <pr>
 ```
 Prints the context dir and a five-line summary; `manifest.json` has the rest. `mode`:
 - `full` — no prior review by us: review the whole diff.
@@ -185,12 +185,12 @@ Write `$CTX/request.json` (`{"event","body","comments":[{"path","line","side","b
 is the line number in the **new** file for `RIGHT`, old file for `LEFT`; it must be inside a
 hunk of `diff.patch` or GitHub rejects the whole review — nothing half-posts). Then:
 ```sh
-bash .claude/skills/pr-review/scripts/submit-review.sh preview --repo <o/r> --pr <n> --head <full sha> --request $CTX/request.json
+bash $BATON/skills/pr-review/scripts/submit-review.sh preview --repo <o/r> --pr <n> --head <full sha> --request $CTX/request.json
 ```
 Show the preview (event, anchored comments, body, digest) — every item in it was approved in 5b/5c,
 so this is a last look, not a second triage. One `AskUserQuestion`: **Submit (Recommended)** · **Abort**. On Submit:
 ```sh
-bash .claude/skills/pr-review/scripts/submit-review.sh submit … --confirm <digest>
+bash $BATON/skills/pr-review/scripts/submit-review.sh submit … --confirm <digest>
 ```
 The script refuses a closed/merged PR (set `PR_REVIEW_ALLOW_CLOSED=1` for a post-merge **COMMENT** with inline anchors; never APPROVE/REQUEST_CHANGES post-merge — a PR can merge mid-walk), a moved head, a digest mismatch, a path outside the diff, and a second submit
 of the same digest; it appends `reviewed` to the ledger and prints `status: submitted · review
@@ -214,7 +214,7 @@ line outside a hunk) and preview again. The body gets no footer (config `footer`
 ## 8. Flush — the review is not done until the KB grew *(main session)*
 
 1. **KB write-back** (`.context/pr-reviews/<repo>.md`; create with
-   `make -C .claude/context-db new TYPE=pr-review DOMAIN=pr-reviews SLUG=<repo> TITLE="<org>/<repo> — PR review knowledge"`
+   `make -C $BATON/context-db new TYPE=pr-review DOMAIN=pr-reviews SLUG=<repo> TITLE="<org>/<repo> — PR review knowledge"`
    if missing). Add only **verified, reusable** facts — a trap to check on future PRs, a mechanic
    confirmed against the wheel/spec/data, a consumer map, a convention the repo docs do not state.
    Format: `- **<one-line rule>** — <how to check / why>. Verified on #<pr> (<date>).` Grep for an
@@ -228,7 +228,7 @@ line outside a hunk) and preview again. The body gets no footer (config `footer`
    inline, <hits> traps hit, KB +<n>` (newest first).
 3. Self-assessment drop: append one evidence-linked bullet to
    `.context/self-assessment/inbox/2026-Wnn--pr-reviews.md` (PR link, author, notable findings, outcome).
-4. `make -C .claude/context-db index`; `session-touch` if this session is registered.
+4. `make -C $BATON/context-db index`; `session-touch` if this session is registered.
 5. If a fast follow needs a ticket, offer `ticket-open` (with the environment's backlog convention for architecture findings, where `environment.md` § Rules names one);
    never assign it to anyone.
 

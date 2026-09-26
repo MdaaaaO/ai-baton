@@ -2,7 +2,7 @@
 name: pr-watch
 description: Low-noise watch on the PRs you authored: ONE multi-PR Monitor per repo per session, emitting only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeping waiting branches updated with their base, and merging via `pr-merge.sh` once the gates hold. Park rule: sign-off, idle windows, human gate. For every open PR your session owns.
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-26"
   reviewed: "2026-09-26"
 ---
@@ -27,7 +27,7 @@ list before ending. Never assume a watch exists because the context doc says one
 
 ```
 Monitor({
-  command: "bash .claude/skills/pr-watch/pr-watch.sh <org>/<repo> <pr1> <head1> <pr2> <head2> <pr3> <head3>",   // always via `bash …`: the file's execute bit is not reliable on this mount (exit 126). The script is POSIX-safe since 2026-09-14 (a bash-only `${cur:0:9}` in the HEAD MOVED branch crashed a `sh`-run watcher with "Bad substitution" on the first head move)
+  command: "bash $BATON/skills/pr-watch/pr-watch.sh <org>/<repo> <pr1> <head1> <pr2> <head2> <pr3> <head3>",   // always via `bash …`: the file's execute bit is not reliable on this mount (exit 126). The script is POSIX-safe since 2026-09-14 (a bash-only `${cur:0:9}` in the HEAD MOVED branch crashed a `sh`-run watcher with "Bad substitution" on the first head move)
   description: "<repo> #<pr1>/#<pr2>/#<pr3>: actionable events only, until merged",
   persistent: true, timeout_ms: 3600000   // the maximum — one expiry per hour, not two per hour per PR
 })
@@ -165,7 +165,7 @@ Source of truth for the scripts: this directory — whichever session improves t
 
 ```
 Monitor({
-  command: "bash .claude/skills/pr-watch/pr-merge.sh <org>/<repo> <n>",
+  command: "bash $BATON/skills/pr-watch/pr-merge.sh <org>/<repo> <n>",
   description: "#<n> merge sequence: bot verdict → update-branch → forced review → squash-merge when CLEAN",
   persistent: true, timeout_ms: 3600000
 })

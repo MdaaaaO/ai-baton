@@ -2,7 +2,7 @@
 name: ticket-close
 description: Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues) cleanly — a final outcome comment (Delivered / Verified / Out-of-scope), the right transition/resolution or close reason (Done / Won't Do / Cancelled), confirmation the delivering PRs are linked, and the context-doc flush. Invoke when a ticket's work is finished, decided-against, or abandoned.
 metadata:
-  version: "4"
+  version: "5"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -13,7 +13,7 @@ user-invocable: true
 A closed ticket should let anyone reconstruct what shipped and what was deliberately left, from the
 ticket alone. One final comment, the correct transition, links intact.
 
-**Pick the adapter first:** `python3 .claude/context-db/bin/kit_profile.py get tracker.kind` (from the
+**Pick the adapter first:** `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the
 workspace root). Follow **exactly one** adapter below. Any other kind → say "no tracker adapter for
 kind X in this environment" and stop.
 
@@ -53,7 +53,7 @@ kind X in this environment" and stop.
 - Final comment: `gh issue comment <n> -R <repo> --body-file <file>`.
 - **Close reason replaces the transition.** Resolve the value for the outcome key and **stop if the lookup
   fails** — an empty `--reason` would close the issue as `completed` with no error:
-  `reason=$(python3 .claude/context-db/bin/kit_profile.py get tracker.close_reasons.<done|wont_do|cancelled>) || { echo "close reason missing — run python3 .claude/context-db/bin/kb.py migrate"; exit 1; }`
+  `reason=$(python3 $BATON/context-db/bin/kit_profile.py get tracker.close_reasons.<done|wont_do|cancelled>) || { echo "close reason missing — run python3 $BATON/context-db/bin/kb.py migrate"; exit 1; }`
   then pass it **quoted**: `gh issue close <n> -R <repo> --reason "$reason"`. GitHub knows only two reasons, so
   `done` → `completed` and both `wont_do` and `cancelled` → `not planned` (the value has a space; `not_planned` is
   rejected by `gh`, and a store still carrying it is fixed by `kb.py migrate`). For `wont_do`, also retitle

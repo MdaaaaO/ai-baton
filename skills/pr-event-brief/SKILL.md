@@ -2,7 +2,7 @@
 name: pr-event-brief
 description: Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN line a pr-watch Monitor emits; the main session then performs the action.
 metadata:
-  version: "7"
+  version: "8"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
   facts: "github.review_bot"
@@ -23,7 +23,7 @@ Not for an `ERROR <repo>#<pr> …` line — that is a `gh` fetch failure, not a 
 the PR to triage. The main session handles it directly (transient → ignore; the same error every cycle →
 stop the watch or fix auth), never forking this skill for it.
 
-You are read-only. Gather the facts below with `gh api …` — run `eval "$(python3 .claude/context-db/bin/kit_profile.py gh-env)"` once first
+You are read-only. Gather the facts below with `gh api …` — run `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"` once first
 (the `github.sandbox_token_prefix` placeholder where a sandbox needs one, nothing where `gh` is logged in; skill `gh-cli`) (paginate every
 listing with `--paginate` and `per_page=100`), then answer in the template. Do not post, resolve,
 re-request or merge anything — the main session does that.

@@ -2,7 +2,7 @@
 name: env-init
 description: Fill or refresh this machine's env fact store from the discovery manifests: run the named tool per missing or stale fact, verify, write back with provenance, and ask the user once for what no tool settles. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact.
 metadata:
-  version: "5"
+  version: "6"
   updated: "2026-09-26"
   reviewed: "2026-09-26"
 user-invocable: true
@@ -10,14 +10,14 @@ user-invocable: true
 
 # env-init — discover the environment, don't interrogate the user
 
-The env fact store (`.context/reference/env/`, spec `.claude/docs/env-facts.md`) is a knowledge base
+The env fact store (`.context/reference/env/`, spec `$BATON/docs/env-facts.md`) is a knowledge base
 that grows as the kit is used. Before this skill, every unset fact cost the user a question. Now the
-discovery manifests (`.claude/context-db/discovery/<system>.json`, plus a plugin's copies in the store's
+discovery manifests (`$BATON/context-db/discovery/<system>.json`, plus a plugin's copies in the store's
 `_discovery/`) say **which tool finds each fact, how to verify it and how long it stays fresh** — and
 `kb.py` turns that into a plan. This skill executes the plans. It never guesses a value, never stores a
 secret, and asks the user only for what no tool can settle — once, batched.
 
-`K=python3 .claude/context-db/bin/kb.py` below. Run everything from the workspace root.
+`K=python3 $BATON/context-db/bin/kb.py` below. Run everything from the workspace root.
 
 ## Modes
 
@@ -31,14 +31,14 @@ secret, and asks the user only for what no tool can settle — once, batched.
 ## Procedure
 
 0. **Store health first.** `$K migrate --check` — exit 3 means renamed flags/kinds are pending: run
-   `$K migrate`, say so in one line. Then `make -C .claude/context-db kit-verify` must pass (a store
+   `$K migrate`, say so in one line. Then `make -C $BATON/context-db kit-verify` must pass (a store
    with a broken `config.json` is fixed before it is filled).
 1. **Take the inventory.** `$K discover --all` → one line per fact: key, target (`row`/`config`), tool,
    ttl, state (`set` / `N row(s)` / `—`). A system heading marked *not applicable* (its `requires` flag is
    false or its `when` does not hold) is skipped whole — never turned on from here; the user decides
    `systems.*` (`kb.py config-set`). Then the named needs: for every installed unit,
    ```sh
-   python3 .claude/context-db/bin/frontmatter.py facts
+   python3 $BATON/context-db/bin/frontmatter.py facts
    ```
    (every unit's `metadata.facts` string — comma-separated entries, the same parser `kit-verify` uses — sorted,
    unique) → each `<system>.<kind> <name>` entry is a concrete row to have; `$K get <system>.<kind> <name>`
@@ -56,7 +56,7 @@ secret, and asks the user only for what no tool can settle — once, batched.
      never does): call it with the rendered args. If the tool is not in this session's roster, that system's facts go
      to the user round (step 4) with the note *tool unavailable here* — never substitute another tool.
    - **`cli`**: run the rendered shell command exactly as the `call:` line prints it, with the `github.sandbox_token_prefix`
-     placeholder applied where one is set (`eval "$(python3 .claude/context-db/bin/kit_profile.py gh-env)"`).
+     placeholder applied where one is set (`eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"`).
      Exit status is checked separately from the output; an error is a failed lookup, not an empty answer.
    - **`roster`**: the fact is "does this session have tool X" (a `<system>.enabled` switch) — answer from
      the tool list, no call. **`settings`**: read the named `WORKSPACE_*` variable from the shell environment
@@ -81,9 +81,9 @@ secret, and asks the user only for what no tool can settle — once, batched.
    manifest unless the user gave a better clause. Under `--refresh`, a re-run whose value is unchanged
    is still written (same value, new date) so `stale` stops reporting it; a changed value is written and
    named in the report — a drifted id is worth the user's eye. Never `kb.py rm` from here.
-6. **Close.** `$K stale` (should be empty after `--refresh`), `make -C .claude/context-db kit-verify`,
+6. **Close.** `$K stale` (should be empty after `--refresh`), `make -C $BATON/context-db kit-verify`,
    then the report to the user: a ≤ 15-line table `fact | before → after | source` plus one line per fact
-   left unset and why. Then `make -C .claude/context-db session-touch NAME=<name>` (§ Cost & context hygiene). Nothing here changes a skill, the
+   left unset and why. Then `make -C $BATON/context-db session-touch NAME=<name>` (§ Cost & context hygiene). Nothing here changes a skill, the
    kit, or `.context/reference/environment.md` — prose stays the user's.
 
 ## Rules

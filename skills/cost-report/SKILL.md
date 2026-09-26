@@ -2,7 +2,7 @@
 name: cost-report
 description: The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7 by default, named phases on request. Org mode reports billed cost with an anonymous aggregate control; private mode estimates list price from local transcripts. Opens with a Basis block; never names anyone. Invoke as "cost report" or "how efficient was last week".
 metadata:
-  version: "6"
+  version: "7"
   updated: "2026-09-26"
   reviewed: "2026-09-25"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
@@ -19,7 +19,7 @@ compute from which source. The ratio columns (in/out, $/Mout, cheap%) are weekda
 slightly from a report that computes them over all days; the fixture smoke run under § Files is the reference
 a reader can check.
 
-**Config-driven.** `python3 .claude/skills/cost-report/cost_report.py mode` prints the resolved mode and
+**Config-driven.** `python3 $BATON/skills/cost-report/cost_report.py mode` prints the resolved mode and
 why. Everything the script branches on lives under the optional `cost` key of the env config
 (`kb.py config-set cost '{…}'`, shape in `environment-template/config.json`):
 
@@ -40,7 +40,7 @@ Say which mode ran; never present an estimate as a bill.
 
 ## Default run — rolling 7 days + weekly overview
 
-1. `python3 .claude/skills/cost-report/cost_report.py mode` → note mode + basis.
+1. `python3 $BATON/skills/cost-report/cost_report.py mode` → note mode + basis.
 2. **Spend rows**
    - org: `cost_report.py sql --since <join or 10 weeks back>` prints two queries (or exits 2 listing the
      `cost.*` values still unset — `cost.columns` → § Column mapping). Run both through the warehouse's MCP
@@ -67,7 +67,7 @@ Say which mode ran; never present an estimate as a bill.
    — `--view rolling7|weekly|phases` narrows; `--phase NAME=START..END` (repeatable) overrides `cost.phases`.
 5. Deliver **the Basis block first**, then the table(s). Terminal reply: the Basis rows that matter
    (mode, cost basis, what was skipped) + the rolling-7 line + one sentence on the decomposition. The
-   full markdown goes to a `.context/reference/` doc (`make -C .claude/context-db new TYPE=reference …`)
+   full markdown goes to a `.context/reference/` doc (`make -C $BATON/context-db new TYPE=reference …`)
    when the user wants to keep it; a `.context/` doc never goes to an external surface.
 
 ### Tracker query for step 3 (tickets)
@@ -126,7 +126,7 @@ are the only work units — lines changed are never a denominator.
    warehouse tool (`datalake.tool sql`) and the write line. Run the call; save the result as a JSON array of
    row objects (`describe.json` — the warehouse's `name`/`type` rows; any vendor's shape with a column-name
    field works).
-2. `python3 .claude/skills/cost-report/cost_report.py propose-columns --describe describe.json` → one table
+2. `python3 $BATON/skills/cost-report/cost_report.py propose-columns --describe describe.json` → one table
    `role | column | score | alternatives` and the exact `kb.py config-set cost.columns '{…}'` line. A role
    scores `ok` when exactly one column matches its vocabulary (`usage_date`/`day` for `date`,
    `cache_read_tokens`/`cache_read_input_tokens` for `cache_read`, …) and `?` when none or several do; the

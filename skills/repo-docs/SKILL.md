@@ -4,7 +4,7 @@ description: Write or restructure a repo's README.md and CONTRIBUTING.md in the 
 user-invocable: true
 argument-hint: "<repo-dir> [readme|contributing|both]"
 metadata:
-  version: "1"
+  version: "2"
   updated: "2026-09-26"
   reviewed: "2026-09-26"
 ---
@@ -16,7 +16,7 @@ start, where is the rest.** Everything a reader needs only after deciding to use
 CONTRIBUTING answers **how do I get a change merged** — the short version first, the rules by link.
 
 Run the checker before and after; its numbers, not an impression, say whether the page is done:
-`python3 .claude/skills/repo-docs/readme-check.py <file>` (`ok` / `warn` / `FAIL` per rule, exit 1 on a FAIL).
+`python3 $BATON/skills/repo-docs/readme-check.py <file>` (`ok` / `warn` / `FAIL` per rule, exit 1 on a FAIL).
 
 ## 1. Measure and inventory
 

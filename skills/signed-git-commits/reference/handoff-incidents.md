@@ -59,5 +59,5 @@ Where a proxy adds the GitHub credential at the network layer (a sandbox), `gh a
 `gh` refuses every command until it sees some token.
 
 **Rule.** The environment's placeholder is `github.sandbox_token_prefix`; apply it with `eval "$(python3
-.claude/context-db/bin/kit_profile.py gh-env)"` — empty where `gh` is logged in natively, and then `gh` runs
+$BATON/context-db/bin/kit_profile.py gh-env)"` — empty where `gh` is logged in natively, and then `gh` runs
 bare (skill `gh-cli`).

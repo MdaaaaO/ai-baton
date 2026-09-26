@@ -140,16 +140,20 @@ class BodyChecks(unittest.TestCase):
         self.assertEqual(self.check("run `scripts/hello.sh` and `scripts/*.sh` and `scripts/<x>.sh`"), [])
         errors = self.check("run `scripts/nope.sh`")
         self.assertTrue(any("cites `scripts/nope.sh`" in e for e in errors), errors)
-        self.assertEqual(self.check("see `.claude/skills/other-skill/scripts/x.sh`"), [])  # another unit's file
+        self.assertEqual(self.check("see `$BATON/skills/other-skill/scripts/x.sh`"), [])  # another unit's file
+        errors = self.check("run `$BATON/skills/good-skill/scripts/nope.sh`")  # the kit-root form is checked like a relative path
+        self.assertTrue(any("cites `.claude/skills/good-skill/scripts/nope.sh`" in e for e in errors), errors)
+        errors = self.check("see `.claude/skills/other-skill/scripts/x.sh`")  # the clone spelling: no such path on a plugin (#3)
+        self.assertTrue(any("write `$BATON/…`" in e for e in errors), errors)
 
     def test_cross_skill_path_literal_is_rejected(self):
         # #115: cross-reference a skill by name; a `skills/<x>/SKILL.md` literal breaks on every host with another layout
-        errors = self.check("read `.claude/skills/other-skill/SKILL.md` § Rules")
+        errors = self.check("read `$BATON/skills/other-skill/SKILL.md` § Rules")
         self.assertTrue(any("cross-reference a skill by name (`other-skill`" in e for e in errors), errors)
         errors = self.check("see `skills/other-skill/` for the rest")
         self.assertTrue(any("cross-reference a skill by name" in e for e in errors), errors)
-        self.assertEqual(self.check("run `.claude/skills/other-skill/scripts/x.sh` first"), [])  # a script a step runs: allowed
-        self.assertEqual(self.check("this is `.claude/skills/good-skill/SKILL.md`"), [])  # its own file
+        self.assertEqual(self.check("run `$BATON/skills/other-skill/scripts/x.sh` first"), [])  # a script a step runs: allowed
+        self.assertEqual(self.check("this is `$BATON/skills/good-skill/SKILL.md`"), [])  # its own file
         self.assertEqual(self.check("see `~/my-skills/other/` or https://x.invalid/skills/other/"), [])  # not a kit path: left boundary
         for installed in ("`~/.claude/skills/other-skill/SKILL.md`", "`$HOME/.claude/skills/other-skill/`"):  # the installed-path forms
             self.assertTrue(any("cross-reference a skill by name" in e for e in self.check(f"read {installed}")), installed)

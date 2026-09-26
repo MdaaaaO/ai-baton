@@ -2,7 +2,7 @@
 name: ticket-open
 description: Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues) — type/placement (active sprint, or labels + milestone), labels, epic/parent link, a lean opening comment (Goal + Plan + Links), and the matching .context/ context doc. The tracker analogue of pr-open. Invoke right before/after creating the ticket.
 metadata:
-  version: "4"
+  version: "5"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -15,7 +15,7 @@ every session can read intent at a glance. Mirrors `pr-open`. The shared mechani
 env config / `.context/reference/environment.md` — this skill *sequences* them, it does not
 restate them.
 
-**Pick the adapter first:** `python3 .claude/context-db/bin/kit_profile.py get tracker.kind` (from the
+**Pick the adapter first:** `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the
 workspace root). Follow **exactly one** adapter below. Any other kind → say "no tracker adapter for
 kind X in this environment" and stop — never improvise.
 
@@ -31,7 +31,7 @@ kind X in this environment" and stop — never improvise.
    **Links** — epic/parent · related tickets · any existing PR (all clickable)
    ```
 4. **Context doc.** If this ticket is its own initiative, create the context doc
-   (`make -C .claude/context-db new TYPE=epic DOMAIN=<domain> SLUG=<key-slug>`); if it belongs to an existing
+   (`make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=<key-slug>`); if it belongs to an existing
    epic, add it under that epic's context doc instead. Never cite the local `.context/` path on the
    ticket (`WORKSPACE.md` § Rules).
 5. **Register / coordinate.** If another live session owns the epic (`.context/SESSION_INDEX.md`),

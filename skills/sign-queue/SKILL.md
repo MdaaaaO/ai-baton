@@ -3,7 +3,7 @@ name: sign-queue
 description: Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains the queue with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners for the user to run. Inert where `systems.signed_commits` is false.
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "9"
+  version: "10"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
   requires: "signed_commits"
@@ -17,12 +17,12 @@ break on the user's terminal line wrap. So: sessions **enqueue**, the user **dra
 ## Session side — enqueue a job
 
 ```
-sh .claude/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [--rebase] [--new-branch] [--files "<paths>"] [--onto <upstream-branch>:<old-base-sha>]
+sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [--rebase] [--new-branch] [--files "<paths>"] [--onto <upstream-branch>:<old-base-sha>]
 ```
 
 - `topic` names the job (`key-123-p4`, `kb-round4`); `[A-Za-z0-9._-]` only.
 - the message file's **subject follows the repo's commit style** — Conventional Commits (`type(scope): KEY-123
-  description`) unless the repo overrides it (`pr-open` § Commit style; `python3 .claude/context-db/bin/commit_style.py
+  description`) unless the repo overrides it (`pr-open` § Commit style; `python3 $BATON/context-db/bin/commit_style.py
   resolve --dir <wt>` tells you which). `enqueue.sh` runs `commit_style.py check` on the file and refuses the job
   otherwise; `SIGN_QUEUE_SKIP_STYLE=1` is the deliberate one-off bypass — say so when you use it.
 - `--rebase` when the remote branch is ahead (GitHub "Update branch" merge commit, someone else pushed):
@@ -79,7 +79,7 @@ make sign_retry JOB=1    # un-park a .failed as is           make sign_drop JOB=
 make sign V=1            # stream every git line instead of the milestones
 ```
 
-All targets wrap `.claude/skills/sign-queue/signq.py` (stdlib python3; `sign.sh` is a compatibility shim). A drain prints
+All targets wrap `$BATON/skills/sign-queue/signq.py` (stdlib python3; `sign.sh` is a compatibility shim). A drain prints
 the **overview table** (`# · TICKET · EPIC · REPO · PR · BRANCH · COMMIT · STAGE · BY`), then one **card per job**
 (ticket · epic title · repo #PR, the commit subject, branch and the step chain `stage → commit -S → [rebase] → push`),
 the milestones as they happen (`committed <sha>`, `rebased`, `pushed a..b`) and a `✔ pushed <sha> signed ✓` or

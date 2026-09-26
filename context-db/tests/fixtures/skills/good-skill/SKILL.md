@@ -13,5 +13,5 @@ user-invocable: true
 
 # good-skill
 
-Run `scripts/hello.sh` first; the pattern is in `.claude/skills/good-skill/scripts/hello.sh` too, and
+Run `scripts/hello.sh` first; the pattern is in `$BATON/skills/good-skill/scripts/hello.sh` too, and
 `scripts/*.sh` globs or `scripts/<name>.sh` placeholders are not checked.

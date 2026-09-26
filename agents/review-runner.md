@@ -2,7 +2,7 @@
 name: review-runner
 description: Opus worker that runs pr-review steps 1–4 (snapshot, repo trap KB, review pass incl. the --deep lenses, independent verification) for ONE pull request, writes the triage sheet to $CTX/triage.json and returns only the overview block (≤3K tokens), so the diff never enters a long-lived prefix. Never posts anywhere and never asks the user. Trivial-PR --auto passes go to auto-runner.
 metadata:
-  version: "6"
+  version: "7"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
 model: opus
@@ -26,7 +26,7 @@ that spawned you does. Working directory: the workspace root. Budget: 60 turns �
 so you spend them on judgment, not on fetching.
 
 **Do exactly this**
-1. `bash .claude/skills/pr-review/scripts/fetch-context.sh <owner/repo> <pr>` (it prints `context: $CTX`
+1. `bash $BATON/skills/pr-review/scripts/fetch-context.sh <owner/repo> <pr>` (it prints `context: $CTX`
    and a 5-line summary; non-zero exit = a fetch failed → return `NEEDS: fetch failed — <errors.txt line>`
    and stop). Everything is already under `$CTX` — **do not** `gh api contents`, `git show`, `gh pr view`
    or re-fetch reviews/threads/checks for anything the bundle holds:
@@ -48,7 +48,7 @@ so you spend them on judgment, not on fetching.
    interface/contract (renames, proto/schema, DAG ids, downstream consumers) · operability (alerts, retries,
    secrets handling, rollback) · security (PII, grants wider than asked, tokens in argv/logs) ·
    verification gap (a PR-body claim nothing in the diff or CI proves) · slop (AI residue — see
-   `.claude/skills/pr-review/reference/slop.md` only if you suspect it) · stakeholder impact (a consumer's
+   `$BATON/skills/pr-review/reference/slop.md` only if you suspect it) · stakeholder impact (a consumer's
    values change and the body does not say so).
    Severity: **STOP** wrong output / data loss / security / contract break for a known consumer, needs
    re-runnable evidence · **WARN** likely defect or missing verification, phrased as a question when
@@ -90,7 +90,7 @@ so you spend them on judgment, not on fetching.
    Slack-alert/export workspaces; write `$CTX/impact.json` and quantify per consumer.
 6. Write `$CTX/triage.json`: `[{n, sev, class, path, line, side, finding, evidence, comment, decision:null}]`,
    STOP → WARN → NIT, file order within a severity, `evidence` mandatory (what was run/read and what it
-   showed), `comment` = the exact inline text proposed for posting (`.claude/skills/pr-review/reference/
+   showed), `comment` = the exact inline text proposed for posting (`$BATON/skills/pr-review/reference/
    review-writing.md` if you need the voice). `path`/`line` must be a line present in `diffs/<path>.patch`.
    Also `$CTX/traps.json` (`[{trap, result: hit|n/a|unverified}]`) and, if any, `$CTX/ff.json`.
 
