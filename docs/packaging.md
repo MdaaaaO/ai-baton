@@ -46,12 +46,15 @@ from a worktree), then `CLAUDE_PROJECT_DIR/.context` (plugin path).
   `${CLAUDE_PLUGIN_ROOT}` (open item below) a plugin install alone gives the skills whose bodies need no engine
   script; the full kit still wants the clone.
 
-  **Not wired on the plugin path yet (#3).** The seeded root `CLAUDE.md` imports `@.claude/WORKSPACE.md` and the root
-  `Makefile` does `include .claude/workspace.mk`; a plugin install puts neither file in `<root>/.claude/`, so the
-  always-on rules load nothing and every `make` fails. `kit-health` § 4 reports both as errors (it checks the
-  targets, not just the lines). What does work: the engine finds the workspace's `.context/` (the SessionStart hook
-  exports `CLAUDE_PROJECT_DIR`, and `kit_profile.context_root()` walks up from the current directory), and
-  kit-health names the installed kit from `installed_plugins.json` + `plugin.json` where there is no git checkout.
+  **Always-on rules on the plugin path (#3).** A plugin cannot ship a CLAUDE.md, and a plugin install puts no kit
+  file in `<root>/.claude/`. So the SessionStart hook prints `WORKSPACE.md` (`kit_profile.py workspace-rules`), and
+  Claude Code adds hook stdout to the session's context on startup, resume, `/clear` and compaction. It prints only
+  when `CLAUDE_PROJECT_DIR` is, or sits below, a dir holding an env store (the plugin is per user, so other projects
+  get nothing) that has no `.claude/WORKSPACE.md` of its own (a clone imports that, so nothing loads twice). On this path `setup.sh` seeds a
+  `CLAUDE.md` without the `@.claude/WORKSPACE.md` import and no `Makefile` include (`workspace.mk` drives a clone).
+  A leftover import or include is flagged by `setup.sh` and is an error in `kit-health` § 4 (it checks the targets,
+  not just the lines). The engine finds `.context/` through the `CLAUDE_PROJECT_DIR` the same hook exports (the
+  Bash tool isn't handed it), else by walking up from the current directory.
 
 ## Identity (#116)
 

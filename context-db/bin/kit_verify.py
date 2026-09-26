@@ -240,6 +240,9 @@ def check_identity_options(errors: list[str], man: dict) -> None:
             for h in (grp.get("hooks") or []) if isinstance(h, dict)]
     if not any("session-env" in c and "CLAUDE_ENV_FILE" in c and "${CLAUDE_PLUGIN_ROOT}" in c for c in cmds):
         errors.append(f"{PLUGIN_HOOKS}: no SessionStart hook runs `${{CLAUDE_PLUGIN_ROOT}}/…/kit_profile.py session-env` into $CLAUDE_ENV_FILE")
+    if not any("workspace-rules" in c and "${CLAUDE_PLUGIN_ROOT}" in c for c in cmds):
+        errors.append(f"{PLUGIN_HOOKS}: no SessionStart hook prints `kit_profile.py workspace-rules` — a plugin install "
+                      "would load no always-on rules (#3)")
 
 
 MAKE_TARGET = re.compile(r"make(?:\s+-s)?\s+-C\s+\.claude/context-db(?:\s+-s)?\s+([a-z][a-z_-]*)\b")

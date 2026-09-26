@@ -106,6 +106,35 @@ class SessionEnvHook(unittest.TestCase):
             self.assertEqual(shown.stdout, str(ws))  # quoted: a path with a space survives the eval
 
 
+class WorkspaceRules(unittest.TestCase):
+    def test_injected_only_into_a_plugin_path_kit_workspace(self):
+        body = (KIT / "WORKSPACE.md").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "ws"
+            self.assertEqual(kit_profile.workspace_rules({}, KIT), "")  # no project dir (a non-hook caller)
+            self.assertEqual(kit_profile.workspace_rules({"CLAUDE_PROJECT_DIR": str(ws)}, KIT), "")  # not a kit workspace
+            (ws / ".context" / "reference" / "env").mkdir(parents=True)
+            self.assertEqual(kit_profile.workspace_rules({"CLAUDE_PROJECT_DIR": str(ws)}, KIT), body)
+            (ws / "repo").mkdir()
+            self.assertEqual(kit_profile.workspace_rules({"CLAUDE_PROJECT_DIR": str(ws / "repo")}, KIT), body)  # a repo inside it
+            (ws / ".claude").mkdir()
+            (ws / ".claude" / "WORKSPACE.md").write_text("clone copy\n", encoding="utf-8")
+            self.assertEqual(kit_profile.workspace_rules({"CLAUDE_PROJECT_DIR": str(ws)}, KIT), "")  # a clone imports its own
+            self.assertEqual(kit_profile.workspace_rules({"CLAUDE_PROJECT_DIR": str(ws / "repo")}, KIT), "")
+
+    def test_the_hook_prints_it_to_stdout(self):
+        cmd = json.loads((KIT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        base = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_", "CLAUDE_PROJECT_DIR"))}
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / "ws"
+            (ws / ".context" / "reference" / "env").mkdir(parents=True)
+            r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_PROJECT_DIR": str(ws),
+                                                      "CLAUDE_ENV_FILE": str(Path(tmp) / "env")}, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(r.stdout, (KIT / "WORKSPACE.md").read_text(encoding="utf-8"))  # stdout = session context
+            self.assertIn("export CLAUDE_PROJECT_DIR=", (Path(tmp) / "env").read_text(encoding="utf-8"))  # never mixed into stdout
+
+
 class KitHealthOnAPluginInstall(unittest.TestCase):
     def load(self, kit: Path, ws: Path):
         spec = importlib.util.spec_from_file_location("kit_health_plugin_test", KIT / "skills" / "kit-health" / "kit-health.py")
@@ -134,9 +163,18 @@ class KitHealthOnAPluginInstall(unittest.TestCase):
             kh = self.load(kit, ws)
             r = kh.Report(); kh.sec_machine(r)
             errs = [l for l in r.lines if "❌" in l]
-            self.assertTrue(any("WORKSPACE.md" in l and "NOT loaded" in l and "plugin install" in l for l in errs), r.lines)
-            self.assertTrue(any("workspace.mk" in l and "missing" in l for l in errs), r.lines)
+            self.assertTrue(any("WORKSPACE.md" in l and "remove the line" in l and "SessionStart hook" in l for l in errs), r.lines)
+            self.assertTrue(any("workspace.mk" in l and "missing" in l and "remove the line" in l for l in errs), r.lines)
             self.assertFalse(any("✅" in l and ("WORKSPACE.md" in l or "workspace.mk" in l) for l in r.lines), r.lines)
+            # the plugin-path wiring (#3): no import, no include, the hook injects WORKSPACE.md into a kit workspace
+            (ws / ".context" / "reference" / "env").mkdir(parents=True)
+            (ws / "CLAUDE.md").write_text("# me\n\n@.context/reference/environment.md\n", encoding="utf-8")
+            (ws / "Makefile").write_text("fleet:\n\ttrue\n", encoding="utf-8")
+            r = kh.Report(); kh.sec_machine(r)
+            self.assertFalse([l for l in r.lines if "❌" in l and ("WORKSPACE.md" in l or "workspace.mk" in l)], r.lines)
+            self.assertTrue(any("✅" in l and "SessionStart hook" in l for l in r.lines), r.lines)
+            (ws / "CLAUDE.md").write_text("# me\n\n@.claude/WORKSPACE.md\n@.context/reference/environment.md\n", encoding="utf-8")
+            (ws / "Makefile").write_text("include .claude/workspace.mk\n", encoding="utf-8")
             (ws / ".claude").mkdir()
             (ws / ".claude" / "WORKSPACE.md").write_text("rules\n", encoding="utf-8")
             (ws / ".claude" / "workspace.mk").write_text("\n", encoding="utf-8")

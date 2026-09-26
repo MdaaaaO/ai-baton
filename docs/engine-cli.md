@@ -104,6 +104,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py zone           # the zone timestamps render in (UTC when WORKSPACE_TZ is unknown)
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig (#116)
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
+                        python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 on a clone
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session, or --stable per user (survives logout)

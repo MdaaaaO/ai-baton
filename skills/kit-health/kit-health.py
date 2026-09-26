@@ -55,11 +55,6 @@ ENV = kit_profile.ENV_DIR
 OK, WARN, ERR = "OK", "WARN", "ERR"
 
 
-def plugin_wiring_hint() -> str:
-    """Appended to a dangling `.claude/…` wiring finding: on a plugin install nothing puts those files in the workspace (#3)."""
-    return "" if kit_profile.plugin_install(KIT) is None else \
-        " (plugin install: `.claude/` in the workspace holds no kit files — see `docs/packaging.md` § Plugin path)"
-
 
 class Report:
     def __init__(self) -> None:
@@ -668,12 +663,18 @@ def sec_machine(r: Report) -> str:
         r.add(ERR, "machine", "root `CLAUDE.md` missing — `sh .claude/setup.sh` seeds it")
     else:
         text = claude_md.read_text(encoding="utf-8", errors="replace")
-        if re.search(r"^@\.claude/WORKSPACE\.md\s*$", text, re.M) and not (ROOT / ".claude" / "WORKSPACE.md").is_file():
+        imp_ws = re.search(r"^@\.claude/WORKSPACE\.md\s*$", text, re.M)
+        ws_file = (ROOT / ".claude" / "WORKSPACE.md").is_file()
+        plugin = kit_profile.plugin_install(KIT) is not None
+        if imp_ws and not ws_file:
             # the import line alone is not wiring: a missing target loads nothing, silently (#3)
-            r.add(ERR, "machine", "CLAUDE.md imports `@.claude/WORKSPACE.md` but the file is missing — the kit's always-on rules "
-                  "are NOT loaded" + plugin_wiring_hint())
-        elif re.search(r"^@\.claude/WORKSPACE\.md\s*$", text, re.M):
+            r.add(ERR, "machine", "CLAUDE.md imports `@.claude/WORKSPACE.md` but the file is missing — "
+                  + ("remove the line: on a plugin install the SessionStart hook injects WORKSPACE.md" if plugin
+                     else "the kit's always-on rules are NOT loaded"))
+        elif imp_ws:
             r.add(OK, "machine", "CLAUDE.md imports `@.claude/WORKSPACE.md`")
+        elif plugin and not ws_file and (CTX / "reference" / "env").is_dir():
+            r.add(OK, "machine", "WORKSPACE.md comes from the plugin's SessionStart hook (`kit_profile.py workspace-rules`) — no import needed")
         else:
             r.add(ERR, "machine", "CLAUDE.md does not import `@.claude/WORKSPACE.md`")
         imp_env = re.search(r"^@\.context/reference/environment\.md\s*$", text, re.M)
@@ -691,9 +692,11 @@ def sec_machine(r: Report) -> str:
     mk_inc = mk.is_file() and re.search(r"^include \.claude/workspace\.mk", mk.read_text(errors="replace"), re.M)
     if mk_inc and not (ROOT / ".claude" / "workspace.mk").is_file():
         r.add(ERR, "machine", "root Makefile does `include .claude/workspace.mk` but the file is missing — every `make` in the "
-              "workspace fails" + plugin_wiring_hint())
+              "workspace fails" + ("; remove the line (its targets drive a `.claude/` clone)" if kit_profile.plugin_install(KIT) is not None else ""))
     elif mk_inc:
         r.add(OK, "machine", "root Makefile includes `.claude/workspace.mk`")
+    elif kit_profile.plugin_install(KIT) is not None:
+        r.add(OK, "machine", "no `workspace.mk` include — not used on a plugin install (its targets drive a `.claude/` clone)")
     else:
         r.add(WARN, "machine", "root Makefile missing or without `include .claude/workspace.mk` (no `make claude_sync` / `sign*`)")
     if (CTX / "README.md").is_file():

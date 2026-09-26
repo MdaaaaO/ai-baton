@@ -174,6 +174,11 @@ OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/
 set -e
 check "exit 0" '[ "$RC" -eq 0 ]'
 check "store and files land in the cwd, not beside the plugin" '[ -f "$WS/.context/reference/env/config.json" ] && [ -f "$WS/CLAUDE.md" ] && [ ! -e "$WORK/plugin/.context" ]'
+check "plugin path: CLAUDE.md imports no .claude/WORKSPACE.md and no Makefile is seeded (#3)" '! grep -q "^@.claude/WORKSPACE.md" "$WS/CLAUDE.md" && grep -q "^@.context/reference/environment.md" "$WS/CLAUDE.md" && [ ! -e "$WS/Makefile" ] && [ ! -e "$WS/.CLAUDE.md.seed" ]'
+printf 'include .claude/workspace.mk\n' > "$WS/Makefile"; printf '@.claude/WORKSPACE.md\n' >> "$WS/CLAUDE.md"
+set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/plugin/cache-kit/setup.sh" 2>&1)"; RC=$?; set -e
+check "plugin path: a dangling import/include is named, never added (#3)" '[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "remove that line (the plugin" && printf "%s" "$OUT" | grep -q "every make fails: remove that line"'
+rm -f "$WS/Makefile"
 check "settings.local.json is seeded under <root>/.claude/, nothing is written below the plugin dir" '[ -f "$WS/.claude/settings.local.json" ] && [ ! -e "$WORK/plugin/cache-kit/settings.local.json" ] && [ -z "$(find "$WORK/plugin/cache-kit" -type f -newer "$WORK/plugin/stamp" -not -path "*/__pycache__*" 2>/dev/null)" ]'
 mkdir -p "$WORK/plugin/proj"
 set +e

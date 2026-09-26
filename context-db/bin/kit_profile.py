@@ -24,6 +24,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py zone           # the zone timestamps render in (UTC when WORKSPACE_TZ is unknown)
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig (#116)
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
+                        python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 on a clone
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session, or --stable per user (survives logout)
@@ -413,6 +414,33 @@ def session_env(environ: dict | None = None) -> dict[str, str]:
     return out
 
 
+def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str:
+    """The kit's always-on body (`WORKSPACE.md`) for the plugin's SessionStart hook to print into the session's
+    context — a plugin cannot ship a CLAUDE.md, and on a plugin install the seeded `@.claude/WORKSPACE.md` import has
+    no file to load (#3). "" unless `CLAUDE_PROJECT_DIR` is, or sits below, a kit workspace (a dir holding an env store
+    — the plugin is installed per user, so other projects get nothing; a repo inside the workspace gets it, as a clone's
+    parent CLAUDE.md reaches it) that does not import its own copy (a `.claude/` clone)."""
+    env = os.environ if environ is None else environ
+    kit = kit or KIT
+    proj = str(env.get("CLAUDE_PROJECT_DIR", "")).strip()
+    if not proj:
+        return ""
+    start, home = Path(proj).resolve(), Path.home().resolve()
+    root = None
+    for base in (start, *start.parents):
+        if base == home:  # never `~/.context` (#168)
+            break
+        if (base / ".context" / "reference" / "env").is_dir():
+            root = base
+            break
+    if root is None or (root / ".claude" / "WORKSPACE.md").is_file():
+        return ""
+    try:
+        return (kit / "WORKSPACE.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "name"
     if cmd == "name":
@@ -448,6 +476,9 @@ def main(argv: list[str]) -> int:
         # the plugin's SessionStart hook: identity-env plus CLAUDE_PROJECT_DIR (#3)
         for var, value in session_env().items():
             print(f"export {var}={shlex.quote(value)}")
+    elif cmd == "workspace-rules":
+        # the plugin's SessionStart hook: WORKSPACE.md on stdout (→ the session's context) for a plugin-path workspace (#3)
+        sys.stdout.write(workspace_rules())
     elif cmd == "plugin":
         # `repo commit version` of a plugin install, nothing (exit 1) on a clone
         p = plugin_install()
