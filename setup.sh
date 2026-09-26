@@ -336,25 +336,26 @@ fi
 seed_pairs() {
   printf '%s\t%s\n' "$HERE/context-db/context-README.template.md" "$CONTEXT/README.md"
   printf '%s\t%s\n' "$HERE/environment-template/environment.md" "$ENV_DOC"
-  printf '%s\t%s\n' "$CLAUDE_TPL" "$PROJECTS/CLAUDE.md"
+  printf '%s\t%s\t%s\n' "$HERE/CLAUDE.example.md" "$PROJECTS/CLAUDE.md" "$CLAUDE_TPL"  # age from the kit file, diff vs what was seeded
   printf '%s\t%s\n' "$HERE/context-db/_templates/self-assessment-charter.md" "$CONTEXT/self-assessment/README.md"
 }
 stale_seeds=0
-while IFS="$(printf '\t')" read -r tpl copy; do
+while IFS="$(printf '\t')" read -r tpl copy difftpl; do
+  difftpl="${difftpl:-$tpl}"  # the file the copy was seeded from (the plugin path trims CLAUDE.md's import, #3)
   [ -f "$tpl" ] && [ -f "$copy" ] || continue
   tpl_t="$(git -C "$HERE" log -1 --format=%ct -- "$tpl" 2>/dev/null || echo 0)"
   copy_t="$(python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$copy" 2>/dev/null || echo 0)"
   if [ -z "$tpl_t" ] || [ "$tpl_t" = 0 ]; then  # no git history for the template (plugin install): nothing to compare against
-    [ "$REFRESH" = 1 ] && { echo "  seed ${copy#"$PROJECTS"/}: cannot compare — the kit has no git history here; diff (copy → template):"; diff -u "$copy" "$tpl" | sed 's/^/    /' || true; }
+    [ "$REFRESH" = 1 ] && { echo "  seed ${copy#"$PROJECTS"/}: cannot compare — the kit has no git history here; diff (copy → template):"; diff -u "$copy" "$difftpl" | sed 's/^/    /' || true; }
     continue
   fi
   if [ "${tpl_t:-0}" -gt "${copy_t:-0}" ] 2>/dev/null; then
     stale_seeds=$((stale_seeds + 1))
     if [ "$REFRESH" = 1 ]; then
       echo "  seed ${copy#"$PROJECTS"/} predates its template ${tpl#"$HERE"/} — diff (copy → template):"
-      diff -u "$copy" "$tpl" | sed 's/^/    /' || true
+      diff -u "$copy" "$difftpl" | sed 's/^/    /' || true
     fi
-  elif [ "$REFRESH" = 1 ] && ! cmp -s "$tpl" "$copy"; then
+  elif [ "$REFRESH" = 1 ] && ! cmp -s "$difftpl" "$copy"; then
     echo "  seed ${copy#"$PROJECTS"/} differs from ${tpl#"$HERE"/} (your edits; the template is not newer) — no action"
   fi
 done <<EOF_SEEDS

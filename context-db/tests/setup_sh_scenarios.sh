@@ -184,6 +184,13 @@ set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh
 check "plugin path: a .claude/ copy nobody imports is named, a working include is not 'nothing to include' (#3)" '[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "loads nowhere" && printf "%s" "$OUT" | grep -q "includes .claude/workspace.mk (the file exists)"'
 check "plugin path: --refresh-seeds never proposes the WORKSPACE.md import back (#3)" '! printf "%s" "$OUT" | grep -q "^ *+@.claude/WORKSPACE.md"'
 rm -f "$WS/Makefile" "$WS/.claude/WORKSPACE.md" "$WS/.claude/workspace.mk"
+# a git-tracked plugin dir (a marketplace checkout): CLAUDE.md's age check still reads the kit's history (#3)
+git -C "$WORK/plugin/cache-kit" init -q && git -C "$WORK/plugin/cache-kit" add -A >/dev/null 2>&1 \
+  && git -C "$WORK/plugin/cache-kit" -c user.name=t -c user.email=t@example.invalid commit -q -m seed >/dev/null 2>&1
+python3 -c 'import os, sys; os.utime(sys.argv[1], (946684800, 946684800))' "$WS/CLAUDE.md"  # 2000-01-01
+set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/plugin/cache-kit/setup.sh" --refresh-seeds 2>&1)"; RC=$?; set -e
+check "git-tracked plugin dir: a stale CLAUDE.md is detected against the kit template, diffed against the trimmed one (#3)" '[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "seed CLAUDE.md predates its template CLAUDE.example.md" && ! printf "%s" "$OUT" | grep -q "^ *+@.claude/WORKSPACE.md"'
+rm -rf "$WORK/plugin/cache-kit/.git"
 check "settings.local.json is seeded under <root>/.claude/, nothing is written below the plugin dir" '[ -f "$WS/.claude/settings.local.json" ] && [ ! -e "$WORK/plugin/cache-kit/settings.local.json" ] && [ -z "$(find "$WORK/plugin/cache-kit" -type f -newer "$WORK/plugin/stamp" -not -path "*/__pycache__*" 2>/dev/null)" ]'
 mkdir -p "$WORK/plugin/proj"
 set +e
