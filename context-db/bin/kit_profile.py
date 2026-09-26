@@ -71,8 +71,11 @@ def context_root() -> Path:
     for base in (cwd, *cwd.parents):
         if base == home:  # never `~/.context` (#168: the home dir is not a workspace root)
             break
-        if (base / ".context" / "reference" / "env" / "config.json").is_file():
-            return base / ".context"
+        try:
+            if (base / ".context" / "reference" / "env" / "config.json").is_file():
+                return base / ".context"
+        except OSError:  # an ancestor we may not stat (EACCES): not a workspace, keep walking
+            continue
     return KIT.parent / ".context"
 
 

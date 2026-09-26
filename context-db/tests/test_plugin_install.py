@@ -92,6 +92,18 @@ class ContextRoot(unittest.TestCase):
             (Path(tmp) / "repo" / ".context" / "reference" / "env").mkdir(parents=True)  # an empty env dir is not a store
             self.assertEqual(self.resolve(kit, Path(tmp) / "repo", {}), kit.parent / ".context")
 
+    def test_an_unreadable_ancestor_is_skipped_not_raised(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            real_is_file = Path.is_file
+
+            def is_file(path):
+                if path.parts[-4:] == (".context", "reference", "env", "config.json"):
+                    raise PermissionError(13, "denied", str(path))
+                return real_is_file(path)
+            with mock.patch.object(Path, "is_file", is_file):
+                self.assertEqual(self.resolve(kit, Path(tmp), {}), kit.parent / ".context")
+
     def test_a_checkout_never_walks_up(self):
         with tempfile.TemporaryDirectory() as tmp:
             kit = fake_install(Path(tmp))
