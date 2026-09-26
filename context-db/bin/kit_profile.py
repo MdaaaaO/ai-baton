@@ -23,6 +23,8 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py zone           # the zone timestamps render in (UTC when WORKSPACE_TZ is unknown)
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig (#116)
+                        python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
+                        python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 on a clone
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session, or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
@@ -44,16 +46,29 @@ DEFAULT_NAME = "local"
 
 def context_root() -> Path:
     """`CONTEXT_ROOT`, else the `.context/` beside the kit — also found from a kit worktree
-    (`<root>/.worktrees/<name>/`), where the sibling is two levels up."""
+    (`<root>/.worktrees/<name>/`), where the sibling is two levels up. On the plugin path (#118) the kit sits in
+    Claude Code's plugin cache: `CLAUDE_PROJECT_DIR` (hooks get it, and the SessionStart hook re-exports it), else
+    the nearest `.context/` above the current directory — the Bash tool starts in the project dir but is not
+    handed `CLAUDE_PROJECT_DIR` (#3)."""
     env = os.environ.get("CONTEXT_ROOT", "").strip()
     if env:
         return Path(env)
     for base in (KIT.parent, KIT.parent.parent):
         if (base / ".context").is_dir():
             return base / ".context"
-    proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()  # the plugin path (#118): the kit is installed elsewhere,
-    if proj and (Path(proj) / ".context").is_dir():             # the workspace's .context/ sits in the project dir
+    proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+    if proj and (Path(proj) / ".context").is_dir():
         return Path(proj) / ".context"
+    home = Path.home().resolve()
+    try:
+        cwd = Path.cwd().resolve()
+    except OSError:  # the current directory was deleted under us
+        return KIT.parent / ".context"
+    for base in (cwd, *cwd.parents):
+        if base == home:  # never `~/.context` (#168: the home dir is not a workspace root)
+            break
+        if (base / ".context" / "reference" / "env").is_dir():
+            return base / ".context"
     return KIT.parent / ".context"
 
 
@@ -354,6 +369,50 @@ def gh_env(base: dict | None = None) -> dict:
     return env
 
 
+def plugin_install(kit: Path | None = None, environ: dict | None = None) -> dict[str, str] | None:
+    """`{repo, commit, version}` when the kit is a Claude Code plugin install (no git checkout: the plugin cache),
+    None on a clone. `repo` = `owner/repo` from plugin.json `repository`; `commit` = the `gitCommitSha` Claude Code
+    recorded for this install path in `installed_plugins.json` ("" when not recorded); `version` = plugin.json's.
+    Lets kit-health name the installed kit where git cannot (#3)."""
+    kit = kit or KIT
+    env = os.environ if environ is None else environ
+    if (kit / ".git").exists():
+        return None
+    try:
+        manifest = json.loads((kit / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    m = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", str(manifest.get("repository") or ""))
+    out = {"repo": m.group(1) if m else "", "commit": "", "version": str(manifest.get("version") or "")}
+    # <config>/plugins/cache/<marketplace>/<plugin>/<version> — the registry sits in <config>/plugins/
+    registries = [kit.parents[3] / "installed_plugins.json"] if len(kit.parents) > 3 and kit.parents[2].name == "cache" else []
+    config = env.get("CLAUDE_CONFIG_DIR", "").strip()
+    registries.append((Path(config) if config else Path.home() / ".claude") / "plugins" / "installed_plugins.json")
+    for reg in registries:
+        try:
+            plugins = json.loads(reg.read_text(encoding="utf-8")).get("plugins") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        for entries in plugins.values():
+            for e in entries if isinstance(entries, list) else []:
+                if isinstance(e, dict) and e.get("installPath") and Path(e["installPath"]).resolve() == kit.resolve():
+                    out["commit"] = str(e.get("gitCommitSha") or "")
+                    return out
+    return out
+
+
+def session_env(environ: dict | None = None) -> dict[str, str]:
+    """What the plugin's SessionStart hook exports into `$CLAUDE_ENV_FILE` so every later Bash command sees it: the
+    identity options (`identity_env`) plus `CLAUDE_PROJECT_DIR`, which hooks get and the Bash tool does not — without
+    it the engine cannot find the workspace's `.context/` from a plugin install (#3)."""
+    env = os.environ if environ is None else environ
+    out = identity_env(env)
+    proj = str(env.get("CLAUDE_PROJECT_DIR", "")).strip()
+    if proj:
+        out["CLAUDE_PROJECT_DIR"] = proj
+    return out
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "name"
     if cmd == "name":
@@ -385,6 +444,16 @@ def main(argv: list[str]) -> int:
         # identity value set through plugin userConfig, nothing otherwise (settings.local.json is never echoed)
         for var, value in identity_env().items():
             print(f"export {var}={shlex.quote(value)}")
+    elif cmd == "session-env":
+        # the plugin's SessionStart hook: identity-env plus CLAUDE_PROJECT_DIR (#3)
+        for var, value in session_env().items():
+            print(f"export {var}={shlex.quote(value)}")
+    elif cmd == "plugin":
+        # `repo commit version` of a plugin install, nothing (exit 1) on a clone
+        p = plugin_install()
+        if p is None:
+            return 1
+        print(json.dumps(p))
     elif cmd == "identity-source":
         # `option` | `env` | `` for one WORKSPACE_* variable — the source, never the value
         print(identity_source(argv[2]))

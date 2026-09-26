@@ -36,7 +36,7 @@ flowchart TB
 
   subgraph HK["hooks"]
     H1["settings.json SessionEnd → sync.sh"]
-    H2["hooks/hooks.json SessionStart → kit_profile.py identity-env"]
+    H2["hooks/hooks.json SessionStart → kit_profile.py session-env"]
     H3["git hooks: pre-push (main guard) · commit-msg (commit style)"]
   end
   H1 --> SY["sync.sh — fast-forward the kit, install the git hooks"]

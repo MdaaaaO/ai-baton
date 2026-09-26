@@ -213,7 +213,7 @@ def check_identity_options(errors: list[str], man: dict) -> None:
     """Identity via plugin userConfig (#116): every `WORKSPACE_*` variable `kit_profile.IDENTITY_KEYS` resolves has a
     `userConfig` entry of the mapped key (string, titled, described) and nothing else is declared there — the
     manifest and the resolver drift apart otherwise; and `hooks/hooks.json` carries the SessionStart hook that
-    re-exports the options as `WORKSPACE_*` for Bash (`kit_profile.py identity-env`), else the plugin path
+    re-exports the options as `WORKSPACE_*` and `CLAUDE_PROJECT_DIR` for Bash (`kit_profile.py session-env`, #3), else the plugin path
     never sees the values the user typed into `/config`."""
     uc = man.get("userConfig") if isinstance(man.get("userConfig"), dict) else {}
     want = {v: k for k, v in kit_profile.IDENTITY_KEYS.items()}
@@ -238,8 +238,8 @@ def check_identity_options(errors: list[str], man: dict) -> None:
         return
     cmds = [h.get("command", "") for grp in (hooks.get("hooks", {}).get("SessionStart") or []) if isinstance(grp, dict)
             for h in (grp.get("hooks") or []) if isinstance(h, dict)]
-    if not any("identity-env" in c and "CLAUDE_ENV_FILE" in c and "${CLAUDE_PLUGIN_ROOT}" in c for c in cmds):
-        errors.append(f"{PLUGIN_HOOKS}: no SessionStart hook runs `${{CLAUDE_PLUGIN_ROOT}}/…/kit_profile.py identity-env` into $CLAUDE_ENV_FILE")
+    if not any("session-env" in c and "CLAUDE_ENV_FILE" in c and "${CLAUDE_PLUGIN_ROOT}" in c for c in cmds):
+        errors.append(f"{PLUGIN_HOOKS}: no SessionStart hook runs `${{CLAUDE_PLUGIN_ROOT}}/…/kit_profile.py session-env` into $CLAUDE_ENV_FILE")
 
 
 MAKE_TARGET = re.compile(r"make(?:\s+-s)?\s+-C\s+\.claude/context-db(?:\s+-s)?\s+([a-z][a-z_-]*)\b")

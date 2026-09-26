@@ -55,6 +55,12 @@ ENV = kit_profile.ENV_DIR
 OK, WARN, ERR = "OK", "WARN", "ERR"
 
 
+def plugin_wiring_hint() -> str:
+    """Appended to a dangling `.claude/…` wiring finding: on a plugin install nothing puts those files in the workspace (#3)."""
+    return "" if kit_profile.plugin_install(KIT) is None else \
+        " (plugin install: `.claude/` in the workspace holds no kit files — see `docs/packaging.md` § Plugin path)"
+
+
 class Report:
     def __init__(self) -> None:
         self.lines: list[str] = []
@@ -80,6 +86,7 @@ def sh(cmd: list[str] | str, cwd: Path | None = None, env: dict | None = None, t
     """(exit status, stdout, stderr), both stripped — apart, so a summary line on stdout is never displaced by a
     warning on stderr (#60 KH-07). A command that cannot run is (127, "", <why>)."""
     e = dict(os.environ)
+    e.setdefault("CONTEXT_ROOT", str(CTX))  # children resolve the workspace as this run did, whatever their cwd (#3)
     if env:
         e.update(env)
     try:
@@ -185,13 +192,20 @@ def sec_kit(r: Report, stale: int) -> None:
     for line in err.splitlines():
         if line.strip().startswith("~ stale:"):
             r.add(WARN, "kit", f"stale (reviewed >{stale}d ago): {line.split('~ stale:',1)[1].strip()} — re-read it and bump `reviewed`")
-    rc, head, _ = sh(["git", "-C", str(KIT), "rev-parse", "--short", "HEAD"])
-    r.raw(f"- kit commit: `{head if rc == 0 else 'not a git checkout'}`")
+    head, plugin = kit_head(), kit_profile.plugin_install(KIT)
+    if plugin is None:
+        r.raw(f"- kit commit: `{head[:7] or 'unknown'}`")
+    else:
+        r.raw(f"- kit commit: `{head[:7] or 'unknown'}` — plugin install{' v' + plugin['version'] if plugin['version'] else ''}"
+              f"{' from `' + plugin['repo'] + '`' if plugin['repo'] else ''} (no git checkout; the commit is the one Claude Code recorded)")
     rc, out, err = sh(["sh", str(KIT / "sync-check.sh")])
     out = both(out, err)  # sync-check warns on stderr
     if out.strip():
         for line in out.splitlines():
             r.add(WARN, "kit", line.replace("WARN kit sync: ", "sync: "))
+    elif plugin is not None:  # sync-check skips the git half without a checkout: never claim "in step with origin" (#3)
+        r.add(OK, "kit", "sync: plugin install — Claude Code updates it from the marketplace (`claude plugin update`), "
+              "there is no checkout to sync; env store up to date")
     else:
         r.add(OK, "kit", "sync: in step with origin, tree clean")
     review_ratio(r)
@@ -282,10 +296,23 @@ def scan_files() -> list[Path]:
 
 
 def kit_repo() -> str:
-    """`owner/repo` of the kit itself (its own name is not a leak), "" when unknown."""
+    """`owner/repo` of the kit itself (its own name is not a leak), "" when unknown: the checkout's origin, else
+    plugin.json `repository` on a plugin install (#3 — without it the kit's own install lines read as leaks)."""
     rc, out, _ = sh(["git", "-C", str(KIT), "remote", "get-url", "origin"])
     m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", out.strip()) if rc == 0 else None
-    return m.group(1) if m else ""
+    if m:
+        return m.group(1)
+    plugin = kit_profile.plugin_install(KIT)
+    return plugin["repo"] if plugin else ""
+
+
+def kit_head() -> str:
+    """The kit's full commit: git HEAD, else the commit Claude Code recorded for a plugin install, else ""."""
+    rc, head, _ = sh(["git", "-C", str(KIT), "rev-parse", "HEAD"])
+    if rc == 0 and head:
+        return head
+    plugin = kit_profile.plugin_install(KIT)
+    return plugin["commit"] if plugin else ""
 
 
 @functools.lru_cache(maxsize=None)
@@ -577,7 +604,8 @@ def identity_wiring(r: Report) -> None:
     elif not settings.is_file():
         r.add(ERR, "machine", "no identity from any source: `settings.local.json` missing (looked at `"
               + (str(settings.relative_to(ROOT)) if settings.is_relative_to(ROOT) else str(settings))
-              + "`) and no `WORKSPACE_*` in the environment — run `sh .claude/setup.sh`, or `/plugin configure ai-baton` on a plugin install")
+              + "`) and no `WORKSPACE_*` in the environment — run `sh .claude/setup.sh`, or `/plugin configure ai-baton` on a plugin install "
+              "(values set there reach Bash from the next session on: restart it if you just configured them)")
     for k in ("WORKSPACE_USER", "WORKSPACE_GITHUB_LOGIN", "WORKSPACE_TZ"):
         if not src[k]:
             r.add(WARN, "machine", f"`{k}` unset — `/config` (plugin) or settings.local.json env (clone); scripts fall back to `gh api user` / UTC where they can")
@@ -640,7 +668,11 @@ def sec_machine(r: Report) -> str:
         r.add(ERR, "machine", "root `CLAUDE.md` missing — `sh .claude/setup.sh` seeds it")
     else:
         text = claude_md.read_text(encoding="utf-8", errors="replace")
-        if re.search(r"^@\.claude/WORKSPACE\.md\s*$", text, re.M):
+        if re.search(r"^@\.claude/WORKSPACE\.md\s*$", text, re.M) and not (ROOT / ".claude" / "WORKSPACE.md").is_file():
+            # the import line alone is not wiring: a missing target loads nothing, silently (#3)
+            r.add(ERR, "machine", "CLAUDE.md imports `@.claude/WORKSPACE.md` but the file is missing — the kit's always-on rules "
+                  "are NOT loaded" + plugin_wiring_hint())
+        elif re.search(r"^@\.claude/WORKSPACE\.md\s*$", text, re.M):
             r.add(OK, "machine", "CLAUDE.md imports `@.claude/WORKSPACE.md`")
         else:
             r.add(ERR, "machine", "CLAUDE.md does not import `@.claude/WORKSPACE.md`")
@@ -656,7 +688,11 @@ def sec_machine(r: Report) -> str:
     if LEGACY_PROFILES.exists():  # the one legacy line kept (#78)
         r.add(WARN, "machine", "legacy `.claude/profiles/` present → delete it (`rm -rf .claude/profiles`; the layer retired 2026-09-25, nothing reads it)")
     mk = ROOT / "Makefile"
-    if mk.is_file() and re.search(r"^include \.claude/workspace\.mk", mk.read_text(errors="replace"), re.M):
+    mk_inc = mk.is_file() and re.search(r"^include \.claude/workspace\.mk", mk.read_text(errors="replace"), re.M)
+    if mk_inc and not (ROOT / ".claude" / "workspace.mk").is_file():
+        r.add(ERR, "machine", "root Makefile does `include .claude/workspace.mk` but the file is missing — every `make` in the "
+              "workspace fails" + plugin_wiring_hint())
+    elif mk_inc:
         r.add(OK, "machine", "root Makefile includes `.claude/workspace.mk`")
     else:
         r.add(WARN, "machine", "root Makefile missing or without `include .claude/workspace.mk` (no `make claude_sync` / `sign*`)")
@@ -802,6 +838,16 @@ def sec_stamp(r: Report, active: str) -> None:
     rc, behind, _ = sh(["git", "-C", str(KIT), "rev-list", "--count", f"{commit}..HEAD"]) if commit else (1, "", "")
     n = int(behind) if rc == 0 and behind.isdigit() else None
     when = h.get("last_green", "?")
+    head = kit_head()
+    if n is None and commit and head and kit_profile.plugin_install(KIT) is not None:
+        # a plugin install cannot count commits: same commit = at HEAD, else a newer install this run re-stamps (#3)
+        if commit == head:
+            n = 0
+        else:
+            r.add(OK, "stamp", f"`{active}`: last green at `{commit[:7]}` ({when}), the installed kit is `{head[:7]}` — this run re-stamps it")
+            r.raw("- changed units unknown (a plugin install has no git history) — the judgement pass re-reads every unit the report flags")
+            r.raw("- other environments keep their own stamp in their `.context/kit-health/` — run `/kit-health` there after every kit change")
+            return
     if n == 0:
         r.add(OK, "stamp", f"`{active}`: green at `{commit[:7]}` = HEAD ({when}, {h.get('warnings', '?')} warnings)")
     elif n is None:
@@ -822,13 +868,15 @@ def kit_version() -> str:
     """`v0.3.0` on a release commit, `v0.3.0+2` two commits after it, "" before the first release tag."""
     rc, d, _ = sh(["git", "-C", str(KIT), "describe", "--tags", "--match", "v[0-9]*", "--long"])
     if rc != 0 or not d:
-        return ""
+        plugin = kit_profile.plugin_install(KIT)  # a plugin install: the manifest's release version (#3)
+        return f"v{plugin['version']}" if plugin and plugin["version"] else ""
     tag, n, _ = d.rsplit("-", 2)
     return tag if n == "0" else f"{tag}+{n}"
 
 
 def stamp(envname: str, r: Report) -> "tuple[Path, bool]":
-    rc, head, _ = sh(["git", "-C", str(KIT), "rev-parse", "HEAD"])
+    head = kit_head()
+    rc = 0 if head else 1
     ver = kit_version()
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
     p = health_path(envname)

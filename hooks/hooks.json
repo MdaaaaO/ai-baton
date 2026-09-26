@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -n \"${CLAUDE_ENV_FILE:-}\" ] && python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/kit_profile.py\" identity-env >> \"$CLAUDE_ENV_FILE\" 2>/dev/null; exit 0",
+            "command": "[ -n \"${CLAUDE_ENV_FILE:-}\" ] && python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/kit_profile.py\" session-env >> \"$CLAUDE_ENV_FILE\" 2>/dev/null; exit 0",
             "timeout": 10
           }
         ]

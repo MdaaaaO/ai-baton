@@ -1,0 +1,149 @@
+"""A plugin install (#3): the kit sits in Claude Code's plugin cache with no git checkout and no `.claude/` in the
+workspace. `kit_profile.plugin_install()` names the installed kit from plugin.json + installed_plugins.json,
+`context_root()` finds the workspace from the Bash tool's cwd, the SessionStart hook re-exports CLAUDE_PROJECT_DIR,
+and kit-health neither calls the kit's own repo a leak nor passes a dangling `@.claude/…` import or Makefile include.
+Stdlib unittest. Run: make -C .claude/context-db test."""
+from __future__ import annotations
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+HERE = Path(__file__).resolve().parent
+KIT = HERE.parents[1]
+BIN = HERE.parent / "bin"
+sys.path.insert(0, str(BIN))
+import kit_profile  # noqa: E402
+
+OWNER = "octo-" + "org"
+SHA = "0123456789abcdef" * 2 + "01234567"
+
+
+def fake_install(tmp: Path) -> Path:
+    """`<tmp>/config/plugins/cache/<marketplace>/<plugin>/<version>` with its manifest and the registry entry."""
+    plugins = tmp / "config" / "plugins"
+    kit = plugins / "cache" / "mkt" / "kit" / "1.2.3"
+    (kit / ".claude-plugin").mkdir(parents=True)
+    (kit / ".claude-plugin" / "plugin.json").write_text(json.dumps(
+        {"name": "kit", "version": "1.2.3", "repository": f"https://github.com/{OWNER}/kit"}), encoding="utf-8")
+    (plugins / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {
+        "other@mkt": [{"installPath": str(plugins / "cache" / "mkt" / "other" / "0.1.0"), "gitCommitSha": "f" * 40}],
+        "kit@mkt": [{"installPath": str(kit), "gitCommitSha": SHA}]}}), encoding="utf-8")
+    return kit
+
+
+class PluginInstall(unittest.TestCase):
+    def test_names_repo_commit_and_version_from_the_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            self.assertEqual(kit_profile.plugin_install(kit, {}), {"repo": f"{OWNER}/kit", "commit": SHA, "version": "1.2.3"})
+
+    def test_a_checkout_is_not_a_plugin_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            (kit / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")  # a worktree's .git is a file
+            self.assertIsNone(kit_profile.plugin_install(kit, {}))
+        self.assertIsNone(kit_profile.plugin_install(Path("/nonexistent/kit"), {}))  # no manifest: not a plugin either
+
+    def test_unregistered_install_keeps_repo_and_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = Path(tmp) / "loose"
+            (kit / ".claude-plugin").mkdir(parents=True)
+            (kit / ".claude-plugin" / "plugin.json").write_text(json.dumps(
+                {"version": "0.1.0", "repository": f"https://github.com/{OWNER}/kit.git"}), encoding="utf-8")
+            info = kit_profile.plugin_install(kit, {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "none")})
+            self.assertEqual(info, {"repo": f"{OWNER}/kit", "commit": "", "version": "0.1.0"})
+
+
+class ContextRoot(unittest.TestCase):
+    def resolve(self, kit: Path, cwd: Path, env: dict) -> Path:
+        base = {k: v for k, v in os.environ.items() if k not in ("CONTEXT_ROOT", "CLAUDE_PROJECT_DIR")}
+        saved_kit, saved_cwd = kit_profile.KIT, Path.cwd()
+        try:
+            kit_profile.KIT = kit
+            os.chdir(cwd)
+            with mock.patch.dict(os.environ, {**base, **env}, clear=True):
+                return kit_profile.context_root()
+        finally:
+            kit_profile.KIT = saved_kit
+            os.chdir(saved_cwd)
+
+    def test_bash_cwd_finds_the_workspace_without_claude_project_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            ws = Path(tmp) / "ws"
+            (ws / ".context" / "reference" / "env").mkdir(parents=True)
+            (ws / "repo" / "src").mkdir(parents=True)
+            self.assertEqual(self.resolve(kit, ws / "repo" / "src", {}), ws / ".context")  # walks up from a repo dir
+            self.assertEqual(self.resolve(kit, Path(tmp), {"CLAUDE_PROJECT_DIR": str(ws)}), ws / ".context")  # the hook's export
+            self.assertEqual(self.resolve(kit, Path(tmp), {}), kit.parent / ".context")  # nothing found: the old fallback
+
+    def test_a_context_dir_without_an_env_store_is_not_a_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            (Path(tmp) / "repo" / ".context").mkdir(parents=True)  # some repo's own .context/ (no env store)
+            self.assertEqual(self.resolve(kit, Path(tmp) / "repo", {}), kit.parent / ".context")
+
+
+class SessionEnvHook(unittest.TestCase):
+    def test_hook_exports_the_project_dir_for_bash(self):
+        cmd = json.loads((KIT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        base = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_", "CLAUDE_PROJECT_DIR"))}
+        with tempfile.TemporaryDirectory() as tmp:
+            envfile = Path(tmp) / "env"
+            ws = Path(tmp) / "my ws"
+            r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_ENV_FILE": str(envfile),
+                                                      "CLAUDE_PROJECT_DIR": str(ws), "CONTEXT_ROOT": "/nonexistent/.context"},
+                               capture_output=True, text=True)
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
+            shown = subprocess.run(["sh", "-c", envfile.read_text(encoding="utf-8") + 'printf %s "$CLAUDE_PROJECT_DIR"'],
+                                   capture_output=True, text=True)
+            self.assertEqual(shown.stdout, str(ws))  # quoted: a path with a space survives the eval
+
+
+class KitHealthOnAPluginInstall(unittest.TestCase):
+    def load(self, kit: Path, ws: Path):
+        spec = importlib.util.spec_from_file_location("kit_health_plugin_test", KIT / "skills" / "kit-health" / "kit-health.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        mod.KIT, mod.CTX, mod.ROOT = kit, ws / ".context", ws
+        return mod
+
+    def test_kit_repo_head_and_version_come_from_the_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "none")}):
+                kh = self.load(kit, Path(tmp) / "ws")
+                self.assertEqual(kh.kit_repo(), f"{OWNER}/kit")  # its own install lines are not a leak
+                self.assertIn("kit", kh.kit_dependencies())
+                self.assertEqual(kh.kit_head(), SHA)
+                self.assertEqual(kh.kit_version(), "v1.2.3")
+
+    def test_dangling_workspace_wiring_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            ws = Path(tmp) / "ws"
+            (ws / ".context").mkdir(parents=True)
+            (ws / "CLAUDE.md").write_text("# me\n\n@.claude/WORKSPACE.md\n@.context/reference/environment.md\n", encoding="utf-8")
+            (ws / "Makefile").write_text("include .claude/workspace.mk\n", encoding="utf-8")
+            kh = self.load(kit, ws)
+            r = kh.Report(); kh.sec_machine(r)
+            errs = [l for l in r.lines if "❌" in l]
+            self.assertTrue(any("WORKSPACE.md" in l and "NOT loaded" in l and "plugin install" in l for l in errs), r.lines)
+            self.assertTrue(any("workspace.mk" in l and "missing" in l for l in errs), r.lines)
+            self.assertFalse(any("✅" in l and ("WORKSPACE.md" in l or "workspace.mk" in l) for l in r.lines), r.lines)
+            (ws / ".claude").mkdir()
+            (ws / ".claude" / "WORKSPACE.md").write_text("rules\n", encoding="utf-8")
+            (ws / ".claude" / "workspace.mk").write_text("\n", encoding="utf-8")
+            r = kh.Report(); kh.sec_machine(r)
+            self.assertTrue(any("✅" in l and "imports `@.claude/WORKSPACE.md`" in l for l in r.lines), r.lines)
+            self.assertTrue(any("✅" in l and "includes `.claude/workspace.mk`" in l for l in r.lines), r.lines)
+
+
+if __name__ == "__main__":
+    unittest.main()
