@@ -70,8 +70,10 @@ class KitRelease(unittest.TestCase):
         self.assert_dry_ran(self.make("kit_release_dry"), checkout)
 
     def test_plugin_workspace_uses_kit_checkout(self):
-        checkout = self.clone(self.tmp / "kit-clone")
-        self.assert_dry_ran(self.make("kit_release_dry", f"KIT_CHECKOUT={checkout}"), checkout)
+        for name in ("kit-clone", "kit clone"):  # a path with a space stays one argument
+            with self.subTest(name=name):
+                checkout = self.clone(self.tmp / name)
+                self.assert_dry_ran(self.make("kit_release_dry", f"KIT_CHECKOUT={checkout}"), checkout)
 
     def test_no_checkout_names_kit_checkout(self):
         for extra in ((), (f"KIT_CHECKOUT={self.tmp / 'missing'}",)):

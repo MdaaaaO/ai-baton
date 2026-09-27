@@ -64,9 +64,9 @@ _CTXROOT := $(if $(wildcard .context/reference/env/config.json),CONTEXT_ROOT=$(C
 # both run in a detached worktree off origin/main, so the dry run shows exactly what kit_release would cut
 kit_release_dry kit_release:
 	@git -C "$(or $(KIT_CHECKOUT),.)" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ -n "$(KIT_CHECKOUT)" ] || { echo "kit_release: no kit git checkout ('$(KIT_CHECKOUT)') — pass KIT_CHECKOUT=<a clone of the kit repo>; a plugin install has no clone of its own"; exit 2; }
-	@git -C $(KIT_CHECKOUT) fetch -q --tags origin
-	@test ! -e $(_REL_WT) || { echo "$(_REL_WT) exists — a release run in progress, or left over: git -C $(KIT_CHECKOUT) worktree remove --force $(CURDIR)/$(_REL_WT)"; exit 1; }
-	@git -C $(KIT_CHECKOUT) worktree add -q --detach $(CURDIR)/$(_REL_WT) origin/main
+	@git -C "$(KIT_CHECKOUT)" fetch -q --tags origin
+	@test ! -e $(_REL_WT) || { echo "$(_REL_WT) exists — a release run in progress, or left over: git -C '$(KIT_CHECKOUT)' worktree remove --force $(CURDIR)/$(_REL_WT)"; exit 1; }
+	@git -C "$(KIT_CHECKOUT)" worktree add -q --detach $(CURDIR)/$(_REL_WT) origin/main
 	@eval "$$($(_CTXROOT) python3 $(_REL_WT)/context-db/bin/kit_profile.py gh-env)"; \
 	  out="$$(cd $(_REL_WT) && $(_CREL) release $(if $(filter kit_release_dry,$@),--dry-run) $(LEVEL))"; rc=$$?; \
 	  br="$$(git -C $(_REL_WT) branch --show-current)"; \
@@ -78,11 +78,11 @@ kit_release_dry kit_release:
 	    echo "finish it (skip what already happened — the output above says how far it got):"; \
 	    echo "  cd $(CURDIR)/$(_REL_WT) && git push -u origin $$br && gh pr create --base main --head $$br --fill --label release"; \
 	    echo "then clean up:"; \
-	    echo "  git -C $(KIT_CHECKOUT) worktree remove $(CURDIR)/$(_REL_WT) && git -C $(KIT_CHECKOUT) branch -D $$br"; \
+	    echo "  git -C '$(KIT_CHECKOUT)' worktree remove $(CURDIR)/$(_REL_WT) && git -C '$(KIT_CHECKOUT)' branch -D $$br"; \
 	    exit $$rc; \
 	  fi; \
-	  git -C $(KIT_CHECKOUT) worktree remove --force $(CURDIR)/$(_REL_WT); \
-	  if [ -n "$$br" ]; then git -C $(KIT_CHECKOUT) branch -q -D "$$br"; fi; \
+	  git -C "$(KIT_CHECKOUT)" worktree remove --force $(CURDIR)/$(_REL_WT); \
+	  if [ -n "$$br" ]; then git -C "$(KIT_CHECKOUT)" branch -q -D "$$br"; fi; \
 	  [ $$rc -eq 0 ] || exit $$rc; \
 	  $(if $(filter kit_release_dry,$@),exit 0;) \
 	  url="$$(printf '%s\n' "$$out" | grep -o 'https://github.com/[^ ]*/pull/[0-9]*' | tail -n 1)"; \
