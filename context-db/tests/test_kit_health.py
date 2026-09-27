@@ -346,5 +346,77 @@ class Verdict(unittest.TestCase):
         self.assertTrue(any("= HEAD" in ln for ln in r.lines) and any("nothing to re-read" in ln for ln in r.lines), r.lines)
 
 
+class Release(unittest.TestCase):
+    """#33: § 1 warns when a newer kit release is out, with the update command for the install mode; a lookup that
+    fails is an informational `latest release unknown` line, never a ✅."""
+    PLUGIN = {"repo": "owner/kit", "commit": "", "version": "0.2.2", "updated": ""}
+
+    def plugin_run(self, sh_result, gh="/usr/bin/gh"):
+        kh = load_kit_health()
+        r = kh.Report()
+        with mock.patch.object(kh.shutil, "which", return_value=gh), \
+             mock.patch.object(kh, "sh", return_value=sh_result) as sh:
+            kh.release_check(r, dict(self.PLUGIN))
+        return kh, r, sh
+
+    def test_plugin_newer_release_warns_with_the_update_command(self):
+        out = '{"tagName": "v0.3.0", "publishedAt": "2026-09-27T10:00:00Z", "url": "https://example.invalid/r/v0.3.0"}'
+        kh, r, sh = self.plugin_run((0, out, ""))
+        self.assertEqual(sh.call_args[0][0][:5], ["gh", "release", "view", "-R", "owner/kit"])
+        self.assertEqual(r.counts[kh.WARN], 1, r.lines)
+        text = r.findings[0][2]
+        for part in ("v0.3.0 available", "installed v0.2.2", "published 2026-09-27", "claude plugin marketplace update ai-baton-kit",
+                     "claude plugin update ai-baton@ai-baton-kit", "restart", "https://example.invalid/r/v0.3.0"):
+            self.assertIn(part, text)
+
+    def test_plugin_up_to_date_is_ok(self):
+        kh, r, _ = self.plugin_run((0, '{"tagName": "v0.2.2", "publishedAt": "", "url": ""}', ""))
+        self.assertEqual((r.counts[kh.OK], r.counts[kh.WARN]), (1, 0), r.lines)
+        self.assertIn("v0.2.2 = latest release", r.lines[-1])
+
+    def test_plugin_lookup_failure_is_unknown_never_ok(self):
+        for result, gh in (((1, "", "HTTP 401: Bad credentials"), "/usr/bin/gh"), ((0, "", ""), None), ((0, "not json", ""), "/usr/bin/gh")):
+            kh, r, _ = self.plugin_run(result, gh)
+            self.assertEqual((r.counts[kh.OK], r.counts[kh.WARN], r.counts[kh.ERR]), (0, 0, 0), r.lines)
+            self.assertIn("latest release unknown", r.lines[-1])
+        self.assertIn("`gh` not installed", self.plugin_run((0, "", ""), None)[1].lines[-1])
+
+    def test_plugin_non_version_latest_tag_is_unknown_not_a_crash(self):
+        kh, r, _ = self.plugin_run((0, '{"tagName": "v0.3.0-rc1", "publishedAt": "", "url": ""}', ""))
+        self.assertEqual((r.counts[kh.OK], r.counts[kh.WARN], r.counts[kh.ERR]), (0, 0, 0), r.lines)
+        self.assertIn("cannot compare", r.lines[-1])
+
+    def clone_run(self, remote, describe="v0.2.2"):
+        kh = load_kit_health()
+        r = kh.Report()
+
+        def fake(cmd, *a, **kw):
+            if "ls-remote" in cmd:
+                return remote
+            if "describe" in cmd:
+                return (0, describe, "") if describe else (128, "", "No names found")
+            return (0, "", "")
+        with mock.patch.object(kh, "sh", side_effect=fake):
+            kh.release_check(r, None)
+        return kh, r
+
+    def test_clone_newer_tag_on_origin_warns_with_claude_sync(self):
+        tags = "a\trefs/tags/v0.2.2\nb\trefs/tags/v0.10.0\nc\trefs/tags/v0.9.1\nd\trefs/tags/vnext\n"
+        kh, r = self.clone_run((0, tags, ""))
+        self.assertEqual(r.counts[kh.WARN], 1, r.lines)
+        self.assertIn("v0.10.0 available (installed v0.2.2)", r.findings[0][2])  # numeric, not lexical, order
+        self.assertIn("make claude_sync", r.findings[0][2])
+
+    def test_clone_up_to_date_and_unknown(self):
+        kh, r = self.clone_run((0, "a\trefs/tags/v0.2.2\n", ""))
+        self.assertEqual((r.counts[kh.OK], r.counts[kh.WARN]), (1, 0), r.lines)
+        kh, r = self.clone_run((128, "", "fatal: unable to access origin"))
+        self.assertEqual(r.counts[kh.OK] + r.counts[kh.WARN], 0, r.lines)
+        self.assertIn("latest release unknown", r.lines[-1])
+        kh, r = self.clone_run((0, "a\trefs/tags/v0.2.2\n", ""), describe="")
+        self.assertEqual(r.counts[kh.OK] + r.counts[kh.WARN], 0, r.lines)
+        self.assertIn("cannot compare", r.lines[-1])
+
+
 if __name__ == "__main__":
     unittest.main()
