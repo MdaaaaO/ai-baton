@@ -31,9 +31,11 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
+Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key, `plugin` on a clone) · 2 usage or I/O error.
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 """
 from __future__ import annotations
+import copy
 import json
 import os
 import re
@@ -149,10 +151,18 @@ ENV_DIR = context_root() / "reference" / "env"
 TEMPLATES_DIR = ENV_DIR / "_templates"  # `_`-prefixed: the index/verify walkers skip it
 
 
+
+def section(cfg: dict, name: str) -> dict:
+    """`cfg[name]` as an object: a missing, null or non-object section becomes `{}` (in this in-memory copy), so a reader
+    never trips over a `null` that `config-set` or a hand edit left in config.json."""
+    v = cfg.get(name)
+    if not isinstance(v, dict):
+        v = cfg[name] = {}
+    return v
+
 @lru_cache(maxsize=None)
-def env_config() -> dict:
-    """config.json as written, `{}` when there is no store. Invalid JSON is a one-line error naming the file (exit 1),
-    never a traceback in every importer."""
+def _env_config() -> dict:
+    """config.json as written (cached, shared: never hand this object out — `env_config()` copies it)."""
     p = ENV_DIR / "config.json"
     if not p.is_file():
         return {}
@@ -162,6 +172,16 @@ def env_config() -> dict:
         raise SystemExit(f"{p}: invalid JSON — {e}; fix it (or move it aside and `python3 $BATON/context-db/bin/kb.py init --blank`)")
     except OSError as e:
         raise SystemExit(f"{p}: cannot read — {e}")
+
+
+def env_config() -> dict:
+    """config.json as written, `{}` when there is no store — a private copy per call, so a caller that edits it never
+    changes what the next reader in the process sees. Invalid JSON is a one-line error naming the file, never a
+    traceback in every importer."""
+    return copy.deepcopy(_env_config())
+
+
+env_config.cache_clear = _env_config.cache_clear  # type: ignore[attr-defined]  # the tests' reset hook, as before
 
 
 @lru_cache(maxsize=None)
@@ -210,28 +230,34 @@ def _project_tables(cfg: dict) -> None:
     def vals(rows_: dict) -> dict:
         return {n: num(r["value"]) for n, r in rows_.items() if r["value"]}
     if rows("slack", "channel"):
-        cfg.setdefault("slack", {})["channels"] = {**cfg.get("slack", {}).get("channels", {}), **vals(rows("slack", "channel"))}
+        section(cfg, "slack")["channels"] = {**(section(cfg, "slack").get("channels") or {}), **vals(rows("slack", "channel"))}
     if rows("slack", "review-venue"):
-        cfg.setdefault("slack", {})["repo_channels"] = {**cfg.get("slack", {}).get("repo_channels", {}), **vals(rows("slack", "review-venue"))}
+        section(cfg, "slack")["repo_channels"] = {**(section(cfg, "slack").get("repo_channels") or {}), **vals(rows("slack", "review-venue"))}
     for k, v in vals(rows("tracker", "setting")).items():
-        cfg.setdefault("tracker", {})[k] = v
+        section(cfg, "tracker")[k] = v
     fields = vals(rows("tracker", "field"))
     for nm, key in (("sprint", "sprint_field"), ("unplanned", "unplanned_field")):
         if nm in fields:
-            cfg.setdefault("tracker", {})[key] = fields[nm]
+            section(cfg, "tracker")[key] = fields[nm]
     if rows("tracker", "transition"):
-        cfg.setdefault("tracker", {})["transitions"] = {**cfg.get("tracker", {}).get("transitions", {}), **vals(rows("tracker", "transition"))}
+        section(cfg, "tracker")["transitions"] = {**(section(cfg, "tracker").get("transitions") or {}), **vals(rows("tracker", "transition"))}
     if rows("github", "person"):
-        cfg.setdefault("github", {})["display_names"] = {**cfg.get("github", {}).get("display_names", {}), **vals(rows("github", "person"))}
+        section(cfg, "github")["display_names"] = {**(section(cfg, "github").get("display_names") or {}), **vals(rows("github", "person"))}
 
 
-@lru_cache(maxsize=None)
 def load(strict: bool = True) -> dict:
     """The merged config: env/config.json with the fact tables projected onto the legacy keys. With no store: `strict`
     (the default — a script that needs the configuration) raises a one-line SystemExit; `strict=False` (what
     `get()`, `tz()`, `zone()` use, so the session scripts and the heartbeat run before env-init) returns `{}`
-    after ONE stderr warning per process."""
-    cfg = {k: v for k, v in env_config().items() if not k.startswith("_")}
+    after ONE stderr warning per process. Each call returns a private copy of the cached merge: a caller may edit it."""
+    return copy.deepcopy(_load(strict))
+
+
+@lru_cache(maxsize=None)
+def _load(strict: bool = True) -> dict:
+    """The cached merge behind `load()`, built once from a deep copy of config.json — the projection and the alias
+    block below edit this copy, never the parsed file. Read-only for `get()`; everyone else goes through `load()`."""
+    cfg = {k: v for k, v in copy.deepcopy(_env_config()).items() if not k.startswith("_")}
     if not cfg:
         if strict:
             raise SystemExit(f"no configuration: no env store at {ENV_DIR} — run "
@@ -250,6 +276,9 @@ def load(strict: bool = True) -> dict:
     return cfg
 
 
+load.cache_clear = _load.cache_clear  # type: ignore[attr-defined]  # the tests' reset hook, as before
+
+
 def domains() -> list[str]:
     out: list[str] = []
     for dom in env_config().get("domains") or []:
@@ -260,12 +289,12 @@ def domains() -> list[str]:
 
 def get(path: str, default=None):
     """Dotted lookup: get('tracker.key_regex'). Without an env store every key is `default` (one warning)."""
-    cur: object = load(strict=False)
+    cur: object = _load(strict=False)  # walk the cached merge; an object or list is copied on the way out
     for part in path.split("."):
         if not isinstance(cur, dict) or part not in cur:
             return default
         cur = cur[part]
-    return cur
+    return copy.deepcopy(cur) if isinstance(cur, (dict, list)) else cur
 
 
 # Identity: the user's own values, never the environment's. Two sources, one reader. On the plugin path
@@ -546,8 +575,15 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
     return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
 
 
+NEEDS_ARG = {"template": "<type>", "identity-source": "<WORKSPACE_* variable>", "get": "<dotted.config.key>"}
+
+
 def main(argv: list[str]) -> int:
+    """Exit codes (docs/engine-cli.md): 0 ok · 1 the thing asked about is absent (`get`, `plugin`) · 2 usage / I/O error."""
     cmd = argv[1] if len(argv) > 1 else "name"
+    if cmd in NEEDS_ARG and len(argv) < 3:
+        print(f"kit_profile: `{cmd}` needs {NEEDS_ARG[cmd]} — kit_profile.py {cmd} {NEEDS_ARG[cmd]}", file=sys.stderr)
+        return 2
     if cmd == "name":
         print(name())
     elif cmd == "dir":
@@ -627,5 +663,17 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+def cli(argv: list[str]) -> int:
+    """main() with the exit-code contract applied: a `SystemExit("<message>")` from the library (an unreadable or invalid
+    store) is one stderr line and exit 2, not Python's default exit 1 for a message."""
+    try:
+        return main(argv)
+    except SystemExit as e:
+        if isinstance(e.code, str):
+            print(e.code, file=sys.stderr)
+            return 2
+        raise
+
+
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(cli(sys.argv))

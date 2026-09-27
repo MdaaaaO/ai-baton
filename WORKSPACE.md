@@ -125,11 +125,11 @@ Position matters too: long contexts recall their middle worst.
 
 - **Load by task:** `INDEX.md` first, then only the leaf docs needed. **Read slices** (`grep`,
   `Read` with offset+limit) and pipe big output to a count or scratch file.
-- **Delegate wide reads** to a subagent and keep only its conclusion. **Route by model:** subagents
-  default to Sonnet (Haiku for read-and-classify forks: #55 trial); read-and-summarise work to `triage`
-  or its forked skills, `pr-review` steps 1–4 to the Opus `review-runner`, `model: fable` only when the
-  subagent must exercise judgment. A fork returns a brief, never acts — the main model keeps every post,
-  commit and flush decision. Registry heartbeats are pure shell, never a `/loop`.
+- **Delegate by cost — reads and code.** The main model costs most: wide reads go to a
+  subagent (keep its conclusion); a queue of ≥ 2 independent tickets goes to one background worker each
+  (own worktree; pushes a branch, no PR). **Set `model` on every `Agent` call** by size: Haiku to
+  read/classify, Sonnet for a specified fix, Opus for judgment/security. The main model reviews
+  each diff and keeps every PR, post, merge and flush. Brief: `docs/delegation.md`. Heartbeats: shell, no `/loop`.
 - **Flush at every step.** When a ticket/PR/epic step lands: context doc (Session log + section), tick
   `.context/reference/priorities.md` where it exists, `make -C $BATON/context-db index`, then
   `session-touch NAME=<name>`; the `MEMORY.md` index if a memory note changed.
