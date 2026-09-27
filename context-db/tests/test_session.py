@@ -113,3 +113,70 @@ class RegistryDoc(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RegistrySafety(unittest.TestCase):
+    """#132: a name never leaves sessions/, free text reaches the doc verbatim, concurrent writers never tear it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        (self.root / "sessions").mkdir(parents=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_name_cannot_escape_sessions(self):
+        (self.root / "INDEX.md").write_text("store index\n", encoding="utf-8")
+        for bad in ("../INDEX", "a/b", "..", ".hidden", "", "x" * 65, "a b"):
+            r = run("session.py", "register", "--name", bad, "--no-stats", root=self.root)
+            self.assertNotEqual(r.returncode, 0, bad)
+            self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual((self.root / "INDEX.md").read_text(encoding="utf-8"), "store index\n")
+        self.assertEqual(sorted(p.name for p in (self.root / "sessions").glob("*.md")), [])
+
+    def test_make_passes_free_text_verbatim(self):
+        text = """it's "quoted" $(touch PWNED-a) `touch PWNED-b` $$HOME; $(shell touch PWNED-c) \\ end"""
+        mk = ["make", "-s", "-C", str(BIN.parent), f"CONTEXT={self.root}", "NOSTATS=1 $(shell touch PWNED-n)", "NAME=t-mk",
+              f"WORKING={text}", f"RESP={text}", "SESSION_ID=$(shell touch PWNED-s)"]
+        env = {k: v for k, v in os.environ.items() if k not in ("WORKSPACE_TZ", "CLAUDE_CODE_SESSION_ID")}
+        r = subprocess.run([*mk[:4], "session-register", *mk[4:]], cwd=self.tmp.name, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        doc = (self.root / "sessions" / "t-mk.md").read_text(encoding="utf-8")
+        self.assertIn(f"working_on: {text}\n", doc)
+        self.assertIn(f"responsibilities: {text}\n", doc)
+        self.assertEqual([p.name for p in Path(self.tmp.name).rglob("PWNED*")] + [p.name for p in BIN.parent.rglob("PWNED*")], [])
+
+    def test_a_newline_cannot_forge_a_field(self):
+        r = run("session.py", "register", "--name", "t-nl", "--no-stats", "--working", "a\nstatus: ended", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = (self.root / "sessions" / "t-nl.md").read_text(encoding="utf-8")
+        self.assertIn("working_on: a status: ended\n", doc)
+        self.assertIn("status: active\n", doc)
+
+    def test_a_body_rule_is_not_front_matter(self):
+        r = run("session.py", "register", "--name", "t-rule", "--no-stats", "--epic", "E-9",
+                "--note", "above\n\n---\n\nbelow: not a field", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        spec = importlib.util.spec_from_file_location("gen_sessions_rule", BIN / "gen_sessions.py")
+        sys.path.insert(0, str(BIN))
+        gs = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gs)  # type: ignore[union-attr]
+        meta = gs.parse(str(self.root / "sessions" / "t-rule.md"))
+        self.assertEqual((meta["epic"], meta.get("below")), ("E-9", None))
+
+    def test_concurrent_touches_leave_a_whole_doc(self):
+        r = run("session.py", "register", "--name", "t-cc", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        e = {k: v for k, v in os.environ.items() if k not in ("WORKSPACE_TZ", "CLAUDE_CODE_SESSION_ID")}
+        e["CONTEXT_ROOT"] = str(self.root)
+        procs = [subprocess.Popen([sys.executable, str(BIN / "session.py"), "touch", "--name", "t-cc", "--no-stats",
+                                   "--working", f"w{i}"], env=e, cwd=BIN, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                 for i in range(8)]
+        for p in procs:
+            _, err = p.communicate(timeout=60)
+            self.assertEqual(p.returncode, 0, err)
+        doc = (self.root / "sessions" / "t-cc.md").read_text(encoding="utf-8")
+        self.assertEqual(doc.count("\nsession: t-cc\n"), 1)
+        self.assertRegex(doc, r"\nworking_on: w\d\n")
+        self.assertEqual([p.name for p in (self.root / "sessions").glob(".*.tmp")], [])

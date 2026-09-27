@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit_profile as profile  # noqa: E402  — same dir
 import frontmatter  # noqa: E402  — the one frontmatter parser
+from fsutil import atomic_write, locked  # noqa: E402  — same dir
 
 # Heartbeats are stored in UTC; rendered to the terminal/ledger in the owner's local
 # zone so they're easy to eyeball against the wall clock.
@@ -87,8 +88,27 @@ def today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+# A session name is a file stem under sessions/ (#132): `--name ../INDEX` must not write outside it.
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def check_name(name: str) -> str:
+    if not NAME_RE.match(name or "") or ".." in name:
+        sys.exit(f"session.py: invalid session name {name!r} — letters, digits, '.', '_', '-'; "
+                 f"starts with a letter or digit; at most 64 characters")
+    return name
+
+
 def path_for(name: str) -> str:
-    return os.path.join(SESS_DIR, f"{name}.md")
+    path = os.path.join(SESS_DIR, f"{check_name(name)}.md")
+    if os.path.dirname(os.path.realpath(path)) != os.path.realpath(SESS_DIR):
+        sys.exit(f"session.py: {name!r} resolves outside sessions/")
+    return path
+
+
+def one_line(v) -> str:
+    """A frontmatter value is one line: a newline in WORKING=/RESP= text would start a forged field."""
+    return " ".join(str(v).split("\n")).replace("\r", " ").strip()
 
 
 def restore_from_archive(name: str) -> str:
@@ -141,13 +161,13 @@ def write_doc(path: str, meta: dict, body: str) -> None:
     os.makedirs(SESS_DIR, exist_ok=True)
     lines = ["---"]
     for k in FIELDS:
-        lines.append(f"{k}: {meta.get(k, '')}")
+        lines.append(f"{k}: {one_line(meta.get(k, ''))}")
     for k, v in meta.items():  # a key this version does not know (a newer kit, a hand-added note) survives the next touch
         if k not in FIELDS:
-            lines.append(f"{k}: {v}")
+            lines.append(f"{k}: {one_line(v)}")
     lines.append("---")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n\n" + body.strip() + "\n")
+    # atomic: the heartbeat and the session write the same file; a reader never sees a torn one
+    atomic_write(path, "\n".join(lines) + "\n\n" + body.strip() + "\n")
 
 
 def _stats(a):
@@ -200,11 +220,12 @@ def _ledger_append(meta: dict, st) -> None:
            f"{g('wall_hours', default=0.0)} | {k(g('context', 'peak'))} | {k(g('tokens', 'cache_read'))} | {k(g('tokens', 'output'))} | "
            f"{g('spend_total_usd_est', default=0.0):.0f} ({g('spend_usd_est', default=0.0):.0f}+{g('subagents_cost', 'spend_usd_est', default=0.0):.0f}) | "
            f"{g('compactions')} | {len(g('prs_touched', default=[]))} | {len(g('tickets_touched', default=[]))} | {g('sign_jobs')} | {g('slack', 'drafts')} |")
-    new = not os.path.exists(LEDGER)
-    with open(LEDGER, "a", encoding="utf-8") as f:
-        if new:
-            f.write(LEDGER_HEADER)
-        f.write(row + "\n")
+    with locked(LEDGER):  # two sessions ending at once must not interleave or both write the header
+        new = not os.path.exists(LEDGER)
+        with open(LEDGER, "a", encoding="utf-8") as f:
+            if new:
+                f.write(LEDGER_HEADER)
+            f.write(row + "\n")
 
 
 def cmd_register(a) -> None:
@@ -287,8 +308,9 @@ def cmd_end(a) -> None:
         import session_stats
         _apply_stats(meta, st)
         body = _replace_section(body, STATS_HEADING, session_stats.fmt_block(st))
-        _ledger_append(meta, st)
     write_doc(path, meta, body)
+    if st is not None:
+        _ledger_append(meta, st)  # after the doc: a failed doc write must not leave a ledger row for an un-ended session
     print(f"ended {os.path.relpath(path, CTX)}" + (" (+ stats block, ledger row)" if st is not None else " (no transcript found — no stats)")
           + (" (+ next-session prompt)" if nxt is not None else ""))
 
@@ -331,7 +353,10 @@ def main() -> int:
     if a.cmd == "stats":
         cmd_stats(a)
         return 0
-    {"register": cmd_register, "touch": cmd_touch, "end": cmd_end}[a.cmd](a)
+    check_name(a.name)
+    # one registry lock around read-modify-write: the session and its heartbeat.sh touch the same file
+    with locked(os.path.join(SESS_DIR, ".registry")):
+        {"register": cmd_register, "touch": cmd_touch, "end": cmd_end}[a.cmd](a)
     regen()
     return 0
 

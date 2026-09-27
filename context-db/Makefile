@@ -82,7 +82,7 @@ export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
 .PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
 SESSION_ID ?= $(CLAUDE_CODE_SESSION_ID)
-STATSFLAGS  = $(if $(SESSION_ID),--session-id "$(SESSION_ID)",) $(if $(NOSTATS),--no-stats,)
+STATSFLAGS  = $(if $(value SESSION_ID),--session-id $(call sq,SESSION_ID),) $(if $(value NOSTATS),--no-stats,)
 
 help:
 	@sed -n '/^[^#]/q;p' $(lastword $(MAKEFILE_LIST))  # the comment header, however long it grows
@@ -219,18 +219,26 @@ endif
 
 # --- live session registry (operational; skipped by index/verify) ---
 # Each session writes ONLY its own sessions/<NAME>.md, so sessions never collide.
+# Free text (WORKING="…", RESP="…") reaches session.py verbatim (#132): `$(call sq,VAR)` is the variable's
+# UNEXPANDED value as one single-quoted sh word, and `unexport` keeps make from expanding it into the recipe
+# environment (a `$(shell …)` inside the text would otherwise run). So quotes, `$(…)` and backticks are data.
+SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING RESP NOTE NEXT SESSION_ID NOSTATS
+unexport $(SESSION_VARS)
+override sq = '$(subst ','\'',$(value $(1)))'
+SESSION_ARGS = --ref $(call sq,REF) --status $(call sq,STATUS) --epic $(call sq,EPIC) --repos $(call sq,REPOS) \
+               --resp $(call sq,RESP) --note $(call sq,NOTE)
 session-register:
-	@test -n "$(NAME)" || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=]"; exit 2; }
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name "$(NAME)" --ref "$(REF)" --status "$(STATUS)" --epic "$(EPIC)" --repos "$(REPOS)" --working "$(WORKING)" --resp "$(RESP)" --note "$(NOTE)" $(STATSFLAGS)
+	@test -n $(call sq,NAME) || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=]"; exit 2; }
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) $(STATSFLAGS)
 	@sh $(ENGINE)../sync-check.sh || true
 
 session-touch:
-	@test -n "$(NAME)" || { echo "usage: make session-touch NAME=<session> [WORKING=] [STATUS=]"; exit 2; }
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py touch --name "$(NAME)" --status "$(STATUS)" --working "$(WORKING)" $(if $(NEXT),--next "$(NEXT)") $(STATSFLAGS)
+	@test -n $(call sq,NAME) || { echo "usage: make session-touch NAME=<session> [WORKING=] [STATUS=]"; exit 2; }
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py touch --name $(call sq,NAME) --status $(call sq,STATUS) --working $(call sq,WORKING) --next $(call sq,NEXT) $(STATSFLAGS)
 
 session-end:
-	@test -n "$(NAME)" || { echo "usage: make session-end NAME=<session> [NEXT=<file with the next-session prompt>] [WORKING=]"; exit 2; }
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py end --name "$(NAME)" --working "$(WORKING)" $(if $(NEXT),--next "$(NEXT)") $(STATSFLAGS)
+	@test -n $(call sq,NAME) || { echo "usage: make session-end NAME=<session> [NEXT=<file with the next-session prompt>] [WORKING=]"; exit 2; }
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py end --name $(call sq,NAME) --working $(call sq,WORKING) --next $(call sq,NEXT) $(STATSFLAGS)
 
 # make session-stats [SESSION_ID=<uuid>] — the stats block for the handoff (no registry write)
 session-stats:

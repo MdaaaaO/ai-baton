@@ -28,6 +28,7 @@ import argparse
 import glob
 import os
 import re
+import sys
 from datetime import datetime, timezone
 
 # Content root: the Makefile passes CONTEXT_ROOT; fall back to the sibling .context/
@@ -40,6 +41,8 @@ OUT = os.path.join(CTX, "SESSION_INDEX.md")
 STALE_HOURS = 12
 
 import kit_profile as profile  # same dir
+import frontmatter  # same dir — the one frontmatter parser
+from fsutil import atomic_write  # same dir
 
 # Heartbeats are stored in UTC (12h-staleness math and cross-session sorting stay
 # correct across DST); every DISPLAYED timestamp is rendered in the owner's local zone.
@@ -100,14 +103,10 @@ def section(body: str, heading: str) -> str:
 def parse(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         text = f.read()
-    meta: dict[str, str] = {}
-    body = text
-    if text.count("---") >= 2:
-        _, fm, body = text.split("---", 2)
-        for line in fm.splitlines():
-            if ":" in line:
-                k, _, v = line.partition(":")
-                meta[k.strip()] = v.strip()
+    # the shared parser: only a leading `---` block is front matter — a `---` rule in the body is body (#132)
+    parts = frontmatter.split(text)
+    meta: dict[str, str] = frontmatter.parse_flat(parts[0]) if parts else {}
+    body = parts[1] if parts else text
     meta["_next"] = section(body, NEXT_HEADING)
     meta["_path"] = path
     if not meta.get("session"):  # missing or blank: the file stem names the session
@@ -196,6 +195,10 @@ def sweep(ended: list[dict], dry_run: bool) -> tuple[list[dict], int]:
             os.replace(m["_path"], dst)
         except FileNotFoundError:
             continue  # a concurrent regen (heartbeat, another session's flush) already took it
+        except OSError as e:
+            print(f"gen_sessions: could not archive {m['_path']}: {e} — kept in the index", file=sys.stderr)
+            keep.append(m)
+            continue
         print(f"archived {cell(m, 'session')} → {rel} ({why})")
         moved += 1
     return keep, moved
@@ -226,8 +229,7 @@ def write_archive_index(now: datetime) -> int:
                        f"| {prompt_preview(m)} | `{os.path.basename(m['_path'])}` |")
     else:
         out.append("_empty_")
-    with open(ARCHIVE_OUT, "w", encoding="utf-8") as f:
-        f.write("\n".join(out) + "\n")
+    atomic_write(ARCHIVE_OUT, "\n".join(out) + "\n")
     return len(rows)
 
 
@@ -245,6 +247,8 @@ def main(argv: list[str] | None = None) -> int:
             rows.append(parse(p))
         except FileNotFoundError:
             continue  # swept by a concurrent regen between the glob and the read
+        except (OSError, ValueError) as e:  # unreadable / not UTF-8: name it, never drop it silently
+            print(f"gen_sessions: skipped {p}: {e}", file=sys.stderr)
     active = [m for m in rows if m.get("status") != "ended"]
     ended = by_heartbeat([m for m in rows if m.get("status") == "ended"])
     now = datetime.now(timezone.utc)
@@ -314,8 +318,7 @@ def main(argv: list[str] | None = None) -> int:
             out.append("</details>")
             out.append("")
 
-    with open(OUT, "w", encoding="utf-8") as f:
-        f.write("\n".join(out) + "\n")
+    atomic_write(OUT, "\n".join(out) + "\n")
     archived = write_archive_index(now)
     tail = f", {moved} archived" if moved else ""
     tail += f" ({archived} in sessions/archive/)" if archived else ""
