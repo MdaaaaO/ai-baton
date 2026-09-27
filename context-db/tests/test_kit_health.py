@@ -166,13 +166,13 @@ class Helpers(unittest.TestCase):
 
 class ReadOnlyRun(unittest.TestCase):
     def engine_section(self, root: Path, stamping: bool = False) -> str:
-        """kit-health's section 5 alone, on a temp CONTEXT_ROOT — no gh/aws probes, no network (the module's CTX is
-        read from CONTEXT_ROOT at exec time)."""
+        """kit-health's section 5 alone, on a temp CONTEXT_ROOT — no gh/aws probes, no network (the workspace is
+        resolved when the section runs, #91, so the section runs inside the patch)."""
         import unittest.mock
         with unittest.mock.patch.dict(os.environ, {"CONTEXT_ROOT": str(root)}):
             kh = load_kit_health()
-        r = kh.Report()
-        kh.sec_engine(r, stamping=stamping)
+            r = kh.Report()
+            kh.sec_engine(r, stamping=stamping)
         return "\n".join(r.lines)
 
     def test_plain_run_never_rewrites_index(self):
@@ -444,6 +444,28 @@ class Release(unittest.TestCase):
         self.assertNotIn("run `make claude_sync`", text)
 
 
+class LazyWorkspace(unittest.TestCase):
+    """#91: kit-health resolves the workspace when a section runs, not at import, so a test that points `KIT` at a
+    fixture never reads the developer's live `.context/` (or its `settings.local.json`) beside the real kit."""
+
+    def test_a_fixture_kit_never_reaches_the_live_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            live = Path(tmp) / "live" / ".context"          # stands in for the populated workspace beside the real kit
+            (live / "reference" / "env").mkdir(parents=True)
+            (live / "reference" / "env" / "config.json").write_text('{"environment": "live-marker-91"}')
+            fixture = Path(tmp) / "fixture" / "kit"
+            fixture.mkdir(parents=True)
+            env = {k: v for k, v in os.environ.items() if k != "CONTEXT_ROOT"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                kh = load_kit_health()                          # import resolves nothing any more
+                with mock.patch.object(kh.kit_profile, "context_root", return_value=live):
+                    self.assertEqual(kh.ctx(), live)            # the shipped kit: context_root() as before
+                    kh.KIT = fixture
+                    self.assertEqual(kh.ctx(), fixture.parent / ".context")
+                    self.assertEqual(kh.root(), fixture.parent)
+                    self.assertNotIn("live", str(kh.settings_local_path()))
+                    kh.CTX = live                               # an explicit override still wins
+                    self.assertEqual(kh.ctx(), live)
 class SandboxMarkers(unittest.TestCase):
     """#94: kit-health's sandbox probe reads `kit.sandbox_markers` from the env store; the kit names no sandbox product of its own."""
 

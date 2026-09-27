@@ -49,8 +49,28 @@ import kb  # noqa: E402
 import frontmatter as fmt  # noqa: E402
 import leak_shapes  # noqa: E402
 
-CTX = kit_profile.context_root()
-ROOT = CTX.parent
+CTX: Path | None = None   # overrides for a caller (a test) that names the workspace outright; None = resolve per call
+ROOT: Path | None = None
+
+
+def ctx() -> Path:
+    """The workspace's `.context/`, resolved when a section runs, not at import (#91): the `CTX` override, else
+    `CONTEXT_ROOT`, else `kit_profile.context_root()` for the kit this script ships in, else the `.context/` beside a kit
+    a caller pointed `KIT` at (a test's fixture), so a fixture never reads the developer's live workspace."""
+    if CTX is not None:
+        return CTX
+    env = os.environ.get("CONTEXT_ROOT", "").strip()
+    if env:
+        return Path(env)
+    if KIT.resolve() == kit_profile.KIT.resolve():
+        return kit_profile.context_root()
+    return KIT.parent / ".context"
+
+
+def root() -> Path:
+    """The workspace root: the `ROOT` override, else the directory that holds `.context/`."""
+    return ROOT if ROOT is not None else ctx().parent
+
 ENV = kit_profile.ENV_DIR
 
 OK, WARN, ERR = "OK", "WARN", "ERR"
@@ -82,11 +102,11 @@ def sh(cmd: list[str] | str, cwd: Path | None = None, env: dict | None = None, t
     """(exit status, stdout, stderr), both stripped — apart, so a summary line on stdout is never displaced by a
     warning on stderr. A command that cannot run is (127, "", <why>)."""
     e = dict(os.environ)
-    e.setdefault("CONTEXT_ROOT", str(CTX))  # children resolve the workspace as this run did, whatever their cwd (#3)
+    e.setdefault("CONTEXT_ROOT", str(ctx()))  # children resolve the workspace as this run did, whatever their cwd (#3)
     if env:
         e.update(env)
     try:
-        p = subprocess.run(cmd, cwd=cwd or ROOT, env=e, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, cwd=cwd or root(), env=e, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=timeout)
         return p.returncode, p.stdout.strip(), p.stderr.strip()
     except (OSError, subprocess.TimeoutExpired) as ex:
         return 127, "", str(ex)
@@ -109,7 +129,7 @@ def settings_local_path() -> Path:
     beside = KIT / "settings.local.json"
     if beside.is_file() or KIT.name == ".claude":
         return beside
-    return CTX.parent / ".claude" / "settings.local.json"
+    return ctx().parent / ".claude" / "settings.local.json"
 
 
 def settings_local_env() -> dict:
@@ -165,11 +185,11 @@ def identity_sources() -> dict[str, str]:
 
 def health_path(envname: str) -> Path:
     """Where this environment's stamp lives — local to the machine."""
-    return CTX / "kit-health" / f"HEALTH-{envname}.md"
+    return ctx() / "kit-health" / f"HEALTH-{envname}.md"
 
 
 def rel(p: Path) -> str:
-    for base in (KIT, ROOT):
+    for base in (KIT, root()):
         try:
             return str(p.relative_to(base))
         except ValueError:
@@ -213,8 +233,8 @@ def sec_kit(r: Report, stale: int) -> None:
 
 def old_wiring() -> list[str]:
     """What a `.claude/` clone left in the workspace, which `mode` (not a clone) does not use."""
-    left = ["the `.claude/` clone"] if (ROOT / ".claude" / ".git").exists() else []
-    md, mk = ROOT / "CLAUDE.md", ROOT / "Makefile"
+    left = ["the `.claude/` clone"] if (root() / ".claude" / ".git").exists() else []
+    md, mk = root() / "CLAUDE.md", root() / "Makefile"
     if md.is_file() and re.search(r"^@\.claude/WORKSPACE\.md\s*$", md.read_text(encoding="utf-8", errors="replace"), re.M):
         left.append("`@.claude/WORKSPACE.md` in the root CLAUDE.md")
     if mk.is_file() and re.search(r"^include \.claude/workspace\.mk", mk.read_text(errors="replace"), re.M):
@@ -230,7 +250,7 @@ def install_mode_check(r: Report, mode: str) -> None:
     if not recorded:
         r.add(WARN, "kit", f"install mode: `{mode}` — not recorded in the env store (`kit.install_mode`); "
               "`sh $BATON/setup.sh` records it")
-    elif kit_profile.mode_to_record(recorded, mode, ROOT) == recorded:
+    elif kit_profile.mode_to_record(recorded, mode, root()) == recorded:
         r.add(OK, "kit", f"install mode: `{mode}` = recorded" if mode == recorded else
               f"install mode: `{mode}` — a development checkout beside the workspace's `.claude/` clone (recorded `{recorded}`, "
               "the installed kit)")
@@ -781,7 +801,7 @@ def identity_wiring(r: Report) -> None:
             r.add(OK, "machine", "`settings.local.json` absent — not needed, the environment carries the identity")
     elif not settings.is_file():
         r.add(ERR, "machine", "no identity from any source: `settings.local.json` missing (looked at `"
-              + (str(settings.relative_to(ROOT)) if settings.is_relative_to(ROOT) else str(settings))
+              + (str(settings.relative_to(root())) if settings.is_relative_to(root()) else str(settings))
               + "`) and no `WORKSPACE_*` in the environment — run `sh $BATON/setup.sh`, or `/plugin configure ai-baton` on a plugin install "
               "(values set there reach Bash from the next session on: restart it if you just configured them)")
     for k in ("WORKSPACE_USER", "WORKSPACE_GITHUB_LOGIN", "WORKSPACE_TZ"):
@@ -814,10 +834,10 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
 
 def seed_pairs() -> list[tuple[Path, Path]]:
     """(template in the kit, seeded copy on this machine) — what setup.sh seeds once and never overwrites."""
-    return [(KIT / "context-db" / "context-README.template.md", CTX / "README.md"),
-            (KIT / "environment-template" / "environment.md", CTX / "reference" / "environment.md"),
-            (KIT / "CLAUDE.example.md", ROOT / "CLAUDE.md"),
-            (KIT / "context-db" / "_templates" / "self-assessment-charter.md", CTX / "self-assessment" / "README.md")]
+    return [(KIT / "context-db" / "context-README.template.md", ctx() / "README.md"),
+            (KIT / "environment-template" / "environment.md", ctx() / "reference" / "environment.md"),
+            (KIT / "CLAUDE.example.md", root() / "CLAUDE.md"),
+            (KIT / "context-db" / "_templates" / "self-assessment-charter.md", ctx() / "self-assessment" / "README.md")]
 
 
 def stale_seeds(pairs: list[tuple[Path, Path]] | None = None, template_time=None) -> tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]]:
@@ -874,14 +894,14 @@ def sec_machine(r: Report) -> str:
         r.add(OK, "machine", f"active environment `{envname}` from the env store")
     else:
         r.add(WARN, "machine", f"the env store names no `environment` — defaulting to `{envname}`; `kb.py config-set environment <name>` fixes it")
-    claude_md = ROOT / "CLAUDE.md"
-    env_doc = CTX / "reference" / "environment.md"
+    claude_md = root() / "CLAUDE.md"
+    env_doc = ctx() / "reference" / "environment.md"
     if not claude_md.is_file():
         r.add(ERR, "machine", "root `CLAUDE.md` missing — `sh $BATON/setup.sh` seeds it")
     else:
         text = claude_md.read_text(encoding="utf-8", errors="replace")
         imp_ws = re.search(r"^@\.claude/WORKSPACE\.md\s*$", text, re.M)
-        ws_file = (ROOT / ".claude" / "WORKSPACE.md").is_file()
+        ws_file = (root() / ".claude" / "WORKSPACE.md").is_file()
         hook = kit_profile.mode_hint("workspace_md", kit_profile.install_mode(KIT)) == "hook"  # #34: from the mode table
         if imp_ws and not ws_file:
             # the import line alone is not wiring: a missing target loads nothing, silently (#3)
@@ -890,7 +910,7 @@ def sec_machine(r: Report) -> str:
                      else "the kit's always-on rules are NOT loaded"))
         elif imp_ws:
             r.add(OK, "machine", "CLAUDE.md imports `@.claude/WORKSPACE.md`")
-        elif hook and not ws_file and (CTX / "reference" / "env").is_dir():
+        elif hook and not ws_file and (ctx() / "reference" / "env").is_dir():
             r.add(OK, "machine", "WORKSPACE.md comes from the plugin's SessionStart hook (`kit_profile.py workspace-rules`) — no import needed")
         else:
             r.add(ERR, "machine", "CLAUDE.md does not import `@.claude/WORKSPACE.md`")
@@ -905,11 +925,11 @@ def sec_machine(r: Report) -> str:
             r.add(WARN, "machine", "no `.context/reference/environment.md` — the environment's prose (repos, venues, capabilities) is not written down; seed it from `$BATON/environment-template/environment.md`")
     if LEGACY_PROFILES.exists():  # the one legacy line kept
         r.add(WARN, "machine", "legacy `.claude/profiles/` present → delete it (`rm -rf .claude/profiles`; the layer retired 2026-09-25, nothing reads it)")
-    mk = ROOT / "Makefile"
+    mk = root() / "Makefile"
     mk_inc = mk.is_file() and re.search(r"^include \.claude/workspace\.mk", mk.read_text(errors="replace"), re.M)
     mode = kit_profile.install_mode(KIT)
     uses_mk = kit_profile.mode_hint("makefile", mode)  # #34: only a clone includes workspace.mk
-    if mk_inc and not (ROOT / ".claude" / "workspace.mk").is_file():
+    if mk_inc and not (root() / ".claude" / "workspace.mk").is_file():
         r.add(ERR, "machine", "root Makefile does `include .claude/workspace.mk` but the file is missing — every `make` in the "
               "workspace fails" + ("" if uses_mk else "; remove the line (its targets drive a `.claude/` clone)"))
     elif mk_inc:
@@ -919,17 +939,17 @@ def sec_machine(r: Report) -> str:
               "(its targets drive a `.claude/` clone)")
     else:
         r.add(WARN, "machine", "root Makefile missing or without `include .claude/workspace.mk` (no `make claude_sync` / `sign*`)")
-    if (CTX / "README.md").is_file():
+    if (ctx() / "README.md").is_file():
         r.add(OK, "machine", "`.context/README.md` present")
     else:
         r.add(WARN, "machine", "`.context/README.md` missing — `sh $BATON/setup.sh` seeds it")
-    slug = str(ROOT).replace("/", "-")
+    slug = str(root()).replace("/", "-")
     hm = Path.home() / ".claude" / "projects" / slug / "memory"
-    if hm.is_symlink() and hm.resolve() == (CTX / "memory").resolve():
+    if hm.is_symlink() and hm.resolve() == (ctx() / "memory").resolve():
         r.add(OK, "machine", "harness memory dir → `.context/memory` symlink")
     else:
         r.add(WARN, "machine", "harness memory dir is not a symlink to `.context/memory` — `sh $BATON/setup.sh`")
-    prc = CTX / "state" / "pr-review" / "config.json"
+    prc = ctx() / "state" / "pr-review" / "config.json"
     org = kit_profile.get("github.org") or ""
     if prc.is_file():
         try:
@@ -985,7 +1005,7 @@ def sec_machine(r: Report) -> str:
             r.add(WARN, "machine", "aws_sso enabled but the `aws` CLI is missing")
     if systems.get("signed_commits"):
         # the queue lives in the workspace (#7); the kit's own `sign-queue/` is where a pre-#7 kit left jobs
-        sq = CTX / "state" / "sign-queue"
+        sq = ctx() / "state" / "sign-queue"
         pending = len(list(sq.glob("*.sh"))) if sq.is_dir() else 0
         r.add(OK, "machine", f"signed_commits: queue `.context/state/sign-queue/` " + (f"({pending} pending)" if sq.is_dir()
               else "not created yet (the first enqueue creates it)"))
@@ -1012,7 +1032,7 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
     r.h("5 · Engine — smoke")
     # read-only: `make verify` never writes; a stale INDEX.md is a WARN with the fix named, not a silent rewrite of
     # the live DB — `--stamp` regenerates it after the stamp doc is written
-    rc, out, err = sh(["make", "-C", str(KIT / "context-db"), "-s", f"CONTEXT={CTX}", "verify"], timeout=300)
+    rc, out, err = sh(["make", "-C", str(KIT / "context-db"), "-s", f"CONTEXT={ctx()}", "verify"], timeout=300)
     # verify.py's problem list follows its `FAIL —` header; the ⚠ oversized-doc notes above it are `- ` lines too
     tail = err.split("FAIL —", 1)[1] if "FAIL —" in err else ""
     problems = [ln.strip()[2:] for ln in tail.splitlines() if ln.strip().startswith("- ")]
@@ -1138,7 +1158,7 @@ def stamp(envname: str, r: Report) -> "tuple[Path, bool]":
         encoding="utf-8",
     )
     # the stamp is a .context/ doc: re-index now, or the next run's `make verify index` reads it as stale
-    rc, out, err = sh(["make", "-C", str(KIT / "context-db"), "-s", f"CONTEXT={CTX}", "index"], timeout=300)
+    rc, out, err = sh(["make", "-C", str(KIT / "context-db"), "-s", f"CONTEXT={ctx()}", "index"], timeout=300)
     if rc != 0:
         r.raw("\n⚠ `make index` after the stamp failed — run `make -C $BATON/context-db index` by hand:\n```\n" + both(out, err)[-800:] + "\n```")
         # the verdict is already built and --quiet prints only it: stderr + a non-zero exit keep this visible
