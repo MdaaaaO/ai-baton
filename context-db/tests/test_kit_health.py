@@ -527,3 +527,61 @@ class SandboxMarkers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class NoTraceback(unittest.TestCase):
+    """kit-health degrades to a RED finding, always leaves its report, and exits with the verdict."""
+
+    def blank(self, tmp: str) -> tuple[Path, dict]:
+        root = Path(tmp) / ".context"
+        env = {k: v for k, v in os.environ.items() if not k.startswith("WORKSPACE_")}
+        env["CONTEXT_ROOT"] = str(root)
+        subprocess.run([sys.executable, str(KIT / "context-db" / "bin" / "kb.py"), "init", "--blank"], env=env, check=True, capture_output=True)
+        return root, env
+
+    def test_a_null_config_section_is_no_crash(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root, env = self.blank(tmp)
+            cfg_path = next(root.rglob("config.json"))
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            cfg.update(github=None, slack=None, tracker=None)
+            cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+            report = Path(tmp) / "out" / "report.md"
+            p = subprocess.run([sys.executable, str(KIT / "skills" / "kit-health" / "kit-health.py"), "--ci", "--report", str(report)],
+                               env=env, capture_output=True, text=True, cwd=KIT)
+            self.assertNotIn("Traceback", p.stderr)
+            self.assertIn(p.returncode, (0, 2), p.stdout + p.stderr)
+            self.assertTrue(report.is_file())
+
+    def test_a_crashing_section_is_a_red_finding_and_the_report_is_written(self):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "r.md"
+
+            def boom(_r):
+                raise TypeError("'NoneType' object is not iterable")
+            argv = ["kit-health.py", "--ci", "--quiet", "--report", str(report)]
+            with mock.patch.object(kh, "sec_config", boom), mock.patch.object(sys, "argv", argv), \
+                    mock.patch("builtins.print"):
+                rc = kh.main()
+            self.assertEqual(rc, 2)
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("section crashed: `TypeError", text)
+            self.assertIn("**RED** (CI)", text)
+
+    def test_a_crash_outside_the_sections_still_writes_the_report(self):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "r.md"
+            argv = ["kit-health.py", "--ci", "--report", str(report)]
+            with mock.patch.object(kh, "header_time", side_effect=RuntimeError("clock")), mock.patch.object(sys, "argv", argv):
+                with self.assertRaises(RuntimeError):
+                    kh.main()
+            self.assertTrue(report.is_file())
+
+    def test_every_flag_has_help(self):
+        p = subprocess.run([sys.executable, str(KIT / "skills" / "kit-health" / "kit-health.py"), "--help"], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0)
+        self.assertIn("--stale DAYS", p.stdout)
+        self.assertIn("metadata.reviewed", p.stdout)
+        self.assertIn("exit 0 GREEN", p.stdout)
