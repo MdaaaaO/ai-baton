@@ -14,7 +14,7 @@
 #
 # Live session registry (who is working on what, right now — see SESSION_INDEX.md):
 #   make -C .claude/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
-#                         WORKING="KEY-124 go-live" RESP="<what this session owns>" REF=<ref>
+#                         WORKING="KEY-123 go-live" RESP="<what this session owns>" REF=<ref>
 #   make -C .claude/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat (also on every flush)
 #   make -C .claude/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
 #   make -C .claude/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)

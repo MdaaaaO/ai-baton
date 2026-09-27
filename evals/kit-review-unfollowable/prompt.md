@@ -36,8 +36,9 @@ The rules (docs/REVIEW.md § 2–6 of the plugin, copied here by gen_eval_rules.
    A shape scan cannot see: an environment's name (also as an `environments:` tag or a "(<name>) " description
    prefix); the owner's projects or any repository but this kit named as an example (use `<owner>/<repo>`); employer,
    org, team, channel or workspace names; dated anecdotes about a workplace incident ("seen on …", "after the
-   <incident> outage"); a ticket or PR reference into another repository; a concrete system (a tracker, chat, warehouse,
-   orchestrator, cloud, review tool) named in a unit whose `metadata.requires` lacks that capability — the evidence
+   <incident> outage"); a ticket or PR reference into another repository; a real number or slug behind a placeholder
+   prefix (examples use `KEY-123` / `KEY-456` / `key-123-<slug>`: tier 0 flags any other number, the slug's words are
+   yours to judge); a concrete system (a tracker, chat, warehouse, orchestrator, cloud, review tool) named in a unit whose `metadata.requires` lacks that capability — the evidence
    pre-flags the vocabulary, you decide whether the unit assumes the system or merely uses the word. **Not a finding:**
    a provenance line `Owner decision (<date>): "<the rule, quoted>"` that names no person, workplace, ticket or
    incident; a placeholder (`<owner>`, `acme.…` in a template); the kit's own repository; a tool the kit installs.

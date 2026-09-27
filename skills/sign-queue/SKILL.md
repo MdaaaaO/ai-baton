@@ -55,7 +55,7 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
   cannot find one) or when `gh` is absent. enqueue.sh embeds them as one `# META {…}` line in the job and echoes the resulting row
   (`queued <topic>: <ticket> · epic <epic> · <repo> #<pr> · <subject>`) — repeat that line to the user, nothing more.
 - Before enqueuing: `git -C <wt> status --short` must show exactly the files the commit should carry;
-  the message file must exist at an absolute path under `<workspace root>/.worktrees/`, e.g. `$PWD/.worktrees/KEY-1340-fix-commit-msg.txt` — OUTSIDE the
+  the message file must exist at an absolute path under `<workspace root>/.worktrees/`, e.g. `$PWD/.worktrees/KEY-123-commit-msg.txt` — OUTSIDE the
   worktree, otherwise the default `add -A` commits the message file itself (enqueue.sh refuses that unless `--files` is given).
 - Then tell the user in one line: "queued `<topic>` — `make sign` when convenient." Do NOT paste
   git commands. Keep your `pr-watch` monitor armed; it reports the head move when the push lands.

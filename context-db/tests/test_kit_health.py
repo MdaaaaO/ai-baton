@@ -69,11 +69,20 @@ class Shapes(unittest.TestCase):
 
     def test_allow_list_is_anchored(self):
         # `README.md:acme` must not allow `docs/README.md:acme…`; a prefix entry still allows its own path
-        pats = (re.compile("skills/x/SKILL.md:C0"), re.compile(r"docs/a\.md:KEY-1$"))
+        pats = (re.compile("skills/x/SKILL.md:C0"), re.compile(r"docs/a\.md:acme1$"))
         self.assertTrue(leak_shapes.is_allowed("skills/x/SKILL.md", LEAK, pats))
         self.assertFalse(leak_shapes.is_allowed("docs/skills/x/SKILL.md", LEAK, pats))
-        self.assertTrue(leak_shapes.is_allowed("docs/a.md", "KEY-1", pats))
-        self.assertFalse(leak_shapes.is_allowed("docs/a.md", "KEY-12", pats))
+        self.assertTrue(leak_shapes.is_allowed("docs/a.md", "acme1", pats))
+        self.assertFalse(leak_shapes.is_allowed("docs/a.md", "acme12", pats))
+
+    def test_real_number_behind_a_placeholder_prefix(self):
+        # #92: `KEY-` / `ABC-` are exempt from the ticket-key shape, so a real number behind them needs its own shape
+        for line in ("see KEY-" + "9876 for why", "ABC-" + "77 did it", "file key-" + "9876-foo-bar.md", "topic key-" + "9876-fix"):
+            with self.subTest(line=line):
+                self.assertTrue(self.hits(line), line)
+        for line in ("see KEY-123 and KEY-456", "ABC-123", "file key-123-<slug>.md", "KEY-123-commit-msg.txt", "topic key-123-fix"):
+            with self.subTest(line=line):
+                self.assertEqual(self.hits(line), [], line)
 
     def kinds(self, text: str) -> list[str]:
         return [what.split(" (")[0] for what in self.hits(text)]

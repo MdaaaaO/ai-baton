@@ -118,15 +118,15 @@ the user any git commands — you enqueue and they drain.
 git add <path/to/changed_file>
 git -C <worktree> status --short      # must show exactly the intended file(s)
 ```
-Write the full message to an absolute path under `<workspace root>/.worktrees/`, e.g. `$PWD/.worktrees/KEY-1340-fix-commit-msg.txt`
+Write the full message to an absolute path under `<workspace root>/.worktrees/`, e.g. `$PWD/.worktrees/KEY-123-commit-msg.txt`
 (outside the worktree), then enqueue via the `sign-queue` skill:
 ```
 sh $BATON/skills/sign-queue/enqueue.sh \
-   key-1340-fix <abs-worktree> <branch> \
-   $PWD/.worktrees/KEY-1340-fix-commit-msg.txt \
+   key-123-fix <abs-worktree> <branch> \
+   $PWD/.worktrees/KEY-123-commit-msg.txt \
    --by <your-session> --files "<path/to/changed_file>"
 ```
-Then tell the user one line: "queued `key-1340-fix` — run the sign command when convenient."
+Then tell the user one line: "queued `key-123-fix` — run the sign command when convenient."
 Keep your `pr-watch` monitor armed; it reports the head move when the push lands.
 
 **Rebase first (remote branch ahead):** you run the fetch/rebase/conflict-resolution

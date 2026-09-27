@@ -7,7 +7,7 @@ Adapted from a colleague's `engineering-writing/pull-requests.md` plus this work
 - Optional feedback starts with `nit:` or `suggestion:`. Questions end with a question mark and say what answer would close them.
 - Suggest code with a ```suggestion block only when the replacement is exact and ≤10 lines.
 - Write to the change, not the author. No "you forgot"; "this misses …".
-- Never include local `.context/` paths, session names, or SSM values. Link the tracker key (`[KEY-1508](<tracker.url_template>)`) or the PR/commit instead.
+- Never include local `.context/` paths, session names, or SSM values. Link the tracker key (`[KEY-123](<tracker.url_template>)`) or the PR/commit instead.
 
 ## Body
 Shape (omit empty sections):

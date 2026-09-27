@@ -128,13 +128,13 @@ def _ts(s: str | None):
         return None
 
 
-# Ticket keys look different per tracker (Jira `KEY-1698` vs GitHub `#162`); the env config's
+# Ticket keys look different per tracker (Jira `KEY-123` vs GitHub `#123`); the env config's
 # config carries the regex (one capture group). No regex → nothing counts as a ticket.
 TICKET_RE = re.compile(profile.get("tracker.key_regex") or r"(?!x)x")
 
 
 def _ticket_key(k: str) -> tuple:
-    """Natural sort for any tracker: `KEY-1698` → ('KEY', 1698); `162` / `#162` → ('', 162)."""
+    """Natural sort for any tracker: `KEY-123` → ('KEY', 123); `456` / `#456` → ('', 456)."""
     m = re.match(r"^#?([A-Za-z]*)-?(\d+)$", k)
     return (m.group(1), int(m.group(2))) if m else (k, 0)
 # MCP tool-name suffixes that count as tracker writes (create / comment / transition); Jira only today.

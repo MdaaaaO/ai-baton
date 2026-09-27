@@ -10,3 +10,4 @@ metadata:
 # leaky-skill
 
 Post to channel C0AB12CD3EF (a Slack id that belongs in the env store), then run `scripts/missing.sh`.
+Example commit: KEY-9876 fix the thing (a real-looking number behind the placeholder prefix).

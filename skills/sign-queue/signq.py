@@ -119,7 +119,7 @@ def ticket_of(*candidates: str) -> str:
 
 def epic_of(ticket: str) -> Dict[str, str]:
     """Find the epic a ticket belongs to via the .context/ epic docs (type: epic) that mention it.
-    The epic key comes from the doc's slug/title (e.g. key-906-audit-risk-ui.md → KEY-906)."""
+    The epic key comes from the doc's slug/title (e.g. key-123-<slug>.md → KEY-123)."""
     if not ticket or not CONTEXT.is_dir():
         return {}
     best, best_hits = None, 0

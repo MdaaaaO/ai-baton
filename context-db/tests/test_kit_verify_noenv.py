@@ -52,6 +52,7 @@ class NoEnv(unittest.TestCase):
         rc, _, err = run("--no-env", str(FIX / "leaky-skill" / "SKILL.md"))
         self.assertEqual(rc, 1)
         self.assertIn(f"Slack channel/DM id `{LEAK}`", err)
+        self.assertIn("real-looking number behind a placeholder prefix", err)  # #92
         self.assertIn("cites `scripts/missing.sh` but", err)
         self.assertIn("'version:' belongs under `metadata:`", err)
 
