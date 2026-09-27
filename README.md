@@ -1,16 +1,16 @@
 # bAIton
 
 **`ai-baton` — a workspace kit for Claude Code: every session gets the same skills, rules and memory,
-and hands off to the next.**
+hands off to the next, and every machine checks and updates its own copy.**
 
 [![CI](https://github.com/MdaaaaO/ai-baton/actions/workflows/ci.yml/badge.svg)](https://github.com/MdaaaaO/ai-baton/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/MdaaaaO/ai-baton)](https://github.com/MdaaaaO/ai-baton/releases)
 [![Conventional Commits](https://img.shields.io/badge/Conventional_Commits-1.0.0-FE5196)](https://www.conventionalcommits.org)
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](docs/packaging.md)
 
-Install it as a plugin or clone it into your workspace root. You get skills for PRs, tickets, sessions and docs, a
-markdown database for what sessions learn, and one store for per-machine values. It holds no names, ids or org
-settings, so every machine and every teammate uses it unchanged.
+Install it as a plugin or clone it. You get skills for PRs, tickets, sessions and docs, a markdown database for
+what sessions learn, and one store for per-machine values. No names, ids or org settings: every machine and
+teammate uses it unchanged.
 
 **Plugin**: Claude Code installs and updates it.
 
@@ -57,6 +57,26 @@ several machines or several people.
 5. Sessions register in a live registry and hand off through one context doc per initiative.
 6. Kit changes are PR-only. Each machine picks them up itself: a clone runs `make claude_sync` (its SessionEnd hook
    does too) to fast-forward to the merged `main`, a plugin install updates to each release with `claude plugin update`.
+
+## Stays healthy on every machine
+
+The kit maintains itself, and each machine that runs it checks its own copy:
+
+| Loop | What it does |
+|---|---|
+| `/kit-health` | Audits the kit and this machine's wiring (frontmatter, leaked values, env store, hooks, an engine smoke), names the update command when a newer release is out, and stamps `.context/kit-health/HEALTH-<env>.md` |
+| Versioned units | Every skill and agent carries a version; each change adds a CHANGELOG line that says what a machine must do, usually nothing |
+| Updates | A clone fast-forwards itself at session end, a plugin install updates per release, and each machine re-stamps on its own |
+| Many sessions | A live registry with heartbeats, one PR watcher per repo and a handoff prompt per session, so parallel and successor sessions pick up in-flight work |
+| The kit's own PRs | Claude reviews every PR, a gate blocks leaked values and missing version bumps, and auto-merge lands it on green |
+
+```mermaid
+flowchart LR
+  pr["Kit PR"] --> gate["Claude review + gate"] --> rel["Release"]
+  rel --> m1["Machine A: update, /kit-health, stamp"]
+  rel --> m2["Machine B: update, /kit-health, stamp"]
+  m1 -. finding .-> issue["Issue"] -.-> pr
+```
 
 ## Install
 
