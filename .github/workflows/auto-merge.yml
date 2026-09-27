@@ -42,7 +42,8 @@ jobs:
     env:
       REPO: ${{ github.repository }}
       SHA: ${{ github.event.workflow_run.head_sha }}
-      REQUIRED: kit-verify pr-title pr-issue claude-review
+      # comma-separated: a check name may contain spaces (`install-smoke (clone)`, #98)
+      REQUIRED: kit-verify,pr-title,pr-issue,claude-review,install-smoke (clone),install-smoke (plugin)
       REVIEWER: github-actions[bot]
     steps:
       - id: token
@@ -77,7 +78,8 @@ jobs:
           runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
                    --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion)"') \
             || skip "could not list the check runs"
-          for name in $REQUIRED; do
+          IFS=',' read -ra required <<< "$REQUIRED"
+          for name in "${required[@]}"; do
             line=$(awk -F'\t' -v n="$name" '$1 == n' <<< "$runs" | tail -1)
             [ -n "$line" ] || skip "check '$name' has not run on this head"
             status=$(cut -f2 <<< "$line"); conclusion=$(cut -f3 <<< "$line")

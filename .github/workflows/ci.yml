@@ -19,6 +19,11 @@ on:
 permissions:
   contents: read
 
+# One pin for every job that installs the Claude Code CLI (kit-verify's manifest check, install-smoke's plugin leg);
+# bump on purpose.
+env:
+  CLAUDE_CODE_VERSION: 2.1.283
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -84,8 +89,6 @@ jobs:
       # Makefile target skips silently without one — so install it first (no account needed to validate); a failed
       # install fails the step rather than dropping the check. Pinned like every other CI dependency; bump on purpose.
       - name: Install the Claude Code CLI
-        env:
-          CLAUDE_CODE_VERSION: 2.1.283
         run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
       - name: Plugin manifests validate
         run: make -C .claude/context-db plugin-validate
@@ -147,8 +150,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the Claude Code CLI (plugin path)
         if: matrix.path == 'plugin'
-        env:
-          CLAUDE_CODE_VERSION: 2.1.283
         run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
       - name: Replay the README install block
         run: python3 context-db/tests/install_smoke.py ${{ matrix.path }}
