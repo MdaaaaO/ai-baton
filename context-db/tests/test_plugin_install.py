@@ -72,15 +72,21 @@ class CacheEdits(unittest.TestCase):
             kit = fake_install(Path(tmp))
             install = kit_profile.plugin_install(kit, {})["updated"]
             t0 = kh.dt.datetime.fromisoformat(install.replace("Z", "+00:00")).timestamp()
-            for rel in ("skills/x/allow.txt", "skills/x/SKILL.md", ".in_use/42", "skills/x/__pycache__/a.pyc", "sign-queue/job"):
+            for rel in ("skills/x/allow.txt", "skills/x/SKILL.md", ".in_use/42", "skills/x/__pycache__/a.pyc", "sign-queue/job",
+                        "skills/sign-queue/SKILL.md", "evals/a/results/r.json"):
                 f = kit / rel
                 f.parent.mkdir(parents=True, exist_ok=True)
                 f.write_text("x\n", encoding="utf-8")
                 os.utime(f, (t0 + 3600, t0 + 3600))
             os.utime(kit / "skills" / "x" / "SKILL.md", (t0 + 5, t0 + 5))  # written by the unpack itself
             os.utime(kit / ".claude-plugin" / "plugin.json", (t0, t0))
-            self.assertEqual(kh.cache_edits(kit, install), ["skills/x/allow.txt"])
+            # the top-level queue is runtime; the sign-queue SKILL under skills/ is kit code (review of #16)
+            self.assertEqual(kh.cache_edits(kit, install), ["skills/sign-queue/SKILL.md", "skills/x/allow.txt"])
             self.assertIsNone(kh.cache_edits(kit, ""))  # install time unknown: not "no edits"
+            r = kh.Report()
+            with mock.patch.object(kh, "KIT", kit):
+                kh.cache_wiring(r, {"updated": ""})
+            self.assertTrue(any("edit check skipped" in ln for ln in r.lines), r.lines)  # said, never silent
 
 
 class ContextRoot(unittest.TestCase):
