@@ -188,11 +188,14 @@ def _apply_stats(meta: dict, st) -> None:
 
 def _replace_section(body: str, heading: str, content: str) -> str:
     """Replace (or append) a `## heading` section in the free-text body. Headings inside a fenced block (a pasted
-    prompt that shows `## …`) are text, not sections: neither the heading nor the section end is matched there."""
+    prompt that shows `## …`) are text, not sections: neither the heading nor the section end is matched there. Fences
+    count only when they balance: stored free text with an odd number of ``` lines is read as before, fence-blind, so one
+    stray fence can never hide the heading and turn a replace into a duplicate section."""
     lines = body.rstrip("\n").split("\n")
+    track = sum(1 for ln in lines if ln.lstrip().startswith("```")) % 2 == 0
     out, i, replaced, fence = [], 0, False, False
     while i < len(lines):
-        if lines[i].lstrip().startswith("```"):
+        if track and lines[i].lstrip().startswith("```"):
             fence = not fence
         if not fence and lines[i].strip() == heading:
             replaced = True
@@ -200,7 +203,7 @@ def _replace_section(body: str, heading: str, content: str) -> str:
             i += 1
             inner = False
             while i < len(lines) and (inner or not lines[i].startswith("## ")):
-                if lines[i].lstrip().startswith("```"):
+                if track and lines[i].lstrip().startswith("```"):
                     inner = not inner
                 i += 1
             continue

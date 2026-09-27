@@ -224,6 +224,33 @@ class NoSilentLoss(unittest.TestCase):
         self.assertNotIn("tail of prompt", out)                    # the fence belongs to the section being replaced
         self.assertIn("## Open PRs\n- x", out)
 
+    def test_an_unbalanced_fence_does_not_duplicate_a_section(self):
+        spec = importlib.util.spec_from_file_location("session_fence2", BIN / "session.py")
+        sys.path.insert(0, str(BIN))
+        with unittest.mock.patch.dict(os.environ, {"CONTEXT_ROOT": str(self.root)}):
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        body = "## Next session\n\nprompt with a stray ```\n\n## Session stats\n\nold\n"
+        out = mod._replace_section(body, "## Session stats", "new")
+        self.assertEqual(out.count("## Session stats"), 1, out)
+        self.assertIn("## Session stats\n\nnew", out)
+
+    def test_a_non_string_tracker_regex_does_not_break_the_registry(self):
+        import json as _json
+        subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},
+                       check=True, capture_output=True)
+        cfg = next(self.root.rglob("config.json"))
+        data = _json.loads(cfg.read_text(encoding="utf-8"))
+        data.setdefault("tracker", {})["key_regex"] = True
+        cfg.write_text(_json.dumps(data), encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("session_stats_rx", BIN / "session_stats.py")
+        with unittest.mock.patch.dict(os.environ, {"CONTEXT_ROOT": str(self.root)}):
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            with unittest.mock.patch("sys.stderr"):
+                rx = mod.ticket_re()
+        self.assertIsNone(rx.search("ABC-12 anything"))
+
     def test_a_bad_tracker_regex_does_not_break_the_registry(self):
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},
                        check=True, capture_output=True)

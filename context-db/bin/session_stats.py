@@ -143,6 +143,8 @@ def ticket_re() -> re.Pattern:
     if not rx:
         return _NEVER
     try:
+        if not isinstance(rx, str):  # config-set takes any JSON value: `true`, a number, a list
+            raise re.error(f"not a string but {type(rx).__name__} {rx!r}")
         return re.compile(rx)
     except re.error as e:
         print(f"session_stats: tracker.key_regex invalid ({e}) — tickets are not counted until it is fixed "
