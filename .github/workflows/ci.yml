@@ -57,6 +57,12 @@ jobs:
           [ "$SKIP_BUMP" = "true" ] && set -- "$@" --skip-bump
           python3 context-db/bin/review_gate.py "$@"
 
+      # The same leak shapes over EVERY tracked file, not the diff (#95): a release commit pushed to main, a squash of
+      # many PRs or a repo's first push is never a diff the step above sees. On PRs and on every push to main.
+      - name: Review gate --tree (leak shapes over the whole tree)
+        working-directory: .claude
+        run: python3 context-db/bin/review_gate.py --tree
+
       # The environment-free validator: the check a contributor runs on a bare clone
       # (`make -C .claude/context-db verify-skill`) — frontmatter schema, body, leak shapes. `--no-env` reads no
       # store, so a previous run's .context left on a persistent runner changes nothing here.
@@ -79,6 +85,23 @@ jobs:
 
       - name: Engine tests
         run: make -C .claude/context-db test
+
+      # Test isolation (#95, after #91): the suite must never read the workspace it sits in. Seed the sibling
+      # .context/ with decoy values, run the suite on a throw-away store (ISOLATED=1) and fail if a decoy reaches
+      # the output. The store is set back to the blank "ci" one afterwards.
+      - name: Test isolation (decoy workspace)
+        shell: bash
+        run: |
+          kb="python3 .claude/context-db/bin/kb.py"
+          $kb config-set environment decoy-env-7q3x
+          $kb set github.login decoy decoy-login-7q3x --from user
+          $kb config-set leaks.markers '["decoy-marker-7q3x"]'
+          rc=0; make -C .claude/context-db test ISOLATED=1 > "$RUNNER_TEMP/isolation.log" 2>&1 || rc=$?
+          [ "$rc" -eq 0 ] || { tail -50 "$RUNNER_TEMP/isolation.log"; echo "::error::the suite failed on a throw-away store"; exit 1; }
+          if grep -n 7q3x "$RUNNER_TEMP/isolation.log"; then
+            echo "::error::a test read the sibling workspace's .context/ (#91) — resolve it lazily from CONTEXT_ROOT"; exit 1
+          fi
+          rm -rf .context && $kb init --blank && $kb config-set environment ci
 
       # The eval suite's static gate (#54): every case loads, every skill's trigger suite has >= 10 cases with positives
       # and near misses. No model and no tokens — the token-spending run is the manual `evals` workflow.

@@ -93,6 +93,17 @@ class Shapes(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(self.hits(line), [], line)
 
+    def test_third_party_attribution(self):
+        # #95: a colleague's or former employer's repo named as the source is a hit; a placeholder or a plain mention is not
+        for line in ("adapted from a colle" + "ague's `widgets` repo", "ported from my former emp" + "loyer's acme/tools",
+                     "a team" + "mate\u2019s `x`"):
+            with self.subTest(line=line):
+                self.assertTrue(self.hits(line), line)
+        for line in ("adapted from a colleague's `<repo>`", "ask a colleague for review", "the teammate who owns it",
+                     "colleagues' logins stay in the env store"):
+            with self.subTest(line=line):
+                self.assertEqual(self.hits(line), [], line)
+
     def kinds(self, text: str) -> list[str]:
         return [what.split(" (")[0] for what in self.hits(text)]
 
@@ -303,6 +314,19 @@ class Verdict(unittest.TestCase):
         self.assertIn("tracker.repos", hits("clone octo-maint/config"))              # the full slug still scans
         self.assertIn("tracker.repos (repo name)", hits("the secret-bot runbook"))   # a distinctive name still scans
         self.assertIn("colleague login (github.display_names)", hits("ask octo-maint"))
+
+    def test_leaks_markers_join_the_value_scan(self):
+        # #95: `leaks.markers` carries what no generic shape knows (a sandbox product's CLI, a team name)
+        kh = load_kit_health()
+        cfg = {"leaks": {"markers": ["widgetbox-cli", "ab"]}}
+        with mock.patch.object(kh.kb, "all_facts", return_value={}), \
+             mock.patch.object(kh.kit_profile, "load", return_value=cfg), \
+             mock.patch.object(kh, "identity_env", return_value={}):
+            pats, errors = kh.configured_values()
+        self.assertEqual(errors, [])
+        hits = lambda line: [what for rx, what in pats if rx.search(line)]
+        self.assertEqual(hits("run widgetbox-cli first"), ["leaks.markers"])
+        self.assertEqual(hits("ab testing"), [])  # a marker under four characters would match everywhere: skipped
 
     def test_redact_names_the_kind_and_two_characters(self):
         kh = load_kit_health()

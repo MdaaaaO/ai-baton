@@ -48,6 +48,7 @@ Kit / config (env fact store .context/reference/env/):
   make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
+  make -C .claude/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
   make -C .claude/context-db test                      # the engine's stdlib unittest suite (context-db/tests/)
   make -C .claude/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
@@ -140,7 +141,7 @@ options:
 
 ```text
 usage: review_gate.py [-h] [--base BASE] [--head HEAD] [--skip-bump] [--json]
-                      [--repo REPO]
+                      [--repo REPO] [--tree]
                       [{all,leak,bump}]
 
 tier-0 review gate: leak shapes on added lines, version/CHANGELOG bumps
@@ -156,6 +157,8 @@ options:
   --json           print the findings as a JSON list
   --repo REPO      the repository (default: the working directory's git top
                    level)
+  --tree           leak-scan every file at --head, not the diff (no base, no
+                   bump check)
 ```
 
 ## `review_evidence.py`

@@ -35,6 +35,7 @@
 #   make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
 #   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
 #   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
+#   make -C .claude/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
 #   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
 #   make -C .claude/context-db test                      # the engine's stdlib unittest suite (context-db/tests/)
 #   make -C .claude/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
@@ -79,7 +80,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
+.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
 SESSION_ID ?= $(CLAUDE_CODE_SESSION_ID)
 STATSFLAGS  = $(if $(SESSION_ID),--session-id "$(SESSION_ID)",) $(if $(NOSTATS),--no-stats,)
 
@@ -119,10 +120,12 @@ verify:
 
 # make test  — the engine's stdlib unittest suite (context-db/tests/). A clone without an env store (a contributor's
 # checkout, `make ci` before setup) gets a throw-away blank one, so the suite never needs this machine's .context/.
+# make test [ISOLATED=1]  — ISOLATED=1 always runs on a throw-away blank store, never the workspace's own: ci.yml's
+# decoy gate (#95) seeds the sibling .context/ with markers and fails if one reaches the output
 test:
-	@ctx="$(CONTEXT)"; tmp=""; if [ ! -f "$$ctx/reference/env/config.json" ]; then \
+	@ctx="$(CONTEXT)"; tmp=""; if [ -n "$(ISOLATED)" ] || [ ! -f "$$ctx/reference/env/config.json" ]; then \
 	  tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; ctx="$$tmp/.context"; CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py init --blank >/dev/null; \
-	  echo "test: no env store at $(CONTEXT) — using a throw-away blank one"; fi; \
+	  echo "test: $(if $(ISOLATED),ISOLATED=1,no env store at $(CONTEXT)) — using a throw-away blank one"; fi; \
 	cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" $(PY) -m unittest discover -s tests -t . -v
 
 # make kit-verify [STALE=90]  — every skill/agent carries the versioning frontmatter
@@ -139,7 +142,7 @@ verify-skill:
 # make ci  — what .github/workflows/ci.yml runs, reproducible on any clone: the env-free validator, the engine
 # tests, every Python file compiles, every shell script parses. (CI additionally runs kit-verify against a blank
 # env store — `python3 context-db/bin/kb.py init --blank` from the workspace root gives you one.)
-ci: verify-skill test eval-check plugin-validate check-links shellcheck
+ci: verify-skill review-gate-tree test eval-check plugin-validate check-links shellcheck
 	@cd $(ENGINE).. && git ls-files -z '*.py' | xargs -0 -r $(PY) -m py_compile && echo "py_compile: OK"
 	@cd $(ENGINE).. && git ls-files -z '*.sh' hooks/ ':!hooks/*.json' | xargs -0 -n1 bash -n && echo "bash -n: OK"
 	@cd $(ENGINE).. && sh_files="$$(git ls-files '*.sh' | while read -r f; do head -1 "$$f" | grep -q '^#!/bin/sh' && echo "$$f"; done)"; \
@@ -194,6 +197,8 @@ plugin-validate:
 BASE ?= origin/main
 review-gate:
 	@cd $(ENGINE).. && $(PY) $(BIN)/review_gate.py --base $(BASE) --head HEAD $(if $(SKIP_BUMP),--skip-bump,)
+review-gate-tree:
+	@cd $(ENGINE).. && $(PY) $(BIN)/review_gate.py --tree --head HEAD
 review-evidence:
 	@cd $(ENGINE).. && $(PY) $(BIN)/review_evidence.py --base $(BASE) --head HEAD $(if $(SKIP_BUMP),--skip-bump,) --out .review/evidence.md
 # make find TAG=foo   |   make find DOMAIN=bar

@@ -4,12 +4,14 @@ for changed, new and removed units, the wording-only exemption, README edits not
 errors, vocabulary in a unit without the capability), rules read from the base. Fact-shaped literals are assembled at
 run time. Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -128,6 +130,35 @@ class Leaks(unittest.TestCase):
             r.write("docs/n.md", "you@example.com and 1234+bot@users.noreply.github.com and git@github.com:o/r.git and /home/$USER and /Users/<you>/x and /home/runner/work\n")
             r.commit("fine")
             self.assertEqual(r.gate(skip_bump=True), [])
+
+
+class Tree(unittest.TestCase):
+    def test_tree_scans_every_file_not_only_the_diff(self):
+        # #95: a leak already on main is invisible to the diff scan but not to --tree; the allow-list still applies
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            sh(r.root, "git", "checkout", "-q", "main")
+            r.write("docs/old.md", f"# old\n\nchannel {LEAK}\n")
+            r.write("docs/allowed.md", f"allowed {LEAK}\n")
+            r.write("docs/fine.md", "mail t@example.invalid\n")  # an RFC 2606 reserved domain is no address
+            r.commit("main has a leak")
+            self.assertEqual(gate.run("main", "HEAD", skip_bump=True, cwd=r.root)[0], [])
+            f, n = gate.tree_findings("HEAD", cwd=r.root)
+            self.assertEqual(len(f), 1, f)
+            self.assertTrue(f[0].startswith("[STOP] docs/old.md:3 — Slack channel/DM id"), f[0])
+            self.assertIn("in the tree", f[0])
+            self.assertGreater(n, 3)
+
+    def test_tree_cli_exit_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(gate.main(["--tree", "--repo", str(r.root)]), 0)
+            self.assertIn("review-gate --tree: OK", out.getvalue())
+            r.write("docs/old.md", f"channel {LEAK}\n"); r.commit("leak")
+            with redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(gate.main(["--tree", "--repo", str(r.root)]), 1)
+            self.assertIn("review-gate --tree: FAIL", out.getvalue())
 
 
 class Bumps(unittest.TestCase):

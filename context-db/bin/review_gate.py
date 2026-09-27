@@ -19,6 +19,10 @@ locally):
 Every finding is one line in the review's fixed shape: `[STOP] path:line — claim (rule)` (docs/REVIEW.md § Findings).
 Exit 1 on any finding, 0 with a one-line summary otherwise; `--json` prints the findings as a list for
 review_evidence.py. Stdlib only; needs `git` and a checkout that has the base ref (`fetch-depth: 0`).
+
+`--tree` (#95) runs the leak check over EVERY file at `--head` instead of the added lines: a release commit pushed straight
+to `main`, a squash of many PRs or a repo's first push is never a diff the PR scan sees. No base is needed and no bump check
+runs; `ci.yml` runs it on every PR and every push to `main` (`make -C $BATON/context-db review-gate-tree` locally).
 """
 from __future__ import annotations
 import argparse
@@ -42,7 +46,7 @@ RULE_BUMP = "docs/contributing.md § Versioning"
 # Shapes a diff scan adds to the shared list: they are PII/secret shapes, not environment facts, so kit-health's
 # every-file scan (which has this machine's real values) does not need them, and a diff scan has nothing else.
 PII_SHAPES = [
-    (r"(?<![\w.+-])(?!git@)[\w.+-]+@(?!example\.(?:com|org|net)\b)(?!users\.noreply\.github\.com\b)(?!noreply\.github\.com\b)[\w-]+(?:\.[\w-]+)+(?![\w-])", "e-mail address"),
+    (r"(?<![\w.+-])(?!git@)[\w.+-]+@(?!example\.(?:com|org|net)\b)(?![\w.-]*\.(?:invalid|test|example)\b)(?!users\.noreply\.github\.com\b)(?!noreply\.github\.com\b)[\w-]+(?:\.[\w-]+)+(?![\w-])", "e-mail address"),
     (r"(?<![\w-])/(?:home|Users)/(?!<)(?!user\b)(?!runner\b)(?!\$)[A-Za-z][\w.-]*(?=[/\s`'\")]|$)", "home path (use `~`, `$HOME` or `<user>`)"),
     (r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", "GitHub token"),
     (r"\bgithub_pat_[A-Za-z0-9_]{20,}\b", "GitHub fine-grained token"),
@@ -160,6 +164,32 @@ def meta(text: str | None) -> tuple[int | None, str]:
     return vi, fmt.unquote(md.get("updated", ""))
 
 
+# the engine's deliberately leaky test inputs (kit-verify must flag them; an allow-list line would blind that test)
+TREE_SKIP_DIRS = ("context-db/tests/fixtures/",)
+
+
+def tree_files(head: str = "HEAD", cwd: Path = KIT) -> list[str]:
+    """Every tracked file at `head`."""
+    return [p for p in git("ls-tree", "-r", "--name-only", head, cwd=cwd).splitlines() if p]
+
+
+def tree_findings(head: str = "HEAD", cwd: Path = KIT) -> tuple[list[str], int]:
+    """(findings, files scanned): the leak shapes over every line of every tracked file at `head` (#95)."""
+    shapes = leak_shapes.shapes() + [(re.compile(rx), what) for rx, what in PII_SHAPES]
+    allow = leak_shapes.allowed(cwd / "skills" / "kit-health" / "allow.txt")
+    out: list[str] = []
+    files = [p for p in tree_files(head, cwd) if Path(p).name not in leak_shapes.SKIP_FILES
+             and not p.lower().endswith(SKIP_SUFFIXES) and p != "context-db/bin/review_gate.py"
+             and not p.startswith(TREE_SKIP_DIRS)]
+    for path in files:
+        text = show(head, path, cwd)
+        if text is None:
+            continue
+        for n, what, hit in leak_shapes.scan(text, shapes=shapes, rel=path, allow=allow):
+            out.append(f"[STOP] {path}:{n} — {what} `{hit}` in the tree; an environment's or a person's value never ships with the kit ({RULE_LEAK})")
+    return out, len(files)
+
+
 def bump_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] | None = None) -> list[str]:
     files = changed_files(base, head, cwd) if files is None else files
     mb = merge_base(base, head, cwd)
@@ -210,8 +240,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--skip-bump", action="store_true", help="wording-only PR: no version/CHANGELOG check")
     ap.add_argument("--json", action="store_true", help="print the findings as a JSON list")
     ap.add_argument("--repo", type=Path, default=None, help="the repository (default: the working directory's git top level)")
+    ap.add_argument("--tree", action="store_true", help="leak-scan every file at --head, not the diff (no base, no bump check)")
     a = ap.parse_args(argv)
     cwd = a.repo or repo_root()
+    if a.tree:
+        findings, n = tree_findings(a.head, cwd)
+        if a.json:
+            print(json.dumps(findings))
+        else:
+            for f in findings:
+                print(f)
+            print(f"review-gate --tree: {'FAIL' if findings else 'OK'} — {n} file(s) at {a.head}, {len(findings)} finding(s)")
+        return 1 if findings else 0
     files = changed_files(a.base, a.head, cwd)
     findings: list[str] = []
     if a.check in ("all", "leak"):

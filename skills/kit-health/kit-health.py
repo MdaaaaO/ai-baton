@@ -664,6 +664,8 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
         for k in ("site", "project", "board_sprint_prefix"):
             keep(cfg.get("tracker", {}).get(k), f"tracker.{k}")
         keep(cfg.get("tz_default"), "tz_default")
+        for m in (cfg.get("leaks") or {}).get("markers") or []:  # #95: product/org markers no shape knows
+            keep(m, "leaks.markers")
         deps = kit_dependencies()
         for repo in cfg.get("tracker", {}).get("repos") or []:
             if str(repo).rsplit("/", 1)[-1] in deps:

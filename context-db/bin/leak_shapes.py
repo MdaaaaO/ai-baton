@@ -39,6 +39,10 @@ LEAK_SHAPES = [
     # named it (a tool a GitHub Action or the kit itself serves has one fixed name and is not matched), so it leaks the
     # install and breaks on every other — write the placeholder form `mcp__<server>__<tool>` or the bare tool name
     (r"\bmcp__claude_ai_[A-Za-z0-9_-]+__[A-Za-z0-9_]+", "concrete claude.ai connector tool id (install-specific) — use mcp__<server>__<tool> or the bare tool name"),
+    # third-party attribution (#93, #95): a possessive colleague / former employer followed by a repo names someone
+    # else's work and workplace; provenance is the owner's own decision line or nothing
+    (r"\b(?:[Cc]olleague|[Cc]o-?worker|[Tt]eammate|[Ee]x-?employer|[Ff]ormer (?:employer|team|colleague))(?:'s|\u2019s|s')\s+(?:`(?!<)[^`]+`|[\w.-]+/[\w.-]+)",
+     "third-party attribution (a colleague's or former employer's repo) — drop the line; provenance is the owner's own decision"),
     (r"\bsbx\b", "a specific sandbox product's CLI — say \"a sandbox shell\" or name the capability"),
     # a pointer to a personal memory note (`memory \`x\``, `memory note \`x\``, `Memories: \`x\``, "in the memory note"):
     # the notes live in one machine's auto-memory; the content belongs in the skill's own reference/*.md
