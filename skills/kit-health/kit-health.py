@@ -673,6 +673,23 @@ def identity_wiring(r: Report) -> None:
     for k in ("WORKSPACE_USER", "WORKSPACE_GITHUB_LOGIN", "WORKSPACE_TZ"):
         if not src[k]:
             r.add(WARN, "machine", f"`{k}` unset — `/config` (plugin) or settings.local.json env (clone); scripts fall back to `gh api user` / UTC where they can")
+    zone_warning(r, src)
+
+
+def zone_warning(r: Report, src: dict[str, str]) -> None:
+    """An unknown display zone is a WARN, not a silent UTC fallback behind a GREEN verdict (#22): every timestamp and the
+    log date would render in UTC. Names where the value comes from, never the value."""
+    name = kit_profile.tz()
+    try:
+        kit_profile.ZoneInfo(name)
+        return
+    except Exception:  # ZoneInfoNotFoundError, ValueError, OSError on a directory-shaped name
+        pass
+    where = {"option": "the plugin option `tz` (`/plugin configure ai-baton`)",
+             "settings.local.json": "`WORKSPACE_TZ` in settings.local.json",
+             "environment": "`WORKSPACE_TZ` in the environment"}.get(src.get("WORKSPACE_TZ", ""), "the env store's `tz_default`")
+    r.add(WARN, "machine", f"the display zone from {where} is not an IANA zone — timestamps and the log date render in UTC; "
+          "set an IANA Region/City name (an abbreviation like `EST` or `EDT` is not one)")
 
 
 def seed_pairs() -> list[tuple[Path, Path]]:

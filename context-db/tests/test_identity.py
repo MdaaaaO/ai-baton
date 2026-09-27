@@ -203,6 +203,18 @@ class KitHealth(unittest.TestCase):
             kh = self.load(kit)
             self.assertEqual(set(kh.identity_sources().values()) - {""}, set() if not any(os.environ.get(v) for v in kit_profile.IDENTITY_KEYS) else {"settings.local.json"})
 
+    def test_an_unknown_zone_is_a_warning_naming_its_source_not_its_value(self):
+        # #22: an abbreviation typed into /config rendered everything in UTC behind a GREEN verdict
+        for value, warned in (("nowhere-zone", True), (TOKYO, False)):
+            with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_TZ": value}):
+                kh = self.load(Path(tempfile.gettempdir()))
+                r = kh.Report(); kh.zone_warning(r, kh.identity_sources())
+                hits = [l for l in r.lines if "not an IANA zone" in l]
+                self.assertEqual(bool(hits), warned, r.lines)
+                if hits:
+                    self.assertIn("plugin option `tz`", hits[0])
+                    self.assertNotIn(value, hits[0])  # the value itself is never printed
+
 
 if __name__ == "__main__":
     unittest.main()
