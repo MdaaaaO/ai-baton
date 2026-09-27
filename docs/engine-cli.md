@@ -337,9 +337,11 @@ inherited by the detached heartbeat). Missing id or transcript => exit 3, empty 
 treat that as "no stats", never as an error.
 
 Spend is a LIST-PRICE ESTIMATE priced per API request by the model that served it: Sonnet
-3/3.75/0.3/15, Haiku 1/1.25/0.1/5, everything else (Opus, Fable/Mythos) at the Opus-class default
-15/18.75/1.5/75 $/Mtok (in/cache_write/cache_read/out) — override the default with
-SESSION_STATS_PRICES="in,cw,cr,out". Subagents are billed too: every Agent/fork child writes its
+3/3.75/0.3/15/6, Haiku 1/1.25/0.1/5/2, everything else (Opus, Fable/Mythos) at the Opus-class default
+15/18.75/1.5/75/30 $/Mtok (in/cache_write_5m/cache_read/out/cache_write_1h) — a cache write against
+the 1-hour TTL (`cache_creation.ephemeral_1h_input_tokens`) is billed at its own, higher rate, not
+the 5-minute one. Override the default with SESSION_STATS_PRICES="in,cw,cr,out[,cw_1h]"; the 1h
+rate defaults to 2x the input price when the list has only 4 numbers. Subagents are billed too: every Agent/fork child writes its
 own transcript under <project>/<session-id>/subagents/*.jsonl, and those are summed into
 `subagents_cost` and `spend_total_usd_est` (main + subagents). Before 2026-09-22 the figure was
 main-session only; this session's review-runners alone cost ~3.4x the main prefix, so the total

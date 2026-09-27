@@ -2,11 +2,12 @@
 """transcripts.py — the one reader of Claude Code session transcripts (`~/.claude/projects/<project>/*.jsonl`).
 
 A transcript is JSONL; every API request the session made appears as an `assistant` line whose
-`message.usage` carries the token counts. A message with several content blocks is written as
-several assistant lines that repeat the same usage, so usage is de-duplicated per request id
-(`requestId`, else `message.id`). `session_stats.py` (one session's stats) and the cost-report
-skill (every transcript in a window) both read usage this way — this module is the shared path,
-so the two never drift.
+`message.usage` carries the token counts. A streamed request is written as several assistant lines
+under the same request id (`requestId`, else `message.id`) as the response grows, and only the
+last of them carries the final `output_tokens` — so usage is de-duplicated per request id by
+keeping the LAST line seen, not the first. `session_stats.py` (one session's stats) and the
+cost-report skill (every transcript in a window) both read usage this way — this module is the
+shared path, so the two never drift.
 
   usage_records(path, seen)   → (record, message, usage, request_id) per new API request in one file
   tokens(usage)               → (input, cache_write, cache_read, output)
@@ -30,13 +31,17 @@ def tokens(u: dict) -> tuple[int, int, int, int]:
 
 
 def usage_records(path: str, seen: set[str] | None = None) -> Iterator[tuple[dict, dict, dict, str]]:
-    """Every `assistant` line of `path` that carries usage for a request not in `seen` (which is updated,
-    so one set de-duplicates across files). Unreadable files and unparsable lines are skipped."""
+    """One record per distinct request id in `path` — its LAST assistant line, so a streamed
+    response's final `output_tokens` wins over the smaller counts its earlier chunks carried.
+    Requests already in `seen` are skipped (`seen` is updated, so one set de-duplicates across
+    files). Unreadable files and unparsable lines are skipped."""
     seen = set() if seen is None else seen
     try:
         fh = open(path, encoding="utf-8", errors="replace")
     except OSError:
         return
+    order: list[str] = []
+    last: dict[str, tuple[dict, dict, dict]] = {}
     with fh:
         for line in fh:
             if '"usage"' not in line:
@@ -50,10 +55,17 @@ def usage_records(path: str, seen: set[str] | None = None) -> Iterator[tuple[dic
             m = o.get("message") or {}
             u = m.get("usage") or {}
             rid = o.get("requestId") or m.get("id")
-            if not u or not rid or rid in seen:
+            if not u or not rid:
                 continue
-            seen.add(rid)
-            yield o, m, u, rid
+            if rid not in last:
+                order.append(rid)
+            last[rid] = (o, m, u)  # later lines for the same rid overwrite: last one wins
+    for rid in order:
+        if rid in seen:
+            continue
+        seen.add(rid)
+        o, m, u = last[rid]
+        yield o, m, u, rid
 
 
 def subagent_dir(path: str) -> str:

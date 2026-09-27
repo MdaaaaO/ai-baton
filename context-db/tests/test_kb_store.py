@@ -187,6 +187,75 @@ class Rows(StoreCase):
         self.assertEqual(kb.normalize_provenance("user 2026-01-01"), "user 2026-01-01")  # a given date is kept
 
 
+class TableGrammar(StoreCase):
+    """The reader accepts exactly the documented `## <kind>` + table grammar: a heading only opens a kind
+    when the table header follows it directly, any other heading (hand-written prose, one the kind regex
+    misses) never absorbs rows nor lets an earlier kind's section bleed into, and a duplicate row name is
+    reported rather than silently dropped."""
+
+    def test_a_stray_heading_with_a_table_is_never_read_as_a_fact_kind(self):
+        # `## Notes` matched the old `^##\s+(\S+)\s*$` just like a real kind heading, so a documentation
+        # table under it was absorbed as facts of a bogus kind "Notes"
+        kb.set_fact("slack", "channel", "eng-help", "C1")
+        doc = self.env / "slack.md"
+        doc.write_text(doc.read_text(encoding="utf-8") +
+                        "\n## Notes\n\n| topic | detail |\n|---|---|\n| oops | not a fact |\n", encoding="utf-8")
+        rc, out, err = self.cli("list", "slack")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("slack.channel\teng-help\tC1", out)
+        self.assertNotIn("oops", out)
+        self.assertIn("Notes", err)  # skipped, and said so — not silently absorbed
+        self.assertIn("slack.md", err)
+
+    def test_a_heading_the_kind_regex_misses_never_bleeds_rows_into_the_previous_kind(self):
+        # `## See Also` (two words) never matched the heading regex at all, so `kind` stayed "channel" from
+        # the section above it, and a table right below "## See Also" was absorbed there
+        kb.set_fact("slack", "channel", "eng-help", "C1")
+        doc = self.env / "slack.md"
+        doc.write_text(doc.read_text(encoding="utf-8") + "\n## See Also\n\n" + kb.table_header() +
+                        "\n| leaked | oops | not a fact | nope |\n", encoding="utf-8")
+        rc, out, err = self.cli("list", "slack")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("slack.channel\teng-help\tC1", out)
+        self.assertNotIn("leaked", out)
+
+    def test_duplicate_row_name_is_reported_not_silent(self):
+        # last-wins on a duplicate `name` was correct enough, but silent — a hand-edited store with two
+        # rows for the same name never told anyone
+        doc = self.env / "slack.md"
+        text = doc.read_text(encoding="utf-8")
+        text = text.replace(kb.table_header(), kb.table_header() +
+                             "\n| dup | v1 | first | user 2026-01-01 |\n| dup | v2 | second | user 2026-01-02 |", 1)
+        doc.write_text(text, encoding="utf-8")
+        rc, out, err = self.cli("list", "slack.channel")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("dup\tv2", out)          # the later row still wins — unchanged
+        self.assertNotIn("v1", out)
+        self.assertIn("duplicate row name 'dup'", err)  # ...but it is reported now
+        self.assertIn("slack.md", err)
+
+    def test_all_facts_skips_a_non_system_file_instead_of_crashing(self):
+        # `all_facts()` fed every `*.md` in the store to `parse_doc`, so a `README.md` (or an editor backup)
+        # hit `doc_path`'s "bad system name" check and took the whole read down with it
+        kb.set_fact("slack", "channel", "eng-help", "C1")
+        (self.env / "README.md").write_text("# notes\nnot a system doc\n", encoding="utf-8")
+        rc, out, err = self.cli("list")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("slack.channel\teng-help\tC1", out)
+        self.assertNotIn("README", out)
+        self.assertIn("README.md", err)  # skipped, and said so
+
+    def test_all_facts_reads_a_hyphenated_system_doc(self):
+        # `doc_path()` accepts a hyphen in a system name (its own error message says so: "lowercase,
+        # digits, -/_"), so a fact written to e.g. `google-drive.md` round-trips through `get`/`set` —
+        # but `all_facts()` (used by `list`/`values`/`stale`/`discover --all`) must not silently drop it.
+        kb.set_fact("google-drive", "channel", "eng-help", "C1")
+        rc, out, err = self.cli("list")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("google-drive.channel\teng-help\tC1", out)
+        self.assertNotIn("google-drive.md: not a system doc name", err)
+
+
 class RenamedKinds(StoreCase):
     def write_legacy_channels(self):
         p = self.env / "slack.md"
