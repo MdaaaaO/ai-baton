@@ -17,7 +17,7 @@ settings, so every machine and every teammate uses it unchanged.
 ```sh
 claude plugin marketplace add MdaaaaO/ai-baton && claude plugin install ai-baton@ai-baton-kit
 cd ~/Projects      # your workspace root: the directory that holds your repos
-sh "$(claude plugin list --json | python3 -c 'import json,sys; print(next(p["installPath"] for p in json.load(sys.stdin) if p["id"] == "ai-baton@ai-baton-kit"))')/setup.sh" --personal
+sh "$(claude plugin list --json | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,list) else [dict(e,id=k) for k,v in d.get("plugins",{}).items() for e in v]; print(next(p["installPath"] for p in d if p["id"] == "ai-baton@ai-baton-kit"))')/setup.sh" --personal
 # restart Claude Code, then in the first session:
 /kit-health
 ```
