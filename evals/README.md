@@ -8,9 +8,10 @@ the one `claude plugin eval` runs: `evals/<skill>-<case>/prompt.md` (frontmatter
 and the runner writes `evals/results/` (not committed).
 
 **Trigger suites.** Every skill ships ≥ 10 trigger cases, at least three positives and three **same-domain near
-misses** (the description's "Not for …" clause, or a neighbouring skill's own trigger, as a case that must not fire).
+misses** (`EVAL_MIN_CASES` / `EVAL_MIN_EACH` lower the bar locally while a new suite is built up; CI uses the defaults) (the description's "Not for …" clause, or a neighbouring skill's own trigger, as a case that must not fire).
 A trigger case is tagged `trigger` plus `positive` or `near-miss` and carries two graders: `fired.md`, a
-`tool_used` check on the `Skill` call naming the skill (`min: 1` for a positive, `min: 0` + `max: 0` for a near miss,
+`tool_used` check on the `Skill` call naming the skill — its `input_match` must match the skill and not a longer name that
+contains it, e.g. `'(?<![\w-])<skill>(?![\w-])'` (`min: 1` for a positive, `min: 0` + `max: 0` for a near miss,
 `arm: both` so it is scored), and `criteria.md`, an `llm` grader on the outcome. `docs/templates/evals/` holds one of
 each — copy here, rename to `<skill>-<case>`, fill the `<…>` marks (the scaffold sits under `docs/` so the runner never
 scores a placeholder). No case carries a real id, host, person or organisation — placeholders only (`acme/widgets`,
