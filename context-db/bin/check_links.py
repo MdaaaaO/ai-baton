@@ -27,6 +27,9 @@ def tracked_markdown(repo: Path) -> list[Path]:
     """Every tracked *.md except the templates setup.sh seeds elsewhere (`*.template.md`, `environment-template/`,
     `docs/templates/`): their links are written for the seeded location, not for the kit tree."""
     r = subprocess.run(["git", "-C", str(repo), "ls-files", "-z", "*.md", "**/*.md"], capture_output=True, text=True)
+    if r.returncode != 0:  # not a checkout, or git broken: an empty list here would be a green run over nothing
+        raise SystemExit(f"check-links: cannot list the tracked Markdown files in {repo} (git ls-files exit {r.returncode}: "
+                         f"{r.stderr.strip() or 'no message'}) — pass the files to check as arguments")
     files = {repo / f for f in r.stdout.split("\0") if f}
     return sorted(f for f in files if f.is_file() and not f.name.endswith(".template.md")
                   and "environment-template" not in f.parts and "templates" not in f.parts)
@@ -63,6 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("paths", nargs="*", help="files to check (default: every tracked *.md)")
     a = ap.parse_args(argv)
     files = [Path(p) if Path(p).is_absolute() else a.repo / p for p in a.paths] or tracked_markdown(a.repo)
+    if not files:
+        print(f"check-links: FAIL — no Markdown files to check in {a.repo} (an empty list is not a pass)", file=sys.stderr)
+        return 2
     bad = 0
     for f in files:
         for n, target in broken_links(f, a.repo):

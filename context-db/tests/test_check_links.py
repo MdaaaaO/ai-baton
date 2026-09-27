@@ -72,6 +72,26 @@ class Links(unittest.TestCase):
         self.assertEqual(main("--repo", str(KIT)), 0)
 
 
+class ListingFailures(unittest.TestCase):
+    """A listing that failed, or found nothing, is never a green run over zero files."""
+
+    def test_outside_a_git_checkout_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "a.md").write_text("[x](missing.md)\n", encoding="utf-8")
+            p = subprocess.run([sys.executable, str(BIN / "check_links.py"), "--repo", tmp], capture_output=True, text=True,
+                               env={"PATH": "/usr/bin:/bin", "GIT_CEILING_DIRECTORIES": str(Path(tmp).parent)})
+            self.assertNotEqual(p.returncode, 0, p.stdout)
+            self.assertIn("cannot list the tracked Markdown files", p.stderr)
+            self.assertNotIn("Traceback", p.stderr)
+
+    def test_a_repo_without_markdown_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            p = subprocess.run([sys.executable, str(BIN / "check_links.py"), "--repo", tmp], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+            self.assertIn("no Markdown files to check", p.stderr)
+
+
 class MakeTargets(unittest.TestCase):
     def test_cited_targets_are_extracted_with_lines(self):
         text = "run `make -C .claude/context-db ci` then\n`make -s -C .claude/context-db kit-verify`\nnot a make line\n"
