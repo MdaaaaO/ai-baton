@@ -50,6 +50,13 @@ open_threads(){
   done
   printf '%s\n' "$total"
 }
+# APPROVED reviews on the current head (paginated): the gate where the repo requires no review and reviewDecision is ""
+approved_on_head(){
+  local full; full=$(head_full) && [ -n "$full" ] || return 1
+  gh api --paginate "repos/$R/pulls/$PR/reviews?per_page=100" -q "[.[] | select(.commit_id == \"$full\" and .state == \"APPROVED\")] | length" 2>"$ERRF" \
+    | awk '{ n += $1 } END { print n + 0 }'
+  return "${PIPESTATUS[0]}"
+}
 update_branch(){ gh api -X PUT "repos/$R/pulls/$PR/update-branch" -f expected_head_sha="$1" 2>"$ERRF" >/dev/null; }
 
 wait_verdict(){
@@ -90,15 +97,22 @@ if [ "$st" = "BEHIND" ]; then
   [ "$ot" = "0" ] || { echo "open threads on $H — resolve, then rerun"; exit 1; }
 fi
 for _ in $(seq 1 60); do
-  resp=$(gh pr view "$PR" --repo "$R" --json headRefOid,mergeStateStatus,reviewDecision -q '[.headRefOid[0:9],.mergeStateStatus,.reviewDecision]|join(" ")' 2>"$ERRF"); rc=$?
+  resp=$(gh pr view "$PR" --repo "$R" --json headRefOid,mergeStateStatus,reviewDecision -q '[.headRefOid[0:9],.mergeStateStatus,.reviewDecision]|join("|")' 2>"$ERRF"); rc=$?
   if [ $rc -ne 0 ] || [ -z "$resp" ]; then err_line; exit 1; fi
-  # POSIX sh (no process substitution): split the three fields with set --
-  set -- $resp; cur=$1; st=$2; rd=$3
+  # split on `|`: reviewDecision is "" where the repo requires no review (#89) — a space split lost the field and
+  # `set -u` killed the script before the merge
+  IFS='|' read -r cur st rd <<EOF_RESP
+$resp
+EOF_RESP
   [ "$cur" = "$H" ] || { echo "HEAD MOVED to $cur — rerun"; exit 1; }
+  if [ -z "$rd" ]; then  # no required review: the gate is still a review — an APPROVED one on this head
+    ap=$(approved_on_head); [ $? -eq 0 ] || { err_line; exit 1; }
+    if [ "$ap" -gt 0 ]; then rd=APPROVED; else rd=NONE; fi
+  fi
   case "$st $rd" in
     "CLEAN APPROVED") gh pr merge "$PR" --repo "$R" --squash 2>&1 | tail -1; echo "MERGE ATTEMPTED on $H"; exit 0;;
     "BLOCKED APPROVED"|"UNSTABLE APPROVED"|"UNKNOWN APPROVED") sleep 60;;   # required checks still running
     "BEHIND APPROVED") echo "BEHIND again (main moved) — rerun"; exit 1;;
-    *) echo "state '$st' decision '$rd' — needs a human (approval missing or checks red)"; exit 1;;
+    *) echo "state '$st' decision '$rd' — needs a human (approval missing or checks red; NONE = no required review and no approval on this head)"; exit 1;;
   esac
 done; echo "TIMEOUT waiting for CLEAN"; exit 1
