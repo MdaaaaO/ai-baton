@@ -289,6 +289,14 @@ Three tiers, one rule book — [`docs/REVIEW.md`](REVIEW.md):
   and the owner merges that PR by hand. Everything else in the PR's copy is live, which is why the rules are read
   from the base branch (`.review/RULES.md`) and why the server-side gate on `.github/workflows/**` is the
   `main` ruleset's code-owner review (`.github/CODEOWNERS` assigns that path to the maintainer).
+  **Trust model (#122).** `github-actions[bot]` is the identity of every workflow, not only this one, so
+  `auto-merge.yml` accepts its approval only when the review names the run that posted it (`claude-review run
+  <id>`) and that run is `claude-review.yml` on a `pull_request` event for this head. What could forge it is PR
+  code running with `pull-requests: write`, so none does: a PR that changes anything under `.github/`, or a file that
+  judges PRs (`review_gate.py`, `leak_shapes.py`, `review_evidence.py`, `allow.txt`, `docs/REVIEW.md`), is never
+  auto-merged (its own workflow copies are live; the merge token is the owner's PAT, which would satisfy the
+  code-owner review by itself), and the review job keeps no credentials in its checkout and runs the evidence
+  script from the base branch (`test_ci_hygiene.py` § ApprovalTrust holds both).
   **Its threads are not optional** either: a PR is merged only when every
   review thread is answered and resolved — fixed on the branch (the default), or deferred to a `review-followup`
   issue cited in the thread. Never resolve a thread without a reply that names the commit or the issue.

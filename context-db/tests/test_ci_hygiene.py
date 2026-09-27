@@ -81,6 +81,42 @@ class Hosting(unittest.TestCase):
         self.assertGreater(seen, 0)
 
 
+class ApprovalTrust(unittest.TestCase):
+    """auto-merge.yml trusts an APPROVED review by the shared Actions identity (#122): a pull_request job holding
+    pull-requests: write must not run the PR's code with a token in reach, and the approval must name the
+    claude-review run that auto-merge verifies."""
+
+    def pr_write_workflows(self) -> list[tuple[Path, str]]:
+        found = []
+        for wf in workflows():
+            text = Hosting.code(wf)
+            if re.search(r"\bpull_request:", Hosting.triggers(text)) and re.search(r"pull-requests:\s*write", text):
+                found.append((wf, text))
+        self.assertTrue(found, "no pull_request workflow with pull-requests: write — the test lost its target")
+        return found
+
+    def test_checkouts_keep_no_credentials(self):
+        for wf, text in self.pr_write_workflows():
+            checkouts = len(re.findall(r"uses:\s*actions/checkout@", text))
+            self.assertEqual(len(re.findall(r"persist-credentials:\s*false", text)), checkouts,
+                             f"{wf.name}: a checkout leaves the pull-requests: write token in .git/config")
+
+    def test_no_script_runs_from_the_pr_checkout(self):
+        for wf, text in self.pr_write_workflows():
+            hit = re.search(r"\b(python3?|bash|sh)\s+(\./)?(context-db|skills|hooks|bin|scripts)/|make\s+-C\s+(\./)?[\w.-]", text)
+            self.assertIsNone(hit, f"{wf.name}: runs the PR's copy of a script ({hit and hit.group(0)}) — run the base branch's")
+
+    def test_approval_is_bound_to_its_run(self):
+        review = (WORKFLOWS / "claude-review.yml").read_text(encoding="utf-8")
+        merge = Hosting.code(WORKFLOWS / "auto-merge.yml")
+        self.assertIn("claude-review run $GITHUB_RUN_ID", review)
+        self.assertIn('capture("claude-review run (?<id>[0-9]+)")', merge)
+        self.assertIn(".github/workflows/claude-review.yml pull_request", merge)
+        self.assertIn("grep -q '^\\.github/'", merge, "auto-merge must leave a PR that edits .github/ to the owner")
+        for judge in ("review_gate", "leak_shapes", "review_evidence", "allow\\.txt", "docs/REVIEW\\.md"):
+            self.assertIn(judge, merge.split("judges=", 1)[1].split("\n", 1)[0], f"auto-merge must leave a PR that edits {judge} to the owner")
+
+
 class EngineMakefile(unittest.TestCase):
     def test_context_value_has_no_trailing_blanks(self):
         """an inline `# comment` after `CONTEXT := …` leaves the blanks before it in the value, and every recipe
