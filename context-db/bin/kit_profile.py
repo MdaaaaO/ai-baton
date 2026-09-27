@@ -31,6 +31,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
+Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key, `plugin` on a clone) · 2 usage or I/O error.
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 """
 from __future__ import annotations
@@ -555,8 +556,15 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
     return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
 
 
+NEEDS_ARG = {"template": "<type>", "identity-source": "<WORKSPACE_* variable>", "get": "<dotted.config.key>"}
+
+
 def main(argv: list[str]) -> int:
+    """Exit codes (docs/engine-cli.md): 0 ok · 1 the thing asked about is absent (`get`, `plugin`) · 2 usage / I/O error."""
     cmd = argv[1] if len(argv) > 1 else "name"
+    if cmd in NEEDS_ARG and len(argv) < 3:
+        print(f"kit_profile: `{cmd}` needs {NEEDS_ARG[cmd]} — kit_profile.py {cmd} {NEEDS_ARG[cmd]}", file=sys.stderr)
+        return 2
     if cmd == "name":
         print(name())
     elif cmd == "dir":
@@ -636,5 +644,17 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+def cli(argv: list[str]) -> int:
+    """main() with the exit-code contract applied: a `SystemExit("<message>")` from the library (an unreadable or invalid
+    store) is one stderr line and exit 2, not Python's default exit 1 for a message."""
+    try:
+        return main(argv)
+    except SystemExit as e:
+        if isinstance(e.code, str):
+            print(e.code, file=sys.stderr)
+            return 2
+        raise
+
+
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(cli(sys.argv))

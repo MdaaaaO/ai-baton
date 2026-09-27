@@ -312,11 +312,11 @@ class MigrateConfig(StoreCase):
             with self.assertRaises(SystemExit):
                 kb.unmet_units({"systems": bad})
         kb.save_config({**kb.load_config(), "systems": ["slack"]})
-        self.assertEqual(self.cli("migrate")[0], 1)
-        self.assertEqual(self.cli("migrate", "--off")[0], 1)
+        self.assertEqual(self.cli("migrate")[0], 2)           # an invalid store is an I/O error: exit 2
+        self.assertEqual(self.cli("migrate", "--off")[0], 2)
         r = subprocess.run([sys.executable, str(KIT / "context-db" / "bin" / "kb.py"), "migrate"], capture_output=True, text=True,
                            env={**os.environ, "CONTEXT_ROOT": str(kb.ENV.parents[1])})
-        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.returncode, 2)
         self.assertNotIn("Traceback", r.stderr)
         self.assertIn("systems must be an object of true/false flags", r.stderr)
 
