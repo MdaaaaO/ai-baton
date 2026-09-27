@@ -277,15 +277,15 @@ Three tiers (#121), one rule book — [`docs/REVIEW.md`](REVIEW.md):
   validation failed. The workflow file must exist and have identical content to the version on the repository's
   default branch" — verified on #150's run), so the check turns green without a verdict, auto-merge never fires
   and the owner merges that PR by hand. Everything else in the PR's copy is live, which is why the rules are read
-  from the base branch (`.review/RULES.md`) and why a ruleset requiring owner review on `.github/workflows/**` is
-  the server-side gate to add when the repo goes public (rulesets answer 403 on a free-plan private repo).
+  from the base branch (`.review/RULES.md`) and why the server-side gate on `.github/workflows/**` is the
+  `main` ruleset's code-owner review (`.github/CODEOWNERS` assigns that path to the maintainer).
   **Its threads are not optional** either: a PR is merged only when every
   review thread is answered and resolved — fixed on the branch (the default), or deferred to a `review-followup`
   issue cited in the thread. Never resolve a thread without a reply that names the commit or the issue.
 - It is **read-only** on the repo — it can comment, it cannot push.
-- GitHub cannot enforce any of this on a free-plan private repo (rulesets and branch protection answer
-  403), so the gate is this file, `hooks/pre-push` and `auto-merge.yml` (it merges only what passed every gate;
-  everything else waits for the owner) — `main-guard.yml` is
+- GitHub's `main` ruleset requires a PR and blocks force-pushes and deletes, but repo admins bypass it and it
+  does not check the verdict or the threads, so the gate is this file, `hooks/pre-push` and `auto-merge.yml`
+  (it merges only what passed every gate; everything else waits for the owner) — `main-guard.yml` is
   the server-side backstop, flagging (not blocking) a commit on `main` that isn't a squash-merged PR.
 
 Setup, once, by the repo owner: `claude setup-token` locally (Claude Pro/Max), add the value as the

@@ -1,10 +1,10 @@
 name: main-guard
 
 # CONTRIBUTING.md says every kit change reaches `main` by a squash-merged PR (`hooks/pre-push` says so
-# locally). GitHub offers no branch protection on a free-plan private repo, so that local guard is the
-# only thing stopping a direct push — and it is bypassed by `KIT_ALLOW_MAIN_PUSH=1`, `--no-verify`, a
-# fresh clone before `setup.sh`/`sync.sh` installed `core.hooksPath`, or any other machine. This is the
-# server-side backstop: it cannot block the push (same 403), but on every push to `main` it checks that
+# locally). The repo's `main` ruleset requires a PR, but repo admins bypass it, and the local guard is
+# bypassed by `KIT_ALLOW_MAIN_PUSH=1`, `--no-verify`, a fresh clone before `setup.sh`/`sync.sh` installed
+# `core.hooksPath`, or any other machine. This is the server-side backstop for what gets past both: it
+# cannot block the push, but on every push to `main` it checks that
 # the pushed commit is the squash of a merged PR and, when it is not, opens (or comments on) a tracking
 # issue so the bypass does not go unnoticed.
 # Runs on GitHub-hosted runners like every workflow: push-to-main only, and it checks nothing out (docs/contributing.md § Where CI runs).
@@ -70,7 +70,7 @@ jobs:
           # outside this step's YAML block-scalar indentation) — its backticks are inert, only \n is
           # special, so the placeholders below are filled by plain bash string replacement, not shell
           # expansion.
-          body_template=$'__WHAT__\n\nEvery kit change is meant to travel issue \xe2\x86\x92 branch \xe2\x86\x92 PR \xe2\x86\x92 squash-merge (docs/contributing.md \xc2\xa7 From issue\nto merge). `hooks/pre-push` is the local guard against this; it is bypassed by\n`KIT_ALLOW_MAIN_PUSH=1`, `git push --no-verify`, a fresh clone before `setup.sh`/`sync.sh`\ninstalled `core.hooksPath`, another machine, or the GitHub UI \xe2\x80\x94 this workflow is only the\nserver-side backstop that notices after the fact, since GitHub offers no branch protection on a\nfree-plan private repo.\n\nSee CONTRIBUTING.md \xc2\xa7 From issue to merge.'
+          body_template=$'__WHAT__\n\nEvery kit change is meant to travel issue \xe2\x86\x92 branch \xe2\x86\x92 PR \xe2\x86\x92 squash-merge (docs/contributing.md \xc2\xa7 From issue\nto merge). `hooks/pre-push` is the local guard against this; it is bypassed by\n`KIT_ALLOW_MAIN_PUSH=1`, `git push --no-verify`, a fresh clone before `setup.sh`/`sync.sh`\ninstalled `core.hooksPath`, another machine, or the GitHub UI \xe2\x80\x94 the `main` ruleset on the repo lets\nrepo admins bypass it, so this workflow is the server-side backstop that notices after the fact.\n\nSee CONTRIBUTING.md \xc2\xa7 From issue to merge.'
           body="${body_template//__WHAT__/$what}"
           body="${body//__SHA__/$SHA}"
           body="${body//__ACTOR__/$ACTOR}"

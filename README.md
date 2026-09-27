@@ -8,9 +8,21 @@ and hands off to the next.**
 [![Conventional Commits](https://img.shields.io/badge/Conventional_Commits-1.0.0-FE5196)](https://www.conventionalcommits.org)
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](docs/packaging.md)
 
-Clone it into the directory your sessions run in. You get a set of skills for PRs, tickets, sessions and
-docs, a small markdown database for what the sessions learn, and one store for the values that differ between
-machines. The kit contains no names, ids or org settings, so every machine and every teammate uses it unchanged.
+Install it as a plugin or clone it into your workspace root. You get skills for PRs, tickets, sessions and docs, a
+markdown database for what sessions learn, and one store for per-machine values. It holds no names, ids or org
+settings, so every machine and every teammate uses it unchanged.
+
+**Plugin**: Claude Code installs and updates it.
+
+```sh
+claude plugin marketplace add MdaaaaO/ai-baton && claude plugin install ai-baton@ai-baton-kit
+cd ~/Projects      # your workspace root: the directory that holds your repos
+sh "$(claude plugin list --json | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,list) else [dict(e,id=k) for k,v in d.get("plugins",{}).items() for e in v]; print(next(p["installPath"] for p in d if p["id"] == "ai-baton@ai-baton-kit"))')/setup.sh" --personal
+# restart Claude Code, then in the first session:
+/kit-health
+```
+
+**Clone**: the whole workspace kit, with the git hooks, the `make` targets and the fast-forward sync.
 
 ```sh
 cd ~/Projects      # your workspace root: the directory that holds your repos
@@ -19,14 +31,14 @@ git clone https://github.com/MdaaaaO/ai-baton.git .claude && sh .claude/setup.sh
 /kit-health
 ```
 
-> **Never clone into your home directory.** `~/.claude` is Claude Code's own config directory; `setup.sh` refuses
-> `$HOME` as the workspace root.
+> **Never use your home directory as the workspace root.** `~/.claude` is Claude Code's own config directory;
+> `setup.sh` refuses `$HOME` as the workspace root.
 
 ## Why a kit
 
 | You have | What breaks | What the kit adds |
 |---|---|---|
-| A `CLAUDE.md` in each repo | Rules drift from repo to repo. Nothing is shared across repos. | One `WORKSPACE.md` that every session imports |
+| A `CLAUDE.md` in each repo | Rules drift from repo to repo. Nothing is shared across repos. | One `WORKSPACE.md` that every session loads (a `CLAUDE.md` import on a clone, a SessionStart hook on a plugin) |
 | A skills plugin | Skills hardcode your org, channels and ids, or ask you for them every time | An env fact store: a fact is found once, then read everywhere |
 | Nothing | Each session starts cold and forgets what the last one learned | `.context/`, an indexed markdown DB, plus a session registry and handoff docs |
 
@@ -35,49 +47,52 @@ several machines or several people.
 
 ## How it works
 
-1. Your root `CLAUDE.md` imports `.claude/WORKSPACE.md` (the shared rules) and `.context/reference/environment.md`
+1. Every session loads `WORKSPACE.md` (the shared rules): a clone's root `CLAUDE.md` imports `.claude/WORKSPACE.md`,
+   a plugin's SessionStart hook injects it. The root `CLAUDE.md` also imports `.context/reference/environment.md`
    (your environment's prose).
 2. Only the skills' names and descriptions load into a session. A skill's body loads when it runs.
 3. A skill that needs a value, such as a channel id, reads it from the env store in `.context/reference/env/`. It
    discovers a missing value once and writes it back.
 4. What sessions learn goes into `.context/` as rows of a markdown DB with a generated index.
 5. Sessions register in a live registry and hand off through one context doc per initiative.
-6. Kit changes are PR-only. `make claude_sync` fast-forwards every machine to the merged `main`.
+6. Kit changes are PR-only. Each machine picks them up itself: a clone runs `make claude_sync` (its SessionEnd hook
+   does too) to fast-forward to the merged `main`, a plugin install updates to each release with `claude plugin update`.
 
 ## Install
 
-Prerequisites: [Claude Code](https://claude.com/claude-code), `git`, `python3`, and `gh` logged in.
+| Path | Prerequisites |
+|---|---|
+| Both | [Claude Code](https://claude.com/claude-code), `python3` and `make`. `gh` logged in lets `--personal` fill your identity and runs the PR and ticket skills |
+| Clone | `git` as well |
+
+[`docs/packaging.md`](docs/packaging.md) compares the two paths.
 
 ### Quick start: a GitHub-only machine
 
-This setup needs no questions. Run the command in the code block above. `--personal` takes your login and name
-from `gh`, your repos from the clones under the workspace root, and the timezone from the OS. It sets every
-`systems.*` flag to false. A skill that needs Jira, Slack or a warehouse stops with one "not applicable here"
-line. It is safe to re-run.
+This setup needs no questions. Run the block for your path above, from your workspace root. `--personal` takes
+your login and name from `gh`, your repos from the clones under the workspace root, and the timezone from the OS.
+It sets every `systems.*` flag to false. A skill that needs Jira, Slack or a warehouse stops with one "not
+applicable here" line. It is safe to re-run.
+
+On the plugin path the third line finds the plugin root through `claude plugin list --json` (the root moves on
+every update) and runs its `setup.sh`. That seeds `.context/` and the root `CLAUDE.md`, but no `Makefile` include:
+the plugin's own hook loads the shared rules. To set your identity without `gh`, run `/plugin configure ai-baton`.
 
 ### Full path: a tracker, chat or warehouse
 
-Paste the install prompt from [`docs/new-environment.md`](docs/new-environment.md) into Claude Code. It asks once
-for your identity and the structural switches, then runs the same `setup.sh`.
-
-### As a Claude Code plugin
-
-```sh
-claude plugin marketplace add MdaaaaO/ai-baton
-claude plugin install ai-baton@ai-baton-kit
-```
-
-Then run `/plugin configure ai-baton` to enter your identity. A plugin cannot create the workspace files
-(`.context/`, the root `CLAUDE.md`, `Makefile`). Run `setup.sh` from your workspace root for those.
-[`docs/packaging.md`](docs/packaging.md) compares the two paths.
+This is a clone path. Paste the install prompt from [`docs/new-environment.md`](docs/new-environment.md) into
+Claude Code. It clones the kit into `.claude/`, asks once for your identity and the structural switches, then runs
+the same `setup.sh`.
 
 ### Keep it current
 
-```sh
-make claude_sync          # or: sh .claude/sync.sh
-```
+| Path | Update, then restart Claude Code and run `/kit-health` to re-stamp the machine |
+|---|---|
+| Plugin | `claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@ai-baton-kit` |
+| Clone | `make claude_sync` (or `sh .claude/sync.sh`). It only ever fast-forwards `main` |
 
-This only ever fast-forwards `main`. [`docs/sync.md`](docs/sync.md) explains the hooks and the guards.
+`/kit-health` warns when a newer release is out and prints the update command. [`docs/sync.md`](docs/sync.md)
+explains the clone's hooks and guards.
 
 ## What's inside
 
@@ -90,7 +105,7 @@ This only ever fast-forwards `main`. [`docs/sync.md`](docs/sync.md) explains the
 | Needs a system (`systems.*`) | `sign-queue` · `signed-git-commits` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
 It also ships three agents (`triage`, `review-runner`, `auto-runner`) and the `context-db/` engine
-(`make -C .claude/context-db help`). [`docs/skills.md`](docs/skills.md) describes each item in one line.
+(`make -C $BATON/context-db help`). [`docs/skills.md`](docs/skills.md) describes each item in one line.
 
 ## Documentation
 
