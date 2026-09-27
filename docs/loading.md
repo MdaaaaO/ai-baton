@@ -1,8 +1,9 @@
 # What loads when — the three layers and their byte budgets
 
 Cost ≈ turns × prefix size (`WORKSPACE.md` § Cost & context hygiene): the prefix is re-read on every later turn —
-cached at ~0.1× input, but an edit to an always-on file re-bills it in full for every open session. The kit therefore sorts every file into one of three layers, and the always-on
-layer is the one lever the budgets guard. Numbers below were measured on 2026-09-26 against the kit at that date; re-measure as § How to
+cached at ~0.1× input, but an edit to an always-on file re-bills it in full for every open session. The kit therefore
+sorts every file into one of three layers, and the always-on layer is the one lever the budgets guard. Numbers below
+were measured on 2026-09-26 against the kit at that date; re-measure as § How to
 measure says.
 
 ## Layer 1 — always on (every session, every turn)
