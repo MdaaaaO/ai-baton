@@ -15,7 +15,7 @@ color: cyan
 
 No `tools:` allow-list (#94): MCP tool ids carry the connector's name on one install, so a fixed list breaks on
 every other. The worker inherits the session's tools, the machine's chat/tracker connectors included, minus the
-file-writing ones (`disallowedTools`). Use an MCP tool only to **read** (a channel, a thread, a ticket) and only where
+file-writing ones and `Agent` (`disallowedTools`: a forked skill runs as this worker and spawns nothing). Use an MCP tool only to **read** (a channel, a thread, a ticket) and only where
 its `systems.<x>` flag is true; never call one that posts, sends, reacts, creates, comments or transitions. A connector
 that is absent here is not an error: skip the enrichment and say "n/a in this environment" where the brief would have
 cited it.
