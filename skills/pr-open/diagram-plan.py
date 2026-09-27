@@ -264,7 +264,7 @@ def env_get(key: str, default):
 def env_overlay(repo: str | None) -> tuple[list[tuple[str, list[str]]], list[str]]:
     if not repo:
         return [], []
-    repos = env_get("diagrams.repos", {})  # one lookup by the whole slug: a dotted path would split `owner/site.io` at the `.` (#136)
+    repos = env_get("diagrams.repos", {})  # one lookup by the whole slug: a dotted path would split `owner/site.io` at the `.`
     cfg = repos.get(repo) if isinstance(repos, dict) else None
     cfg = cfg if isinstance(cfg, dict) else {}  # a bare value under the slug (a hand edit) is no overlay either, not an AttributeError
     facets = [(k, list(v)) for k, v in (cfg.get("facets") or {}).items()]
@@ -283,7 +283,7 @@ def variants(g: str) -> set[str]:
 
 
 def match(path: str, globs: list[str]) -> bool:
-    p = path.removeprefix("./")  # a prefix, not a character set: `.github/x` must keep its dot (#57)
+    p = path.removeprefix("./")  # a prefix, not a character set: `.github/x` must keep its dot
     base = p.rsplit("/", 1)[-1]
     for g in globs:
         if "/" not in g and fnmatch.fnmatch(base, g):

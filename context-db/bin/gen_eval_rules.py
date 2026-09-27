@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_eval_rules.py — copy the review rules into the kit-review eval prompts (#121).
+"""gen_eval_rules.py — copy the review rules into the kit-review eval prompts.
 
 `claude plugin eval` runs a case in a sandbox whose file reads are confined to a scratch cwd: the plugin's own
 `docs/REVIEW.md` is not readable from the prompt. So every `evals/kit-review-*/prompt.md` carries the rules inline,

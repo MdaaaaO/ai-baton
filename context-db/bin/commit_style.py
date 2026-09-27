@@ -56,7 +56,7 @@ def _config() -> dict:
         return {}
     try:
         return kit_profile.load() or {}
-    except (SystemExit, Exception):  # SystemExit when there is no env store; never KeyboardInterrupt (#59 E29)
+    except (SystemExit, Exception):  # SystemExit when there is no env store; never KeyboardInterrupt
         return {}
 
 

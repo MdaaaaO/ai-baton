@@ -33,7 +33,7 @@ skill that needs the fact; the manifest holds only the mechanics.
 | `facts[].verify` | how to confirm the candidate before writing it (one clause) |
 | `facts[].ttl_days` | after this many days a `tool:`/`derived:`/`import:` row is reported by `kb.py stale`; `0` = never |
 | `facts[].purpose` | default `purpose` column for the row |
-| `facts[].common_word` | `true` when the values are ordinary words (a first name, a team, a label): kit-health's value scan skips the kind instead of flagging every occurrence of the word (#83) |
+| `facts[].common_word` | `true` when the values are ordinary words (a first name, a team, a label): kit-health's value scan skips the kind instead of flagging every occurrence of the word |
 | `facts[].note` | anything the caller must know (rate limits, membership needed…) |
 
 Provenance written back is structured — `--from tool:<name>`, `user`, `import:<env>`, `derived:<key>` —

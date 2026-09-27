@@ -62,7 +62,7 @@ class Report:
         self.lines: list[str] = []
         self.counts = {OK: 0, WARN: 0, ERR: 0}
         self.findings: list[tuple[str, str, str]] = []  # (level, section, text)
-        self.leak_hits = 0  # #83: un-accepted leak hits block the stamp like an error would
+        self.leak_hits = 0  # un-accepted leak hits block the stamp like an error would
 
     def h(self, title: str) -> None:
         self.lines.append(f"\n## {title}\n")
@@ -80,7 +80,7 @@ class Report:
 
 def sh(cmd: list[str] | str, cwd: Path | None = None, env: dict | None = None, timeout: int = 120) -> tuple[int, str, str]:
     """(exit status, stdout, stderr), both stripped — apart, so a summary line on stdout is never displaced by a
-    warning on stderr (#60 KH-07). A command that cannot run is (127, "", <why>)."""
+    warning on stderr. A command that cannot run is (127, "", <why>)."""
     e = dict(os.environ)
     e.setdefault("CONTEXT_ROOT", str(CTX))  # children resolve the workspace as this run did, whatever their cwd (#3)
     if env:
@@ -105,7 +105,7 @@ def frontmatter(p: Path) -> dict[str, str]:
 
 def settings_local_path() -> Path:
     """Where this install keeps the ignored settings.local.json: beside the kit on a clone; on a plugin install (the kit in
-    Claude Code's plugin cache) setup.sh seeds it in `<workspace>/.claude/` (#118), so look there when the kit has none."""
+    Claude Code's plugin cache) setup.sh seeds it in `<workspace>/.claude/`, so look there when the kit has none."""
     beside = KIT / "settings.local.json"
     if beside.is_file() or KIT.name == ".claude":
         return beside
@@ -124,7 +124,7 @@ def settings_local_env() -> dict:
 
 
 def identity_env() -> dict[str, str]:
-    """The user's identity as `{WORKSPACE_*: value}` from every source (#116): the plugin option
+    """The user's identity as `{WORKSPACE_*: value}` from every source: the plugin option
     (`CLAUDE_PLUGIN_OPTION_<KEY>` — visible when kit-health runs inside a hook) wins, then the `WORKSPACE_*` variable in
     the environment (on a plugin install the SessionStart hook re-exported the `/config` values into Bash; on a clone
     Claude Code merged settings.local.json `env`), then settings.local.json read directly (a script run outside a
@@ -358,7 +358,7 @@ def cache_wiring(r: Report, plugin: dict) -> None:
         r.raw("- plugin cache: edit check skipped — `installed_plugins.json` records no install time for this path")
 
 
-# ── review findings (#121) ────────────────────────────────
+# ── review findings ────────────────────────────────
 # The CI reviewer posts every finding in one shape, `[STOP|WARN|NIT] path:line — claim (rule)`, so the kit can count what
 # happened to them: a thread resolved before the merge = acted on (fixed, or answered and deferred); still open on a
 # merged PR = dismissed. Read from the kit's own repo through `gh` (GraphQL: thread resolution is not in REST); one OK
@@ -422,7 +422,7 @@ def review_ratio(r: Report, n: int = 10) -> None:
 # config.json), so the scanner finds exactly what THIS environment knows to be a fact, wherever it sits in the kit.
 LEAK_SHAPES = leak_shapes.LEAK_SHAPES
 # only the frontmatter declarations are exempt per line (leak_shapes owns the rule); the scanner's own files are
-# skipped per file (SKIP_FILE) — a line that merely mentions `kit-health` is scanned like any other (#60 KH-02)
+# skipped per file (SKIP_FILE) — a line that merely mentions `kit-health` is scanned like any other
 SKIP_LINE = leak_shapes.SKIP_LINE
 SKIP_FILE = set(leak_shapes.SKIP_FILES)  # the scanners' own files, per file (leak_shapes.py owns the set)
 SKIP_SUFFIX = {".jsonl", ".pyc", ".png", ".jpg", ".gif", ".pdf", ".zip", ".gz"}
@@ -487,7 +487,7 @@ def kit_dependencies() -> frozenset[str]:
 
 def identity_values() -> list[tuple[re.Pattern, str]]:
     """The user's identity — full name, `first.last`, the GitHub login — from the plugin options and
-    settings.local.json env (#116: the option values are scanned too, so a login typed into `/config` that
+    settings.local.json env (the option values are scanned too, so a login typed into `/config` that
     lands in a kit file is a finding). Not the single name parts: many are ordinary words (Will, Page, Mark)
     and would flood the report. Case-insensitive; the caller never prints what these match, so the label
     names which form hit."""
@@ -511,7 +511,7 @@ def identity_values() -> list[tuple[re.Pattern, str]]:
 
 def common_word_kinds() -> set[str]:
     """`<system>.<kind>` of every manifest fact flagged `common_word: true` — kinds whose values are ordinary words
-    (a person's first name, a team, a label) and would flood the value scan (#83). Read from the manifests, so an
+    (a person's first name, a team, a label) and would flood the value scan. Read from the manifests, so an
     environment's own `_discovery/` overlay can add one."""
     out: set[str] = set()
     try:
@@ -529,7 +529,7 @@ def keep_value(v: str, kind: str = "", common: set[str] | frozenset[str] = froze
     everywhere and mean nothing. For an env-store ROW (`kind` given): a common-word kind (`common_word: true` in its
     manifest — first names, teams, labels) skips a plain single word but still scans a value with a space or hyphen
     (`First Last`, `<team>-platform` are the leaks the scan exists for), and any kind skips a plain word under six
-    letters (#83 KH-05). A config or identity value (no `kind`) keeps the old four-character floor: a short org or
+    letters. A config or identity value (no `kind`) keeps the old four-character floor: a short org or
     login is the leak most worth catching."""
     s = v.strip()
     if len(s) < 4 or s.lower() in GENERIC or (s.isdigit() and len(s) < 6) or s.startswith("<"):
@@ -545,7 +545,7 @@ def keep_value(v: str, kind: str = "", common: set[str] | frozenset[str] = froze
 
 
 def redact(what: str, value: str) -> str:
-    """`<kind>:<first2>…` — the report and the audit log name the kind and two characters, never the value (#83 KH-25).
+    """`<kind>:<first2>…` — the report and the audit log name the kind and two characters, never the value.
     Shapes give their name as `what`; configured values their key."""
     kind = what.split(" (")[0].replace("env fact ", "").strip("`")
     return f"{kind}:{value[:2]}…" if len(value) > 2 else f"{kind}:…"
@@ -588,7 +588,7 @@ def changed_units_remote(repo: str, base: str, head: str) -> list[str] | None:
 
 
 def may_stamp(r: "Report") -> bool:
-    """The stamp means "the kit works everywhere": no errors and no un-accepted leak hit (#83 KH-06)."""
+    """The stamp means "the kit works everywhere": no errors and no un-accepted leak hit."""
     return not r.counts[ERR] and not r.leak_hits
 
 
@@ -596,7 +596,7 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
     """(patterns, loader errors). Every literal value this environment has configured: env-store table values +
     config keys that carry identity (org, review bot, hosts, channel ids, colleague logins, tracked repos, domains)
     + the user's own identity. Short / numeric / generic values are skipped — they would match everywhere. A store
-    that cannot be read is an ERROR the caller reports (#60 KH-04), never a silent shapes-only scan."""
+    that cannot be read is an ERROR the caller reports, never a silent shapes-only scan."""
     vals: dict[str, str] = {}
     errors: list[str] = []
 
@@ -731,7 +731,7 @@ def sec_config(r: Report) -> None:
         r.add(OK, "config", f"env store `{rel(ENV)}`: config.json + {n} facts ({per})")
         try:
             cfg = kb.load_config()
-            # KH-26: a key is only wanted where something reads it — github.org by a GitHub-tracked or bot-reviewed
+            # a key is only wanted where something reads it — github.org by a GitHub-tracked or bot-reviewed
             # store, tz_default only when the identity carries no zone
             wanted = ["environment", "tracker.kind", "systems"]
             if kb.dotted_get(cfg, "tracker.kind") == "github" or kb.dotted_get(cfg, "github.review_bot"):
@@ -770,7 +770,7 @@ def sec_config(r: Report) -> None:
 
 # ── 4. machine ──────────────────────────────────────────────────────────────────────────────
 def identity_wiring(r: Report) -> None:
-    """§ 4's identity rows (#116): which source supplies each key, one ERR only when no source supplies any."""
+    """§ 4's identity rows: which source supplies each key, one ERR only when no source supplies any."""
     src = identity_sources()
     settings = settings_local_path()
     hooked = [k for k, v in src.items() if v in ("option", "environment")]
@@ -813,7 +813,7 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
 
 
 def seed_pairs() -> list[tuple[Path, Path]]:
-    """(template in the kit, seeded copy on this machine) — what setup.sh seeds once and never overwrites (#79)."""
+    """(template in the kit, seeded copy on this machine) — what setup.sh seeds once and never overwrites."""
     return [(KIT / "context-db" / "context-README.template.md", CTX / "README.md"),
             (KIT / "environment-template" / "environment.md", CTX / "reference" / "environment.md"),
             (KIT / "CLAUDE.example.md", ROOT / "CLAUDE.md"),
@@ -892,7 +892,7 @@ def sec_machine(r: Report) -> str:
             r.add(ERR, "machine", "CLAUDE.md imports `@.context/reference/environment.md` but the doc is missing — seed it from `$BATON/environment-template/environment.md`")
         else:
             r.add(WARN, "machine", "no `.context/reference/environment.md` — the environment's prose (repos, venues, capabilities) is not written down; seed it from `$BATON/environment-template/environment.md`")
-    if LEGACY_PROFILES.exists():  # the one legacy line kept (#78)
+    if LEGACY_PROFILES.exists():  # the one legacy line kept
         r.add(WARN, "machine", "legacy `.claude/profiles/` present → delete it (`rm -rf .claude/profiles`; the layer retired 2026-09-25, nothing reads it)")
     mk = ROOT / "Makefile"
     mk_inc = mk.is_file() and re.search(r"^include \.claude/workspace\.mk", mk.read_text(errors="replace"), re.M)
@@ -990,7 +990,7 @@ def sec_machine(r: Report) -> str:
             r.add(OK, "machine", "lattice: paste-block flow — `WORKSPACE_SLACK_LATTICE_DM` set (plugin option or settings.local.json; no connector to probe)")
         else:
             r.add(WARN, "machine", "lattice: `WORKSPACE_SLACK_LATTICE_DM` unset (`/config` or settings.local.json) — the self-assessment skill cannot read the Lattice bot DM")
-    mcp = [k for k in kb.MCP_BACKED if systems.get(k)]  # kb.py owns the list, beside kb.SYSTEMS (#76)
+    mcp = [k for k in kb.MCP_BACKED if systems.get(k)]  # kb.py owns the list, beside kb.SYSTEMS
     if mcp:
         r.raw(f"- MCP-backed systems ({', '.join(mcp)}): not probeable from a shell — the skill's step 3 checks the servers are connected in this session")
     return envname
@@ -1000,7 +1000,7 @@ def sec_machine(r: Report) -> str:
 def sec_engine(r: Report, stamping: bool = False) -> None:
     r.h("5 · Engine — smoke")
     # read-only: `make verify` never writes; a stale INDEX.md is a WARN with the fix named, not a silent rewrite of
-    # the live DB (#60 KH-03) — `--stamp` regenerates it after the stamp doc is written
+    # the live DB — `--stamp` regenerates it after the stamp doc is written
     rc, out, err = sh(["make", "-C", str(KIT / "context-db"), "-s", f"CONTEXT={CTX}", "verify"], timeout=300)
     # verify.py's problem list follows its `FAIL —` header; the ⚠ oversized-doc notes above it are `- ` lines too
     tail = err.split("FAIL —", 1)[1] if "FAIL —" in err else ""
@@ -1151,7 +1151,7 @@ def main() -> int:
     ap.add_argument("--stamp", action="store_true", help="write the HEALTH.md stamp for this environment when there are no errors")
     ap.add_argument("--report", help="also write the report to this file")
     ap.add_argument("--quiet", action="store_true", help="print only the summary line")
-    ap.add_argument("--ci", action="store_true", help="CI mode (#81): leak scan + env-store config only, against the checkout and the blank "
+    ap.add_argument("--ci", action="store_true", help="CI mode: leak scan + env-store config only, against the checkout and the blank "
                                                        "store CI builds; nothing under .context/ is written; exit 2 on an error or a leak hit, else 0")
     a = ap.parse_args()
     r = Report()
@@ -1189,7 +1189,7 @@ def main() -> int:
         r.raw(f"\nStamped `{rel(p)}`.")
     elif a.stamp:
         r.raw("\nNot stamped — " + ("errors present." if r.counts[ERR] else
-              f"{r.leak_hits} un-accepted leak hit(s): fix each, or accept it in `skills/kit-health/allow.txt` with a `# reason` (#83)."))
+              f"{r.leak_hits} un-accepted leak hit(s): fix each, or accept it in `skills/kit-health/allow.txt` with a `# reason`."))
     text = "\n".join(r.lines) + "\n"
     if a.report:
         Path(a.report).parent.mkdir(parents=True, exist_ok=True)

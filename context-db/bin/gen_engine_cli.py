@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_engine_cli.py — generate `docs/engine-cli.md`, the engine's CLI reference (#82).
+"""gen_engine_cli.py — generate `docs/engine-cli.md`, the engine's CLI reference.
 
 The reference is DERIVED, never hand-written: it is `make -C $BATON/context-db help` (the Makefile's comment
 header) followed by `python3 context-db/bin/<tool>.py --help` for every engine tool that answers `--help` with

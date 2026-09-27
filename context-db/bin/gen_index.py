@@ -20,7 +20,7 @@ import sys
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import frontmatter as fm  # noqa: E402  — the one frontmatter parser (#80)
+import frontmatter as fm  # noqa: E402  — the one frontmatter parser
 
 # Content root: the Makefile passes CONTEXT_ROOT; fall back to the sibling .context/
 # of the engine dir (../../.context relative to this bin/) for a direct invocation.

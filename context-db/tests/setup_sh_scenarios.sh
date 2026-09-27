@@ -1,6 +1,6 @@
 #!/bin/sh
 # shellcheck disable=SC2034  # OUT / RC are read inside the quoted `check` expressions, which shellcheck cannot see
-# setup_sh_scenarios.sh — bats-free scenario test for setup.sh (#62). `sh -e` and POSIX tools only.
+# setup_sh_scenarios.sh — bats-free scenario test for setup.sh. `sh -e` and POSIX tools only.
 #
 #   sh context-db/tests/setup_sh_scenarios.sh            # from the kit root; exit 0 = every scenario passed
 #
@@ -134,7 +134,7 @@ run_setup
 check "exit non-zero" '[ "$RC" -ne 0 ]'
 check "one-line cause, no traceback" 'printf "%s" "$OUT" | grep -q "invalid JSON" && ! printf "%s" "$OUT" | grep -q Traceback'
 
-echo "== 7. housekeeping: the kit's __pycache__ dirs and empty leftover dirs are swept, the workspace is not touched (#78) =="
+echo "== 7. housekeeping: the kit's __pycache__ dirs and empty leftover dirs are swept, the workspace is not touched =="
 scenario leftover
 mkdir -p "$WS/.claude/old-template/templates" "$WS/.claude/skills/gone-skill/__pycache__" "$WS/keep-empty"
 printf 'x' > "$WS/.claude/skills/gone-skill/__pycache__/x.pyc"
@@ -215,7 +215,7 @@ OUT="$(cd "$WORK" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR="$WORK/plug
 set -e
 check "an ignored file gets no warning" '[ "$RC" -eq 0 ] && ! printf "%s" "$OUT" | grep -q "not git-ignored"'
 
-echo "== 10. seeds vs templates (#79): a copy older than its template's last commit is reported; --refresh-seeds prints the diff =="
+echo "== 10. seeds vs templates: a copy older than its template's last commit is reported; --refresh-seeds prints the diff =="
 scenario seeds
 run_setup
 check "first run: no stale seed" '! printf "%s" "$OUT" | grep -q "predate their template"'
@@ -231,7 +231,7 @@ run_setup --refresh-seeds
 check "--refresh-seeds names the pair and prints the diff" 'printf "%s" "$OUT" | grep -q "seed .context/README.md predates its template context-db/context-README.template.md" && printf "%s" "$OUT" | grep -q "+<!-- template fix -->"'
 check "--help names --refresh-seeds" 'run_setup --help; printf "%s" "$OUT" | grep -q -- "--refresh-seeds"'
 
-echo "== 11. the home directory is never the workspace root (#168) =="
+echo "== 11. the home directory is never the workspace root (#68) =="
 scenario homeroot
 set +e
 OUT="$(cd "$WS" && HOME="$WS" PROJECTS="$WS" sh "$WS/.claude/setup.sh" 2>&1)"; RC=$?

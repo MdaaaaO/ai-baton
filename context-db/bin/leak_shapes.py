@@ -55,7 +55,7 @@ def shapes(tracker_kind: str | None = None, key_regex: str | None = None) -> lis
     """The compiled shape list for one scanner: the generic list on every tracker (a key from ANOTHER environment is
     exactly the leak a shared kit risks, so the generic ticket shape is never dropped), plus, on a tracker with a
     compiling `key_regex`, that regex as a second ticket shape so this environment's own keys are caught even when
-    they do not fit the generic form (#60 KH-10). An invalid regex is kit-verify's finding; nothing is added for it."""
+    they do not fit the generic form. An invalid regex is kit-verify's finding; nothing is added for it."""
     out = [(re.compile(rx), what) for rx, what in LEAK_SHAPES]
     if key_regex and tracker_kind != "github":  # a GitHub key is `#12`: no id to leak, the generic shape already covers foreign keys
         try:
@@ -87,7 +87,7 @@ def allowed(path: Path = ALLOW_FILE) -> tuple[re.Pattern, ...]:
 
 def is_allowed(rel: str, hit: str, allow) -> bool:
     """An allow-list entry is anchored at the start of `<path>:<match>` (a bare `acme` cannot allow `notacme`); append
-    `$` for an exact match (#60 KH-09)."""
+    `$` for an exact match."""
     return any(a.match(f"{rel}:{hit}") for a in allow)
 
 

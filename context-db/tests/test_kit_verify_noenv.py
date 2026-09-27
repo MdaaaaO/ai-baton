@@ -1,4 +1,4 @@
-"""kit_verify --no-env — the environment-free validator (#114): passes on a bare clone with no .context/, checks a
+"""kit_verify --no-env — the environment-free validator: passes on a bare clone with no .context/, checks a
 fixture skill's body, fails the leaky fixture. Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import contextlib
@@ -62,7 +62,7 @@ class NoEnv(unittest.TestCase):
 
 
 class PluginManifest(unittest.TestCase):
-    """#118: plugin.json version == VERSION, kebab name, the marketplace entry points at the root — env-free."""
+    """plugin.json version == VERSION, kebab name, the marketplace entry points at the root — env-free."""
 
     def check(self, kit: Path) -> list[str]:
         saved = kit_verify.KIT
@@ -76,7 +76,7 @@ class PluginManifest(unittest.TestCase):
 
     def write(self, kit: Path, version="1.2.3", name="my-kit", market_name=None, market_source="./", kit_version="1.2.3"):
         (kit / ".claude-plugin").mkdir(parents=True, exist_ok=True)
-        # the identity options and the hook (#116) are what the real kit ships; check_identity_options has its own tests
+        # the identity options and the hook are what the real kit ships; check_identity_options has its own tests
         (kit / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name, "version": version, "userConfig": {
             k: {"type": "string", "title": "t", "description": "d"} for k in kit_verify.kit_profile.IDENTITY_KEYS.values()}}), encoding="utf-8")
         (kit / "hooks").mkdir(exist_ok=True)
@@ -109,7 +109,7 @@ class PluginManifest(unittest.TestCase):
 
 class ProjectDirContextRoot(unittest.TestCase):
     def test_plugin_path_finds_the_projects_context_dir(self):
-        # #118: with the kit installed elsewhere, CLAUDE_PROJECT_DIR/.context is the store's home
+        # with the kit installed elsewhere, CLAUDE_PROJECT_DIR/.context is the store's home
         with tempfile.TemporaryDirectory() as tmp:
             proj = Path(tmp) / "proj"
             (proj / ".context").mkdir(parents=True)
@@ -147,7 +147,7 @@ class BodyChecks(unittest.TestCase):
         self.assertTrue(any("write `$BATON/…`" in e for e in errors), errors)
 
     def test_cross_skill_path_literal_is_rejected(self):
-        # #115: cross-reference a skill by name; a `skills/<x>/SKILL.md` literal breaks on every host with another layout
+        # cross-reference a skill by name; a `skills/<x>/SKILL.md` literal breaks on every host with another layout
         errors = self.check("read `$BATON/skills/other-skill/SKILL.md` § Rules")
         self.assertTrue(any("cross-reference a skill by name (`other-skill`" in e for e in errors), errors)
         errors = self.check("see `skills/other-skill/` for the rest")
@@ -188,6 +188,46 @@ class BodyChecks(unittest.TestCase):
             self.assertEqual(len(leak_shapes.scan(text, rel="skills/other/SKILL.md", allow=pats)), 1)
             self.assertEqual(leak_shapes.allowed(Path(tmp) / "missing.txt"), ())
             self.assertIs(leak_shapes.allowed(allow), pats)  # compiled once per process and file
+
+
+class IssueRefs(unittest.TestCase):
+    """A kit file may not cite `#n` past this tracker's reach: the release CHANGELOG's highest issue + the margin."""
+
+    def kit(self, files: dict[str, str]) -> Path:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "CHANGELOG.md").write_text("* fix ([#40](https://github.com/o/r/issues/40)) ([abc](https://github.com/o/r/commit/abc))\n")
+        for rel, text in files.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text)
+        return root
+
+    def check(self, root: Path) -> list[str]:
+        errors: list[str] = []
+        kit_verify.check_issue_refs(errors, root)
+        return errors
+
+    def test_ceiling_from_changelog(self):
+        self.assertEqual(kit_verify.issue_ref_ceiling(self.kit({})), 40 + kit_verify.ISSUE_REF_MARGIN)
+
+    def test_ref_past_the_ceiling_fails(self):
+        errors = self.check(self.kit({"bin/x.py": "ok = 1  # (#12)\nbad = 2  # (#116)\n"}))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("bin/x.py:2: cites #116", errors[0])
+
+    def test_examples_history_and_fixtures_are_exempt(self):
+        self.assertEqual(self.check(self.kit({
+            "skills/a/SKILL.md": "A GitHub key looks like `#162`; a hex colour #000000 is no ref.\n",
+            "docs/CHANGELOG.md": "- old entry (#199)\n",
+            "context-db/tests/test_y.py": 'FIXTURE = "Closes #404"\n',
+            "evals/e/prompt.md": "PR #310 is up.\n",
+        })), [])
+
+    def test_no_changelog_skips(self):
+        root = self.kit({"x.md": "#999\n"})
+        (root / "CHANGELOG.md").unlink()
+        self.assertEqual(self.check(root), [])
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""migrate_frontmatter.py — move the kit's bookkeeping keys under `metadata:` (Agent Skills spec, #113).
+"""migrate_frontmatter.py — move the kit's bookkeeping keys under `metadata:` (Agent Skills spec).
 
 Rewrites the frontmatter of every skill (`skills/*/SKILL.md`) and agent (`agents/*.md`), or of the files
 given, so that `version`, `updated`, `reviewed`, `requires` and `facts` live under `metadata:` as

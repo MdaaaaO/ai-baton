@@ -30,7 +30,7 @@
 # host. Before enqueuing, verify `git -C <wt> status --short` shows exactly what the commit should
 # contain and that the message file exists. One job = one commit.
 set -eu
-eval "$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" identity-env 2>/dev/null)"  # WORKSPACE_* from plugin userConfig, if set (#116)
+eval "$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" identity-env 2>/dev/null)"  # WORKSPACE_* from plugin userConfig, if set
 # the queue lives in the workspace (#7): `<.context>/state/sign-queue/`, never under the kit (a plugin update deletes it)
 if [ -z "${SIGN_QUEUE_DIR:-}" ]; then
   ctx=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" context)

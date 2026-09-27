@@ -137,7 +137,7 @@ edited — if you already have a root `CLAUDE.md` or `Makefile`, add the two imp
 Until 2026-09-25 an environment's config and prose lived in a second private repo cloned at
 `.claude/profiles/<name>/`. That layer was retired the next day in favour of the env store and
 `.context/reference/environment.md`; the migration command (`kb.py import <dir>`) and every other code path
-that knew about it were removed on 2026-09-26 (#78), once every machine had moved. `kit-health` keeps one
+that knew about it were removed on 2026-09-26, once every machine had moved. `kit-health` keeps one
 line: a leftover `.claude/profiles/` directory is a warning to delete it. A row a migration wrote still
 carries `import:<name> <date>` as its provenance and reads like any dated row.
 

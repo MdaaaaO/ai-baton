@@ -1,4 +1,4 @@
-"""CI hygiene (#81): third-party actions pinned by commit SHA, Dependabot keeps them fresh, every job runs on GitHub-hosted
+"""CI hygiene: third-party actions pinned by commit SHA, Dependabot keeps them fresh, every job runs on GitHub-hosted
 runners, and `kit-health --ci` runs against a blank store without writing anything.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
@@ -83,7 +83,7 @@ class Hosting(unittest.TestCase):
 
 class EngineMakefile(unittest.TestCase):
     def test_context_value_has_no_trailing_blanks(self):
-        """#81: an inline `# comment` after `CONTEXT := …` leaves the blanks before it in the value, and every recipe
+        """an inline `# comment` after `CONTEXT := …` leaves the blanks before it in the value, and every recipe
         then reads a store literally named `.context  `."""
         # neither CONTEXT nor CONTEXT_ROOT inherited: the assertion is about what the Makefile derives, not the caller's store
         env = {k: v for k, v in os.environ.items() if k not in ("CONTEXT", "CONTEXT_ROOT")}

@@ -1,5 +1,5 @@
 """frontmatter.py / migrate_frontmatter.py / kit_verify.check_unit — the Claude Code profile of the Agent Skills
-spec (#113). Stdlib unittest, no env store needed. Run: make -C .claude/context-db test."""
+spec. Stdlib unittest, no env store needed. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import sys
 import tempfile
@@ -87,7 +87,7 @@ class Parser(unittest.TestCase):
         self.assertEqual(fm["model"], "sonnet")
 
     def test_every_kit_unit_parses_and_declares_metadata(self):
-        self.assertTrue((KIT / "docs" / "templates" / "skill" / "SKILL.md").is_file())  # #115: the scaffold, outside skills/
+        self.assertTrue((KIT / "docs" / "templates" / "skill" / "SKILL.md").is_file())  # the scaffold, outside skills/
         self.assertFalse((KIT / "skills" / "_template").exists())  # Claude Code would load it as a live skill
         for p in fmt.units(KIT):
             fm = fmt.load(p)

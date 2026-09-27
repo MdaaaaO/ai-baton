@@ -58,7 +58,7 @@ my_commit=$(jq -r 'if .==null then "" else .commit_id end' <<<"$mine")
 if [ -z "$my_commit" ]; then mode=full
 elif [ "${marker_head:-$my_commit}" = "$head" ]; then mode=replies_only
 else mode=follow_up; fi
-# bot verdict: one helper, shared with pr-scan/pr-watch/pr-merge/trivial-check (#56) — pass the reviews
+# bot verdict: one helper, shared with pr-scan/pr-watch/pr-merge/trivial-check — pass the reviews
 # we already fetched so this costs no extra gh call; exit 2 (no bot configured) reads as "n/a", never a failure.
 bot_err=$(mktemp)
 bot=$(bash "$KIT/skills/pr-watch/bot-verdict.sh" "$repo" "$pr" "$head" "$out/reviews.json" 2>"$bot_err"); bot_rc=$?

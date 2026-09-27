@@ -6,7 +6,7 @@ A transcript is JSONL; every API request the session made appears as an `assista
 several assistant lines that repeat the same usage, so usage is de-duplicated per request id
 (`requestId`, else `message.id`). `session_stats.py` (one session's stats) and the cost-report
 skill (every transcript in a window) both read usage this way — this module is the shared path,
-so the two never drift (#80).
+so the two never drift.
 
   usage_records(path, seen)   → (record, message, usage, request_id) per new API request in one file
   tokens(usage)               → (input, cache_write, cache_read, output)

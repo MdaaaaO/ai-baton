@@ -122,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           # REST, not `gh pr merge`: the fine-grained PAT is refused on the GraphQL `repository.pullRequest`
-          # query gh runs first (run 36247528682, PR #137). `sha` is the head the gates checked — GitHub
+          # query gh runs first. `sha` is the head the gates checked — GitHub
           # answers 409 if it moved. Subject/body come from the repo's squash settings (PR title / PR body).
           if out=$(gh api -X PUT "repos/$REPO/pulls/$PR/merge" -f merge_method=squash -f sha="$SHA" 2>&1); then
             echo "auto-merge: merged PR #$PR at $SHA"

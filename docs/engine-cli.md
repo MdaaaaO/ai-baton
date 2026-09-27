@@ -105,7 +105,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py zone           # the zone timestamps render in (UTC when WORKSPACE_TZ is unknown)
-                        python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig (#116)
+                        python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
@@ -390,7 +390,7 @@ options:
 usage: migrate_frontmatter.py [-h] [--dry-run | --check] [paths ...]
 
 migrate_frontmatter.py — move the kit's bookkeeping keys under `metadata:`
-(Agent Skills spec, #113).
+(Agent Skills spec).
 
 positional arguments:
   paths       files to migrate (default: every skill and agent of the kit)

@@ -43,7 +43,7 @@ Usage:
                                                  (`slack.channels` → `slack.channel`) moved; prints the
                                                  skills now off here; --check = dry run, exit 3 when pending; --off = only that list
   kb.py init --blank                           → create an empty store (never overwrites anything)
-  kb.py init --personal                        → blank store + the zero-config GitHub-only fill (#117): identity
+  kb.py init --personal                        → blank store + the zero-config GitHub-only fill: identity
                                                  from `gh api user`, tracked repos from the workspace clones,
                                                  tz from the OS, every systems.* false — discovered, never asked
   kb.py path                                   → the store directory
@@ -89,7 +89,7 @@ RENAMED_KINDS: dict[tuple[str, str], tuple[str, str]] = {("slack", "channels"): 
 
 # `learned-from` is structured so `stale` can measure a row's age: `<who> <YYYY-MM-DD>` with who =
 # tool:<tool-name> (a discovery tool answered) | user (the user said so — never stale) | derived:<key> (computed
-# from another fact). Rows written by the retired `kb.py import` (`import:<env> <date>`, #78) still read fine: the
+# from another fact). Rows written by the retired `kb.py import` (`import:<env> <date>`) still read fine: the
 # date is what `stale` measures, the `import:` word is treated as free text.
 PROVENANCE = re.compile(r"^(user|tool:[\w.-]+|derived:[\w. /:-]+?)(?:\s+(\d{4}-\d{2}-\d{2}))?$")
 MANIFEST_DIR = KIT / "context-db" / "discovery"   # the kit's manifests; the store's `_discovery/` overlays them
@@ -284,7 +284,7 @@ def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", l
     """Upsert one row; returns 'added' | 'updated' | 're-verified' | 'unchanged'. `learned` is validated as a
     provenance unless `keep_learned` (migrations carry a legacy cell over as-is). A row whose value and purpose
     are unchanged but that arrives with an explicit `--from` is RE-VERIFIED: its provenance (and date) is
-    rewritten, so re-running a discovery clears a stale row (#58 E01); without `--from` it is `unchanged`."""
+    rewritten, so re-running a discovery clears a stale row; without `--from` it is `unchanged`."""
     if not re.fullmatch(r"[A-Za-z0-9][\w.:/@+-]*", kind):
         raise usage_error(f"bad kind '{kind}' (letters, digits, `.:/@+-`)")
     if not name or not name.strip() or name != name.strip():
@@ -459,7 +459,7 @@ def validate_manifests() -> list[str]:
             errs.append(f"{rel}: 'when' must be {{\"config\": \"<dotted.key>\", \"equals\": <value>}}")
         facts = m.get("facts")
         if not isinstance(facts, list) or (not facts and not str(m.get("note") or "").strip()):
-            errs.append(f"{rel}: 'facts' must be a list — empty only with a 'note' saying why the flag has no store fact yet (#79)")
+            errs.append(f"{rel}: 'facts' must be a list — empty only with a 'note' saying why the flag has no store fact yet")
             continue
         seen: set[str] = set()
         for f in facts:
@@ -601,7 +601,7 @@ def render(template, name: str, cfg: dict):
 def cli_provenance(template_cmd: str, rendered_cmd: str) -> str:
     """`tool:<first word of the command>` for a `cli` fact — from the rendered command, else the template's first word,
     else `tool:cli`; always something `PROVENANCE` accepts, so the plan's write line never names an unfilled
-    `<config.x unset …>` placeholder as the tool (#58 E32)."""
+    `<config.x unset …>` placeholder as the tool."""
     for cmd in (rendered_cmd, template_cmd):
         first = cmd.split()[0] if cmd.split() else ""
         if PROVENANCE.match(f"tool:{first}"):
@@ -713,7 +713,7 @@ def load_config() -> dict:
         return {}
     try:
         return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:  # one line naming the file, never a traceback (#59 E16)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:  # one line naming the file, never a traceback
         raise SystemExit(f"{p}: invalid JSON — {e}; fix it (or move it aside and `kb.py init --blank`)")
     except OSError as e:
         raise SystemExit(f"{p}: cannot read — {e}")
@@ -750,7 +750,7 @@ RENAMED_SYSTEMS = {"snowflake": "datalake"}  # old flag → new flag (2026-09-25
 # The flags whose system is reached through an MCP server in the session (no CLI to probe from a shell): kit-health § 4
 # says so instead of probing them; the others are a CLI (`aws`, `gh`/`git`) or an identity variable (`lattice`).
 MCP_BACKED = ("jira", "slack", "notion", "datalake", "incident_io")
-# The vocabulary each capability brings with it (#121). A unit whose `requires` lacks the flag but whose added lines use
+# The vocabulary each capability brings with it. A unit whose `requires` lacks the flag but whose added lines use
 # one of these words is pre-flagged for the reviewer's judgment (review_evidence.py) — never failed outright: "a DAG of
 # steps" is not an Airflow dependency. Words are matched whole, case-sensitively; generic terms (tracker, chat, datalake,
 # BI tool, cloud account) are what a unit without the capability uses instead.
@@ -816,7 +816,7 @@ def close_reason_problems(cfg: dict) -> list[str]:
 
 def systems_of(cfg: dict) -> dict:
     """`cfg["systems"]` as the flag object: `null`/absent is `{}` (nothing set); a list or a string is the one-line
-    type error kit-verify already reports for that store, never a traceback from `dict(list)` / `str.get` (#136)."""
+    type error kit-verify already reports for that store, never a traceback from `dict(list)` / `str.get`."""
     systems = cfg.get("systems") or {}
     if not isinstance(systems, dict):
         raise SystemExit(f"kb: systems must be an object of true/false flags, got {systems!r} — "
@@ -827,7 +827,7 @@ def systems_of(cfg: dict) -> dict:
 def migrate_config(cfg: dict) -> list[str]:
     """Bring `systems` up to the kit's flag set in place. Returns one line per change (empty = current)."""
     done: list[str] = []
-    systems = cfg["systems"] = systems_of(cfg)  # `systems: null` reads as nothing set (#59): migrate adds every flag
+    systems = cfg["systems"] = systems_of(cfg)  # `systems: null` reads as nothing set: migrate adds every flag
     legacy = dict(systems)
     for old, new in RENAMED_SYSTEMS.items():
         if old in systems:
@@ -908,7 +908,7 @@ def template_config_keys() -> set[str]:
 
 
 def config_key_drift() -> list[str]:
-    """Where blank_config() and the template disagree on the key set — empty when they are one list (#58 E10):
+    """Where blank_config() and the template disagree on the key set — empty when they are one list:
     every non-optional template key is in the blank store, every blank key is documented by the template, the
     template's `systems` flags are exactly kb.SYSTEMS, and every structural key a script reads is documented."""
     want = template_config_keys()
@@ -982,7 +982,7 @@ def main(argv: list[str]) -> int:
     cs = sub.add_parser("config-set"); cs.add_argument("key"); cs.add_argument("value")
     i = sub.add_parser("init"); grp = i.add_mutually_exclusive_group(required=True)
     grp.add_argument("--blank", action="store_true")
-    grp.add_argument("--personal", action="store_true", help="blank store + the zero-config GitHub-only fill (#117): identity from gh, repos from the workspace clones, tz from the OS — no questions")
+    grp.add_argument("--personal", action="store_true", help="blank store + the zero-config GitHub-only fill: identity from gh, repos from the workspace clones, tz from the OS — no questions")
     sub.add_parser("path")
     mg = sub.add_parser("migrate")
     mg_mode = mg.add_mutually_exclusive_group()

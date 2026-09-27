@@ -36,7 +36,7 @@ jobs:
           path: .claude
           fetch-depth: 0  # the review gate diffs against the base branch
 
-      # Tier 0 of the review (#121, docs/REVIEW.md § 1): what a diff against the base decides without a model — leak
+      # Tier 0 of the review (docs/REVIEW.md § 1): what a diff against the base decides without a model — leak
       # shapes on every added line, a version + `updated` bump and a CHANGELOG line for every changed skill/agent. The
       # bump check is skipped for a PR the author marks wording-only (`wording` label, or `[skip-bump]` in the title or
       # body) — the claim stays visible on the PR for the reviewer to question.
@@ -52,7 +52,7 @@ jobs:
           [ "$SKIP_BUMP" = "true" ] && set -- "$@" --skip-bump
           python3 context-db/bin/review_gate.py "$@"
 
-      # The environment-free validator (#114): the check a contributor runs on a bare clone
+      # The environment-free validator: the check a contributor runs on a bare clone
       # (`make -C .claude/context-db verify-skill`) — frontmatter schema, body, leak shapes. `--no-env` reads no
       # store, so a previous run's .context left on a persistent runner changes nothing here.
       - name: Env-free validator (kit-verify --no-env)
@@ -67,7 +67,7 @@ jobs:
       - name: Skills and agents carry versioning frontmatter
         run: make -C .claude/context-db kit-verify
 
-      # kit-health's leak scan against the blank store (#81 A31): the shapes plus whatever a store carries — here
+      # kit-health's leak scan against the blank store: the shapes plus whatever a store carries — here
       # nothing — over every kit file; CI mode writes nothing under .context/ and fails on an error or a leak hit.
       - name: kit-health --ci (leak scan, no writes)
         run: python3 .claude/skills/kit-health/kit-health.py --ci --quiet
@@ -80,7 +80,7 @@ jobs:
       - name: Eval suite (static, no tokens)
         run: make -C .claude/context-db eval-check
 
-      # The plugin manifests (#118) through Claude Code's own validator. A hosted runner has no `claude` CLI, and the
+      # The plugin manifests through Claude Code's own validator. A hosted runner has no `claude` CLI, and the
       # Makefile target skips silently without one — so install it first (no account needed to validate); a failed
       # install fails the step rather than dropping the check. Pinned like every other CI dependency; bump on purpose.
       - name: Install the Claude Code CLI
@@ -104,7 +104,7 @@ jobs:
           exit $rc
 
       # setup.sh / sync.sh run under `sh` (dash on most hosts) at every session end: a bashism passes `bash -n` and
-      # breaks every machine (#81 A04), so every `#!/bin/sh` script is parsed by dash too.
+      # breaks every machine, so every `#!/bin/sh` script is parsed by dash too.
       - name: POSIX scripts parse under dash
         working-directory: .claude
         run: |
@@ -116,7 +116,7 @@ jobs:
           done
           exit $rc
 
-      # shellcheck -S warning (#81 A05): the system binary where the runner has one, else the PyPI wheel through uvx
+      # shellcheck -S warning: the system binary where the runner has one, else the PyPI wheel through uvx
       # (the runner has uv for pr-title/release); fixtures are test data.
       - name: shellcheck
         working-directory: .claude
@@ -126,7 +126,7 @@ jobs:
           elif command -v uvx >/dev/null 2>&1; then uvx --from shellcheck-py shellcheck -S warning $files
           else echo "::error::neither shellcheck nor uvx on this runner"; exit 1; fi
 
-      # every relative Markdown link in the kit resolves (#81 A30)
+      # every relative Markdown link in the kit resolves
       - name: Markdown links resolve
         working-directory: .claude
         run: python3 context-db/bin/check_links.py

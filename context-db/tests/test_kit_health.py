@@ -1,4 +1,4 @@
-"""kit-health.py's deterministic helpers and the shared leak shapes (#60): separated streams, no token exemption,
+"""kit-health.py's deterministic helpers and the shared leak shapes: separated streams, no token exemption,
 tracker-aware ticket shape, anchored allow-list, loader errors reported, a plain run that never writes the DB.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
@@ -55,20 +55,20 @@ class Shapes(unittest.TestCase):
         self.assertEqual(len(leak_shapes.shapes("jira", r"\b(PROJ-\d+)\b")), len(leak_shapes.LEAK_SHAPES) + 1)
 
     def test_a_key_fitting_both_ticket_shapes_is_one_hit(self):
-        # #136: both scanners stop at the first shape per line, so a key the generic shape AND tracker.key_regex match
+        # both scanners stop at the first shape per line, so a key the generic shape AND tracker.key_regex match
         # is one row (the generic one), never two
         hits = leak_shapes.scan(f"see {PROJ}\n", shapes=leak_shapes.shapes("jira", r"\b(PROJ-\d+)\b"))
         self.assertEqual(hits, [(1, "ticket key", PROJ)])
 
     def test_no_token_exempts_a_line(self):
-        # #60 finding 2: the bare `kit-health` token used to exempt every line mentioning the skill
+        # the bare `kit-health` token used to exempt every line mentioning the skill
         kh = load_kit_health()
         self.assertIs(kh.SKIP_LINE, leak_shapes.SKIP_LINE)
         self.assertEqual(len(leak_shapes.scan(f"kit-health posts to {LEAK}\n")), 1)
         self.assertEqual(leak_shapes.scan(f'  facts: "slack.channel {LEAK}"\n'), [])
 
     def test_allow_list_is_anchored(self):
-        # #60 finding 9: `README.md:acme` must not allow `docs/README.md:acme…`; a prefix entry still allows its own path
+        # `README.md:acme` must not allow `docs/README.md:acme…`; a prefix entry still allows its own path
         pats = (re.compile("skills/x/SKILL.md:C0"), re.compile(r"docs/a\.md:KEY-1$"))
         self.assertTrue(leak_shapes.is_allowed("skills/x/SKILL.md", LEAK, pats))
         self.assertFalse(leak_shapes.is_allowed("docs/skills/x/SKILL.md", LEAK, pats))
@@ -79,7 +79,7 @@ class Shapes(unittest.TestCase):
         return [what.split(" (")[0] for what in self.hits(text)]
 
     def test_universal_sandbox_wording_shape(self):
-        # #76: a sandbox stated as the universe is a leak of one machine; a conditional or the config key is not
+        # a sandbox stated as the universe is a leak of one machine; a conditional or the config key is not
         sb = "sand" + "box"  # assembled so this file never reads as a hit itself
         for s in (f"This {sb} cannot run it", f"The {sb} has no browser", f"works from the {sb}", f"shared by every session on this {sb}",
                   f"the {sb} token lacks the scope", f"a variable that is {sb}-only", f"the {sb} lacks a keyring", f"{sb} can't sign"):
@@ -89,7 +89,7 @@ class Shapes(unittest.TestCase):
             self.assertEqual(self.kinds(s), [], s)
 
     def test_sandbox_only_path_and_variable_shapes(self):
-        # #76: the mount path and the per-job directory variable exist on one kind of machine only — any expansion of the
+        # the mount path and the per-job directory variable exist on one kind of machine only — any expansion of the
         # variable is a hit now (before: only a path under it), a read through os.environ in the resolver is not
         sb = "sand" + "box"
         self.assertEqual(self.kinds("check for " + "/run/" + sb + "/source"), [f"{sb}-only path"])
@@ -101,7 +101,7 @@ class Shapes(unittest.TestCase):
         self.assertEqual(self.kinds("a path like /run/lock or /run/user/1000"), [])
 
     def test_memory_note_pointer_shapes(self):
-        # #76: every form a pointer to a personal note took in the kit; the harness auto-memory feature named generically is not one
+        # every form a pointer to a personal note took in the kit; the harness auto-memory feature named generically is not one
         note = "some-" + "note"
         mn, mem = "memory " + "note", "Memor" + "ies:"  # the pointer forms themselves, assembled so this file is no hit
         for s in (f"(memory `{note}`)", f"in the {mn} `{note}.md`", f"{mem} `{note}`, `other`", f"live in the {mn}",
@@ -112,13 +112,13 @@ class Shapes(unittest.TestCase):
             self.assertEqual(self.kinds(s), [], s)
 
     def test_mcp_backed_is_a_subset_of_systems(self):
-        # #76 (kit-health finding 21): kit-health reads the MCP-backed list from kb.py, beside the flag list it must stay a subset of
+        # kit-health reads the MCP-backed list from kb.py, beside the flag list it must stay a subset of
         self.assertTrue(set(kb.MCP_BACKED) <= set(kb.SYSTEMS), kb.MCP_BACKED)
         self.assertNotIn("aws_sso", kb.MCP_BACKED)
         self.assertNotIn("lattice", kb.MCP_BACKED)
 
     def test_allow_txt_ships_no_login_or_readme_entry(self):
-        # #60 finding 1: the kit's own repo name is exempt by kit_repo()/kit_dependencies(); allow.txt carries no identity
+        # the kit's own repo name is exempt by kit_repo()/kit_dependencies(); allow.txt carries no identity
         lines = [ln.split("#", 1)[0].strip() for ln in (KIT / "skills" / "kit-health" / "allow.txt").read_text(encoding="utf-8").splitlines()]
         self.assertFalse([ln for ln in lines if ln.startswith("README.md:")], lines)
 
@@ -158,7 +158,7 @@ class ReadOnlyRun(unittest.TestCase):
         return "\n".join(r.lines)
 
     def test_plain_run_never_rewrites_index(self):
-        # #60 finding 3: a plain run executed `make verify index` on the live DB; now it reports the stale index instead
+        # a plain run executed `make verify index` on the live DB; now it reports the stale index instead
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / ".context"
             env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_TZ"}
@@ -183,7 +183,7 @@ class ReadOnlyRun(unittest.TestCase):
 
 
 class ReviewFindings(unittest.TestCase):
-    """#121: the fixed finding shape is counted per level and rule — resolved thread = acted on, open = dismissed."""
+    """the fixed finding shape is counted per level and rule — resolved thread = acted on, open = dismissed."""
 
     def test_finding_stats_counts_only_bot_findings_in_shape(self):
         kh = load_kit_health()
@@ -214,7 +214,7 @@ class ReviewFindings(unittest.TestCase):
 
 
 class Seeds(unittest.TestCase):
-    """#79: a seeded copy older than its template's last commit is stale; the check never reads git when a time function
+    """a seeded copy older than its template's last commit is stale; the check never reads git when a time function
     is injected, and a missing file on either side is not stale."""
 
     def test_stale_seeds_compares_template_commit_time_with_copy_mtime(self):
@@ -236,7 +236,7 @@ class Seeds(unittest.TestCase):
 
 
 class Verdict(unittest.TestCase):
-    """#83: the stamp refuses on un-accepted leak hits, the value scan skips common-word kinds and short plain words,
+    """the stamp refuses on un-accepted leak hits, the value scan skips common-word kinds and short plain words,
     every reported value is redacted, the changed-units list comes from git."""
 
     def test_may_stamp_needs_no_errors_and_no_leak_hits(self):

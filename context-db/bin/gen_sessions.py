@@ -10,7 +10,7 @@ An active entry whose heartbeat is older than STALE_HOURS is flagged ⚠ STALE �
 owning session may be gone; re-verify with `ListAgents` (match by ref) before
 trusting or messaging it. Stdlib only; run via `make -C $BATON/context-db session-index`.
 
-Size discipline (#71): WORKSPACE.md tells every session to read this file first, so it is
+Size discipline: WORKSPACE.md tells every session to read this file first, so it is
 part of every session's start-up cost. Active/idle rows carry everything (working_on,
 responsibilities, stats); ended rows are one short line — name, ended-at, the first line
 of the next-session prompt — for the newest MAX_ENDED sessions, older ones by name only.

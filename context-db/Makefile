@@ -52,7 +52,7 @@ BIN     := $(ENGINE)bin
 # kit_profile.py context = CONTEXT_ROOT, else the first of ../../.context, ../../../.context that exists
 # (so the engine also works from a kit worktree under <root>/.worktrees/<name>/).
 PY      := python3
-# Evaluated once, not per reference (#81 E17). No inline comment here: make keeps the blanks before a `#`
+# Evaluated once, not per reference. No inline comment here: make keeps the blanks before a `#`
 # in the value, and `.context  ` is not the store.
 ifeq ($(origin CONTEXT),undefined)
 CONTEXT := $(shell $(PY) $(BIN)/kit_profile.py context)
@@ -100,7 +100,7 @@ sync-check:
 kit-health:
 	@$(PY) $(ENGINE)../skills/kit-health/kit-health.py --stale $(or $(STALE),90)
 
-# make engine-cli-doc  — docs/engine-cli.md, generated from `make help` + every engine tool's --help (#82);
+# make engine-cli-doc  — docs/engine-cli.md, generated from `make help` + every engine tool's --help;
 # tests/test_engine_cli_doc.py fails CI when the committed doc drifts from this output.
 engine-cli-doc:
 	@$(PY) $(BIN)/gen_engine_cli.py
@@ -128,7 +128,7 @@ test:
 kit-verify:
 	@cd $(BIN) && $(PY) kit_verify.py $(if $(STALE),--stale $(STALE),)
 
-# make verify-skill [UNIT=skills/<name>|agents/<name>.md …]  — the environment-free validator (#114): the same
+# make verify-skill [UNIT=skills/<name>|agents/<name>.md …]  — the environment-free validator: the same
 # frontmatter, body and leak-shape checks as kit-verify, no env store or .context/ needed, so a contributor
 # runs it on a bare clone. UNIT (not PATH: a make variable named PATH would shadow the shell's) is relative
 # to the kit root; without it every unit is checked.
@@ -163,11 +163,11 @@ eval:
 	  $(if $(MODEL),--model '$(MODEL)',) $(if $(RUNS),--runs $(RUNS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),) \
 	  $(if $(MAX_COST),--max-cost-usd $(MAX_COST),) $(if $(TRUST),--trust-plugin,)
 
-# The relative Markdown links of every tracked *.md resolve (#81 A30); templates seeded elsewhere are skipped.
+# The relative Markdown links of every tracked *.md resolve; templates seeded elsewhere are skipped.
 check-links:
 	@cd $(ENGINE).. && $(PY) context-db/bin/check_links.py
 
-# shellcheck -S warning over every tracked shell script and the git hooks (#81 A05): the system binary, else the
+# shellcheck -S warning over every tracked shell script and the git hooks: the system binary, else the
 # PyPI wheel through uvx; a machine with neither says so (CI has uv).
 shellcheck:
 	@cd $(ENGINE).. && files="$$(git ls-files '*.sh' | grep -v /fixtures/) hooks/pre-push hooks/commit-msg"; \
@@ -182,7 +182,7 @@ plugin-validate:
 	@cd $(ENGINE).. && if command -v claude >/dev/null 2>&1; then claude plugin validate --strict . && claude plugin validate --strict skills >/dev/null && claude plugin validate --strict agents >/dev/null && echo "plugin validate: OK"; \
 	  else echo "plugin validate: skipped (no \`claude\` CLI on this machine)"; fi
 
-# Tier 0 and tier 1 of the review (#121, docs/REVIEW.md): the gate fails on a leak shape in an added line or a changed
+# Tier 0 and tier 1 of the review (docs/REVIEW.md): the gate fails on a leak shape in an added line or a changed
 # unit without version/CHANGELOG bump (SKIP_BUMP=1 for a wording-only change); the evidence file is what the CI
 # reviewer reads (.review/ is git-ignored).
 BASE ?= origin/main

@@ -87,7 +87,7 @@ class IndexAndVerify(ContextRoot):
         self.assertIn("INDEX.md is stale", v.stderr)
 
     def test_non_utf8_doc_is_named_and_the_rest_is_indexed(self):
-        # #59 E06: one bad byte killed `make index` / `make verify` with a traceback that named no file
+        # one bad byte killed `make index` / `make verify` with a traceback that named no file
         (self.root / "repos" / "latin1.md").write_bytes(b"---\ntitle: caf\xe9\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n")
         r = run(self.root, "gen_index.py")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -100,7 +100,7 @@ class IndexAndVerify(ContextRoot):
         self.assertIn("repos/latin1.md: not valid UTF-8", v.stderr)
 
     def test_index_diff_ignores_only_the_generated_line(self):
-        # #59 E19: every line starting with `_` was dropped from the comparison, so a hand-edit slipped through
+        # every line starting with `_` was dropped from the comparison, so a hand-edit slipped through
         run(self.root, "gen_index.py")
         p = self.root / "INDEX.md"
         text = p.read_text(encoding="utf-8")
@@ -153,7 +153,7 @@ class NewSh(ContextRoot):
         self.assertEqual(run(self.root, "verify.py").returncode, 0)
 
     def test_special_characters_in_values_survive(self):
-        # #59 E07: the sed substitution was unescaped — `/`, `&`, `\\` and the `|` delimiter corrupted the scaffold
+        # the sed substitution was unescaped — `/`, `&`, `\\` and the `|` delimiter corrupted the scaffold
         title = "A/B & C\\D | E $x"
         r = self.new(TYPE="repo", SLUG="weird", TITLE=title)
         self.assertEqual(r.returncode, 0, r.stderr)

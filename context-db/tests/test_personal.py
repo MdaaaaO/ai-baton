@@ -1,4 +1,4 @@
-"""personal.py — the zero-config GitHub-only path (#117): discovered values fill only blank defaults, a run with a fake
+"""personal.py — the zero-config GitHub-only path: discovered values fill only blank defaults, a run with a fake
 `gh` yields a store kit-verify accepts, a run without gh still completes with a line to fill. Stdlib unittest.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations

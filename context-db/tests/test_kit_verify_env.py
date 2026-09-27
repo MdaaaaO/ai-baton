@@ -92,7 +92,7 @@ class EnvStore(unittest.TestCase):
         self.assertEqual(self.check(), [])
 
     def test_null_or_wrong_typed_sections_are_problems_not_tracebacks(self):
-        # #59 E05: `tracker: null` raised AttributeError inside the verifier
+        # `tracker: null` raised AttributeError inside the verifier
         self.edit(tracker=None)
         errors = self.check()
         self.assertTrue(all("Traceback" not in e for e in errors))

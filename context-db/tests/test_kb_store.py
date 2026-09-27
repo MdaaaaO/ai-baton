@@ -92,7 +92,7 @@ class InitAndConfig(StoreCase):
 
 class Rows(StoreCase):
     def test_same_value_with_an_explicit_from_is_re_verified(self):
-        # #58 E01: re-running a discovery on a still-valid fact must re-date its provenance, or `stale` never clears
+        # re-running a discovery on a still-valid fact must re-date its provenance, or `stale` never clears
         old = (dt.date.today() - dt.timedelta(days=400)).isoformat()
         kb.set_fact("slack", "channel", "eng-help", "C1", "help", f"tool:slack_search_channels {old}")
         self.assertEqual(len(kb.stale_rows()), 1)
@@ -111,7 +111,7 @@ class Rows(StoreCase):
         self.assertEqual((rc, out.strip()), (0, "re-verified slack.channel eng-help"))
 
     def test_empty_name_is_a_usage_error_and_writes_nothing(self):
-        # #58 E02: `kb.py set github.person "" x` printed `added github.person ` and persisted nothing
+        # `kb.py set github.person "" x` printed `added github.person ` and persisted nothing
         before = (self.env / "github.md").read_text(encoding="utf-8")
         for bad in ("", "   ", " alice", "a|b"):
             rc, out, err = self.cli("set", "github.person", bad, "x")
@@ -182,7 +182,7 @@ class Rows(StoreCase):
             kb.normalize_provenance("found it in a thread")
         for who in ("user", "tool:slack_search_channels", "derived:tracker.key_regex"):
             self.assertRegex(kb.normalize_provenance(who), rf"^{who} \d{{4}}-\d{{2}}-\d{{2}}$")
-        with self.assertRaises(SystemExit):  # #78: the retired migration's provenance word is no longer accepted for new rows
+        with self.assertRaises(SystemExit):  # the retired migration's provenance word is no longer accepted for new rows
             kb.normalize_provenance("import:acme")
         self.assertEqual(kb.normalize_provenance("user 2026-01-01"), "user 2026-01-01")  # a given date is kept
 
@@ -217,7 +217,7 @@ class RenamedKinds(StoreCase):
         self.assertEqual(errors, [])
 
     def test_rm_and_list_resolve_the_renamed_kind_and_rm_bumps_updated(self):
-        # #58 E03: `rm slack.channels x` failed on a row written as `slack.channel x`; rm never bumped updated:
+        # `rm slack.channels x` failed on a row written as `slack.channel x`; rm never bumped updated:
         self.write_legacy_channels()
         kb.set_fact("slack", "channel", "canon", "C-CANON")
         rc, out, _ = self.cli("list", "slack.channels")
@@ -289,7 +289,7 @@ class Stale(StoreCase):
 
 class MigrateConfig(StoreCase):
     def test_null_systems_migrates_and_lists_off_units(self):
-        # #59: kit-verify's remedy for `systems: null` is `kb.py migrate` — which must not traceback on that input
+        # kit-verify's remedy for `systems: null` is `kb.py migrate` — which must not traceback on that input
         cfg = {"systems": None}
         done = kb.migrate_config(cfg)
         self.assertEqual(set(cfg["systems"]), set(kb.SYSTEMS))
@@ -303,7 +303,7 @@ class MigrateConfig(StoreCase):
         self.assertEqual(set(kb.load_config()["systems"]), set(kb.SYSTEMS))
 
     def test_non_dict_systems_is_a_one_line_error(self):
-        # #136: a truthy non-dict `systems` (a list, a string) reached `dict(systems)` / `.get` — kit-verify's type
+        # a truthy non-dict `systems` (a list, a string) reached `dict(systems)` / `.get` — kit-verify's type
         # error is the answer here too, one line and exit 1, never a traceback
         for bad in (["slack"], "yes"):
             with self.assertRaises(SystemExit) as cm:
@@ -321,14 +321,14 @@ class MigrateConfig(StoreCase):
         self.assertIn("systems must be an object of true/false flags", r.stderr)
 
     def test_null_self_assessment_does_not_crash(self):
-        cfg = {"systems": {}, "self_assessment": None}        # #58 E25
+        cfg = {"systems": {}, "self_assessment": None}
         kb.migrate_config(cfg)
         self.assertEqual(set(cfg["systems"]), set(kb.SYSTEMS))
         cfg = {"systems": {}, "self_assessment": {"sources": None}}
         kb.migrate_config(cfg)
 
     def test_blank_config_and_template_are_one_key_set(self):
-        # #58 E10: three sources of truth → kb owns the optional set, the template documents every key,
+        # three sources of truth → kb owns the optional set, the template documents every key,
         # config_key_drift() fails kit-verify when blank_config() and the template disagree
         self.assertEqual(kb.config_key_drift(), [])
         self.assertIs(kit_verify.OPTIONAL, kb.OPTIONAL_CONFIG_KEYS)
@@ -372,7 +372,7 @@ class MigrateConfig(StoreCase):
 
 class Projection(StoreCase):
     def test_digit_values_keep_leading_zeros(self):
-        # #58 E15: `int("0123")` dropped the zeros of an id; a digit string projects to int only when that round-trips
+        # `int("0123")` dropped the zeros of an id; a digit string projects to int only when that round-trips
         kb.set_fact("tracker", "transition", "in_review", "007")
         kb.set_fact("tracker", "transition", "done", "31")
         kb.set_fact("slack", "channel", "zero", "0123")
@@ -389,7 +389,7 @@ class Projection(StoreCase):
 
 class Discover(StoreCase):
     def test_cli_plan_provenance_is_always_valid(self):
-        # #58 E32: a `cli` command whose first word is an unfilled placeholder produced `--from tool:<config.x` (rejected)
+        # a `cli` command whose first word is an unfilled placeholder produced `--from tool:<config.x` (rejected)
         self.assertEqual(kb.cli_provenance("gh api x", "gh api x"), "tool:gh")
         self.assertEqual(kb.cli_provenance("{config.datalake.cli} query", "<datalake.cli unset — kb.py discover datalake.cli> query"), "tool:cli")
         self.assertEqual(kb.cli_provenance("", ""), "tool:cli")

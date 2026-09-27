@@ -220,7 +220,7 @@ by hand. Workflow runs from outside contributors wait for the owner's approval (
 `.github/CODEOWNERS` puts every change to `.github/workflows/` under the owner's review. `release` and `main-guard`
 (push to main) and `auto-merge` (`workflow_run`, always the copy on main) check out no pull request.
 `tests/test_ci_hygiene.py` fails when any workflow names a self-hosted runner. Each hosted job is a fresh VM, so
-parallel reviews never race on one shared Claude Code install (#119).
+parallel reviews never race on one shared Claude Code install.
 
 ## Testing
 
@@ -244,7 +244,7 @@ and `pr-open/diagram-plan.py`, and the `pr-issue` parser (`.github/scripts/check
 
 ## Code review
 
-Three tiers (#121), one rule book — [`docs/REVIEW.md`](REVIEW.md):
+Three tiers, one rule book — [`docs/REVIEW.md`](REVIEW.md):
 
 - **Tier 0 — `ci.yml`, no model, fails the PR.** `review_gate.py` scans every line the PR *adds* for the shared
   leak shapes plus e-mail, home-path and token shapes, and requires a higher `metadata.version`, an `updated` on or
@@ -281,7 +281,7 @@ Three tiers (#121), one rule book — [`docs/REVIEW.md`](REVIEW.md):
   verdict until the re-review lands. A PR that edits `claude-review.yml` itself gets no review: for `pull_request`
   events GitHub runs the PR's copy of the file, and the action then skips itself with a warning ("Workflow
   validation failed. The workflow file must exist and have identical content to the version on the repository's
-  default branch" — verified on #150's run), so the check turns green without a verdict, auto-merge never fires
+  default branch" — verified on a live run), so the check turns green without a verdict, auto-merge never fires
   and the owner merges that PR by hand. Everything else in the PR's copy is live, which is why the rules are read
   from the base branch (`.review/RULES.md`) and why the server-side gate on `.github/workflows/**` is the
   `main` ruleset's code-owner review (`.github/CODEOWNERS` assigns that path to the maintainer).

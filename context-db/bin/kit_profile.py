@@ -22,7 +22,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py zone           # the zone timestamps render in (UTC when WORKSPACE_TZ is unknown)
-                        python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig (#116)
+                        python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
@@ -111,7 +111,7 @@ def recorded_install_mode() -> str:
 
 def context_root() -> Path:
     """`CONTEXT_ROOT`, else the `.context/` beside the kit — also found from a kit worktree
-    (`<root>/.worktrees/<name>/`), where the sibling is two levels up. On the plugin path (#118) the kit sits in
+    (`<root>/.worktrees/<name>/`), where the sibling is two levels up. On the plugin path the kit sits in
     Claude Code's plugin cache: `CLAUDE_PROJECT_DIR` (hooks get it, and the SessionStart hook re-exports it), else
     the nearest env store above the current directory — the Bash tool starts in the project dir but is not handed
     `CLAUDE_PROJECT_DIR` (#3). The walk-up is the last resort and a plugin install's only: it runs when neither
@@ -134,7 +134,7 @@ def context_root() -> Path:
     except OSError:  # the current directory was deleted under us
         return KIT.parent / ".context"
     for base in (cwd, *cwd.parents):
-        if base == home:  # never `~/.context` (#168: the home dir is not a workspace root)
+        if base == home:  # never `~/.context` (#68: the home dir is not a workspace root)
             break
         try:
             if (base / ".context" / "reference" / "env" / "config.json").is_file():
@@ -151,7 +151,7 @@ TEMPLATES_DIR = ENV_DIR / "_templates"  # `_`-prefixed: the index/verify walkers
 @lru_cache(maxsize=None)
 def env_config() -> dict:
     """config.json as written, `{}` when there is no store. Invalid JSON is a one-line error naming the file (exit 1),
-    never a traceback in every importer (#59 E16)."""
+    never a traceback in every importer."""
     p = ENV_DIR / "config.json"
     if not p.is_file():
         return {}
@@ -203,7 +203,7 @@ def _project_tables(cfg: dict) -> None:
         return kb.kind_rows(facts.get(system, {}), system, kind)
     def num(v: str):
         # the legacy keys held ints (transition ids); a digit string projects to int only when that round-trips —
-        # `007` or `0123` is an id with meaningful zeros and stays a string (#58 E15)
+        # `007` or `0123` is an id with meaningful zeros and stays a string
         return int(v) if v.isdigit() and str(int(v)) == v else v
 
     def vals(rows_: dict) -> dict:
@@ -229,7 +229,7 @@ def load(strict: bool = True) -> dict:
     """The merged config: env/config.json with the fact tables projected onto the legacy keys. With no store: `strict`
     (the default — a script that needs the configuration) raises a one-line SystemExit; `strict=False` (what
     `get()`, `tz()`, `zone()` use, so the session scripts and the heartbeat run before env-init) returns `{}`
-    after ONE stderr warning per process (#59 E08)."""
+    after ONE stderr warning per process."""
     cfg = {k: v for k, v in env_config().items() if not k.startswith("_")}
     if not cfg:
         if strict:
@@ -267,7 +267,7 @@ def get(path: str, default=None):
     return cur
 
 
-# Identity (#116): the user's own values, never the environment's. Two sources, one reader. On the plugin path
+# Identity: the user's own values, never the environment's. Two sources, one reader. On the plugin path
 # Claude Code collects them through `plugin.json` `userConfig` and hands them to hooks as
 # `CLAUDE_PLUGIN_OPTION_<KEY>`; on the clone path they are the `WORKSPACE_*` env of the ignored
 # `.claude/settings.local.json`. `identity()` prefers the plugin option, so a value typed into `/config` wins
@@ -344,7 +344,7 @@ def _owning_pid() -> str | None:
     """The pid of the Claude process that owns this shell: `CLAUDE_PID` when the harness exports it, else the
     first ancestor whose comm is `claude`, `node` or a bare version string (the desktop app names its binary
     that way) — the same idea as `session-register/heartbeat.sh`'s owner walk, which today honours neither
-    `CLAUDE_PID` nor a version-string comm (#68). None when nothing matches (not Linux,
+    `CLAUDE_PID` nor a version-string comm (#47). None when nothing matches (not Linux,
     or a shell not started by Claude)."""
     if os.environ.get("CLAUDE_PID"):
         return os.environ["CLAUDE_PID"]
@@ -505,7 +505,7 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
     start, home = Path(proj).resolve(), Path.home().resolve()
     root = None
     for base in (start, *start.parents):
-        if base == home:  # never `~/.context` (#168)
+        if base == home:  # never `~/.context` (#68)
             break
         if (base / ".context" / "reference" / "env").is_dir():
             root = base

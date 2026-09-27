@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""review_gate.py — the review's tier 0 (#121): what a diff against the base branch decides without a model.
+"""review_gate.py — the review's tier 0: what a diff against the base branch decides without a model.
 
 Two checks, both diff-based, both failing the PR in `ci.yml` (`make -C $BATON/context-db review-gate BASE=origin/main`
 locally):

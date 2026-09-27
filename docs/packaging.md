@@ -1,8 +1,8 @@
-# Packaging — a plugin at the root, the clone path kept (#118)
+# Packaging — a plugin at the root, the clone path kept
 
 **Decision (2026-09-26): both.** The repository root is a Claude Code plugin — `.claude-plugin/plugin.json` +
 `.claude-plugin/marketplace.json`, so the kit is marketplace-installable, `claude plugin validate` / `eval` run
-against it, and `userConfig` can carry identity (#116) — **and** the clone-into-`.claude/` path stays, because the
+against it, and `userConfig` can carry identity — **and** the clone-into-`.claude/` path stays, because the
 things that make it a *workspace* kit are conventions a plugin cannot install: the `.context/` DB beside the
 workspace, the root `CLAUDE.md` imports, the root `Makefile` include, the git hooks and the fast-forward sync.
 
@@ -102,7 +102,7 @@ sessions run); on a plugin install the SessionStart hook exports `BATON=${CLAUDE
 the workspace's own `.claude/` (settings.local.json, the sign-queue state), `~/.claude/` and a repo's
 `<repo>/.claude/commit-style` are not kit paths. Scripts find the kit relative to themselves, never through `$BATON`.
 
-## Identity (#116)
+## Identity
 
 The user's own values — name, GitHub login, timezone, optional chat DM ids — are the one input the kit needs per
 person. Two sources, one reader:
@@ -130,7 +130,7 @@ so a release PR bumps them together. `make -C .claude/context-db plugin-validate
 ## Name
 
 The project is **ai-baton** (styled bAIton on the front page): the plugin `ai-baton`, the marketplace `ai-baton-kit`,
-the repository `ai-baton` (#100). The name carries no "Claude" — the kit is *for* Claude Code, not by Anthropic —
+the repository `ai-baton`. The name carries no "Claude" — the kit is *for* Claude Code, not by Anthropic —
 and nothing reserved or impersonating is used. A future rename is a one-line change here plus a `renames` entry in
 `marketplace.json`.
 
@@ -138,5 +138,5 @@ and nothing reserved or impersonating is used. A future rename is a one-line cha
 
 - `install.sh` for agents without a marketplace (symlink `skills/` into `~/.claude/skills`) — the clone path already
   serves them (`~/.claude/skills` shadows `.claude/skills`, so a symlink there is a choice, not a need).
-- Skipped on purpose (amendment on #118): a second agent's manifest pair, a toolchain submodule, a package tap —
+- Skipped on purpose: a second agent's manifest pair, a toolchain submodule, a package tap —
   nothing here ships a binary.

@@ -1,6 +1,6 @@
 # Review rules — what "correct" means for a kit change
 
-The one copy of the rules the kit's reviewer judges by (#121). The CI reviewer reads this file **from the base
+The one copy of the rules the kit's reviewer judges by. The CI reviewer reads this file **from the base
 branch** (a PR cannot rewrite the rules it is judged by), the root `CLAUDE.md` cites it, and a human reviewer applies
 the same list. Procedure and posting mechanics live in `.github/workflows/claude-review.yml`; the mechanical checks
 live in `ci.yml` (§ 1). Rules only, here.

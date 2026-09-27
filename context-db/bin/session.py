@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit_profile as profile  # noqa: E402  — same dir
-import frontmatter  # noqa: E402  — the one frontmatter parser (#80)
+import frontmatter  # noqa: E402  — the one frontmatter parser
 
 # Heartbeats are stored in UTC; rendered to the terminal/ledger in the owner's local
 # zone so they're easy to eyeball against the wall clock.
@@ -142,7 +142,7 @@ def write_doc(path: str, meta: dict, body: str) -> None:
     lines = ["---"]
     for k in FIELDS:
         lines.append(f"{k}: {meta.get(k, '')}")
-    for k, v in meta.items():  # a key this version does not know (a newer kit, a hand-added note) survives the next touch (#59 E21)
+    for k, v in meta.items():  # a key this version does not know (a newer kit, a hand-added note) survives the next touch
         if k not in FIELDS:
             lines.append(f"{k}: {v}")
     lines.append("---")
@@ -188,7 +188,7 @@ def _ledger_append(meta: dict, st) -> None:
     k = session_stats._k
 
     def g(*path, default=0):
-        """A stats field by path, `default` when a producer (an older session_stats, a partial dict) left it out (#59 E21)."""
+        """A stats field by path, `default` when a producer (an older session_stats, a partial dict) left it out."""
         cur = st
         for part in path:
             if not isinstance(cur, dict) or part not in cur:

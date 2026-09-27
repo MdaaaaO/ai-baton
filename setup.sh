@@ -64,7 +64,7 @@ MODE="$(python3 "$HERE/context-db/bin/kit_profile.py" install-mode)" || { echo "
 # how a hint names the kit for a shell in the workspace root: `.claude` on a clone, else the kit's own path
 KITREF="$(python3 "$HERE/context-db/bin/kit_profile.py" mode-hint kit_ref)" || { echo "setup.sh: kit_profile.py mode-hint failed (see above)" >&2; exit 1; }
 # The workspace root: the parent of a `.claude/` clone. Run from anywhere else (a plugin install lives in Claude Code's
-# plugin cache, #118) the parent is the cache, so the root is CLAUDE_PROJECT_DIR, else the current directory — never a
+# plugin cache) the parent is the cache, so the root is CLAUDE_PROJECT_DIR, else the current directory — never a
 # directory an update may delete. PROJECTS=/path overrides all of it.
 if [ -z "${PROJECTS:-}" ]; then
   if [ "$MODE" = clone ]; then PROJECTS="$(dirname "$HERE")"
@@ -72,10 +72,10 @@ if [ -z "${PROJECTS:-}" ]; then
   else PROJECTS="$PWD"; fi
 fi
 # Never the home directory: `~/.claude` is Claude Code's own config dir, so a clone there overwrites the harness's
-# settings and puts `.context/` in $HOME (#168). Pick a workspace dir that holds your repos, e.g. ~/Projects.
+# settings and puts `.context/` in $HOME (#68). Pick a workspace dir that holds your repos, e.g. ~/Projects.
 if [ "$(cd "$PROJECTS" 2>/dev/null && pwd -P)" = "$(cd "$HOME" && pwd -P)" ]; then
-  if [ "$MODE" = clone ]; then echo "setup.sh: refusing the home directory as the workspace root ($PROJECTS) — clone the kit into e.g. ~/Projects/.claude instead (#168)" >&2
-  else echo "setup.sh: refusing the home directory as the workspace root ($PROJECTS) — run it from the project directory, or set CLAUDE_PROJECT_DIR / PROJECTS=/path (#168)" >&2; fi
+  if [ "$MODE" = clone ]; then echo "setup.sh: refusing the home directory as the workspace root ($PROJECTS) — clone the kit into e.g. ~/Projects/.claude instead (#68)" >&2
+  else echo "setup.sh: refusing the home directory as the workspace root ($PROJECTS) — run it from the project directory, or set CLAUDE_PROJECT_DIR / PROJECTS=/path (#68)" >&2; fi
   exit 2
 fi
 CONTEXT="$PROJECTS/.context"
@@ -186,7 +186,7 @@ else
   echo "  .claude/settings.local.json present"
 fi
 # On a plugin install the file sits in the user's project, outside the kit's .gitignore: say so once when that project is a
-# git repo that does not ignore it, so an identity never lands in a commit (#118 review nit).
+# git repo that does not ignore it, so an identity never lands in a commit.
 if [ "$SETTINGS_DIR" != "$HERE" ] && git -C "$PROJECTS" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
    && ! git -C "$PROJECTS" check-ignore -q "$SETTINGS" 2>/dev/null; then
   echo "  WARNING: $SETTINGS is not git-ignored in $PROJECTS — add '.claude/settings.local.json' to its .gitignore before committing"
@@ -250,7 +250,7 @@ else
     echo "  the old clone's wiring may be left: a .claude/ clone, @.claude/WORKSPACE.md in CLAUDE.md, include .claude/workspace.mk — the lines below name what is still there"
   fi
 fi
-# housekeeping (#78): bytecode caches and empty directories are never tracked by git, so a removed skill leaves them
+# housekeeping: bytecode caches and empty directories are never tracked by git, so a removed skill leaves them
 # behind on every machine until something deletes them — this does, inside the kit only (never the workspace).
 # Non-fatal (setup runs under set -e): an unreadable or vanishing entry ends the sweep with one visible line, not the
 # setup. Dot-directories at the kit root are never touched: `.sync.lock.d` is sync.sh's mkdir lock on hosts without flock.
@@ -354,7 +354,7 @@ else
   echo "  .context/self-assessment/README.md present"
 fi
 
-# Seeds vs templates (#79): setup never overwrites a seeded file, so a template fixed after the seed stays fixed only in
+# Seeds vs templates: setup never overwrites a seeded file, so a template fixed after the seed stays fixed only in
 # the kit. Compare the four pairs: the template's last commit time against the copy's mtime; a copy older than that is
 # reported (kit-health § 4 warns the same), and --refresh-seeds prints the unified diff so you can merge by hand.
 seed_pairs() {

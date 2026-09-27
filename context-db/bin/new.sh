@@ -55,7 +55,7 @@ TMPL="$ENV_TMPL"
 [ -f "$TMPL" ] || TMPL="$ENGINE/_templates/default.md"
 
 # Substitute placeholders in the template. Every value is escaped for the sed replacement (`\`, `&` and the
-# `|` delimiter would otherwise corrupt the scaffold or fail: a TITLE like `A/B & C` — #59 E07); a newline in a
+# `|` delimiter would otherwise corrupt the scaffold or fail: a TITLE like `A/B & C`); a newline in a
 # value is turned into a space, a template stays one line per field.
 sed_esc() { printf '%s' "$1" | tr '\n' ' ' | sed -e 's/[\\&|]/\\&/g'; }
 sed -e "s|{{TITLE}}|$(sed_esc "$TITLE")|g" \

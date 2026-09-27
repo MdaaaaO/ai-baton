@@ -1,6 +1,6 @@
 name: claude-review
 
-# The kit's reviewer — tier 2 of a three-tier review (#121, docs/REVIEW.md). Tier 0 (ci.yml, review_gate.py)
+# The kit's reviewer — tier 2 of a three-tier review (docs/REVIEW.md). Tier 0 (ci.yml, review_gate.py)
 # decides the mechanical checks without a model; tier 1 (step "evidence", review_evidence.py) writes what the
 # model reads instead of re-deriving; this file holds only the procedure and the posting mechanics — the rules
 # are docs/REVIEW.md, read from the BASE branch so a PR cannot rewrite what it is judged by.
@@ -17,9 +17,9 @@ name: claude-review
 #
 # Read-only: contents: read. It can comment; it can never push.
 #
-# Hosting (#120): a pull request's code runs here, so both jobs run on GitHub-hosted runners like every
+# Hosting: a pull request's code runs here, so both jobs run on GitHub-hosted runners like every
 # workflow — a fork's PR gets no secrets and therefore no reviewer (the owner reviews outside PRs by
-# hand); each hosted job is a fresh VM, so parallel reviews never race on one shared install (#119).
+# hand); each hosted job is a fresh VM, so parallel reviews never race on one shared install.
 #
 # A PR that edits THIS file gets no review: for pull_request events GitHub runs the PR's copy, and the
 # action skips itself with a warning when the file differs from the default branch ("Workflow validation

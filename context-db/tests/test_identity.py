@@ -1,4 +1,4 @@
-"""Identity via plugin userConfig (#116): `kit_profile.identity()` prefers `CLAUDE_PLUGIN_OPTION_<KEY>` over the
+"""Identity via plugin userConfig: `kit_profile.identity()` prefers `CLAUDE_PLUGIN_OPTION_<KEY>` over the
 `WORKSPACE_*` variable settings.local.json sets, `identity-env` re-exports the options (and never the file), the
 manifest declares exactly the resolver's keys, the SessionStart hook writes the exports into $CLAUDE_ENV_FILE, and
 kit-health matches/labels identity from either source without printing it. Fact-shaped literals are assembled at

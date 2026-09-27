@@ -17,7 +17,7 @@
 # writes the `## Session stats` block into the session file and a row into sessions/_ledger.md,
 # so even a session that never ran session-handoff leaves its numbers behind.
 # Log: /tmp/heartbeat-<name>.log · pidfile: /tmp/heartbeat-<name>.pid (second start = no-op).
-TZ_DEFAULT=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" tz 2>/dev/null || echo UTC)  # identity-aware: plugin option, else WORKSPACE_TZ, else the store (#116)
+TZ_DEFAULT=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" tz 2>/dev/null || echo UTC)  # identity-aware: plugin option, else WORKSPACE_TZ, else the store
 set -u
 NAME=${1:?usage: heartbeat.sh <session-name> ["<working on>"] [interval-seconds]}
 WORKING=${2:-}

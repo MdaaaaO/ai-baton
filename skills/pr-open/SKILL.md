@@ -149,7 +149,7 @@ without reading the diff — and nothing that the PR does not raise.
 **Facet → question matrix.** The one copy is the script: `python3 $BATON/skills/pr-open/diagram-plan.py --explain`
 prints every facet with its globs (first match wins; the env-config overlay before the defaults) and the WHERE /
 WHAT / RUNS answer each facet raises, `—` where a question is not raised, `only when …` where it is conditional.
-Read it there when a plan surprises you; never copy it into this file (it drifted here before, #57).
+Read it there when a plan surprises you; never copy it into this file (it drifted here before).
 
 Intent overlays: **bugfix** → RUNS only (one sequence of the failing path, fixed step in a `rect`); **refactor** →
 WHERE as before → after, no flow. Composition: the dominant facet (most changed lines) answers first; a

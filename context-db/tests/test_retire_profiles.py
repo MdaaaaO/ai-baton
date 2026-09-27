@@ -1,4 +1,4 @@
-"""#78: the profiles layer is gone from the code — no `kb.py import`, no `import:` provenance word, no legacy `profile`
+"""the profiles layer is gone from the code — no `kb.py import`, no `import:` provenance word, no legacy `profile`
 config key, kit-health keeps exactly one legacy line, setup.sh sweeps the kit's bytecode caches and empty leftover
 directories. Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
@@ -70,7 +70,7 @@ class KitHealth(unittest.TestCase):
 
 class Grep(unittest.TestCase):
     def test_the_layer_is_named_only_where_the_issue_allows(self):
-        # #78 done-when: `grep -ri profile` (code paths, prose) returns only the CHANGELOG and new-environment.md § History —
+        # done when `grep -ri profile` (code paths, prose) returns only the CHANGELOG and new-environment.md § History —
         # plus the words that never meant the layer: the `kit_profile` module and its `profile` alias, AWS named profiles
         # (`aws.profile`, `--profile`, AWS_PROFILE), the Agent Skills spec's "Claude Code profile", a chat tool's
         # `read_user_profile`, and kit-health's one legacy line.

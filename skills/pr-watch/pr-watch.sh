@@ -41,7 +41,7 @@ fi
 if [ -n "$bot" ]; then echo "pr-watch: bot mode — polling $bot Assessment + CI + human review" >&2
 else echo "pr-watch: no-bot mode (github.review_bot empty) — gating on CI + human review only" >&2; fi
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
-eval "$(python3 "$KIT/context-db/bin/kit_profile.py" identity-env)"  # WORKSPACE_* from plugin userConfig, if set (#116)
+eval "$(python3 "$KIT/context-db/bin/kit_profile.py" identity-env)"  # WORKSPACE_* from plugin userConfig, if set
 me=${PR_WATCH_SELF:-${WORKSPACE_GITHUB_LOGIN:-$(gh api user --jq .login 2>/dev/null || echo unknown)}}
 sync=${PR_WATCH_SYNC:-1}; sync_cool=${PR_WATCH_SYNC_COOLDOWN:-3600}; known_red=${PR_WATCH_KNOWN_RED:-}
 usage() { echo "usage: pr-watch.sh <owner/repo> <pr_number> <head_sha_prefix> [<pr_number> <head_sha_prefix> ...]" >&2; exit 2; }

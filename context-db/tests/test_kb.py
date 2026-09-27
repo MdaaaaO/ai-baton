@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
 class EmptyManifest(unittest.TestCase):
     def test_empty_facts_need_a_note(self):
-        # #79: a capability flag may ship a manifest with no store facts yet — only with a note saying so
+        # a capability flag may ship a manifest with no store facts yet — only with a note saying so
         import json, tempfile
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

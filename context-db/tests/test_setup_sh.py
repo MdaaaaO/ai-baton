@@ -1,5 +1,5 @@
 """setup.sh — runs the bats-free scenario script tests/setup_sh_scenarios.sh (sh -e; memory migration, symlink
-handling, POSIX grep, helper failures, leftover cleanup — #62). Stdlib unittest. Run: make -C .claude/context-db test."""
+handling, POSIX grep, helper failures, leftover cleanup). Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import subprocess
 import unittest

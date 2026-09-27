@@ -1,4 +1,4 @@
-"""review_gate.py / review_evidence.py (#121): the tier-0 gate and the tier-1 evidence, on a throw-away git repo — leak
+"""review_gate.py / review_evidence.py: the tier-0 gate and the tier-1 evidence, on a throw-away git repo — leak
 shapes on added lines only (a pre-existing leak is not a finding, the allow-list holds), version/updated/CHANGELOG bumps
 for changed, new and removed units, the wording-only exemption, README edits not counting, the pre-flags (swallowed
 errors, vocabulary in a unit without the capability), rules read from the base. Fact-shaped literals are assembled at

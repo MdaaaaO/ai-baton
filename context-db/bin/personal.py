@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""personal.py — the zero-config personal path (#117): a GitHub-only machine becomes a working environment in one
+"""personal.py — the zero-config personal path: a GitHub-only machine becomes a working environment in one
 command and zero questions.
 
     python3 $BATON/context-db/bin/personal.py [--workspace DIR] [--settings FILE] [--pr-review FILE] [--dry-run]

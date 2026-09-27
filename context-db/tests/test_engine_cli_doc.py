@@ -1,4 +1,4 @@
-"""gen_engine_cli.py (#82): the generator runs on a bare clone and the committed docs/engine-cli.md equals its output, so
+"""gen_engine_cli.py: the generator runs on a bare clone and the committed docs/engine-cli.md equals its output, so
 a Makefile-help or `--help` change that forgets `make engine-cli-doc` fails CI. Stdlib unittest. Run: make -C
 .claude/context-db test."""
 from __future__ import annotations

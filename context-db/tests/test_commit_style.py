@@ -81,7 +81,7 @@ class Subjects(BlankStore):
 
 class ConfigLoad(unittest.TestCase):
     def test_missing_store_is_swallowed_but_interrupts_propagate(self):
-        # #59 E29: `except BaseException` also ate KeyboardInterrupt
+        # `except BaseException` also ate KeyboardInterrupt
         saved = cs.kit_profile.load
         try:
             def no_store(*a, **k):

@@ -4,7 +4,9 @@ machine's env store is complete.
 
 Checks `skills/*/SKILL.md` and `agents/*.md` (relative to the kit root, ../.. from here) against the
 Agent Skills spec's "Claude Code profile" (docs/contributing.md § Skill frontmatter):
-  - every `make -C $BATON/context-db <target>` a unit or kit doc cites is a Makefile target (#81),
+  - every `make -C $BATON/context-db <target>` a unit or kit doc cites is a Makefile target,
+  - no kit file cites an issue number (`#n`) past this tracker's reach: the highest `issues/<n>` link in the
+    release CHANGELOG plus ISSUE_REF_MARGIN (a number from another tracker would resolve to an unrelated issue),
   - only spec keys (`name`, `description`, `license`, `compatibility`, `metadata`, `allowed-tools`) and the
     allow-listed Claude Code native keys at the top level (NATIVE_KEYS; agents also AGENT_KEYS) — any other
     key fails, and the kit's own `version`/`updated`/`reviewed`/`requires`/`facts` at the top level fail with
@@ -18,7 +20,7 @@ Agent Skills spec's "Claude Code profile" (docs/contributing.md § Skill frontma
   - no `environments:` tag and no "(<name>) " description prefix: the kit never names an
     environment (retired 2026-09-25; which machine has which capability is its local env store),
   - description ≤ 60 whitespace-separated tokens and ≤ 400 B, all descriptions ≤ 9,500 B together —
-    every description loads into every session's prefix (#70).
+    every description loads into every session's prefix.
 And the env store (`.context/reference/env/config.json`, see kb.py — one per machine, not in the
 kit) for every top-level key `environment-template/config.json` has, `systems.*` covering every
 flag a skill may `require` as booleans, a compiling one-group `tracker.key_regex`, and no rows left
@@ -28,7 +30,7 @@ under a renamed kind (`kb.py migrate` moves them).
     key, org host, tz literal — `leak_shapes.py`, shared with kit-health) in the file.
 With --stale N also lists units whose `reviewed` is older than N days (warning, not an error).
 
-`--no-env` is the ENVIRONMENT-FREE validator (#114): everything above except the env-store checks, which are
+`--no-env` is the ENVIRONMENT-FREE validator: everything above except the env-store checks, which are
 skipped and listed — it passes on a bare `git clone` with no `.context/` at all, so a contributor's PR (and CI,
 before it builds a blank store) can run it. Positional paths verify only those units (`make -C $BATON/context-db
 verify-skill UNIT=skills/<name>`): the kit-wide totals (always-on budget, description total) are skipped too.
@@ -154,10 +156,10 @@ def validate_manifests_kit() -> list[str]:
 
 
 # Always-on prefix budget (bytes): these files load into every session's cached prefix, so their size is
-# re-billed on every turn. WORKSPACE.md was 25 KB before #69; the cap sits deliberately just above the
-# trimmed size so every addition must earn its bytes. The template cap followed its #72 trim (2.0 KB).
+# re-billed on every turn. WORKSPACE.md was 25 KB before its trim; the cap sits deliberately just above the
+# trimmed size so every addition must earn its bytes. The template cap followed its own trim (2.0 KB).
 ALWAYS_ON_BUDGET = {
-    "CLAUDE.md": 600,  # the kit's own memory file: Claude Code loads .claude/CLAUDE.md into every workspace session too (#120)
+    "CLAUDE.md": 600,  # the kit's own memory file: Claude Code loads .claude/CLAUDE.md into every workspace session too
     "WORKSPACE.md": 10_000,
     "environment-template/environment.md": 2_200,
 }
@@ -168,7 +170,7 @@ MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json"
 
 
 def check_plugin_manifest(errors: list[str]) -> None:
-    """The plugin manifest (#118): parses, kebab-case `name`, `version` == `VERSION` (conventional-release bumps both;
+    """The plugin manifest: parses, kebab-case `name`, `version` == `VERSION` (conventional-release bumps both;
     the marketplace entry names the same plugin and points at the repo root). `claude plugin validate --strict .` is
     the authoritative schema check (make plugin-validate); this is the version discipline no external tool checks."""
     mp = KIT / PLUGIN_MANIFEST
@@ -210,7 +212,7 @@ PLUGIN_HOOKS = "hooks/hooks.json"
 
 
 def check_identity_options(errors: list[str], man: dict) -> None:
-    """Identity via plugin userConfig (#116): every `WORKSPACE_*` variable `kit_profile.IDENTITY_KEYS` resolves has a
+    """Identity via plugin userConfig: every `WORKSPACE_*` variable `kit_profile.IDENTITY_KEYS` resolves has a
     `userConfig` entry of the mapped key (string, titled, described) and nothing else is declared there — the
     manifest and the resolver drift apart otherwise; and `hooks/hooks.json` carries the SessionStart hook that
     re-exports the options as `WORKSPACE_*` and `CLAUDE_PROJECT_DIR` for Bash (`kit_profile.py session-env`, #3), else the plugin path
@@ -229,7 +231,7 @@ def check_identity_options(errors: list[str], man: dict) -> None:
                       " (non-secret environment facts belong in the env store, not userConfig)")
     hp = KIT / PLUGIN_HOOKS
     if not hp.is_file():
-        errors.append(f"{PLUGIN_HOOKS}: missing — the SessionStart hook that exports plugin options as WORKSPACE_* (#116)")
+        errors.append(f"{PLUGIN_HOOKS}: missing — the SessionStart hook that exports plugin options as WORKSPACE_*")
         return
     try:
         hooks = json.loads(hp.read_text(encoding="utf-8"))
@@ -263,7 +265,7 @@ def cited_make_targets(text: str) -> list[tuple[int, str]]:
 
 
 def check_make_targets(errors: list[str], files=None) -> None:
-    """A doc or unit that cites `make -C $BATON/context-db <target>` names a target the Makefile has (#81 E14):
+    """A doc or unit that cites `make -C $BATON/context-db <target>` names a target the Makefile has:
     a session following the instruction otherwise stops on `No rule to make target`."""
     have = make_targets()
     if not have:
@@ -277,6 +279,43 @@ def check_make_targets(errors: list[str], files=None) -> None:
             if target not in have:
                 errors.append(f"{rel}:{n}: cites `make -C $BATON/context-db {target}` but the Makefile has no such target "
                               f"(targets: {', '.join(sorted(have))})")
+
+
+# `#n` citations in kit files. The ceiling is offline and moves with each release: the highest issue/PR the release
+# CHANGELOG links, plus a margin for what is opened between releases. Backticked `#n` are examples; the CHANGELOGs are
+# history; tests and evals carry fixture numbers.
+ISSUE_REF = re.compile(r"(?<![\w/&#])#([1-9]\d{0,3})\b")
+ISSUE_REF_MARGIN = 30
+ISSUE_REF_SUFFIXES = {".md", ".py", ".sh", ".yml", ".yaml", ".json", ".mk"}
+ISSUE_REF_SKIP = ("CHANGELOG.md", "docs/CHANGELOG.md", "context-db/tests/", "evals/")
+ISSUE_REF_SKIP_DIRS = {".git", ".worktrees", "__pycache__", "node_modules"}
+
+
+def issue_ref_ceiling(kit: Path = KIT) -> int:
+    """The highest `issues/<n>` the release CHANGELOG links, plus the margin; 0 when there is no CHANGELOG."""
+    p = kit / "CHANGELOG.md"
+    if not p.is_file():
+        return 0
+    nums = [int(n) for n in re.findall(r"/issues/(\d+)\)", p.read_text(encoding="utf-8", errors="replace"))]
+    return max(nums, default=0) + ISSUE_REF_MARGIN
+
+
+def check_issue_refs(errors: list[str], kit: Path = KIT) -> None:
+    """A kit file that cites `#n` above the ceiling cites another tracker's issue (the pre-public tracker's numbers
+    once filled 165 lines): name the issue that tracks the topic now, or keep the reason in words."""
+    ceiling = issue_ref_ceiling(kit)
+    if not ceiling:
+        return
+    for p in sorted(kit.rglob("*")):
+        rel = p.relative_to(kit).as_posix()
+        if (not p.is_file() or ISSUE_REF_SKIP_DIRS & set(p.relative_to(kit).parts)
+                or (p.suffix not in ISSUE_REF_SUFFIXES and p.name != "Makefile") or rel.startswith(ISSUE_REF_SKIP)):
+            continue
+        for n, line in enumerate(p.read_text(encoding="utf-8", errors="replace").split("\n"), 1):
+            for m in ISSUE_REF.finditer(re.sub(r"`[^`]*`", "", line)):
+                if int(m.group(1)) > ceiling:
+                    errors.append(f"{rel}:{n}: cites #{m.group(1)}, past this tracker's highest issue (ceiling {ceiling}: "
+                                  f"CHANGELOG.md + {ISSUE_REF_MARGIN}) — link the issue that tracks it here, or say it in words")
 
 
 def check_workspace_kit_paths(errors: list[str]) -> None:
@@ -538,6 +577,7 @@ def main(argv: list[str] | None = None) -> int:
         check_workspace_kit_paths(errors)
         check_plugin_manifest(errors)
         check_make_targets(errors)
+        check_issue_refs(errors)
     desc_total = 0
     today = date.today()
     for p in units:

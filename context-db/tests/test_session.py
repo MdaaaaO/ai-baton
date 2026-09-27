@@ -20,7 +20,7 @@ def run(script: str, *args: str, root: Path, env: dict | None = None) -> subproc
 
 
 class NoStore(unittest.TestCase):
-    """#59 E08: the session scripts and kit_profile degrade to defaults with ONE warning when no env store exists."""
+    """the session scripts and kit_profile degrade to defaults with ONE warning when no env store exists."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -58,7 +58,7 @@ class NoStore(unittest.TestCase):
 
 class BrokenStore(unittest.TestCase):
     def test_invalid_config_json_is_a_one_line_error(self):
-        # #59 E16: invalid config.json was a raw traceback in every importer
+        # invalid config.json was a raw traceback in every importer
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / ".context"
             (root / "reference" / "env").mkdir(parents=True)
@@ -82,7 +82,7 @@ class RegistryDoc(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_unknown_frontmatter_keys_survive_a_touch(self):
-        # #59 E21: write_doc emitted only FIELDS, so a key from a newer kit or a hand-added note vanished on the next touch
+        # write_doc emitted only FIELDS, so a key from a newer kit or a hand-added note vanished on the next touch
         r = run("session.py", "register", "--name", "t2", "--no-stats", root=self.root)
         self.assertEqual(r.returncode, 0, r.stderr)
         p = self.root / "sessions" / "t2.md"

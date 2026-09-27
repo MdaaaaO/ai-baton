@@ -180,7 +180,7 @@ def main():
     res["threads_open"] = open_t
     if open_t: res["reasons"].append(f"{open_t} unresolved review thread(s)")
     if repo in AA.get("require_bot_review", []):
-        # bot verdict: one helper, shared with fetch-context/pr-scan/pr-watch/pr-merge (#56) — pass the
+        # bot verdict: one helper, shared with fetch-context/pr-scan/pr-watch/pr-merge — pass the
         # reviews we already fetched above, so this costs no extra gh call.
         bot_script = os.path.join(_KIT, "skills", "pr-watch", "bot-verdict.sh")
         tf = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)

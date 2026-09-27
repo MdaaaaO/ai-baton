@@ -105,7 +105,7 @@ class DiagramPlan(unittest.TestCase):
 
     def test_dot_prefixed_paths_keep_their_dot(self):
         # `.github/workflows/ci.yml` used to lose its leading dot (`lstrip("./")` strips characters, not a prefix)
-        # and never classified as ci (#57); `./README.md` still loses the explicit `./` prefix.
+        # and never classified as ci; `./README.md` still loses the explicit `./` prefix.
         self.assertEqual(self.facet(".github/workflows/ci.yml"), "ci")
         self.assertEqual(self.facet(".github/actions/setup/action.yml"), "ci")
         self.assertEqual(self.facet("./README.md"), "docs")
@@ -157,7 +157,7 @@ class DiagramPlan(unittest.TestCase):
         self.assertFalse(self.dp.match("src/x.py", ["**/*.sql"]))
 
     def test_overlay_key_with_a_dot_in_the_repo_name(self):
-        # #136: `diagrams.repos.<owner/site.io>` went through a dotted-key lookup that split the name at its `.`
+        # `diagrams.repos.<owner/site.io>` went through a dotted-key lookup that split the name at its `.`
         repos = {"acme/site.io": {"facets": {"pipeline": ["assets/**"]}, "ignore": ["*.svg"]}}
         saved = self.dp.env_get
         self.dp.env_get = lambda key, default: repos if key == "diagrams.repos" else default

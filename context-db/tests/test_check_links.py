@@ -1,4 +1,4 @@
-"""check_links.py and kit_verify's make-target check (#81): a relative Markdown link must resolve, a cited
+"""check_links.py and kit_verify's make-target check: a relative Markdown link must resolve, a cited
 `make -C .claude/context-db <target>` must exist. Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import contextlib

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""review_evidence.py — the review's tier 1 (#121): machine-prepared evidence the model reads instead of re-deriving.
+"""review_evidence.py — the review's tier 1: machine-prepared evidence the model reads instead of re-deriving.
 
 Writes one markdown file (default `.review/evidence.md`) for a PR head against its base:
 

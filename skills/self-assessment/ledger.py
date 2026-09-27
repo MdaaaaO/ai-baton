@@ -135,7 +135,7 @@ def load_page(args) -> str:
         html = TEMPLATE.read_text(encoding="utf-8")
         esc = lambda t: html_mod.escape(t, quote=True)  # noqa: E731 — every insert is text or an attribute
         title = esc(args.title or "Update Ledger")
-        eyebrow = esc(args.eyebrow or profile.identity("WORKSPACE_USER") or "Weekly updates")  # plugin option, else settings.local.json (#116)
+        eyebrow = esc(args.eyebrow or profile.identity("WORKSPACE_USER") or "Weekly updates")  # plugin option, else settings.local.json
         link = (
             f'<span><a href="{esc(args.report_url)}" target="_blank" rel="noopener">Open the update form ↗</a></span>'
             if args.report_url

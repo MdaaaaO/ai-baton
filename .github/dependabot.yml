@@ -1,4 +1,4 @@
-# Third-party actions are pinned by commit SHA (#81 A12); Dependabot proposes the bumps and keeps the `# vN` comment.
+# Third-party actions are pinned by commit SHA; Dependabot proposes the bumps and keeps the `# vN` comment.
 version: 2
 updates:
   - package-ecosystem: github-actions

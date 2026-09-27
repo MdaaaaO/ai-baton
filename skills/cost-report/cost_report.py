@@ -110,7 +110,7 @@ def resolve_mode() -> dict:
         "missing": missing_org_config() if org else [],
         "control": "anonymous aggregate of every other user in the spend table (weekdays, per user-day)" if org else None,
         "tracker": profile.get("tracker.kind", "none"),
-        "github_login": profile.identity("WORKSPACE_GITHUB_LOGIN"),  # plugin option, else settings.local.json env (#116)
+        "github_login": profile.identity("WORKSPACE_GITHUB_LOGIN"),  # plugin option, else settings.local.json env
         "github_org": profile.get("github.org", ""),
         "extra_repos": c.get("extra_repos", []),
         "phases": c.get("phases", []),

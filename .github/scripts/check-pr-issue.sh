@@ -66,8 +66,8 @@ MSG
   exit 1
 fi
 
-# A link has to point at a real issue: "Closes #9999" would pass a syntax check, merge, and only
-# then fail — after the point where anything can be done about it (review finding on #58).
+# A link has to point at a real issue: `Closes #9999` would pass a syntax check, merge, and only
+# then fail — after the point where anything can be done about it (a review finding).
 # Needs gh with a token: GH_TOKEN in CI, the normal login locally. Without either, say so
 # and keep the syntax check rather than block work offline.
 if command -v gh >/dev/null 2>&1 && { [[ -n "${GH_TOKEN:-}" ]] || gh auth status >/dev/null 2>&1; }; then

@@ -2,7 +2,7 @@
 # bot-verdict.sh <owner/repo> <pr> <head> [reviews_json_file]
 # Canonical bot-verdict lookup — the ONE place that reads a review bot's `### Assessment:` review,
 # replacing five re-implementations (fetch-context.sh, pr-scan.sh, pr-watch.sh, pr-merge.sh,
-# trivial-check.py) that had drifted apart in match semantics and capture regexes (#56).
+# trivial-check.py) that had drifted apart in match semantics and capture regexes.
 #
 # Prints exactly one of: green | yellow | red | none
 #   - green/yellow/red: the bot's latest review whose `commit_id` is a prefix-match of <head> (a full

@@ -139,7 +139,7 @@ while IFS= read -r row; do
   else kind=new; fi
   if [ "$deg" = '[]' ] && [ "$approved" -gt 0 ] && [ "$src" != "direct" ] && [ "$kind" = "new" ]; then dropped_approved=$((dropped_approved+1)); continue; fi
   surfaced=$(jq -r --arg k "$kind" '[.[] | select(.status=="surfaced" and .kind==$k)] | length > 0' <<<"$lset")
-  # bot verdict: one helper, shared with fetch-context/pr-watch/pr-merge/trivial-check (#56) — pass the
+  # bot verdict: one helper, shared with fetch-context/pr-watch/pr-merge/trivial-check — pass the
   # reviews we already fetched for this candidate, so this costs no extra gh call.
   bot=""
   rf=$(mktemp); printf '%s' "$reviews" > "$rf"

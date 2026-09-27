@@ -37,7 +37,7 @@ from pathlib import Path
 KIT = Path(__file__).resolve().parents[2]
 KEY = re.compile(r"^([A-Za-z_][\w-]*):(?:\s+(.*))?$")     # `key: value` / `key:` at column 0
 SUBKEY = re.compile(r"^  ([A-Za-z_][\w-]*):(?:\s+(.*))?$")  # two-space-indented `sub: value`
-# the kit's bookkeeping keys — under `metadata:` since 2026-09-26 (#113); rejected at the top level
+# the kit's bookkeeping keys — under `metadata:` since 2026-09-26; rejected at the top level
 KIT_META_KEYS = ("version", "updated", "reviewed", "requires", "facts")
 
 Frontmatter = dict[str, "str | dict[str, str]"]

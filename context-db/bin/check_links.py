@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check_links.py — every relative Markdown link in the kit's tracked *.md files must resolve (#81 A30).
+"""check_links.py — every relative Markdown link in the kit's tracked *.md files must resolve.
 
 Links checked: `[text](path)` and `[text](path#anchor)` where `path` is relative (no scheme, no leading `/`, not
 `mailto:`). Resolved against the linking file's directory, then against the kit root (README-style `docs/x.md` links
