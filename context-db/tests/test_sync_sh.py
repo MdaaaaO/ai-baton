@@ -248,11 +248,21 @@ class SyncSh(unittest.TestCase):
         p.wait()
         return p.pid
 
-    def _owned_lockdir(self, pid: int) -> Path:
+    def _owned_lockdir(self, pid: int, start: str | None = None) -> Path:
+        """An owner file for `pid`; with `start` omitted this is the old two-field format (pid + the time
+        the lock was taken, no process start time) — every existing caller wants that. Pass `start` (a
+        `ps -o lstart=` string) to write the current three-field format instead."""
         d = self.kit / ".sync.lock.d"
         d.mkdir()
-        (d / "owner").write_text(f"{pid} 2026-01-01T00:00:00Z\n")
+        line = f"{pid} 2026-01-01T00:00:00Z"
+        if start is not None:
+            line += f" {start}"
+        (d / "owner").write_text(line + "\n")
         return d
+
+    def _pid_start(self, pid: int) -> str:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True)
+        return r.stdout.strip()
 
     def test_lock_busy_exits_3_and_names_the_holder(self):
         self._owned_lockdir(os.getpid())
@@ -288,12 +298,42 @@ class SyncSh(unittest.TestCase):
         self.assertFalse((self.kit / ".sync.lock.d").exists())
 
     def test_mkdir_lock_of_a_live_owner_is_never_aged_out(self):
+        # old two-field owner line (no process start time, as written before that check existed):
+        # judged by kill -0 alone, same as ever
         d = self._owned_lockdir(os.getpid())
         old = time.time() - 3600
         os.utime(d, (old, old))
         r = self.sync(env=_env(self.tmp, self.path_without("flock")))
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertTrue((d / "owner").is_file(), "a live run's lock is left alone however old")
+
+    def test_mkdir_lock_of_a_live_owner_with_matching_start_time_is_never_aged_out(self):
+        if not shutil.which("ps"):
+            self.skipTest("no ps on this host")
+        # current three-field owner line, start time matching the real (live, ours) owner pid: a slow
+        # but genuinely live sync must never lose its lock, no matter its age
+        d = self._owned_lockdir(os.getpid(), self._pid_start(os.getpid()))
+        old = time.time() - 3600
+        os.utime(d, (old, old))
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertTrue((d / "owner").is_file(), "a live owner, start time and all, is left alone however old")
+
+    def test_mkdir_lock_of_a_reused_pid_is_reclaimed_at_once(self):
+        """The owner pid is alive (it's ours) but its recorded process start time does not match its
+        real one: the classic reused-pid case (a reboot or pid wraparound recycled the number onto an
+        unrelated process). Must be reclaimed immediately — same as a dead owner, not aged out by the
+        10-minute ownerless threshold."""
+        if not shutil.which("ps"):
+            self.skipTest("no ps on this host")
+        d = self._owned_lockdir(os.getpid(), "Mon Jan  1 00:00:00 1999")
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        log = self.log_file.read_text()
+        self.assertIn("removed a stale lock dir (owner pid", log)
+        self.assertIn("different process", log)
+        self.assertFalse((d).exists())
 
     def test_lockdir_vanishing_mid_check_is_retaken_not_reported_busy(self):
         """The fast `mkdir $LOCKDIR` in take_lockdir can lose to a holder that releases the lock in the

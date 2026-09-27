@@ -115,16 +115,24 @@ sync_kit() {
 [ -d "$HERE/.git" ] || { log "skip: .claude is not a git repo"; exit 0; }
 
 # lock: flock where it exists (Linux); on hosts without it (macOS without coreutils) an atomic mkdir
-# lock. Either way the holder records `<pid> <utc-ts>` (in .sync.lock, or .sync.lock.d/owner). A lock
-# dir is stale only when its owner pid is gone (`kill -0`) — or, with no owner file (a sync.sh from
-# before owner files, or one killed between its mkdir and the write), when older than 10 minutes.
-# Breaking a stale lock is serialised by a second mkdir lock and re-checked inside it, so two runs that
-# both saw the same dead owner can never both remove-and-retake it (the second would delete the
-# first's fresh lock). A busy lock is logged as `skipped`, said on stderr with the holder, and exits 3
-# (the SessionEnd hook swallows it; `make claude_sync` shows it) but never writes .sync-status: the
-# holder's pending/ok/error is newer.
+# lock. Either way the holder records `<pid> <utc-ts> <process-start-time>` (in .sync.lock, or
+# .sync.lock.d/owner) — the third field is the owner's own process start time as `ps -o lstart=`
+# reports it, so a stale lock can be told apart from a live one even after its pid gets reused (a
+# reboot or pid wraparound): a lock dir is stale when its owner pid is gone (`kill -0`), or when the
+# pid is alive but `ps -o lstart=` for it now differs from the start time recorded when the lock was
+# taken (same pid number, different process). There is deliberately no time ceiling on a live owner —
+# a lock is only ever judged by whether its owner process still is the process that took it, never by
+# age, so a slow-but-live sync can hold it as long as it needs to. An owner line with no third field
+# (written before this check existed) or one `ps` cannot answer right now falls back to `kill -0`
+# alone, same as before — a lock is never stolen just because the extra check could not be made. With
+# no owner file at all (a sync.sh from before owner files, or one killed between its mkdir and the
+# write) a lock dir is stale only once older than 10 minutes. Breaking a stale lock is serialised by a
+# second mkdir lock and re-checked inside it, so two runs that both saw the same dead owner can never
+# both remove-and-retake it (the second would delete the first's fresh lock). A busy lock is logged as
+# `skipped`, said on stderr with the holder, and exits 3 (the SessionEnd hook swallows it; `make
+# claude_sync` shows it) but never writes .sync-status: the holder's pending/ok/error is newer.
 LOCKDIR="$HERE/.sync.lock.d"; LOCKBRK="$HERE/.sync.lock.break"; HAVE_LOCKDIR=""; HAVE_LOCKBRK=""
-OWNER_PID=""; OWNER_TS=""; STALE_WHY=""
+OWNER_PID=""; OWNER_TS=""; OWNER_START=""; STALE_WHY=""
 cleanup() {
   [ -n "$ERRF" ] && rm -f "$ERRF"
   [ -n "$HAVE_LOCKBRK" ] && rmdir "$LOCKBRK" 2>/dev/null
@@ -132,15 +140,35 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
-owner_stamp() { printf '%s %s\n' "$$" "$(date -u +%FT%TZ)"; }
-# owner_of <file> — sets OWNER_PID / OWNER_TS from a `<pid> <utc-ts>` owner file; empty when absent or partial
+# pid_start <pid> — the process's start time as `ps -o lstart=` reports it, or empty when `ps` has
+# nothing to say (no such pid, or a `ps` without `lstart`, e.g. some minimal containers): callers then
+# fall back to `kill -0` alone rather than trust an empty answer either way.
+pid_start() { ps -o lstart= -p "$1" 2>/dev/null | sed -e 's/^ *//' -e 's/ *$//'; }
+owner_stamp() { printf '%s %s %s\n' "$$" "$(date -u +%FT%TZ)" "$(pid_start "$$")"; }
+# owner_of <file> — sets OWNER_PID / OWNER_TS / OWNER_START from a `<pid> <utc-ts> <process-start-time>`
+# owner file; OWNER_START is empty for an old two-field line, and for both when the file is absent or partial
 owner_of() {
-  OWNER_PID=""; OWNER_TS=""
+  OWNER_PID=""; OWNER_TS=""; OWNER_START=""
   [ -f "$1" ] || return 0
-  local p="" t=""
-  read -r p t _ <"$1" 2>/dev/null || true
+  local p="" t="" s=""
+  read -r p t s <"$1" 2>/dev/null || true
   case "$p" in ''|*[!0-9]*) return 0 ;; esac
-  OWNER_PID=$p; OWNER_TS=${t:-?}
+  OWNER_PID=$p; OWNER_TS=${t:-?}; OWNER_START=$s
+}
+# owner_gone — is the owner recorded in $OWNER_PID/$OWNER_START (set by owner_of) no longer the
+# process that took the lock? True when the pid is gone outright, or when it is alive but `ps
+# -o lstart=` for it now differs from the start time recorded at lock-take time (the pid was reused,
+# same number, different process — see the block comment above). Sets $STALE_WHY on true. A live pid
+# with no recorded start (an owner line from before this check) or one `ps` can't answer right now is
+# judged by `kill -0` alone: never steal a lock just because the extra check could not be made.
+owner_gone() {
+  if ! kill -0 "$OWNER_PID" 2>/dev/null; then STALE_WHY="owner pid $OWNER_PID is gone"; return 0; fi
+  [ -n "$OWNER_START" ] || return 1
+  local now; now="$(pid_start "$OWNER_PID")"
+  [ -n "$now" ] || return 1
+  [ "$now" = "$OWNER_START" ] && return 1
+  STALE_WHY="owner pid $OWNER_PID is a different process now (reused pid, start time changed)"
+  return 0
 }
 # lockdir_stale — is $LOCKDIR left behind by a run that is no longer there? (sets STALE_WHY)
 # $LOCKDIR itself may already be gone: the fast `mkdir` in take_lockdir can lose to a holder that
@@ -151,8 +179,8 @@ lockdir_stale() {
   [ -d "$LOCKDIR" ] || { STALE_WHY="lock dir vanished before the staleness check"; return 0; }
   owner_of "$LOCKDIR/owner"
   if [ -n "$OWNER_PID" ]; then
-    kill -0 "$OWNER_PID" 2>/dev/null && return 1
-    STALE_WHY="owner pid $OWNER_PID is gone"; return 0
+    owner_gone && return 0
+    return 1
   fi
   [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null)" ] || return 1
   STALE_WHY="no owner recorded, older than 10 min"; return 0

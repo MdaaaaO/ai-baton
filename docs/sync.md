@@ -64,11 +64,17 @@ refused pull is seen by the next session instead of staying silent:
 
 A run that finds the lock busy logs `skipped` with the holder (`held by pid N since T`), says so on stderr,
 exits 3 and leaves `.sync-status` alone: the holder writes the newer state. The lock is `flock` on
-`.sync.lock` where it exists, else an atomic `mkdir` of `.sync.lock.d/`; the holder writes its pid and start
-time into it. A `.sync.lock.d/` whose owner pid is gone is stale and taken over at once (a lock dir without
-an owner file only after 10 minutes); the take-over runs under a second `mkdir` lock (`.sync.lock.break/`)
-and re-checks there, so two runs that saw the same dead owner cannot both take the lock. The thresholds are
-constants at the top of `sync.sh` and `sync-check.sh`.
+`.sync.lock` where it exists, else an atomic `mkdir` of `.sync.lock.d/`; the holder writes its pid, the
+time it took the lock, and its own process start time (`ps -o lstart=`) into it. A `.sync.lock.d/` is
+stale and taken over at once when its owner pid is gone (`kill -0`) — or when the pid is alive but `ps
+-o lstart=` for it no longer matches the start time recorded at lock-take time, i.e. the pid was reused
+(same number, a different process) after a reboot or pid wraparound. There is no time ceiling on a live
+owner: a lock dir without an owner file at all (from before owner files existed) is stale only after 10
+minutes, but a live owner — recognised as still being the same process — is never aged out, however
+long it holds the lock. An owner line with no recorded start time (written by a sync.sh from before this
+check) or one `ps` cannot answer falls back to `kill -0` alone, same as before. The take-over runs under
+a second `mkdir` lock (`.sync.lock.break/`) and re-checks there, so two runs that saw the same dead owner
+cannot both take the lock. The thresholds are constants at the top of `sync.sh` and `sync-check.sh`.
 
 The `SessionEnd` hook in `settings.json` runs it in the background whenever a session ends
 (`sh "$CLAUDE_PROJECT_DIR/.claude/sync.sh"`, `async: true`) — for the kit that is a pull, nothing more.
