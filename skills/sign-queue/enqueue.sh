@@ -30,7 +30,16 @@
 # host. Before enqueuing, verify `git -C <wt> status --short` shows exactly what the commit should
 # contain and that the message file exists. One job = one commit.
 set -eu
-eval "$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" identity-env 2>/dev/null)"  # WORKSPACE_* from plugin userConfig, if set
+# WORKSPACE_* from plugin userConfig, if set — a failed lookup stops here instead of queuing a job without an identity (#123)
+idenv=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" identity-env) \
+  || { echo "enqueue.sh: kit_profile.py identity-env failed — fix it before queuing" >&2; exit 2; }
+eval "$idenv"
+# The job is shell code run on the host with the signing key: every value goes in through sq(), never raw (#123).
+# sq VALUE — VALUE as one single-quoted sh word ('…' with each ' written as '\''). Values are single-line (no_nl).
+sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+NL='
+'
+no_nl() { case "$2" in *"$NL"*) echo "enqueue.sh: $1 contains a newline — refused" >&2; exit 2;; esac; }
 # the queue lives in the workspace (#7): `<.context>/state/sign-queue/`, never under the kit (a plugin update deletes it)
 if [ -z "${SIGN_QUEUE_DIR:-}" ]; then
   ctx=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" context)
@@ -50,6 +59,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown flag $1" >&2; exit 2;;
   esac; shift
 done
+no_nl worktree "$wt"; no_nl branch "$br"; no_nl "message path" "$msg"; no_nl --files "$files"; no_nl --onto "$onto"; no_nl --by "$by"
 [ -d "$wt/.git" ] || [ -f "$wt/.git" ] || { echo "no worktree at $wt" >&2; exit 2; }
 [ -f "$msg" ] || { echo "no message file at $msg" >&2; exit 2; }
 # commit style (WORKSPACE.md § Rules): Conventional Commits unless the repo overrides it — resolved by
@@ -90,12 +100,14 @@ if [ -n "$files" ]; then
   # such paths are in neither worktree nor index. They are already part of the commit, so drop them
   # from the add line; anything else that is neither present nor tracked is a typo -> refuse.
   kept=""
+  set -f  # a path is a word, never a glob
   for f in $files; do
-    # shellcheck disable=SC2089  # the quoted paths are written into a job script, not evaluated here
-    if [ -e "$wt/$f" ] || git -C "$wt" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then kept="$kept '$f'"   # single-quoted: some web frameworks' route dirs contain \$param (unquoted, set -u aborts the job)
+    # sq(): a route dir with \$param or a name with ' stays one literal path in the job script
+    if [ -e "$wt/$f" ] || git -C "$wt" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then kept="$kept $(sq "$f")"
     elif git -C "$wt" diff --cached --name-only --diff-filter=D | grep -qx "$f"; then echo "note: $f is an already-staged deletion, included via the index" >&2
     else echo "--files: $f is neither in the worktree nor tracked" >&2; exit 2; fi
   done
+  set +f
   files=$kept
 fi
 # overview metadata (ticket / epic / repo / PR / subject) for `make sign`; best effort — a job without it
@@ -104,8 +116,7 @@ flags=""
 [ $rebase = 1 ] && flags="$flags,rebase"; [ $newbr = 1 ] && flags="$flags,new-branch"
 [ -n "$onto" ] && flags="$flags,onto"; [ -n "$lease" ] && flags="$flags,force-with-lease"; [ -n "$files" ] && flags="$flags,files"
 nfiles=-1
-# shellcheck disable=SC2086,SC2090  # $files is a whitespace list of quoted paths; split on purpose to count entries
-[ -n "$files" ] && nfiles=$(printf '%s\n' $files | grep -c .)
+[ -n "$files" ] && nfiles=$(python3 -c 'import shlex,sys; print(len(shlex.split(sys.argv[1])))' "$files")
 meta=$(python3 "$(dirname "$0")/signq.py" meta "$wt" "$br" "$msg" --topic "$topic" --by "$by" --ticket "$ticket" \
          --epic "$epic" --pr "$pr" --summary "$summary" --flags "${flags#,}" --files "$nfiles" 2>/dev/null || true)
 mkdir -p "$Q"  # the workspace queue dir is created on first use (#7) — nothing ships or seeds it
@@ -117,7 +128,7 @@ tmp="$job.tmp"
   echo "# worktree $wt  branch $br"
   [ -n "$meta" ] && echo "# META $meta"
   echo 'set -eu'
-  echo "WT='$wt'; BR='$br'; MSG='$msg'"
+  echo "WT=$(sq "$wt")"; echo "BR=$(sq "$br")"; echo "MSG=$(sq "$msg")"
   if [ -n "$files" ]; then echo "git -C \"\$WT\" add -- $files"; elif [ -n "$explicit_files" ]; then echo '# all listed files were already staged'; else echo 'git -C "$WT" add -A'; fi
   echo 'git -C "$WT" diff --cached --stat'
   echo '# commit only if something is staged (a retry after a failed push must not fail here)'
@@ -129,13 +140,13 @@ tmp="$job.tmp"
     echo 'git -C "$WT" rebase -S FETCH_HEAD'
   fi
   if [ -n "$onto" ]; then
-    echo "UP='$onto_br'; OLD_BASE='$onto_base'"
+    echo "UP=$(sq "$onto_br")"; echo "OLD_BASE=$(sq "$onto_base")"
     echo '# stacked branch: replay our commits on the upstream branch'"'"'s pushed tip, dropping the local placeholder'
     echo 'git -C "$WT" fetch origin "$UP"'
     echo 'git -C "$WT" rebase -S --onto FETCH_HEAD "$OLD_BASE"'
   fi
   if [ $newbr = 1 ]; then echo 'git -C "$WT" push -u origin "$BR"'
-  elif [ -n "$lease" ]; then echo "LEASE='$lease'"; echo '# rewritten history of an already-pushed branch: land only if the remote tip is still the one we inspected'; echo 'git -C "$WT" push --force-with-lease="refs/heads/$BR:$LEASE" origin "$BR"'
+  elif [ -n "$lease" ]; then echo "LEASE=$(sq "$lease")"; echo '# rewritten history of an already-pushed branch: land only if the remote tip is still the one we inspected'; echo 'git -C "$WT" push --force-with-lease="refs/heads/$BR:$LEASE" origin "$BR"'
   else echo 'git -C "$WT" push origin "$BR"'; fi
   echo 'git -C "$WT" log --format="pushed %h %G? %s" -1'
 } > "$tmp"

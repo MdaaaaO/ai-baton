@@ -25,6 +25,7 @@ import datetime as _dt
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -248,13 +249,29 @@ class Job:
         h = re.search(r"^# sign-queue job: (\S+)\s+\(enqueued (\S+) by session (.+?)\)\s*$", self.text, re.M)
         if h:
             meta.update(topic=h.group(1), enqueued=h.group(2), by=h.group(3))
-        v = re.search(r"^WT='([^']*)'; BR='([^']*)'; MSG='([^']*)'", self.text, re.M)
-        if v:
-            wt, br, msg = v.groups()
+        v = self._assignments()
+        if all(k in v for k in ("WT", "BR", "MSG")):
+            wt, br, msg = v["WT"], v["BR"], v["MSG"]
             meta.update(build_meta(wt, br, msg, topic=str(meta.get("topic", "")), by=str(meta.get("by", "")),
                                    flags=self._flags_from_script(), files=self._files_from_script()))
             meta["enqueued"] = h.group(2) if h else ""
         return meta
+
+    def _assignments(self) -> Dict[str, str]:
+        """The job's `NAME='value'` lines as sh reads them: one per line since #123 (values quoted by enqueue.sh's
+        sq()), or the older `WT='…'; BR='…'; MSG='…'` one-liner."""
+        out: Dict[str, str] = {}
+        for line in self.text.splitlines():
+            if not re.match(r"(WT|BR|MSG|UP|OLD_BASE|LEASE)=", line):
+                continue
+            try:
+                lex = shlex.shlex(line, posix=True, punctuation_chars=";")  # `;` outside quotes is its own token
+                lex.whitespace_split = True
+                words = list(lex)
+            except ValueError:
+                continue
+            out.update(w.split("=", 1) for w in words if "=" in w)
+        return out
 
     def _flags_from_script(self) -> List[str]:
         f = []
@@ -267,7 +284,12 @@ class Job:
 
     def _files_from_script(self) -> int:
         m = re.search(r'^git -C "\$WT" add -- (.*)$', self.text, re.M)
-        return len(re.findall(r"'[^']*'", m.group(1))) if m else -1
+        if not m:
+            return -1
+        try:
+            return len(shlex.split(m.group(1)))
+        except ValueError:
+            return -1
 
     # display helpers
     def g(self, k: str, default: str = "") -> str:

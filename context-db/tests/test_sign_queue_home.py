@@ -95,3 +95,68 @@ class Migration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HostileValues(unittest.TestCase):
+    """#123: the job is shell code the owner runs on the host with the signing key — a branch, path or file name
+    carrying `'`, `$(…)`, a backtick or `;` must reach git as data, never run."""
+
+    def test_job_runs_hostile_values_as_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            origin, wt = tmp / "origin.git", tmp / "ws" / "re'po $(touch PWNED-wt)"
+            subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+            subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True)
+            key = tmp / "key"
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+            cfg = {"user.name": "t", "user.email": "t@example.invalid", "gpg.format": "ssh",
+                   "user.signingkey": str(key), "remote.origin.url": str(origin)}
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("SIGN_QUEUE_", "GIT_"))}
+            env.update(GIT_CONFIG_COUNT=str(len(cfg)), CONTEXT_ROOT=str(ctx), HOME=str(tmp),
+                       **{f"GIT_CONFIG_KEY_{i}": k for i, k in enumerate(cfg)},
+                       **{f"GIT_CONFIG_VALUE_{i}": v for i, v in enumerate(cfg.values())})
+            git = ["git", "-C", str(wt)]
+            (wt / "seed").write_text("s\n")
+            subprocess.run([*git, "add", "seed"], check=True, env=env)
+            subprocess.run([*git, "commit", "-q", "-m", "chore: seed"], check=True, env=env)
+            branch = "fix/x';touch${IFS}PWNED-br;'`touch${IFS}PWNED-tick`"
+            subprocess.run([*git, "checkout", "-q", "-b", branch], check=True, env=env)
+            names = ["it's.txt", "$param.txt", "a`touch${IFS}PWNED-f`;.txt"]
+            for n in names:
+                (wt / n).write_text(n)
+            (wt / "untouched.txt").write_text("not listed\n")
+            msg = tmp / "m'sg $(touch PWNED-msg).txt"
+            text = "fix: don't $(touch PWNED-body) `id`\n\nsecond line; 'quoted'\n"
+            msg.write_text(text)
+            r = subprocess.run(["sh", str(ENQUEUE), "hostile", str(wt), branch, str(msg), "--new-branch",
+                                "--files", " ".join(names), "--ticket", "none", "--epic", "none", "--pr", "none",
+                                "--summary", "s", "--by", "t"], env=env, capture_output=True, text=True, timeout=60,
+                               cwd=tmp)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            job = Path(r.stdout.strip().splitlines()[-1])
+            run = subprocess.run(["sh", str(job)], env=env, capture_output=True, text=True, timeout=60, cwd=tmp)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertEqual([p.name for p in tmp.rglob("PWNED*")], [], "a value ran as code")
+            got = subprocess.run(["git", "--git-dir", str(origin), "log", "-1", "--format=%B", branch],
+                                 capture_output=True, text=True, check=True, env=env).stdout
+            self.assertEqual(got.rstrip("\n"), text.rstrip("\n"))
+            files = subprocess.run(["git", "--git-dir", str(origin), "show", "--name-only", "--format=", branch],
+                                   capture_output=True, text=True, check=True, env=env).stdout.split("\n")
+            self.assertEqual(sorted(f for f in files if f), sorted(names))
+            sq = load_signq()
+            self.assertEqual(sq.Job(job).meta.get("files"), 3)
+            legacy = tmp / "legacy.sh"  # no META line: signq.py reads the quoted assignments back as sh would
+            legacy.write_text("".join(l for l in job.read_text().splitlines(True) if not l.startswith("# META")))
+            self.assertEqual(sq.Job(legacy)._assignments(), {"WT": str(wt), "BR": branch, "MSG": str(msg)})
+            self.assertEqual(sq.Job(legacy)._files_from_script(), 3)
+
+    def test_newline_in_a_value_is_refused(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".context").mkdir()
+            r = subprocess.run(["sh", str(ENQUEUE), "t", tmp, "fix/a\nb", "/nonexistent"],
+                               env={**env, "CONTEXT_ROOT": str(Path(tmp) / ".context")}, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("contains a newline", r.stderr)
