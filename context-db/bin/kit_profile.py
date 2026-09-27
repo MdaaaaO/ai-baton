@@ -149,6 +149,15 @@ ENV_DIR = context_root() / "reference" / "env"
 TEMPLATES_DIR = ENV_DIR / "_templates"  # `_`-prefixed: the index/verify walkers skip it
 
 
+
+def section(cfg: dict, name: str) -> dict:
+    """`cfg[name]` as an object: a missing, null or non-object section becomes `{}` (in this in-memory copy), so a reader
+    never trips over a `null` that `config-set` or a hand edit left in config.json."""
+    v = cfg.get(name)
+    if not isinstance(v, dict):
+        v = cfg[name] = {}
+    return v
+
 @lru_cache(maxsize=None)
 def env_config() -> dict:
     """config.json as written, `{}` when there is no store. Invalid JSON is a one-line error naming the file (exit 1),
@@ -210,19 +219,19 @@ def _project_tables(cfg: dict) -> None:
     def vals(rows_: dict) -> dict:
         return {n: num(r["value"]) for n, r in rows_.items() if r["value"]}
     if rows("slack", "channel"):
-        cfg.setdefault("slack", {})["channels"] = {**cfg.get("slack", {}).get("channels", {}), **vals(rows("slack", "channel"))}
+        section(cfg, "slack")["channels"] = {**(section(cfg, "slack").get("channels") or {}), **vals(rows("slack", "channel"))}
     if rows("slack", "review-venue"):
-        cfg.setdefault("slack", {})["repo_channels"] = {**cfg.get("slack", {}).get("repo_channels", {}), **vals(rows("slack", "review-venue"))}
+        section(cfg, "slack")["repo_channels"] = {**(section(cfg, "slack").get("repo_channels") or {}), **vals(rows("slack", "review-venue"))}
     for k, v in vals(rows("tracker", "setting")).items():
-        cfg.setdefault("tracker", {})[k] = v
+        section(cfg, "tracker")[k] = v
     fields = vals(rows("tracker", "field"))
     for nm, key in (("sprint", "sprint_field"), ("unplanned", "unplanned_field")):
         if nm in fields:
-            cfg.setdefault("tracker", {})[key] = fields[nm]
+            section(cfg, "tracker")[key] = fields[nm]
     if rows("tracker", "transition"):
-        cfg.setdefault("tracker", {})["transitions"] = {**cfg.get("tracker", {}).get("transitions", {}), **vals(rows("tracker", "transition"))}
+        section(cfg, "tracker")["transitions"] = {**(section(cfg, "tracker").get("transitions") or {}), **vals(rows("tracker", "transition"))}
     if rows("github", "person"):
-        cfg.setdefault("github", {})["display_names"] = {**cfg.get("github", {}).get("display_names", {}), **vals(rows("github", "person"))}
+        section(cfg, "github")["display_names"] = {**(section(cfg, "github").get("display_names") or {}), **vals(rows("github", "person"))}
 
 
 @lru_cache(maxsize=None)
