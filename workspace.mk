@@ -1,6 +1,12 @@
 # workspace.mk — shared Make targets for an ai-baton workspace.
 # Include it from the root Makefile:   include .claude/workspace.mk
 # Everything here is user-agnostic; keep personal/host-specific targets in the root Makefile.
+# Every target names the kit as $(KIT): the directory this file was included from (`.claude` on a clone, the
+# plugin root or a checkout under any other name when included by path); `make … KIT=<dir>` overrides (an environment
+# variable does not). Recipe paths are
+# double-quoted, so a workspace path with a space stays one argument.
+_WORKSPACE_MK := $(lastword $(MAKEFILE_LIST))
+KIT := $(patsubst %/,%,$(dir $(_WORKSPACE_MK)))
 
 # ── sign queue (host side) ───────────────────────────────────────────────────────────────
 # Sessions enqueue signed-commit jobs under .context/state/sign-queue/ (skill `sign-queue`); the user
@@ -16,7 +22,7 @@
 #   make sign_log  JOB=1       # last drain log of one job
 #   make sign_retry JOB=1      # un-park a failed job for the next drain
 #   make sign_drop  JOB=1      # delete a pending/parked job
-_SIGNQ := python3 .claude/skills/sign-queue/signq.py
+_SIGNQ = python3 "$(KIT)/skills/sign-queue/signq.py"
 JOB ?=
 V   ?=
 
@@ -34,14 +40,14 @@ sign_show sign_log sign_retry sign_drop:
 # .claude/ is its own git repo (see .claude/docs/sync.md) and its main is PR-only: sync.sh
 # installs the hooks/pre-push guard and fast-forwards .claude/ to origin/main (refuses, with an
 # `error` in .sync-status, when .claude/ is dirty, off main or ahead — move that work to a branch
-# + PR). Nothing is committed or pushed by it. Lock-guarded, never fails, logs to .claude/sync.log;
+# + PR). Nothing is committed or pushed by it. Lock-guarded, never fails, logs to $(KIT)/sync.log;
 # the target prints the log's tail and .sync-status (pending/ok/offline/error, .claude/docs/sync.md).
 # A SessionEnd hook in .claude/settings.json runs it too.
 #   make claude_sync                    # kit: pull (ff-only)
 claude_sync:
-	@sh .claude/sync.sh
-	@tail -n 3 .claude/sync.log 2>/dev/null || true
-	@cat .claude/.sync-status 2>/dev/null || true
+	@sh "$(KIT)/sync.sh"
+	@tail -n 3 "$(KIT)/sync.log" 2>/dev/null || true
+	@cat "$(KIT)/.sync-status" 2>/dev/null || true
 
 # ── kit releases (conventional-release) ──────────────────────────────────────────────────
 # A kit release = a CHANGELOG.md section + the VERSION bump, as a `chore(release): X.Y.Z` PR; CI tags the
@@ -58,30 +64,33 @@ claude_sync:
 _CREL    := uvx -q --from 'conventional-release>=0.2,<1' conventional-release
 _REL_WT  := .worktrees/kit_release-run
 LEVEL    ?=
+# the default checkout: the workspace's own `.claude/` clone, and nothing else — a release never defaults to a kit that
+# is not this workspace's (e.g. `make -f $BATON/workspace.mk` run from another directory); KIT_CHECKOUT=<dir> names one
 KIT_CHECKOUT ?= $(if $(wildcard .claude/.git),.claude,)
-_CTXROOT := $(if $(wildcard .context/reference/env/config.json),CONTEXT_ROOT=$(CURDIR)/.context,)
+_CTXROOT := $(if $(wildcard .context/reference/env/config.json),CONTEXT_ROOT="$(CURDIR)/.context",)
+_REL_ABS  = $(CURDIR)/$(_REL_WT)
 
 # both run in a detached worktree off origin/main, so the dry run shows exactly what kit_release would cut
 kit_release_dry kit_release:
 	@git -C "$(or $(KIT_CHECKOUT),.)" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ -n "$(KIT_CHECKOUT)" ] || { echo "kit_release: no kit git checkout ('$(KIT_CHECKOUT)') — pass KIT_CHECKOUT=<a clone of the kit repo>; a plugin install has no clone of its own"; exit 2; }
 	@git -C "$(KIT_CHECKOUT)" fetch -q --tags origin
-	@test ! -e $(_REL_WT) || { echo "$(_REL_WT) exists — a release run in progress, or left over: git -C '$(KIT_CHECKOUT)' worktree remove --force $(CURDIR)/$(_REL_WT)"; exit 1; }
-	@git -C "$(KIT_CHECKOUT)" worktree add -q --detach $(CURDIR)/$(_REL_WT) origin/main
-	@eval "$$($(_CTXROOT) python3 $(_REL_WT)/context-db/bin/kit_profile.py gh-env)"; \
-	  out="$$(cd $(_REL_WT) && $(_CREL) release $(if $(filter kit_release_dry,$@),--dry-run) $(LEVEL))"; rc=$$?; \
-	  br="$$(git -C $(_REL_WT) branch --show-current)"; \
+	@test ! -e "$(_REL_WT)" || { echo "$(_REL_WT) exists — a release run in progress, or left over: git -C '$(KIT_CHECKOUT)' worktree remove --force '$(_REL_ABS)'"; exit 1; }
+	@git -C "$(KIT_CHECKOUT)" worktree add -q --detach "$(_REL_ABS)" origin/main
+	@eval "$$($(_CTXROOT) python3 "$(_REL_WT)/context-db/bin/kit_profile.py" gh-env)"; \
+	  out="$$(cd "$(_REL_WT)" && $(_CREL) release $(if $(filter kit_release_dry,$@),--dry-run) $(LEVEL))"; rc=$$?; \
+	  br="$$(git -C "$(_REL_WT)" branch --show-current)"; \
 	  printf '%s\n' "$$out"; \
 	  if [ $$rc -ne 0 ] && [ -n "$$br" ]; then \
 	    echo "kit_release: failed (exit $$rc) after cutting $$br — kept it and its worktree, which may hold the release commit:"; \
-	    echo "  worktree  $(CURDIR)/$(_REL_WT)"; \
+	    echo "  worktree  $(_REL_ABS)"; \
 	    echo "  branch    $$br"; \
 	    echo "finish it (skip what already happened — the output above says how far it got):"; \
-	    echo "  cd $(CURDIR)/$(_REL_WT) && git push -u origin $$br && gh pr create --base main --head $$br --fill --label release"; \
+	    echo "  cd '$(_REL_ABS)' && git push -u origin $$br && gh pr create --base main --head $$br --fill --label release"; \
 	    echo "then clean up:"; \
-	    echo "  git -C '$(KIT_CHECKOUT)' worktree remove $(CURDIR)/$(_REL_WT) && git -C '$(KIT_CHECKOUT)' branch -D $$br"; \
+	    echo "  git -C '$(KIT_CHECKOUT)' worktree remove '$(_REL_ABS)' && git -C '$(KIT_CHECKOUT)' branch -D $$br"; \
 	    exit $$rc; \
 	  fi; \
-	  git -C "$(KIT_CHECKOUT)" worktree remove --force $(CURDIR)/$(_REL_WT); \
+	  git -C "$(KIT_CHECKOUT)" worktree remove --force "$(_REL_ABS)"; \
 	  if [ -n "$$br" ]; then git -C "$(KIT_CHECKOUT)" branch -q -D "$$br"; fi; \
 	  [ $$rc -eq 0 ] || exit $$rc; \
 	  $(if $(filter kit_release_dry,$@),exit 0;) \
@@ -91,12 +100,14 @@ kit_release_dry kit_release:
 	  echo "labelled: release"
 
 # ── .context document DB shorthand ───────────────────────────────────────────────────────
-# The engine lives in .claude/context-db (make -C .claude/context-db <target>); these are aliases.
+# The engine lives in $(KIT)/context-db (make -C .claude/context-db <target> on a clone); these are aliases. The
+# workspace's .context/ is passed as CONTEXT, so the engine finds it from a kit outside the workspace too.
 #   make ctx_index / ctx_verify / ctx_find DOMAIN=<domain> / ctx_find TAG=pii
+_CTXARG := $(if $(wildcard .context),CONTEXT="$(CURDIR)/.context",)
 ctx_index ctx_verify:
-	@$(MAKE) -C .claude/context-db $(patsubst ctx_%,%,$@)
+	@$(MAKE) -C "$(KIT)/context-db" $(_CTXARG) $(patsubst ctx_%,%,$@)
 
 ctx_find:
-	@$(MAKE) -C .claude/context-db find $(if $(DOMAIN),DOMAIN=$(DOMAIN),) $(if $(TAG),TAG=$(TAG),)
+	@$(MAKE) -C "$(KIT)/context-db" $(_CTXARG) find $(if $(DOMAIN),DOMAIN=$(DOMAIN),) $(if $(TAG),TAG=$(TAG),)
 
 .PHONY: sign sign_list sign_show sign_log sign_retry sign_drop claude_sync kit_release kit_release_dry ctx_index ctx_verify ctx_find

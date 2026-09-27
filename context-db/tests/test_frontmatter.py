@@ -128,6 +128,29 @@ class Migration(unittest.TestCase):
     def test_no_frontmatter_is_left_alone(self):
         self.assertEqual(mig.migrate_text("just a body\n"), ("just a body\n", []))
 
+    def test_moved_key_value_comes_from_the_canonical_parser(self):
+        """A MOVED key with nothing after the colon: frontmatter.parse_lines is the one source of truth for what
+        a key's value is — migrate_frontmatter must read that value, not re-derive it with its own regex match."""
+        text = "---\nname: x\ndescription: d\nversion:\nupdated: 2026-09-26\nreviewed: 2026-09-25\n---\nbody\n"
+        lines, _ = fmt.split(text)
+        canonical = fmt.parse_lines(lines)["version"]
+        self.assertEqual(canonical, {})  # frontmatter.py's own reading: a bare key opens a nested mapping, not ""
+        new, changes = mig.migrate_text(text)
+        fm = fmt.parse(new)
+        self.assertEqual(fm["metadata"]["version"], '""')  # migrate coerces the same non-scalar reading to empty
+        self.assertIn("version: → metadata.version", changes)
+        self.assertEqual(mig.migrate_text(new)[1], [])  # idempotent
+
+    def test_body_fenced_dashes_are_kept_byte_for_byte(self):
+        """The frontmatter boundary is the shared `frontmatter.split` — a `---` that shows up later, inside a
+        fenced code block in the body (e.g. a doc illustrating the format), must never be mistaken for the
+        closing fence."""
+        body = "\n# demo\n\n```\n---\nname: example\n---\n```\n"
+        text = f"---\nname: demo\ndescription: d\nversion: 6\nupdated: 2026-09-26\nreviewed: 2026-09-25\n---\n{body}"
+        new, changes = mig.migrate_text(text)
+        self.assertTrue(new.endswith(body), new)
+        self.assertIn("version: → metadata.version", changes)
+
     def test_cli_accepts_a_relative_path_inside_the_kit(self):
         # the documented invocation runs from the workspace root with `.claude/skills/<x>/SKILL.md`
         import os
