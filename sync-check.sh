@@ -4,7 +4,9 @@
 # Non-fatal, a few lines on stderr. Run by `make -C .claude/context-db session-register` (and
 # `sync-check`), so every session sees at registration whether the previous session's background
 # sync silently failed, whether local commits on main can never leave this machine (main is
-# PR-only), or whether origin has moved on (a PR merged). Exit 0 always; the WARN lines are the signal.
+# PR-only), or whether origin has moved on (a PR merged). Exit 0 always; the WARN lines are the signal —
+# silence means "in step". So every state that is NOT "in step" says so: not a git checkout (outside a plugin install,
+# which kit-health reports itself), no origin/main to compare with, or a git call that failed.
 #
 #   sh .claude/sync-check.sh            # prints nothing when everything is in step
 OFFLINE_WARN_DAYS=3      # an offline laptop is normal; warn once no fetch has reached origin for this long
@@ -37,11 +39,21 @@ fi
 # origin/main, on a non-main checkout, a missing pre-push guard, and uncommitted changes.
 check_kit() {
   local dir=$1 label=kit
-  cd "$dir" || return 0
-  [ -d .git ] || return 0
-  if git remote get-url origin >/dev/null 2>&1 && git rev-parse --verify -q origin/main >/dev/null; then
-    ahead=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
-    behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+  cd "$dir" || { warn "$label: cannot enter $dir — sync state unknown"; return 0; }
+  # a worktree or submodule has a .git FILE, so ask git, not the filesystem
+  if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
+    mode=$(python3 "$dir/context-db/bin/kit_profile.py" install-mode 2>/dev/null)
+    # a plugin install has no checkout by design (kit-health says so itself); anything else is a state to report
+    [ "$mode" = plugin ] || warn "$label: $dir is not a git checkout (install mode '${mode:-unknown}') — sync state unknown; re-clone or re-run setup.sh"
+    return 0
+  fi
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    warn "$label: no \`origin\` remote — nothing to compare with; \`git remote add origin <kit repo>\` and \`make claude_sync\`"
+  elif ! git rev-parse --verify -q origin/main >/dev/null; then
+    warn "$label: no origin/main ref (never fetched?) — \`make claude_sync\` fetches it"
+  elif ! ahead=$(git rev-list --count origin/main..HEAD 2>&1) || ! behind=$(git rev-list --count HEAD..origin/main 2>&1); then
+    warn "$label: could not compare HEAD with origin/main (git: ${ahead:-$behind}) — sync state unknown"
+  else
     [ "$ahead" -gt 0 ] && warn "$label: $ahead local commit(s) on main that will never be pushed — main is PR-only: \`git branch <topic> && git reset --hard origin/main\`, open a PR from <topic>"
     [ "$behind" -gt 0 ] && warn "$label: origin/main is $behind commit(s) ahead (a PR merged) — \`make claude_sync\` fast-forwards"
   fi

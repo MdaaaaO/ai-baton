@@ -99,6 +99,24 @@ class SyncSh(unittest.TestCase):
         self.status_file.write_text(" ".join(f) + "\n")
 
     # ── ok, sha line, rotation ──
+    def test_no_origin_and_no_ref_are_reported_not_silent(self):
+        # silence reads as "in step with origin" (kit-health's ✅), so a state that cannot be compared must say so
+        self.git("update-ref", "-d", "refs/remotes/origin/main", cwd=self.kit)
+        self.assertIn("no origin/main ref", self.check())
+        self.git("remote", "remove", "origin", cwd=self.kit)
+        self.assertIn("no `origin` remote", self.check())
+
+    def test_a_copy_without_git_is_reported(self):
+        shutil.rmtree(self.kit / ".git")
+        self.assertIn("is not a git checkout", self.check())
+
+    def test_a_worktree_kit_is_checked_too(self):
+        # a worktree's `.git` is a file: `[ -d .git ]` skipped every check
+        wt = self.tmp / "wt"
+        self.git("worktree", "add", "-q", "-b", "topic", str(wt), cwd=self.kit)
+        r = subprocess.run([SH, str(wt / "sync-check.sh")], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertIn("checked out on 'topic'", r.stderr)
+
     def test_ok_logs_sha_only_when_head_moved(self):
         self.sync()
         self.assertEqual(self.status()[1], "ok")
