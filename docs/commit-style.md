@@ -38,7 +38,8 @@ file to someone else's repo — propose it to the owner if the style there reall
 | `free` | anything non-empty | for repos that explicitly want no rule |
 
 Always accepted: `Merge …`, `Revert "…"`, `fixup! …`, `squash! …` (git writes them). A message's
-second line must be blank; `#` comment lines are ignored (the hook sees the editor template).
+second line must be blank; every line that starts with the comment char (`#`, or the repo's `core.commentChar`) is
+ignored, exactly as git's `cleanup=strip` removes it — so a `#123 …` subject needs `core.commentChar` set to another char.
 
 Type → GitHub type label (`pr-open` step 3): `feat` → `enhancement`, `fix` → `bug`, `docs` →
 `documentation`; the other types take no type label unless the repo names one (`labels.repos`).
