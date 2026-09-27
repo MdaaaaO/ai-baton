@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.4.0 (2026-09-27)
+
+
+### Features
+
+* **skills:** #97 kit-setup runs setup.sh from inside the session ([#112](https://github.com/MdaaaaO/ai-baton/issues/112)) ([cdf720d](https://github.com/MdaaaaO/ai-baton/commit/cdf720d95019160659c5ef97c058f37f50301494))
+
+
+### Bug Fixes
+
+* **leaks:** #92 flag real numbers behind the KEY- placeholder prefix ([#106](https://github.com/MdaaaaO/ai-baton/issues/106)) ([64231f2](https://github.com/MdaaaaO/ai-baton/commit/64231f2415085faae05ace14b5dc6a03f2edab19))
+* **skills:** #89 pr-merge.sh survives an empty reviewDecision ([#108](https://github.com/MdaaaaO/ai-baton/issues/108)) ([0f90abe](https://github.com/MdaaaaO/ai-baton/commit/0f90abead44b9fe69766ff6829e686fbc81fc514))
+* **skills:** #94 remove team, sandbox and tenant MCP fingerprints ([#109](https://github.com/MdaaaaO/ai-baton/issues/109)) ([5f77391](https://github.com/MdaaaaO/ai-baton/commit/5f77391cb1e3e1b9c523987cb4447858262fc5ca))
+* **kit-health:** #91 resolve the workspace per call, not at import ([#110](https://github.com/MdaaaaO/ai-baton/issues/110)) ([7447607](https://github.com/MdaaaaO/ai-baton/commit/74476076625aecd238c95199d309b8fb8d038e7d))
+
+
+### Documentation
+
+* **skills:** #93 drop third-party attribution lines ([#107](https://github.com/MdaaaaO/ai-baton/issues/107)) ([59c0e2b](https://github.com/MdaaaaO/ai-baton/commit/59c0e2bb159b39b7d0234db8eba8e219f3289100))
+* **readme:** #104 pitch the self-maintenance loop ([#113](https://github.com/MdaaaaO/ai-baton/issues/113)) ([685848e](https://github.com/MdaaaaO/ai-baton/commit/685848e03e831756051ee96fcdb623b5b97ccfff))
+* **ci:** #82 claude-review.yml comments name the live main ruleset ([#111](https://github.com/MdaaaaO/ai-baton/issues/111)) ([0c09f72](https://github.com/MdaaaaO/ai-baton/commit/0c09f72303b0f16fa004e34682adaff5e842fae1))
+
+
+### CI
+
+* **install:** #98 replay the README install blocks on a fresh runner ([#114](https://github.com/MdaaaaO/ai-baton/issues/114)) ([159668a](https://github.com/MdaaaaO/ai-baton/commit/159668ac1c61eb1eff40af7ad2b1bf9d9fcd746c))
+
 ## 0.3.1 (2026-09-27)
 
 
