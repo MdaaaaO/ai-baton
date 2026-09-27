@@ -411,14 +411,13 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
     today = today or date.today()
     desc_total = 0
     is_agent = p.parent.name == "agents"
-    fm = fmt.load(p)
-    parts = fmt.split(p.read_text(encoding="utf-8", errors="replace"))
+    parts = fmt.split(p.read_text(encoding="utf-8", errors="replace"))  # one read + split, reused below
+    fm = fmt.parse_lines(parts[0]) if parts else None
     for dup in (fmt.duplicate_keys(parts[0]) if parts else []):  # #19: the parser keeps the last value silently
         errors.append(f"{rel}: frontmatter repeats {dup} (block lines) — a mis-resolved merge? keep one")
     if fm is None:
         errors.append(f"{rel}: no frontmatter block")
         return 0
-    parts = fmt.split(p.read_text(encoding="utf-8", errors="replace"))
     check_body(p, rel, parts[1] if parts else "", errors)
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there
         km = fmt.KEY.match(line) or fmt.SUBKEY.match(line)
