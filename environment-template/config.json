@@ -146,7 +146,8 @@
   },
   "tz_default": "UTC",
   "kit": {
-    "_comment": "Written by setup.sh, never by hand (#34): how the kit is installed on this machine — kit_profile.install_mode(). kit-health § 1 warns when the kit it runs from is installed another way (re-run setup.sh). Optional: absent until setup.sh has run.",
-    "install_mode": "clone | plugin | dev-checkout"
+    "_comment": "Written by setup.sh, never by hand (#34): how the kit is installed on this machine — kit_profile.install_mode(). kit-health § 1 warns when the kit it runs from is installed another way (re-run setup.sh). Optional: absent until setup.sh has run. `sandbox_markers` is set by hand, optional (#94): absolute paths or variable names whose presence means this machine runs in a sandbox, so kit-health warns when github.sandbox_token_prefix is empty there; absent or [] = no sandbox check.",
+    "install_mode": "clone | plugin | dev-checkout",
+    "sandbox_markers": []
   }
 }
