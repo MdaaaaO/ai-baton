@@ -161,8 +161,10 @@ def split_row(line: str) -> list[str] | None:
 
 # A file under the store is a system doc only when its name is this shape — README.md, a `_templates/`
 # entry (a directory, never matched by the *.md glob) and an editor backup (`slack.md~`, `#slack.md#`)
-# are prose or plumbing, never a table `all_facts()` should try to read.
-SYSTEM_FILE = re.compile(r"[a-z][a-z0-9_]*\.md")
+# are prose or plumbing, never a table `all_facts()` should try to read. Must stay in sync with the
+# system-name grammar `doc_path()` enforces (letters, digits, `-`/`_`) — a hyphenated system doc still
+# has to round-trip through `all_facts()`, not just `get`/`set`.
+SYSTEM_FILE = re.compile(r"[a-z][a-z0-9_-]*\.md")
 
 # The heading line and the table header/separator it must be followed by for a `## <kind>` line to be
 # accepted as a fact-table section, exactly the grammar `new_doc()`/`table_header()` write.
@@ -409,7 +411,10 @@ def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", l
                 lines.pop()
             lines += ["", f"## {kind}", "", *table_header().split("\n"), new_row, ""]
         else:
-            # insert after the last row of that section
+            # insert after the last row of that section — `kind in facts` only holds once `_kind_heading`
+            # has confirmed a header + separator follow the heading, and this same scan meets that same
+            # header/separator (both satisfy `split_row(...) is not None`), so `last` is always set by
+            # the time the loop below ends; there is no "section without a table yet" case to fall back to.
             in_kind = False
             last = None
             for i, line in enumerate(lines):
@@ -425,13 +430,8 @@ def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", l
                     continue
                 if in_kind and split_row(line) is not None:
                     last = i
-            if last is None:  # section without a table yet
-                for i, line in enumerate(lines):
-                    if _kind_heading(lines, i) == kind:
-                        lines[i + 1:i + 1] = ["", *table_header().split("\n"), new_row]
-                        break
-            else:
-                lines.insert(last + 1, new_row)
+            assert last is not None, f"{system}.{kind}: header/separator missing for a kind already in facts"
+            lines.insert(last + 1, new_row)
         result = "added"
     write_doc(system, lines)
     return result

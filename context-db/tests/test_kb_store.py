@@ -245,6 +245,16 @@ class TableGrammar(StoreCase):
         self.assertNotIn("README", out)
         self.assertIn("README.md", err)  # skipped, and said so
 
+    def test_all_facts_reads_a_hyphenated_system_doc(self):
+        # `doc_path()` accepts a hyphen in a system name (its own error message says so: "lowercase,
+        # digits, -/_"), so a fact written to e.g. `google-drive.md` round-trips through `get`/`set` —
+        # but `all_facts()` (used by `list`/`values`/`stale`/`discover --all`) must not silently drop it.
+        kb.set_fact("google-drive", "channel", "eng-help", "C1")
+        rc, out, err = self.cli("list")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("google-drive.channel\teng-help\tC1", out)
+        self.assertNotIn("google-drive.md: not a system doc name", err)
+
 
 class RenamedKinds(StoreCase):
     def write_legacy_channels(self):
