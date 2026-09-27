@@ -39,9 +39,9 @@ make -C context-db ci                                 # validator, tests, compil
 make -C context-db verify-skill UNIT=skills/<name>    # one skill only
 ```
 
-A session runs the installed kit, not your branch. To try a branch in a session, start Claude Code from the
-workspace root (project settings load from the start directory, not from the worktree) with
-`claude --plugin-dir .worktrees/kit_<topic>`, or use a clone install.
+A session runs the installed kit, not your branch, on either install. To try a branch in a session, start
+Claude Code from the workspace root (project settings load from the start directory, not from the worktree) with
+`claude --plugin-dir .worktrees/kit_<topic>`; the checkout stays on `main` either way.
 
 The kit checkout itself stays on a clean `main`. `hooks/pre-push` refuses any push to `main`, and
 `hooks/commit-msg` checks every commit subject. Tests use the standard library only and need no network.
