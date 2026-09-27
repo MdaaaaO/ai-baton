@@ -74,7 +74,7 @@ class Grep(unittest.TestCase):
         # plus the words that never meant the layer: the `kit_profile` module and its `profile` alias, AWS named profiles
         # (`aws.profile`, `--profile`, AWS_PROFILE), the Agent Skills spec's "Claude Code profile", a chat tool's
         # `read_user_profile`, and kit-health's one legacy line.
-        allowed_files = {"docs/CHANGELOG.md", "CHANGELOG.md", "docs/new-environment.md", ".gitignore", "docs/authoring.md", "docs/engine-cli.md"}  # generated: names the `make profile` target  # .gitignore keeps `profiles/` so a leftover never blocks the pull
+        allowed_files = {"CHANGELOG.md", "docs/new-environment.md", ".gitignore", "docs/authoring.md", "docs/engine-cli.md"}  # generated: names the `make profile` target  # .gitignore keeps `profiles/` so a leftover never blocks the pull
         allowed_words = ("kit_profile", "profile.", "aws.profile", "--profile", "AWS_PROFILE", "Claude Code profile", "profile of the Agent",
                          "read_user_profile", "LEGACY_PROFILES", "RETIRED_KEYS", "## profile", '"profile"', "per-profile", "Profile names",
                          "profile row", "which profile", "profile or", "profiles share", "profiles must", "profiles reach", "profile/session",

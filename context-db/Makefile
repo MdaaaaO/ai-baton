@@ -215,7 +215,7 @@ plugin-validate:
 	  else echo "plugin validate: FAILED — no \`claude\` CLI on this machine (npm i -g @anthropic-ai/claude-code, or ALLOW_SKIP=1)"; exit 1; fi
 
 # Tier 0 and tier 1 of the review (docs/REVIEW.md): the gate fails on a leak shape in an added line or a changed
-# unit without version/CHANGELOG bump (SKIP_BUMP=1 for a wording-only change); the evidence file is what the CI
+# unit without a version/updated bump (SKIP_BUMP=1 for a wording-only change); the evidence file is what the CI
 # reviewer reads (.review/ is git-ignored).
 BASE ?= origin/main
 review-gate:

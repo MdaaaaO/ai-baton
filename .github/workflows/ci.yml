@@ -42,7 +42,7 @@ jobs:
           fetch-depth: 0  # the review gate diffs against the base branch
 
       # Tier 0 of the review (docs/REVIEW.md § 1): what a diff against the base decides without a model — leak
-      # shapes on every added line, a version + `updated` bump and a CHANGELOG line for every changed skill/agent. The
+      # shapes on every added line, a version + `updated` bump for every changed skill/agent. The
       # bump check is skipped for a PR the author marks wording-only (`wording` label, or `[skip-bump]` in the title or
       # body) — the claim stays visible on the PR for the reviewer to question.
       # The gate, its leak shapes and the allow-list come from the BASE branch (#129): the PR's head is the thing being

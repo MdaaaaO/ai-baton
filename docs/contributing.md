@@ -6,7 +6,7 @@ every session behaves the same day. That is why nothing reaches `main` except th
 
 ## From issue to merge
 
-Every change is traceable both ways: **issue → PR → squash commit → CHANGELOG line**, and back.
+Every change is traceable both ways: **issue → PR → squash commit → release-log line**, and back.
 
 ```
  issue #N ─────────► branch + PR ──────────► review ─────────────► squash-merge ─────► make claude_sync
@@ -37,8 +37,9 @@ revert`, lower-case description, no trailing period, ≤ 72 characters. The scop
 
 ## Versioning
 
-A skill or agent whose **behaviour** changes bumps `metadata.version`, sets `metadata.updated`, and gets one
-line at the top of [`docs/CHANGELOG.md`](CHANGELOG.md). Wording-only edits bump nothing. `kit-verify`
+A skill or agent whose **behaviour** changes bumps `metadata.version` and sets `metadata.updated`. What changed is the
+PR's squash commit, which the generated release log (root `CHANGELOG.md`) lists; what a machine must do after the sync
+is the PR template's § Machines, plus a `BREAKING CHANGE:` footer when every machine must act. Wording-only edits bump nothing. `kit-verify`
 enforces the fields (§ Skill frontmatter); the reviewer checks the bump. A `description:` is a trigger, not the procedure: ≤ 60 words and
 ≤ 400 B per unit, ≤ 9,500 B across the kit (`kit-verify` counts whitespace-separated tokens, so a `/` or
 `—` standing alone counts as a word) — it loads into every session whether or not the unit runs.
@@ -89,8 +90,8 @@ Claude Code loads every `skills/*/SKILL.md` and `claude plugin eval` runs every 
 
 **Before the PR.** `make -C .claude/context-db verify-skill UNIT=skills/<name>` — the env-free validator (schema,
 description caps, body cap, cited paths exist, no fact-shaped literal, no cross-skill path, manifests cover the
-facts) — then `make -C .claude/context-db ci`. A behaviour change bumps `metadata.version` and adds a
-`docs/CHANGELOG.md` line (§ Versioning); the authoring checklist is `docs/authoring.md`; what loads when, `docs/loading.md`.
+facts) — then `make -C .claude/context-db ci`. A behaviour change bumps `metadata.version` and `metadata.updated`
+(§ Versioning); the authoring checklist is `docs/authoring.md`; what loads when, `docs/loading.md`.
 
 **One rule for contributors:** you must understand what you submit, whoever or whatever wrote it.
 
@@ -192,9 +193,9 @@ tags that commit `vX.Y.Z` and publishes a GitHub Release with the section as not
   stamp records it as `kit_version`. A sync between the merge and the tag job shows the release
   commit against the previous tag (the 0.2.0 commit as `v0.1.0+5`); the next sync shows `v0.2.0`. That is expected, not a bug.
 
-Two changelogs, two jobs: the root `CHANGELOG.md` is the **release log** (generated, one line per PR);
-[`docs/CHANGELOG.md`](CHANGELOG.md) stays the hand-written **behaviour log** per skill/agent version,
-with the migration notes a machine needs (§ Versioning).
+One changelog: the root `CHANGELOG.md`, the **release log**, generated from the squash commits (one line per PR). A unit's
+version is its `metadata.version`; a step a machine must take is a `BREAKING CHANGE:` footer, which the release notes carry
+(§ Versioning). The hand-written per-unit changelog (`docs/CHANGELOG.md`) is retired; its history is in git.
 
 ## Labels
 
@@ -252,7 +253,7 @@ Three tiers, one rule book — [`docs/REVIEW.md`](REVIEW.md):
 
 - **Tier 0 — `ci.yml`, no model, fails the PR.** `review_gate.py` scans every line the PR *adds* for the shared
   leak shapes plus e-mail, home-path and token shapes, and requires a higher `metadata.version`, an `updated` on or
-  after the base's (and no later than tomorrow in UTC) and a new `docs/CHANGELOG.md` line for every skill or agent with a changed file (README edits
+  after the base's (and no later than tomorrow in UTC) for every skill or agent with a changed file (README edits
   do not count). A wording-only PR says so with the `wording` label or `[skip-bump]` in its title or body; the
   reviewer may question the claim. Run it yourself: `make -C .claude/context-db review-gate` (`BASE=`, `SKIP_BUMP=1`).
   The rest of tier 0 was already there: kit-verify (frontmatter, description budget, referenced scripts, plugin

@@ -144,7 +144,7 @@ usage: review_gate.py [-h] [--base BASE] [--head HEAD] [--skip-bump] [--json]
                       [--repo REPO] [--tree]
                       [{all,leak,bump}]
 
-tier-0 review gate: leak shapes on added lines, version/CHANGELOG bumps
+tier-0 review gate: leak shapes on added lines, version/updated bumps
 
 positional arguments:
   {all,leak,bump}
@@ -153,7 +153,7 @@ options:
   -h, --help       show this help message and exit
   --base BASE      the base ref (default origin/main)
   --head HEAD
-  --skip-bump      wording-only PR: no version/CHANGELOG check
+  --skip-bump      wording-only PR: no version/updated check
   --json           print the findings as a JSON list
   --repo REPO      the repository (default: the working directory's git top
                    level)

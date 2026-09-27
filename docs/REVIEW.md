@@ -10,7 +10,7 @@ live in `ci.yml` (§ 1). Rules only, here.
 `ci.yml` fails the PR, with no model, on: every leak **shape** on an added line (chat/user ids, ticket keys,
 12-digit account ids, org hosts, timezone literals, e-mail addresses, home paths, token shapes — `review_gate.py`,
 shared list `leak_shapes.py`); a changed skill or agent without a higher `metadata.version`, a `metadata.updated`
-on or after the base's and no later than tomorrow in UTC (the author stamps their local date), and a new `docs/CHANGELOG.md` line naming it (wording-only PRs carry the `wording` label or
+on or after the base's and no later than tomorrow in UTC (the author stamps their local date) (wording-only PRs carry the `wording` label or
 `[skip-bump]` — the author's visible claim, which you may question); frontmatter schema, description budget,
 referenced scripts and flags, always-on file budgets, plugin manifests (`kit_verify.py`); the unittest suite;
 `py_compile`, `bash -n`. The same shapes also run over **every tracked file** (`review_gate.py --tree`, on every PR and push to `main`), so a leak that reached `main` without a PR diff (a release commit, a squash) still fails CI. The evidence file (`.review/evidence.md`) says whether tier 0 passed and lists the units,

@@ -247,7 +247,6 @@ class IssueRefs(unittest.TestCase):
     def test_examples_history_and_fixtures_are_exempt(self):
         self.assertEqual(self.check(self.kit({
             "skills/a/SKILL.md": "A GitHub key looks like `#162`; a hex colour #000000 is no ref.\n",
-            "docs/CHANGELOG.md": "- old entry (#199)\n",
             "context-db/tests/test_y.py": 'FIXTURE = "Closes #404"\n',
             "evals/e/prompt.md": "PR #310 is up.\n",
         })), [])
