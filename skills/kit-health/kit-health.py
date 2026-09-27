@@ -311,8 +311,8 @@ def release_check(r: Report, plugin: dict | None, mode: str) -> None:
         r.raw(f"- ❔ release: latest release unknown — {why}; installed {installed or 'unknown'}")
         return
     have, want = semver(installed), semver(latest["tag"])
-    if have is None:
-        r.raw(f"- ❔ release: latest is {latest['tag']}, installed version unknown — cannot compare")
+    if have is None or want is None:  # a pre-release or non-version tag on either side: say so, never crash
+        r.raw(f"- ❔ release: latest is {latest['tag']}, installed {installed or 'unknown'} — cannot compare")
     elif want > have:
         when = f", published {latest['published']}" if latest["published"] else ""
         notes = f" — release notes: {latest['url']}" if latest["url"] else ""

@@ -56,7 +56,6 @@ Specs: `docs/env-facts.md`, `docs/new-environment.md`.
 
 - **Read `.context/SESSION_INDEX.md` at the start** of any session that touches a shared epic, PR or
   worktree; a `⚠ STALE` row (no heartbeat >12 h) may be dead — re-verify with `ListAgents` by **ref** (main session only).
-  Sessions coordinate through `.context/`.
 - **Register** with the `session-register` skill and keep the ≤12 h heartbeat (each session writes only
   its own `.context/sessions/<name>.md`). If another active session owns the epic/PR/worktree, agree
   ownership in one `SendMessage` before editing — a worktree isolates branch/HEAD, not directory access.
@@ -120,22 +119,23 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
 
 ## Cost & context hygiene
 
-Cost ≈ turns × prefix size: everything read into context is re-billed every later turn.
+Caching: a stable prefix re-reads each turn at ~0.1× input (writes 1.25×, 5-min TTL; 2×, 1 h). The
+cliff is invalidation (tools → system → messages): editing `CLAUDE.md`, an import, a skill description
+or the tool list re-bills every open session in full next turn — **batch always-on edits into one PR**.
+Position matters too: long contexts recall their middle worst.
 
-- **Load by task, not by default:** `INDEX.md` first, then only the leaf docs the task needs; drop
-  anything unrelated. **Read slices** (`grep`, `Read` with offset+limit) — probe before you ingest.
+- **Load by task:** `INDEX.md` first, then only the leaf docs needed. **Read slices** (`grep`,
+  `Read` with offset+limit) and pipe big output to a count or scratch file.
 - **Delegate wide reads** to a subagent and keep only its conclusion. **Route by model:** subagents
-  default to Sonnet; read-and-summarise work goes to the `triage` agent or the forked skills built on
-  it, `pr-review` steps 1–4 to the Opus `review-runner`, `model: fable` only when the subagent must
-  exercise judgment. A fork returns a brief, never acts — the main model keeps every post, commit and
-  flush decision. Registry heartbeats are pure shell, never a `/loop`.
-- **Keep big output out of the transcript** — pipe to counts/filters or a scratch file.
+  default to Sonnet (Haiku for read-and-classify forks: #55 trial); read-and-summarise work to `triage`
+  or its forked skills, `pr-review` steps 1–4 to the Opus `review-runner`, `model: fable` only when the
+  subagent must exercise judgment. A fork returns a brief, never acts — the main model keeps every post,
+  commit and flush decision. Registry heartbeats are pure shell, never a `/loop`.
 - **Flush at every step.** When a ticket/PR/epic step lands: context doc (Session log + section), tick
   `.context/reference/priorities.md` where it exists, `make -C $BATON/context-db index`, then
-  `session-touch NAME=<name>`; the `MEMORY.md` index if a memory note changed. Durable state on
-  disk at every step is the real guard against compaction drift.
-- **Scope → flush → end.** Work a ticket/PR, flush, end the session — don't let a session sprawl.
-- **Don't wake other sessions needlessly** — coordinate through the registry and the context doc.
+  `session-touch NAME=<name>`; the `MEMORY.md` index if a memory note changed.
+- **Scope → flush → end.** Work a ticket/PR, flush, end the session. Don't wake other sessions
+  needlessly — coordinate through the registry and context doc.
 
 ## Repos
 
