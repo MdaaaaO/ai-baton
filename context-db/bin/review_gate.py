@@ -7,7 +7,7 @@ locally):
   leak   every line the PR ADDS is scanned with the shared leak shapes (`leak_shapes.LEAK_SHAPES`: chat/user ids,
          ticket keys, account ids, org hosts, timezone literals, …) plus the PII shapes only a diff scan needs:
          e-mail addresses, home paths (`/home/<x>`, `/Users/<x>`), token shapes (GitHub, Slack, AWS, API keys, private
-         keys). Pre-existing lines are not findings (the reviewer's rule), `skills/kit-health/allow.txt` is honoured, and
+         keys). Pre-existing lines are not findings (the reviewer's rule), `skills/kit-health/allow.txt` AS THE BASE HAS IT is honoured (a PR never widens the list that judges it, #129), and
          the scanners' own files are skipped. A login or a person's name has no shape — that stays with kit-health's
          identity scan (this machine's values) and the reviewer's leak-by-meaning lens.
   bump   a skill or agent with a changed file (anything under `skills/<x>/` except README.md, or `agents/<x>.md`) bumps
@@ -42,6 +42,7 @@ KIT = HERE.parents[1]
 CHANGELOG = "docs/CHANGELOG.md"
 RULE_LEAK = "REVIEW.md § 2.1"
 RULE_BUMP = "docs/contributing.md § Versioning"
+ALLOW = "skills/kit-health/allow.txt"
 
 # Shapes a diff scan adds to the shared list: they are PII/secret shapes, not environment facts, so kit-health's
 # every-file scan (which has this machine's real values) does not need them, and a diff scan has nothing else.
@@ -83,16 +84,49 @@ def merge_base(base: str, head: str, cwd: Path = KIT) -> str:
 
 
 def changed_files(base: str, head: str, cwd: Path = KIT) -> dict[str, str]:
-    """{path: status} for the PR's own files (status A/M/D/R…), from the merge base so a base merge is not the PR's."""
+    """{path: status} for the PR's own files (status A/M/D/R/C…), from the merge base so a base merge is not the PR's.
+    NUL-separated (`-z`, #129): a path git would quote (non-ASCII, a tab, a quote) arrives verbatim; a rename or copy
+    (`R100`/`C075`, two paths) is keyed by its new path."""
     mb = merge_base(base, head, cwd)
     out: dict[str, str] = {}
-    for line in git("diff", "--name-status", "-M", mb, head, cwd=cwd).splitlines():
-        parts = line.split("\t")
-        if len(parts) < 2:
-            continue
-        status, path = parts[0][0], parts[-1]
-        out[path] = status
+    rec = git("diff", "--name-status", "-z", "-M", "-C", mb, head, cwd=cwd).split("\0")
+    i = 0
+    while i < len(rec) and rec[i]:
+        status = rec[i]
+        paths = 2 if status[0] in "RC" else 1
+        out[rec[i + paths]] = status[0]
+        i += 1 + paths
     return out
+
+
+def binary_files(base: str, head: str, cwd: Path = KIT) -> set[str]:
+    """The PR's files git treats as binary (`--numstat` prints `-\t-`): no text hunks to scan."""
+    mb = merge_base(base, head, cwd)
+    out: set[str] = set()
+    rec = git("diff", "--numstat", "-z", "-M", "-C", mb, head, cwd=cwd).split("\0")
+    i = 0
+    while i < len(rec) and rec[i]:
+        added, deleted, path = (rec[i].split("\t", 2) + ["", ""])[:3]
+        if path == "":             # rename/copy: `<a>\t<d>\t` then the old and the new path
+            path, i = rec[i + 2], i + 3
+        else:
+            i += 1
+        if added == "-" and deleted == "-":
+            out.add(path)
+    return out
+
+
+def allowed_at(ref: str, cwd: Path = KIT) -> tuple[re.Pattern, ...]:
+    """The allow-list as `ref` has it (#129): a PR never widens the list it is judged by — its own new lines count
+    from the next PR on, after a human merged them."""
+    text = show(ref, ALLOW, cwd)
+    if text is None:
+        return ()
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "allow.txt"
+        f.write_text(text, encoding="utf-8")
+        return leak_shapes.allowed(f)
 
 
 def added_lines(base: str, head: str, path: str, cwd: Path = KIT) -> list[tuple[int, str]]:
@@ -118,10 +152,11 @@ def added_lines(base: str, head: str, path: str, cwd: Path = KIT) -> list[tuple[
 def leak_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] | None = None) -> list[str]:
     files = changed_files(base, head, cwd) if files is None else files
     shapes = leak_shapes.shapes() + [(re.compile(rx), what) for rx, what in PII_SHAPES]
-    allow = leak_shapes.allowed(cwd / "skills" / "kit-health" / "allow.txt")  # the repo under review's own allow-list
+    allow = allowed_at(merge_base(base, head, cwd), cwd)  # the BASE's allow-list, never the PR's (#129)
+    binary = binary_files(base, head, cwd)
     out: list[str] = []
     for path, status in sorted(files.items()):
-        if status == "D" or Path(path).name in leak_shapes.SKIP_FILES or path.lower().endswith(SKIP_SUFFIXES):
+        if status == "D" or Path(path).name in leak_shapes.SKIP_FILES or path.lower().endswith(SKIP_SUFFIXES) or path in binary:
             continue
         if path == "context-db/bin/review_gate.py":  # this file names the shapes it scans for
             continue
@@ -176,7 +211,7 @@ def tree_files(head: str = "HEAD", cwd: Path = KIT) -> list[str]:
 def tree_findings(head: str = "HEAD", cwd: Path = KIT) -> tuple[list[str], int]:
     """(findings, files scanned): the leak shapes over every line of every tracked file at `head` (#95)."""
     shapes = leak_shapes.shapes() + [(re.compile(rx), what) for rx, what in PII_SHAPES]
-    allow = leak_shapes.allowed(cwd / "skills" / "kit-health" / "allow.txt")
+    allow = allowed_at(head, cwd)  # a pushed tree has no base: the list as that tree has it
     out: list[str] = []
     files = [p for p in tree_files(head, cwd) if Path(p).name not in leak_shapes.SKIP_FILES
              and not p.lower().endswith(SKIP_SUFFIXES) and p != "context-db/bin/review_gate.py"

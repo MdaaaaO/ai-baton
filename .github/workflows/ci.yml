@@ -45,6 +45,9 @@ jobs:
       # shapes on every added line, a version + `updated` bump and a CHANGELOG line for every changed skill/agent. The
       # bump check is skipped for a PR the author marks wording-only (`wording` label, or `[skip-bump]` in the title or
       # body) — the claim stays visible on the PR for the reviewer to question.
+      # The gate, its leak shapes and the allow-list come from the BASE branch (#129): the PR's head is the thing being
+      # judged, so its copy of review_gate.py / leak_shapes.py / allow.txt must not decide. The base copy runs against
+      # this checkout (`--repo .`); a PR that changes the gate is tested by `make test` on its own head.
       - name: Review gate (tier 0 — leak shapes, bumps)
         if: github.event_name == 'pull_request'
         working-directory: .claude
@@ -53,9 +56,10 @@ jobs:
           SKIP_BUMP: ${{ contains(github.event.pull_request.labels.*.name, 'wording') || contains(github.event.pull_request.title, '[skip-bump]') || contains(github.event.pull_request.body, '[skip-bump]') }}
         run: |
           git fetch -q --no-tags origin "$BASE_REF"
-          set -- --base "origin/$BASE_REF" --head HEAD
+          git worktree add -q --detach "$RUNNER_TEMP/base-kit" "origin/$BASE_REF"
+          set -- --repo . --base "origin/$BASE_REF" --head HEAD
           [ "$SKIP_BUMP" = "true" ] && set -- "$@" --skip-bump
-          python3 context-db/bin/review_gate.py "$@"
+          python3 "$RUNNER_TEMP/base-kit/context-db/bin/review_gate.py" "$@"
 
       # The same leak shapes over EVERY tracked file, not the diff (#95): a release commit pushed to main, a squash of
       # many PRs or a repo's first push is never a diff the step above sees. On PRs and on every push to main.

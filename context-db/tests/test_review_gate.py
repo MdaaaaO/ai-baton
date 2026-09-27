@@ -84,6 +84,48 @@ class Repo:
         return evidence.build("main", "HEAD", cwd=self.root)
 
 
+class GateFromBase(unittest.TestCase):
+    """#129: the PR under review cannot widen the allow-list that judges it; the diff is read NUL-separated."""
+
+    def test_an_allow_line_added_by_the_pr_does_not_excuse_its_own_leak(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            r.write("skills/kit-health/allow.txt", "docs/allowed.md:" + LEAK + "$\ndocs/sneak.md:.*\n")
+            r.write("docs/sneak.md", f"token {TOKEN}\n")
+            r.commit("widen the list and leak")
+            f = r.gate(skip_bump=True)
+            self.assertTrue(any(x.startswith("[STOP] docs/sneak.md:1 — GitHub token") for x in f), f)
+
+    def test_the_base_allow_list_still_applies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            r.write("docs/allowed.md", f"ok {LEAK}\n")
+            r.commit("allowed by the base list")
+            self.assertEqual(r.gate(skip_bump=True), [])
+
+    def test_quoted_renamed_and_binary_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            r.write("docs/n\u00e4me \"q\".md", f"token {TOKEN}\n")           # core.quotePath would quote this
+            r.write("docs/old.md", "line one\nline two\nline three\nline four\n")
+            r.commit("seed")
+            sh(r.root, "git", "update-ref", "refs/heads/main", "HEAD")        # the seed is base now
+            sh(r.root, "git", "mv", "docs/old.md", "docs/new.md")
+            r.write("docs/new.md", "line one\nline two\nline three\nline four\n" + f"mail {MAIL}\n")
+            r.write("docs/blob.bin", "")
+            (r.root / "docs/blob.bin").write_bytes(b"\x00\x01" + TOKEN.encode() + b"\x00")
+            r.write("docs/\u00fcber.md", f"sub {MAIL.replace('@', '+tag@')}\n")
+            r.commit("rename + binary + non-ascii")
+            files = gate.changed_files("main", "HEAD", r.root)
+            self.assertEqual(files.get("docs/new.md"), "R", files)
+            self.assertIn("docs/\u00fcber.md", files)
+            self.assertEqual(gate.binary_files("main", "HEAD", r.root), {"docs/blob.bin"})
+            f = r.gate(skip_bump=True)
+            self.assertTrue(any(x.startswith("[STOP] docs/new.md:5 — e-mail address") for x in f), f)
+            self.assertTrue(any(x.startswith("[STOP] docs/\u00fcber.md:1 — e-mail address") for x in f), f)
+            self.assertFalse(any("blob.bin" in x for x in f), f)
+
+
 class Leaks(unittest.TestCase):
     def test_added_line_with_a_shape_is_a_stop_with_path_line_and_rule(self):
         with tempfile.TemporaryDirectory() as tmp:

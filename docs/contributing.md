@@ -144,7 +144,7 @@ lines, every `scripts/…` / `references/…` path the body cites exists, no `sk
 (§ Skills: cross-reference by name), and no fact-shaped literal (Slack id,
 custom-field id, account id, ticket key, org host, tz literal — `context-db/bin/leak_shapes.py`) — and prints
 the checks it skipped (the env-store ones). Both scanners read the one allow-list `skills/kit-health/allow.txt`
-(`<path>:<match>` regexes for a dated example that must stay verbatim, never a value a skill reads). It passes on a bare `git clone` with no `.context/`, so it is the
+(`<path>:<match>` regexes for a dated example that must stay verbatim, never a value a skill reads); on a PR, CI's review gate runs the base branch's `review_gate.py` with the base branch's allow-list, so a new allow line takes effect from the next PR on, once a human merged it (#129). It passes on a bare `git clone` with no `.context/`, so it is the
 pre-PR step for a contributor and the first step of `ci.yml`. `make -C .claude/context-db ci` is the whole CI job.
 
 A new native key is added to `NATIVE_KEYS` / `AGENT_KEYS` in `context-db/bin/kit_verify.py` **and** to this table,
