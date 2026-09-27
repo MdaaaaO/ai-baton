@@ -43,16 +43,23 @@ check_kit() {
   # a worktree or submodule has a .git FILE, so ask git, not the filesystem
   if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" != true ]; then
     mode=$(python3 "$dir/context-db/bin/kit_profile.py" install-mode 2>/dev/null)
-    # a plugin install has no checkout by design (kit-health says so itself); anything else is a state to report
-    [ "$mode" = plugin ] || warn "$label: $dir is not a git checkout (install mode '${mode:-unknown}') — sync state unknown; re-clone or re-run setup.sh"
+    # a plugin install has no checkout by design, and `.claude` without git is the copy sync.sh itself
+    # skips (docs/packaging.md) — both are kit-health's to report, not this script's; anything else
+    # (a broken/foreign directory) is a state worth flagging here
+    case "$mode" in
+      plugin|clone) ;;
+      *) warn "$label: $dir is not a git checkout (install mode '${mode:-unknown}') — sync state unknown; re-clone or re-run setup.sh" ;;
+    esac
     return 0
   fi
   if ! git remote get-url origin >/dev/null 2>&1; then
     warn "$label: no \`origin\` remote — nothing to compare with; \`git remote add origin <kit repo>\` and \`make claude_sync\`"
   elif ! git rev-parse --verify -q origin/main >/dev/null; then
     warn "$label: no origin/main ref (never fetched?) — \`make claude_sync\` fetches it"
-  elif ! ahead=$(git rev-list --count origin/main..HEAD 2>&1) || ! behind=$(git rev-list --count HEAD..origin/main 2>&1); then
-    warn "$label: could not compare HEAD with origin/main (git: ${ahead:-$behind}) — sync state unknown"
+  elif ! ahead=$(git rev-list --count origin/main..HEAD 2>&1); then
+    warn "$label: could not compare HEAD with origin/main (git: $ahead) — sync state unknown"
+  elif ! behind=$(git rev-list --count HEAD..origin/main 2>&1); then
+    warn "$label: could not compare HEAD with origin/main (git: $behind) — sync state unknown"
   else
     [ "$ahead" -gt 0 ] && warn "$label: $ahead local commit(s) on main that will never be pushed — main is PR-only: \`git branch <topic> && git reset --hard origin/main\`, open a PR from <topic>"
     [ "$behind" -gt 0 ] && warn "$label: origin/main is $behind commit(s) ahead (a PR merged) — \`make claude_sync\` fast-forwards"

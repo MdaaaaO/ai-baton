@@ -110,12 +110,45 @@ class SyncSh(unittest.TestCase):
         shutil.rmtree(self.kit / ".git")
         self.assertIn("is not a git checkout", self.check())
 
+    def test_a_dotclaude_copy_without_git_is_silent(self):
+        # `.claude` without git is the documented copy sync.sh itself skips (docs/packaging.md), not a
+        # fault: only a directory that is neither `.claude` nor a plugin install is worth flagging here
+        dotclaude = self.tmp / ".claude"
+        (dotclaude / "context-db" / "bin").mkdir(parents=True)
+        shutil.copy(KIT / "sync-check.sh", dotclaude / "sync-check.sh")
+        shutil.copy(KIT / "context-db" / "bin" / "kit_profile.py", dotclaude / "context-db" / "bin" / "kit_profile.py")
+        r = subprocess.run([SH, str(dotclaude / "sync-check.sh")], env=self.env, capture_output=True, text=True,
+                            timeout=60)
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("is not a git checkout", r.stderr)
+
     def test_a_worktree_kit_is_checked_too(self):
         # a worktree's `.git` is a file: `[ -d .git ]` skipped every check
         wt = self.tmp / "wt"
         self.git("worktree", "add", "-q", "-b", "topic", str(wt), cwd=self.kit)
         r = subprocess.run([SH, str(wt / "sync-check.sh")], env=self.env, capture_output=True, text=True, timeout=60)
         self.assertIn("checked out on 'topic'", r.stderr)
+
+    def test_ahead_behind_failure_reports_the_failing_commands_own_error(self):
+        # the `ahead` rev-list succeeds (a plain count, always non-empty) while the `behind` one fails:
+        # the warn must carry *that* command's own stderr, not the count mistaken for an error
+        real_git = shutil.which("git")
+        fakebin = self.tmp / "fakebin"
+        fakebin.mkdir()
+        (fakebin / "git").write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = rev-list ] && [ "$3" = "HEAD..origin/main" ]; then\n'
+            '  echo "fatal: injected rev-list failure" >&2\n'
+            "  exit 128\n"
+            "fi\n"
+            f'exec "{real_git}" "$@"\n'
+        )
+        (fakebin / "git").chmod(0o755)
+        env = dict(self.env, PATH=str(fakebin) + os.pathsep + self.env["PATH"])
+        r = subprocess.run([SH, str(self.kit / "sync-check.sh")], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("fatal: injected rev-list failure", r.stderr)
+        self.assertNotIn("git: 0)", r.stderr, "the ahead count must not be reported as the error")
 
     def test_ok_logs_sha_only_when_head_moved(self):
         self.sync()
