@@ -490,11 +490,12 @@ No `--help` (the tool has no argument parser); the usage is the module docstring
 transcripts.py — the one reader of Claude Code session transcripts (`~/.claude/projects/<project>/*.jsonl`).
 
 A transcript is JSONL; every API request the session made appears as an `assistant` line whose
-`message.usage` carries the token counts. A message with several content blocks is written as
-several assistant lines that repeat the same usage, so usage is de-duplicated per request id
-(`requestId`, else `message.id`). `session_stats.py` (one session's stats) and the cost-report
-skill (every transcript in a window) both read usage this way — this module is the shared path,
-so the two never drift.
+`message.usage` carries the token counts. A streamed request is written as several assistant lines
+under the same request id (`requestId`, else `message.id`) as the response grows, and only the
+last of them carries the final `output_tokens` — so usage is de-duplicated per request id by
+keeping the LAST line seen, not the first. `session_stats.py` (one session's stats) and the
+cost-report skill (every transcript in a window) both read usage this way — this module is the
+shared path, so the two never drift.
 
   usage_records(path, seen)   → (record, message, usage, request_id) per new API request in one file
   tokens(usage)               → (input, cache_write, cache_read, output)
