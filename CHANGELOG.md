@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.2.0 (2026-09-27)
+
+
+### Features
+
+* **kit-health:** #13 changed units from the compare API on a plugin ([#18](https://github.com/MdaaaaO/ai-baton/issues/18)) ([6292dcf](https://github.com/MdaaaaO/ai-baton/commit/6292dcf05cb0bb3ea62baeb388543809bd010846))
+
+
+### Bug Fixes
+
+* **kit-health:** #5 no leak for the kit owner's CODEOWNERS handle ([#14](https://github.com/MdaaaaO/ai-baton/issues/14)) ([cba7f47](https://github.com/MdaaaaO/ai-baton/commit/cba7f47ceab16dc74f4b36672fd01646332ddb9f))
+* **kit-health:** #12 report header in the user's zone ([#15](https://github.com/MdaaaaO/ai-baton/issues/15)) ([a6cf68e](https://github.com/MdaaaaO/ai-baton/commit/a6cf68e3e3ded36d44829f94a41b1003cacde1b7))
+* **kit-health:** #11 kit edits go through a checkout, not the cache ([#16](https://github.com/MdaaaaO/ai-baton/issues/16)) ([c9cbe7b](https://github.com/MdaaaaO/ai-baton/commit/c9cbe7bc6c1d023715237dad476df2d4c0b1c153))
+* **kit-health:** #10 a same-day re-run appends to the day's log ([#17](https://github.com/MdaaaaO/ai-baton/issues/17)) ([d6c5ebf](https://github.com/MdaaaaO/ai-baton/commit/d6c5ebfdad5b56699f9ea8a8284a280dbe9e6869))
+
 ## 0.1.1 (2026-09-26)
 
 
