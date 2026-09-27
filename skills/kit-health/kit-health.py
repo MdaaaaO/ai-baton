@@ -687,8 +687,11 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
         pass
     source = src.get("WORKSPACE_TZ", "")
     if source == "environment" and kit_profile.plugin_install(KIT) is not None:
-        source = "option"  # the SessionStart hook re-exports the /config option as WORKSPACE_TZ; Bash never sees the option (#30)
+        # Bash sees the hook's re-export of the /config option and a shell export alike — name both (#30)
+        source = "hook-or-shell"
     where = {"option": "the plugin option `tz` (`/plugin configure ai-baton`)",
+             "hook-or-shell": "the plugin option `tz` (`/plugin configure ai-baton`, which the SessionStart hook exports as "
+                              "`WORKSPACE_TZ`) or a shell export of `WORKSPACE_TZ`",
              "settings.local.json": "`WORKSPACE_TZ` in settings.local.json",
              "environment": "`WORKSPACE_TZ` in the environment"}.get(source, "the env store's `tz_default`")
     r.add(WARN, "machine", f"the display zone from {where} is not an IANA zone — timestamps and the log date render in UTC; "
