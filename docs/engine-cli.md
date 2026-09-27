@@ -45,6 +45,7 @@ Kit / config (env fact store .context/reference/env/):
   make -C .claude/context-db verify-skill [UNIT=skills/x] # env-free validator: frontmatter schema, body, leak shapes — no .context/ needed
   make -C .claude/context-db ci                        # exactly what .github/workflows/ci.yml runs, minus the blank env store
   make -C .claude/context-db check-links               # every relative Markdown link resolves
+  make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
@@ -65,8 +66,7 @@ Always run `index` after adding or editing a doc's frontmatter.
 
 ```text
 usage: kb.py [-h]
-             {get,set,rm,list,values,config,config-set,init,path,migrate,discover,stale}
-             ...
+             {get,set,rm,list,values,config,config-set,init,path,migrate,discover,stale} ...
 
 kb.py — the environment fact store: `.context/reference/env/`.
 

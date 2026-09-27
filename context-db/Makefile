@@ -32,6 +32,7 @@
 #   make -C .claude/context-db verify-skill [UNIT=skills/x] # env-free validator: frontmatter schema, body, leak shapes — no .context/ needed
 #   make -C .claude/context-db ci                        # exactly what .github/workflows/ci.yml runs, minus the blank env store
 #   make -C .claude/context-db check-links               # every relative Markdown link resolves
+#   make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
 #   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
 #   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
 #   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
@@ -78,7 +79,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-evidence plugin-validate check-links shellcheck engine-cli-doc
+.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
 SESSION_ID ?= $(CLAUDE_CODE_SESSION_ID)
 STATSFLAGS  = $(if $(SESSION_ID),--session-id "$(SESSION_ID)",) $(if $(NOSTATS),--no-stats,)
 
@@ -166,6 +167,11 @@ eval:
 # The relative Markdown links of every tracked *.md resolve; templates seeded elsewhere are skipped.
 check-links:
 	@cd $(ENGINE).. && $(PY) context-db/bin/check_links.py
+
+# The README's install blocks replayed on a scratch HOME (#98): the clone path, then the plugin path (skipped without
+# the `claude` CLI). The same script is CI's install-smoke job.
+install-smoke:
+	@cd $(ENGINE).. && $(PY) context-db/tests/install_smoke.py clone && $(PY) context-db/tests/install_smoke.py plugin
 
 # shellcheck -S warning over every tracked shell script and the git hooks: the system binary, else the
 # PyPI wheel through uvx; a machine with neither says so (CI has uv).

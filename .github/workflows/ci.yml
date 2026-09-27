@@ -130,3 +130,25 @@ jobs:
       - name: Markdown links resolve
         working-directory: .claude
         run: python3 context-db/bin/check_links.py
+
+  # The README's own install blocks, replayed on a runner that has never seen the kit (#98): the clone path and the
+  # plugin path (a real `claude plugin marketplace add` + `install` from this checkout), each ending in kit-health. The
+  # block is read from README.md, so a README change is tested as written; the few swaps (this checkout for the
+  # published source, the in-session `/kit-setup` / `/kit-health`) are printed in the log.
+  install-smoke:
+    name: install-smoke (${{ matrix.path }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        path: [clone, plugin]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the Claude Code CLI (plugin path)
+        if: matrix.path == 'plugin'
+        env:
+          CLAUDE_CODE_VERSION: 2.1.283
+        run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
+      - name: Replay the README install block
+        run: python3 context-db/tests/install_smoke.py ${{ matrix.path }}
