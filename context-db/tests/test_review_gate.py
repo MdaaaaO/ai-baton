@@ -313,6 +313,44 @@ class Evidence(unittest.TestCase):
             self.assertIn("No skill or agent changed", out.read_text())
 
 
+class SwallowForms(unittest.TestCase):
+    """#145: every swallow spelling the workspace rule names, in every script type the kit ships."""
+
+    def test_each_form_is_flagged_in_hooks_mjs_and_shell(self):
+        forms = ["a 2>/dev/null", "b &>/dev/null", "c >/dev/null 2>&1", "d 2>&1 >/dev/null", "e || true", "f || :",
+                 "g || echo none"]
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            r.write("hooks/pre-push", "#!/bin/sh\n" + "\n".join(forms) + "\n")
+            r.write("skills/pr-open/check.mjs", "run() || true\n")
+            r.write("bin/tool", "#!/usr/bin/env python3\ntry:\n    x()\nexcept OSError:\n    pass\nexcept ValueError: pass\n")
+            r.write("docs/prose", "no shebang: a 2>/dev/null here is prose\n")
+            r.write("hooks/clean", "#!/bin/sh\nx >/dev/null\ny || true_value\n")
+            r.write("docs/logo.png", "")
+            (r.root / "docs/logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x00 2>/dev/null")  # not UTF-8: must not crash
+            r.commit("scripts")
+            sw = {(s["path"], s["line"]) for s in r.ev()["swallowed"]}
+            self.assertEqual({n for pth, n in sw if pth == "hooks/pre-push"}, set(range(2, 2 + len(forms))), sw)
+            self.assertIn(("skills/pr-open/check.mjs", 1), sw)
+            self.assertIn(("bin/tool", 6), sw)
+            self.assertFalse(any(pth in ("docs/prose", "hooks/clean") for pth, _ in sw), sw)
+
+
+class UpdatedInUtc(unittest.TestCase):
+    def test_tomorrow_utc_is_not_the_future_but_the_day_after_is(self):
+        from datetime import datetime, timedelta, timezone
+        today = datetime.now(timezone.utc).date()
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            r.write("skills/demo/SKILL.md", UNIT.format(v="2", u=(today + timedelta(days=1)).isoformat(), req="", body=""))
+            r.write("docs/CHANGELOG.md", "# Kit changelog\n\n- x · demo v2 (#2).\n- 2026-09-01 · demo v1 (#1) — born.\n")
+            r.commit("a UTC+14 author's today")
+            self.assertEqual(r.gate(), [])
+            r.write("skills/demo/SKILL.md", UNIT.format(v="2", u=(today + timedelta(days=2)).isoformat(), req="", body=""))
+            r.commit("really in the future")
+            self.assertTrue(any("in the future" in f for f in r.gate()))
+
+
 class KitAgrees(unittest.TestCase):
     def test_vocab_map_covers_every_capability_and_the_kit_passes_its_own_gate_shapes(self):
         import kb

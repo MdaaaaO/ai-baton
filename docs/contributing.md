@@ -251,14 +251,14 @@ Three tiers, one rule book — [`docs/REVIEW.md`](REVIEW.md):
 
 - **Tier 0 — `ci.yml`, no model, fails the PR.** `review_gate.py` scans every line the PR *adds* for the shared
   leak shapes plus e-mail, home-path and token shapes, and requires a higher `metadata.version`, an `updated` on or
-  after the base's and a new `docs/CHANGELOG.md` line for every skill or agent with a changed file (README edits
+  after the base's (and no later than tomorrow in UTC) and a new `docs/CHANGELOG.md` line for every skill or agent with a changed file (README edits
   do not count). A wording-only PR says so with the `wording` label or `[skip-bump]` in its title or body; the
   reviewer may question the claim. Run it yourself: `make -C .claude/context-db review-gate` (`BASE=`, `SKIP_BUMP=1`).
   The rest of tier 0 was already there: kit-verify (frontmatter, description budget, referenced scripts, plugin
   manifests), the unittest suite, `py_compile`, `bash -n`.
 - **Tier 1 — evidence.** `review_evidence.py` writes `.review/evidence.md` for the reviewer: the changed units with
   their `requires` sets, the tier-0 verdict, and two pre-flags only a reader can decide — swallowed errors on
-  added lines and system vocabulary in a unit that does not require the capability (`kb.SYSTEM_VOCAB`). The rules
+  added lines of any script (by suffix or shebang: `.sh`, `.py`, `.mjs`, extension-less hooks) and system vocabulary in a unit that does not require the capability (`kb.SYSTEM_VOCAB`). The rules
   it judges by are copied from the **base** branch (`.review/RULES.md`), so a PR cannot rewrite them.
 - **Tier 2 — judgment.** Every non-draft PR is reviewed by Claude when it opens and on every push
   (`.github/workflows/claude-review.yml`, procedure and posting only). The four lenses (leak by meaning,

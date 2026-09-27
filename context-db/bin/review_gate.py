@@ -30,7 +30,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import date
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -167,6 +167,12 @@ def leak_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] |
     return out
 
 
+def latest_date() -> str:
+    """The latest `updated:` date that is not "in the future" anywhere: UTC today + 1 day (#145). The author stamps
+    their local date; a UTC runner is up to a day behind UTC+14 and must not fail a PR another machine passes."""
+    return (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
+
+
 def unit_of(path: str) -> str | None:
     """The unit a changed path belongs to (`skills/<x>/SKILL.md` or `agents/<x>.md`), None for engine/docs/CI files."""
     parts = path.split("/")
@@ -252,7 +258,7 @@ def bump_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] |
                        f"wording-only (`wording` label / `[skip-bump]`) ({RULE_BUMP})")
         if not u_new or (u_old and u_new < u_old):  # same day as the base's last bump is fine (two PRs in one day)
             out.append(f"[STOP] {unit}:1 — `metadata.updated` is {u_new!r} (base {u_old!r}); set it to the change's date ({RULE_BUMP})")
-        elif u_new > date.today().isoformat():
+        elif u_new > latest_date():
             out.append(f"[STOP] {unit}:1 — `metadata.updated` {u_new!r} is in the future ({RULE_BUMP})")
         if not mentioned:
             out.append(f"[STOP] {CHANGELOG}:1 — `{name}` changed but no added CHANGELOG line names it ({RULE_BUMP})")

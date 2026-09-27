@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -32,8 +33,24 @@ import review_gate as gate  # noqa: E402
 
 KIT = gate.KIT
 RULES = "docs/REVIEW.md"
-SWALLOW = re.compile(r"2>\s*/dev/null|\|\|\s*true\b|\|\|\s*echo\b|\bexcept\s*:|\bexcept\b[^:]*:\s*(?:pass|continue|return)\b")
-SCRIPT_SUFFIXES = (".sh", ".py", ".mk", "Makefile", "SKILL.md")
+# The swallow forms WORKSPACE.md § Verification names (#145): stderr (or both streams) to /dev/null in any spelling, an
+# `|| true` / `|| :` / `|| echo` that turns a failure into success, a bare or pass/continue/return `except`.
+SWALLOW = re.compile(r"2>\s*/dev/null|&>>?\s*/dev/null|>\s*/dev/null\s+2>&1|2>&1\s+>\s*/dev/null"
+                     r"|\|\|\s*true\b|\|\|\s*:(?=\s|;|\)|$)|\|\|\s*echo\b"
+                     r"|\bexcept\s*:|\bexcept\b[^:]*:\s*(?:pass|continue|return)\b")
+SCRIPT_SUFFIXES = (".sh", ".bash", ".py", ".mjs", ".js", ".mk", "Makefile", "SKILL.md")
+SHEBANG = re.compile(r"^#!.*\b(?:(?:ba|da|z)?sh|python[0-9.]*|node)\b")
+
+
+def is_script(path: str, head: str, cwd: Path = KIT) -> bool:
+    """A file whose added lines are code: by suffix, else by shebang (hooks/pre-push has neither suffix nor .sh)."""
+    if path.endswith(SCRIPT_SUFFIXES):
+        return True
+    # bytes, not text: a binary file in the diff (an image, a font) must not crash the evidence with a decode error
+    r = subprocess.run(["git", "show", f"{head}:{path}"], cwd=cwd, capture_output=True)
+    if r.returncode != 0 or b"\0" in r.stdout[:8000]:
+        return False
+    return bool(SHEBANG.match(r.stdout.split(b"\n", 1)[0].decode("utf-8", errors="replace")))
 
 
 def requires_of(text: str | None) -> set[str]:
@@ -59,7 +76,7 @@ def units_changed(base: str, head: str, files: dict[str, str], cwd: Path = KIT) 
 def swallowed(base: str, head: str, files: dict[str, str], cwd: Path = KIT) -> list[dict]:
     out = []
     for path, status in sorted(files.items()):
-        if status == "D" or not path.endswith(SCRIPT_SUFFIXES):
+        if status == "D" or not is_script(path, head, cwd):
             continue
         for n, text in gate.added_lines(base, head, path, cwd):
             m = SWALLOW.search(text)
