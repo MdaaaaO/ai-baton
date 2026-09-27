@@ -34,7 +34,8 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
 5. **Report.** One log per day and environment: `make -C $BATON/context-db new TYPE=log DOMAIN=kit-health
    SLUG=<YYYY-MM-DD>-<env> TITLE="kit-health <date> · <env>"` (the date of the report header), paste the report
    and each finding's outcome, `make … index`. When that log already exists (an earlier run today, or the re-run
-   after a Fix), `new` refuses to clobber it: append a `## Run <HH:MM>` section with the same content instead.
+   after a Fix), `new` refuses to clobber it: add a `## Run <HH:MM>` section with the same content at the top of
+   its body instead (newest first, as in every log).
 6. **Stamp.** Re-run step 1 with `--stamp`: it refuses on any error **or un-accepted leak hit**, else
    writes the HEALTH doc (`last_green`, `kit_commit`, `kit_version`, `warnings`) and re-indexes.
 7. **PR.** Kit files the walk touched go out as one PR from that worktree (`pr-open`); after the merge (and
