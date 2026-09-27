@@ -181,8 +181,8 @@ PR_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 # `prs_opened` (a PR actually *opened*) can share this one match instead of a second regex.
 GH_WRITE_RE = re.compile(
     r"(?<![\w-])gh\s+(?:api\s+(?:-X\s+)?(?:POST|PATCH|PUT|DELETE)"
-    r"|pr\s+(?P<pr_verb>create|merge|review|comment|edit)"
-    r"|issue\s+(?:create|comment|edit|close))\b"
+    r"|pr\s+(?P<pr_verb>create|merge|review|comment|edit|ready|close|reopen)"
+    r"|issue\s+(?:create|comment|edit|close|reopen))\b"
 )
 # a real enqueue: `enqueue.sh <topic> /abs/worktree …` — not `cat enqueue.sh` or a mention in a comment
 ENQUEUE_RE = re.compile(r"enqueue\.sh\s+[a-z0-9][A-Za-z0-9._-]*\s+[/$\"']")

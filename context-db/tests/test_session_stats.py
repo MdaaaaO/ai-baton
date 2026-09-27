@@ -185,6 +185,8 @@ class Transcript(unittest.TestCase):
             ("gh issue comment 5 --body hi", True, False),          # `gh issue` was not covered at all
             ("gh pr view 12", False, False),                        # read-only: not a write
             ("weigh pr create everything", False, False),           # "gh" ending a longer word: no false hit
+            ("gh pr ready 12 --undo", True, False),               # ready / close / reopen change a PR: writes
+            ("gh pr close 12", True, False),
         ]
         for cmd, want_write, want_open in cases:
             with self.subTest(cmd=cmd):
