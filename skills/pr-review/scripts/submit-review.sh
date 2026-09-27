@@ -35,7 +35,7 @@ jq -e 'type=="object" and (.event|IN("COMMENT","APPROVE","REQUEST_CHANGES")) and
   || { echo "error: request shape invalid (event/body/comments[{path,line,side,body}])" >&2; exit 2; }
 if [ "$(jq -r '.event' "$req")" = "COMMENT" ] && [ "$(jq -r '(.body|length)==0 and (.comments|length)==0' "$req")" = "true" ]; then echo "error: empty COMMENT review" >&2; exit 2; fi
 # 1b. external-surface lint — local paths and bare Jira keys never leave the workspace
-leaks=$(jq -r '[.body, .comments[].body] | map(select(test("(^|[^A-Za-z0-9_])\\.context/|scratchpad|/tmp/|\\.cache/tmp|(claude|ai-baton)-kit/|/run/user/|/Users/[a-z]|/home/[a-z]|(^|[^A-Za-z0-9_])\\.claude/"))) | length' "$req")
+leaks=$(jq -r '[.body, .comments[].body] | map(select(test("(^|[^A-Za-z0-9_])\\.context/|scratchpad|/tmp/|\\.cache/tmp|(claude|ai-baton)-kit(-[0-9]+)?/|/run/user/|/Users/[a-z]|/home/[a-z]|(^|[^A-Za-z0-9_])\\.claude/"))) | length' "$req")
 [ "$leaks" = 0 ] || { echo "error: $leaks body/comment(s) mention a local workspace path (.context/, scratchpad, /tmp, ai-baton-kit/ (formerly claude-kit/), home dir) — link the PR/ticket or inline the evidence instead" >&2; exit 2; }
 # bare tracker keys: only a Jira-style tracker needs the link (GitHub `#n` auto-links); regex/template come from the env config
 TRK_KIND=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.kind 2>/dev/null || echo "")

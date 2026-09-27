@@ -29,7 +29,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
                         python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 otherwise
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
-                        python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session, or --stable per user (survives logout)
+                        python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 """
@@ -38,6 +38,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -371,7 +372,7 @@ def scratch(sub: str | None = None, stable: bool = False) -> Path:
     into `/tmp/x` there and sessions overwrote each other's hand-off prompts and reports.
 
     Per-session (default): `<CLAUDE_JOB_DIR>/tmp` → `$KIT_SCRATCH` (explicit override) →
-    `<runtime tmp>/ai-baton-kit/<key>` where the key is `CLAUDE_CODE_SESSION_ID`, else `pid-<owning claude pid>`
+    `$XDG_RUNTIME_DIR/ai-baton-kit/<key>`, else `<$TMPDIR or /tmp>/ai-baton-kit-<uid>/<key>` where the key is `CLAUDE_CODE_SESSION_ID`, else `pid-<owning claude pid>`
     (`CLAUDE_PID` when the harness exports it, otherwise found by walking the process ancestry — shared by every
     Bash call and fork of one session), else `uid-<uid>` (per user: two sessions of one user then share it,
     which is still never a collision between machines or users — callers that need continuity across that
@@ -381,7 +382,12 @@ def scratch(sub: str | None = None, stable: bool = False) -> Path:
     Stable (`stable=True`, CLI `scratch --stable <sub>`): a per-user location that outlives the session and
     the login — `<CLAUDE_JOB_DIR>/tmp/<sub>` in a sandbox, else `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/<sub>` —
     for tooling that keeps run history or a `latest` pointer across sweeps (pr-scan).
-    `sub` appends one component."""
+    `sub` appends one component.
+
+    The per-user root under a runtime or temp dir (`ai-baton-kit[-<uid>]`) is created `0700` and must be a real
+    directory owned by the caller — a symlink or another user's directory raises `ScratchError` (CLI: exit 2), since
+    on a shared host another user could pre-create it and read or redirect review bundles and PR bodies (#138).
+    `CLAUDE_JOB_DIR` and `KIT_SCRATCH` are the caller's own choice and are not checked."""
     job = os.environ.get("CLAUDE_JOB_DIR")
     if stable:
         base = Path(job) / "tmp" if job else Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ai-baton-kit"
@@ -390,14 +396,39 @@ def scratch(sub: str | None = None, stable: bool = False) -> Path:
     elif os.environ.get("KIT_SCRATCH"):
         base = Path(os.environ["KIT_SCRATCH"])
     else:
-        run = os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or "/tmp"
+        xdg = os.environ.get("XDG_RUNTIME_DIR")  # per user and 0700 already
+        root = Path(xdg) / "ai-baton-kit" if xdg else \
+            Path(os.environ.get("TMPDIR") or "/tmp") / f"ai-baton-kit-{os.getuid()}"  # shared temp root: one dir per uid
+        private_dir(root)
         owner = None if os.environ.get("CLAUDE_CODE_SESSION_ID") else _owning_pid()
         key = os.environ.get("CLAUDE_CODE_SESSION_ID") or (f"pid-{owner}" if owner else f"uid-{os.getuid()}")
-        base = Path(run) / "ai-baton-kit" / re.sub(r"[^\w.-]", "_", key)
+        base = root / re.sub(r"[^\w.-]", "_", key)
+        base.mkdir(mode=0o700, exist_ok=True)  # `parents=True` below would give it the umask's mode
     if sub:
         base = base / sub
-    base.mkdir(parents=True, exist_ok=True)
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
     return base
+
+
+class ScratchError(RuntimeError):
+    """The scratch root is not a private directory of this user."""
+
+
+def private_dir(path: Path) -> Path:
+    """`path` as a `0700` directory owned by this user: created when missing; an existing one must be a real
+    directory (not a symlink) owned by the caller, and loses any group/other permission bits."""
+    try:
+        path.mkdir(mode=0o700, parents=True)
+    except FileExistsError:
+        pass
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise ScratchError(f"scratch root {path} is a symlink or not a directory — remove it or set KIT_SCRATCH")
+    if st.st_uid != os.getuid():
+        raise ScratchError(f"scratch root {path} belongs to uid {st.st_uid}, not {os.getuid()} — set KIT_SCRATCH")
+    if st.st_mode & 0o077:
+        os.chmod(path, 0o700)
+    return path
 
 
 @lru_cache(maxsize=1)
@@ -540,7 +571,11 @@ def main(argv: list[str]) -> int:
         print(t or "")
     elif cmd == "scratch":
         rest = [a for a in argv[2:] if a != "--stable"]
-        print(scratch(rest[0] if rest else None, stable="--stable" in argv[2:]))
+        try:
+            print(scratch(rest[0] if rest else None, stable="--stable" in argv[2:]))
+        except ScratchError as e:
+            print(f"kit_profile: {e}", file=sys.stderr)
+            return 2
     elif cmd == "identity-env":
         # for a SessionStart hook / shell callers: eval "$(python3 kit_profile.py identity-env)" — prints an export line per
         # identity value set through plugin userConfig, nothing otherwise (settings.local.json is never echoed)

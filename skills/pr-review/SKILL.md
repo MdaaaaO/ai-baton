@@ -2,8 +2,8 @@
 name: pr-review
 description: Review someone else's PR as the user: snapshot, repo trap KB, Opus review-runner pass, verified claims, walk each finding with the user (Post, Deep dive, Body only, Skip), post ONE review after approval, reply in threads, write learnings back; trivial PRs (pr-scan `A`) take the Sonnet auto-approve path. For PRs pr-scan surfaces or the user names; never the user's own.
 metadata:
-  version: "14"
-  updated: "2026-09-26"
+  version: "15"
+  updated: "2026-09-27"
   reviewed: "2026-09-26"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
 ---
