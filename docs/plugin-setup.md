@@ -35,12 +35,14 @@ step 3 fills your identity and your repos without a question.
 3. **Scaffold the workspace** — from the workspace root:
 
    ```sh
-   cd ~/Projects      # your workspace root: the directory that holds your repos
-   sh "$(claude plugin list --json | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,list) else [dict(e,id=k) for k,v in d.get("plugins",{}).items() for e in v]; print(next(p["installPath"] for p in d if p["id"] == "ai-baton@ai-baton-kit"))')/setup.sh" --personal
+   cd ~/Projects && claude    # your workspace root: the directory that holds your repos
+   /kit-setup
    ```
 
-   The line asks Claude Code where the plugin root is and runs its `setup.sh`, which takes the current directory as
-   the workspace root (`PROJECTS=/path` overrides it). It creates the env store `.context/reference/env/` (filled for a
+   The `kit-setup` skill runs the plugin's own `setup.sh --personal` (the SessionStart hook exports the plugin root as
+   `$BATON`), which takes the session's project directory as the workspace root (`PROJECTS=/path` overrides it). Without
+   a session, the same from a shell: `sh <plugin root>/setup.sh --personal`, where the plugin root is the `installPath`
+   of `ai-baton@ai-baton-kit` in `claude plugin list --json`. It creates the env store `.context/reference/env/` (filled for a
    GitHub-only machine: GitHub issues as the tracker, your clones as the tracked repos, every `systems.*` false),
    `.context/` with its README and index, the memory symlink, `.context/state/pr-review/config.json`,
    `<root>/.claude/settings.local.json` and a root `CLAUDE.md` that imports `.context/reference/environment.md`. It
@@ -69,8 +71,7 @@ Start Claude Code in your workspace root and paste:
 Install the ai-baton kit as a Claude Code plugin for this directory (my workspace root).
 
 1. Run `claude plugin marketplace add MdaaaaO/ai-baton` and `claude plugin install ai-baton@ai-baton-kit`.
-2. Find the plugin root: the `installPath` of `ai-baton@ai-baton-kit` in `claude plugin list --json`.
-   Run `sh <plugin root>/setup.sh --personal` from this directory and show me what it created,
+2. Tell me to restart Claude Code here, then run `/kit-setup` and show me what it created,
    what it left alone and every line it asks me to fix.
 3. If `gh` was not logged in, ask me for my name, GitHub login and IANA timezone, and tell me to
    run `/plugin configure ai-baton` with them.

@@ -16,9 +16,8 @@ teammate uses it unchanged.
 
 ```sh
 claude plugin marketplace add MdaaaaO/ai-baton && claude plugin install ai-baton@ai-baton-kit
-cd ~/Projects      # your workspace root: the directory that holds your repos
-sh "$(claude plugin list --json | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,list) else [dict(e,id=k) for k,v in d.get("plugins",{}).items() for e in v]; print(next(p["installPath"] for p in d if p["id"] == "ai-baton@ai-baton-kit"))')/setup.sh" --personal
-# restart Claude Code, then in the first session:
+cd ~/Projects && claude    # start Claude Code in your workspace root (the directory that holds your repos), then:
+/kit-setup                 # runs the kit's setup.sh here; restart Claude Code, then in the first session:
 /kit-health
 ```
 
@@ -94,8 +93,8 @@ your login and name from `gh`, your repos from the clones under the workspace ro
 It sets every `systems.*` flag to false. A skill that needs Jira, Slack or a warehouse stops with one "not
 applicable here" line. It is safe to re-run.
 
-On the plugin path the third line finds the plugin root through `claude plugin list --json` (the root moves on
-every update) and runs its `setup.sh`. That seeds `.context/` and the root `CLAUDE.md`, but no `Makefile` include:
+On the plugin path `/kit-setup` runs the plugin's own `setup.sh` from inside the session, which knows where the
+plugin lives (its root moves on every update). That seeds `.context/` and the root `CLAUDE.md`, but no `Makefile` include:
 the plugin's own hook loads the shared rules. To set your identity without `gh`, run `/plugin configure ai-baton`.
 [`docs/plugin-setup.md`](docs/plugin-setup.md) walks the plugin path step by step, including updates and a switch
 from a clone.
@@ -120,7 +119,7 @@ explains the clone's hooks and guards.
 
 | Category | Skills |
 |---|---|
-| Sessions and knowledge | `session-register` · `session-handoff` · `env-init` · `kit-health` · `cost-report` · `self-assessment` |
+| Sessions and knowledge | `session-register` · `session-handoff` · `env-init` · `kit-setup` · `kit-health` · `cost-report` · `self-assessment` |
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` |
 | Docs | `repo-docs` |

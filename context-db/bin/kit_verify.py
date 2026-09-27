@@ -328,6 +328,21 @@ def check_workspace_kit_paths(errors: list[str]) -> None:
             errors.append(f"WORKSPACE.md:{n}: cites `{m.group(0)}` — write `$BATON/…`, the kit root on both install paths (#3)")
 
 
+INSTALL_ONE_LINER = re.compile(r"claude plugin list --json\s*\|\s*python3 -c")
+
+
+def check_readme_install(errors: list[str], kit: Path = KIT) -> None:
+    """The README's install block is what a newcomer runs first: no `claude plugin list --json | python3 -c …` lookup of
+    the plugin root there — `/kit-setup` runs setup.sh from inside the session (#97). docs/plugin-setup.md keeps the
+    manual form in prose as the fallback."""
+    p = kit / "README.md"
+    if not p.is_file():
+        return
+    for n, line in enumerate(p.read_text(encoding="utf-8", errors="replace").split("\n"), 1):
+        if INSTALL_ONE_LINER.search(line):
+            errors.append(f"README.md:{n}: the plugin install looks up the plugin root with a python3 one-liner — use `/kit-setup` (#97)")
+
+
 def check_always_on_budget(errors: list[str]) -> None:
     for rel, cap in ALWAYS_ON_BUDGET.items():
         p = KIT / rel
@@ -575,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         check_always_on_budget(errors)
         check_workspace_kit_paths(errors)
+        check_readme_install(errors)
         check_plugin_manifest(errors)
         check_make_targets(errors)
         check_issue_refs(errors)

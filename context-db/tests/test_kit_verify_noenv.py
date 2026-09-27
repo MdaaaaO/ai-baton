@@ -67,6 +67,22 @@ class NoEnv(unittest.TestCase):
         self.assertEqual(rc, 1, err)
         self.assertIn("real-looking number behind a placeholder prefix", err)
 
+    def test_readme_install_has_no_python_one_liner(self):
+        # #97: the README's plugin install uses /kit-setup, not a `claude plugin list --json | python3 -c` lookup
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = Path(tmp)
+            (kit / "README.md").write_text("```sh\nsh \"$(claude plugin list --json | python3 -c 'x')/setup.sh\"\n```\n")
+            errors: list[str] = []
+            kit_verify.check_readme_install(errors, kit)
+            self.assertTrue(errors and "README.md:2" in errors[0] and "/kit-setup" in errors[0], errors)
+            (kit / "README.md").write_text("```sh\ncd ~/Projects && claude\n/kit-setup\n```\n")
+            errors = []
+            kit_verify.check_readme_install(errors, kit)
+            self.assertEqual(errors, [])
+        errors = []
+        kit_verify.check_readme_install(errors)  # the kit's own README
+        self.assertEqual(errors, [])
+
     def test_unknown_path_is_a_usage_error(self):
         rc, _, err = run("--no-env", str(FIX / "no-such-skill"))
         self.assertEqual(rc, 2)
