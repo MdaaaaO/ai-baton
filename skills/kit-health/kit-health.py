@@ -685,9 +685,12 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
         return
     except Exception:  # ZoneInfoNotFoundError, ValueError, OSError on a directory-shaped name
         pass
+    source = src.get("WORKSPACE_TZ", "")
+    if source == "environment" and kit_profile.plugin_install(KIT) is not None:
+        source = "option"  # the SessionStart hook re-exports the /config option as WORKSPACE_TZ; Bash never sees the option (#30)
     where = {"option": "the plugin option `tz` (`/plugin configure ai-baton`)",
              "settings.local.json": "`WORKSPACE_TZ` in settings.local.json",
-             "environment": "`WORKSPACE_TZ` in the environment"}.get(src.get("WORKSPACE_TZ", ""), "the env store's `tz_default`")
+             "environment": "`WORKSPACE_TZ` in the environment"}.get(source, "the env store's `tz_default`")
     r.add(WARN, "machine", f"the display zone from {where} is not an IANA zone — timestamps and the log date render in UTC; "
           "set an IANA Region/City name (an abbreviation like `EST` or `EDT` is not one)")
 

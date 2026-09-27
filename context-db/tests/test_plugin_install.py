@@ -262,6 +262,17 @@ class KitHealthOnAPluginInstall(unittest.TestCase):
                 self.assertEqual(kh.kit_head(), SHA)
                 self.assertEqual(kh.kit_version(), "v1.2.3")
 
+    def test_zone_warning_on_a_plugin_install_names_the_option(self):
+        # #30: Bash sees only the hook's WORKSPACE_TZ export, never CLAUDE_PLUGIN_OPTION_TZ
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("WORKSPACE_", "CLAUDE_PLUGIN_OPTION_"))}
+            with mock.patch.dict(os.environ, {**env, "WORKSPACE_TZ": "nowhere-zone"}, clear=True):
+                kh = self.load(kit, Path(tmp) / "ws")
+                r = kh.Report(); kh.zone_warning(r, kh.identity_sources())
+            hits = [l for l in r.lines if "not an IANA zone" in l]
+            self.assertTrue(hits and "/plugin configure ai-baton" in hits[0], r.lines)
+
     def test_dangling_workspace_wiring_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             kit = fake_install(Path(tmp))
