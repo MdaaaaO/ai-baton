@@ -926,6 +926,15 @@ def stamp(envname: str, r: Report) -> "tuple[Path, bool]":
     return p, rc == 0
 
 
+def header_time(now: dt.datetime | None = None) -> str:
+    """The report header's timestamp in the user's zone (`kit_profile.zone()`), e.g. `2026-09-26 21:04 EDT`, so the
+    header and the log it is pasted into (`<YYYY-MM-DD>-<env>`, the local date) name the same day (#12). The stamp's
+    `last_green` stays UTC."""
+    z, note = kit_profile.zone()
+    t = (now or dt.datetime.now(dt.timezone.utc)).astimezone(z)
+    return t.strftime("%Y-%m-%d %H:%M %Z") + note
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--stale", type=int, default=90)
@@ -936,8 +945,7 @@ def main() -> int:
                                                        "store CI builds; nothing under .context/ is written; exit 2 on an error or a leak hit, else 0")
     a = ap.parse_args()
     r = Report()
-    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    r.raw(f"# kit-health · {now}" + (" · CI mode" if a.ci else ""))
+    r.raw(f"# kit-health · {header_time()}" + (" · CI mode" if a.ci else ""))
     if a.ci:
         sec_leaks(r)
         sec_config(r)

@@ -289,6 +289,18 @@ class Verdict(unittest.TestCase):
         self.assertTrue(hit("docs/contributing.md", "ask @octo-maint"))                          # not CODEOWNERS
         self.assertTrue(hit(".github/CODEOWNERS", "/.github/ @octo-maint", owner=""))            # owner unknown
 
+    def test_header_time_is_the_users_local_date(self):
+        # #12: 01:04 UTC is still the previous evening at UTC-4 — the header names the day the log slug names (a
+        # fixed-offset zone: a real zone name in a kit file is a leak shape)
+        from zoneinfo import ZoneInfo
+        kh = load_kit_health()
+        minus4 = kh.dt.timezone(kh.dt.timedelta(hours=-4), "EDT")
+        at = kh.dt.datetime(2026, 9, 27, 1, 4, tzinfo=kh.dt.timezone.utc)
+        with mock.patch.object(kh.kit_profile, "zone", return_value=(minus4, "")):
+            self.assertEqual(kh.header_time(at), "2026-09-26 21:04 EDT")
+        with mock.patch.object(kh.kit_profile, "zone", return_value=(ZoneInfo("UTC"), " (UTC — WORKSPACE_TZ 'Mars/Base' unknown)")):
+            self.assertEqual(kh.header_time(at), "2026-09-27 01:04 UTC (UTC — WORKSPACE_TZ 'Mars/Base' unknown)")
+
     def test_changed_units_groups_by_skill_dir(self):
         kh = load_kit_health()
         with mock.patch.object(kh, "sh", return_value=(0, "skills/a/SKILL.md\nskills/a/run.sh\nagents/t.md\nWORKSPACE.md\n", "")):
