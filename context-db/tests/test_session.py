@@ -66,7 +66,8 @@ class BrokenStore(unittest.TestCase):
             for script, args in (("kit_profile.py", ["name"]), ("session.py", ["register", "--name", "x", "--no-stats"]),
                                  ("kb.py", ["config"])):
                 r = run(script, *args, root=root)
-                self.assertEqual(r.returncode, 1, (script, r.stderr))
+                # the exit-code contract: an I/O error is 2 in kb.py / kit_profile.py; session.py still says 1
+                self.assertEqual(r.returncode, 1 if script == "session.py" else 2, (script, r.stderr))
                 self.assertNotIn("Traceback", r.stderr, script)
                 self.assertIn("config.json: invalid JSON", r.stderr, script)
 

@@ -626,7 +626,7 @@ def discover_plan(key: str, name: str, cfg: dict) -> str:
     hit = find_fact(key, name, cfg)
     label = f"{key} {name}".strip()
     if hit is None:
-        raise SystemExit(f"kb: no discovery manifest covers '{label}' — ask the user, then `kb.py set {key} {shlex.quote(name) if name else '<name>'} <value> --from user`; "
+        raise absent(f"kb: no discovery manifest covers '{label}' — ask the user, then `kb.py set {key} {shlex.quote(name) if name else '<name>'} <value> --from user`; "
                          f"to make it discoverable add an entry to context-db/discovery/<system>.json (schema: its README.md)")
     m, f = hit
     target = f.get("target", "row")
@@ -988,7 +988,29 @@ def split_key(key: str) -> tuple[str, str]:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(prog="kb.py", description=__doc__.split("\n\n")[0])
+    """Exit codes (docs/engine-cli.md): 0 ok · 1 the thing asked about is absent (`get` of a missing row, a fact no
+    manifest covers, `discover --check` finding invalid manifests) · 2 a usage or I/O error · 3 `stale --check` found rows.
+    Library code raises `SystemExit("<message>")`; here that becomes one stderr line and exit 2 (or 1 when marked
+    `absent`), never Python's default exit 1 for a message — callers that import kb still see the message."""
+    try:
+        return _main(argv)
+    except SystemExit as e:
+        if isinstance(e.code, str):
+            print(e.code if e.code.startswith("kb:") else f"kb: {e.code}", file=sys.stderr)
+            return 1 if getattr(e, "absent", False) else 2
+        raise
+
+
+def absent(msg: str) -> SystemExit:
+    """A SystemExit that the CLI turns into exit 1: the thing asked about does not exist (not a caller error)."""
+    e = SystemExit(msg)
+    e.absent = True  # type: ignore[attr-defined]
+    return e
+
+
+def _main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="kb.py", description=__doc__.split("\n\n")[0],
+                                 epilog="exit: 0 ok · 1 the value / fact asked about is absent · 2 usage or I/O error · 3 stale --check found rows")
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("get"); g.add_argument("key"); g.add_argument("name")
     s = sub.add_parser("set"); s.add_argument("key"); s.add_argument("name"); s.add_argument("value")
@@ -1127,7 +1149,7 @@ def main(argv: list[str]) -> int:
                     print(f"{stem}: {m['_error']}")
                     continue
                 na = applicable(m, cfg)
-                print(f"{stem}  (system {m['system']}; {'not applicable — ' + na if na else 'applicable'})")
+                print(f"{stem}  (system {m.get('system', '?')}; {'not applicable — ' + na if na else 'applicable'})")
                 for f in m.get("facts", []):
                     key = f.get("key", "?")
                     if f.get("target", "row") == "config":
@@ -1136,10 +1158,12 @@ def main(argv: list[str]) -> int:
                     elif " " in key:
                         s_, k_, n_ = key.replace(" ", ".", 1).split(".", 2)
                         state = "set" if get(s_, k_, n_) else "—"
-                    else:
+                    elif key.count(".") == 1:
                         s_, k_ = key.split(".")
                         n = len(kind_rows(all_facts().get(s_, {}), s_, k_))
                         state = f"{n} row(s)" if n else "—"
+                    else:  # `discover --check` names the malformed key; --all lists it rather than crash
+                        state = "malformed key"
                     print(f"  {key:<32} {f.get('target', 'row'):<6} {f.get('tool', '?'):<32} ttl {f.get('ttl_days', 0):<4} {state}")
             return 0
         if not a.key:
