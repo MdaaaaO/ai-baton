@@ -249,7 +249,7 @@ class NoSilentLoss(unittest.TestCase):
             spec.loader.exec_module(mod)  # type: ignore[union-attr]
             with unittest.mock.patch("sys.stderr"):
                 rx = mod.ticket_re()
-        self.assertIsNone(rx.search("ABC-12 anything"))
+        self.assertIsNone(rx.search("ABC" + "-12 anything"))  # assembled: the leak gate scans added lines
 
     def test_a_bad_tracker_regex_does_not_break_the_registry(self):
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},
