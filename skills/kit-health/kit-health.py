@@ -443,13 +443,34 @@ def changed_units(commit: str) -> list[str] | None:
     rc, out, _ = sh(["git", "-C", str(KIT), "diff", "--name-only", f"{commit}..HEAD", "--", "skills", "agents", "WORKSPACE.md"], timeout=30)
     if rc != 0:
         return None
+    return group_units(out.split())
+
+
+def group_units(paths: list[str]) -> list[str]:
+    """Changed paths → the units the judgement pass re-reads (`skills/<name>`, `agents/<file>`, `WORKSPACE.md`), in
+    first-seen order; every other path is dropped."""
     units: list[str] = []
-    for path in out.split():
+    for path in paths:
         parts = path.split("/")
-        u = f"skills/{parts[1]}" if parts[0] == "skills" and len(parts) > 1 else path
+        if parts[0] == "skills" and len(parts) > 1:
+            u = f"skills/{parts[1]}"
+        elif parts[0] == "agents" or path == "WORKSPACE.md":
+            u = path
+        else:
+            continue
         if u not in units:
             units.append(u)
     return units
+
+
+def changed_units_remote(repo: str, base: str, head: str) -> list[str] | None:
+    """The same list on a plugin install, which has no git history: GitHub's compare API between the stamp's commit
+    and the installed one (#13). None when it cannot answer (no repo/commit, no `gh`, offline, unknown commit)."""
+    if not (repo and base and head and shutil.which("gh")):
+        return None
+    rc, out, _ = sh(["gh", "api", f"repos/{repo}/compare/{base}...{head}", "--jq", ".files[].filename"],
+                    env=kit_profile.gh_env(), timeout=30)
+    return group_units(out.split()) if rc == 0 else None
 
 
 def may_stamp(r: "Report") -> bool:
@@ -890,26 +911,28 @@ def sec_stamp(r: Report, active: str) -> None:
     n = int(behind) if rc == 0 and behind.isdigit() else None
     when = h.get("last_green", "?")
     head = kit_head()
-    if n is None and commit and head and kit_profile.plugin_install(KIT) is not None:
-        # a plugin install cannot count commits: same commit = at HEAD, else a newer install this run re-stamps (#3)
-        if commit == head:
-            n = 0
-        else:
-            r.add(OK, "stamp", f"`{active}`: last green at `{commit[:7]}` ({when}), the installed kit is `{head[:7]}` — this run re-stamps it")
-            r.raw("- changed units unknown (a plugin install has no git history) — the judgement pass re-reads every unit the report flags")
-            r.raw("- other environments keep their own stamp in their `.context/kit-health/` — run `/kit-health` there after every kit change")
-            return
-    if n == 0:
-        r.add(OK, "stamp", f"`{active}`: green at `{commit[:7]}` = HEAD ({when}, {h.get('warnings', '?')} warnings)")
-    elif n is None:
-        r.add(WARN, "stamp", f"`{active}`: last green at `{commit[:7]}` ({when}) — commit unknown here (fetch origin)")
+    plugin = kit_profile.plugin_install(KIT) if n is None and commit and head else None
+    if plugin is not None and commit != head:
+        # a plugin install cannot count commits: a newer install this run re-stamps; GitHub names what changed (#3, #13)
+        r.add(OK, "stamp", f"`{active}`: last green at `{commit[:7]}` ({when}), the installed kit is `{head[:7]}` — this run re-stamps it")
+        changed = changed_units_remote(plugin["repo"], commit, head)
+        unknown = (f"- changed units unknown (a plugin install has no git history, and GitHub's compare API did not answer: "
+                   f"offline, or `{commit[:7]}` is not a commit of `{plugin['repo'] or '?'}`)")
     else:
-        r.add(OK, "stamp", f"`{active}`: last green at `{commit[:7]}` ({when}), HEAD is {n} kit commit(s) newer — this run re-stamps it")
-    changed = changed_units(commit) if commit else None
+        if plugin is not None:
+            n = 0  # same commit = at HEAD
+        if n == 0:
+            r.add(OK, "stamp", f"`{active}`: green at `{commit[:7]}` = HEAD ({when}, {h.get('warnings', '?')} warnings)")
+        elif n is None:
+            r.add(WARN, "stamp", f"`{active}`: last green at `{commit[:7]}` ({when}) — commit unknown here (fetch origin)")
+        else:
+            r.add(OK, "stamp", f"`{active}`: last green at `{commit[:7]}` ({when}), HEAD is {n} kit commit(s) newer — this run re-stamps it")
+        changed = [] if plugin is not None else (changed_units(commit) if commit else None)
+        unknown = f"- changed units unknown (git could not diff `{commit[:7] or '?'}..HEAD`)"
     if changed:
         r.raw("- changed since that stamp (the judgement pass re-reads these): " + ", ".join(f"`{c}`" for c in changed))
     elif changed is None:
-        r.raw(f"- changed units unknown (git could not diff `{commit[:7] or '?'}..HEAD`) — the judgement pass re-reads every unit the report flags")
+        r.raw(unknown + " — the judgement pass re-reads every unit the report flags")
     else:
         r.raw("- no skill, agent or WORKSPACE.md changed since that stamp — nothing to re-read")
     r.raw("- other environments keep their own stamp in their `.context/kit-health/` — run `/kit-health` there after every kit change")

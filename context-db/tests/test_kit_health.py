@@ -310,5 +310,41 @@ class Verdict(unittest.TestCase):
         with mock.patch.object(kh, "sh", return_value=(0, "", "")):
             self.assertEqual(kh.changed_units("abc"), [])
 
+    def test_changed_units_remote_reads_the_compare_api(self):
+        # #13: a plugin install has no git history — GitHub's compare API names the changed files, grouped the same way
+        kh = load_kit_health()
+        files = "skills/a/SKILL.md\nskills/a/run.sh\ncontext-db/bin/kb.py\nagents/t.md\nWORKSPACE.md\nREADME.md\n"
+        with mock.patch.object(kh.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(kh, "sh", return_value=(0, files, "")) as sh:
+            self.assertEqual(kh.changed_units_remote("octo/kit", "aaa", "bbb"), ["skills/a", "agents/t.md", "WORKSPACE.md"])
+        self.assertEqual(sh.call_args[0][0][:3], ["gh", "api", "repos/octo/kit/compare/aaa...bbb"])
+        with mock.patch.object(kh.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(kh, "sh", return_value=(1, "", "HTTP 404")):
+            self.assertIsNone(kh.changed_units_remote("octo/kit", "aaa", "bbb"))  # offline / unknown commit: unknown
+        with mock.patch.object(kh.shutil, "which", return_value=None):
+            self.assertIsNone(kh.changed_units_remote("octo/kit", "aaa", "bbb"))  # no gh
+        self.assertIsNone(kh.changed_units_remote("", "aaa", "bbb"))            # repo unknown
+
+    def test_plugin_stamp_lists_remote_units(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        plugin = {"repo": "octo/kit", "commit": "b" * 40, "version": "1.0.0"}
+        with mock.patch.object(kh, "read_health", return_value={"kit_commit": "a" * 40, "last_green": "x"}), \
+             mock.patch.object(kh, "sh", return_value=(128, "", "no git")), \
+             mock.patch.object(kh, "kit_head", return_value="b" * 40), \
+             mock.patch.object(kh.kit_profile, "plugin_install", return_value=plugin), \
+             mock.patch.object(kh, "changed_units_remote", return_value=["skills/a"]) as remote:
+            kh.sec_stamp(r, "env")
+        remote.assert_called_once_with("octo/kit", "a" * 40, "b" * 40)
+        self.assertTrue(any("re-reads these): `skills/a`" in ln for ln in r.lines), r.lines)
+        r = kh.Report()
+        with mock.patch.object(kh, "read_health", return_value={"kit_commit": "b" * 40, "last_green": "x"}), \
+             mock.patch.object(kh, "sh", return_value=(128, "", "no git")), \
+             mock.patch.object(kh, "kit_head", return_value="b" * 40), \
+             mock.patch.object(kh.kit_profile, "plugin_install", return_value=plugin):
+            kh.sec_stamp(r, "env")
+        self.assertTrue(any("= HEAD" in ln for ln in r.lines) and any("nothing to re-read" in ln for ln in r.lines), r.lines)
+
+
 if __name__ == "__main__":
     unittest.main()
