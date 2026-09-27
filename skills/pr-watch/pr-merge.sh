@@ -50,12 +50,18 @@ open_threads(){
   done
   printf '%s\n' "$total"
 }
-# APPROVED reviews on the current head (paginated): the gate where the repo requires no review and reviewDecision is ""
-approved_on_head(){
-  local full; full=$(head_full) && [ -n "$full" ] || return 1
-  gh api --paginate "repos/$R/pulls/$PR/reviews?per_page=100" -q "[.[] | select(.commit_id == \"$full\" and .state == \"APPROVED\")] | length" 2>"$ERRF" \
-    | awk '{ n += $1 } END { print n + 0 }'
-  return "${PIPESTATUS[0]}"
+# The review gate where the repo requires no review and reviewDecision is "": each reviewer's LATEST decisive review
+# (APPROVED / CHANGES_REQUESTED / DISMISSED; comments do not decide) — any latest CHANGES_REQUESTED blocks, and an
+# APPROVED counts only on the current head. Prints APPROVED | CHANGES_REQUESTED | NONE. All pages, merged before grouping.
+review_gate_on_head(){
+  local full out; full=$(head_full) && [ -n "$full" ] || return 1
+  out=$(gh api --paginate "repos/$R/pulls/$PR/reviews?per_page=100" 2>"$ERRF") || return 1
+  jq -rs --arg h "$full" '
+    add // [] | map(select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED"))
+    | group_by(.user.login) | map(max_by(.submitted_at))
+    | if any(.state == "CHANGES_REQUESTED") then "CHANGES_REQUESTED"
+      elif any(.state == "APPROVED" and .commit_id == $h) then "APPROVED"
+      else "NONE" end' <<<"$out"
 }
 update_branch(){ gh api -X PUT "repos/$R/pulls/$PR/update-branch" -f expected_head_sha="$1" 2>"$ERRF" >/dev/null; }
 
@@ -105,9 +111,8 @@ for _ in $(seq 1 60); do
 $resp
 EOF_RESP
   [ "$cur" = "$H" ] || { echo "HEAD MOVED to $cur — rerun"; exit 1; }
-  if [ -z "$rd" ]; then  # no required review: the gate is still a review — an APPROVED one on this head
-    ap=$(approved_on_head); [ $? -eq 0 ] || { err_line; exit 1; }
-    if [ "$ap" -gt 0 ]; then rd=APPROVED; else rd=NONE; fi
+  if [ -z "$rd" ]; then  # no required review: the gate is still a review — each reviewer's latest, approved on this head
+    rd=$(review_gate_on_head) && [ -n "$rd" ] || { err_line; exit 1; }
   fi
   case "$st $rd" in
     "CLEAN APPROVED") gh pr merge "$PR" --repo "$R" --squash 2>&1 | tail -1; echo "MERGE ATTEMPTED on $H"; exit 0;;
