@@ -26,7 +26,7 @@ Every change is traceable both ways: **issue → PR → squash commit → CHANGE
 | **6. Merge** | Squash only. `auto-merge.yml` merges as soon as the four checks are green, the review verdict on the head is `approve` and every thread is resolved; a PR that misses a gate waits for the owner. GitHub closes every `Closes` issue. | `auto-merge` workflow · owner as fallback |
 | **7. Sync** | `make claude_sync` on each machine; then `/kit-health` there if the PR says an environment needs a step. | owner, per machine |
 
-Exempt from step 1/3's issue link: dependabot PRs.
+Exempt from step 1/3's issue link: dependabot PRs and release PRs (title `chore(release): …`).
 
 ## Commits and PR titles
 
@@ -178,9 +178,11 @@ tags that commit `vX.Y.Z` and publishes a GitHub Release with the section as not
   inferred from the subjects (`feat` → minor, `!` / `BREAKING CHANGE:` → major, else patch) unless given.
 - Release PRs need no issue (`pr-issue` exempts them) and get no Claude review.
 - `v0.0.0` marks the history before Conventional Commits; the first release lists what came after it.
-- **A failed release job:** a re-run finds the tag already there and does nothing. If the tag got pushed
-  but the GitHub Release did not, create it by hand: `uvx conventional-release notes X.Y.Z > notes.md &&
-  gh release create vX.Y.Z --title vX.Y.Z --notes-file notes.md --verify-tag`.
+- **A failed release job:** re-run it. Each step does only what is missing — a tag already on the commit is
+  kept, a Release is created only when there is none — so a re-run finishes a half-done release and is a
+  no-op on a finished one. The job runs only for a `chore(release):` commit; every other push skips it.
+- **A failed `make kit_release`:** once the branch is cut, a failure keeps the branch and its worktree (the
+  release commit may exist only there) and prints the push and `gh pr create` commands that finish the run.
 - `sync.sh` logs the version a machine is at (`kit: main at 1a2b3c4 (v0.3.0+2)`), and the kit-health
   stamp records it as `kit_version`. A sync between the merge and the tag job shows the release
   commit against the previous tag (the 0.2.0 commit as `v0.1.0+5`); the next sync shows `v0.2.0`. That is expected, not a bug.
@@ -224,7 +226,7 @@ no install; a clone without an env store gets a throw-away blank one) — and CI
 schema, env-store checks, `--stale`, `--no-env`), `gen_index.py` / `verify.py` / `new.sh` on a throw-away
 `CONTEXT_ROOT`, `gen_sessions.py`, `commit_style.py`, `session_stats.py` + `transcripts.py` on a synthetic
 transcript, `frontmatter.py` + `migrate_frontmatter.py`, and the pure functions of `pr-review/scripts/trivial-check.py`
-and `pr-open/diagram-plan.py`.
+and `pr-open/diagram-plan.py`, and the `pr-issue` parser (`.github/scripts/check-pr-issue.sh`, with a stub `gh`).
 
 - **A fix PR adds the regression test** that fails before the fix and passes after it — in the module that owns the
   code (`tests/test_<module>.py`), on a temp store or `CONTEXT_ROOT`, never on this machine's `.context/`.
