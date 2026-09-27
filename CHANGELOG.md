@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.2.1 (2026-09-27)
+
+
+### Bug Fixes
+
+* **kit-verify:** reject duplicate frontmatter keys and repeated steps ([#25](https://github.com/MdaaaaO/ai-baton/issues/25)) ([85e6944](https://github.com/MdaaaaO/ai-baton/commit/85e6944c2bc0775855a47a5053cc40d4b9f8ba13))
+* **kit-health:** warn when the display zone is not an IANA zone ([#26](https://github.com/MdaaaaO/ai-baton/issues/26)) ([c788fea](https://github.com/MdaaaaO/ai-baton/commit/c788feae2514b45b67518c2651e125bc61d117ec))
+* **sign-queue:** keep the job queue in the workspace, not the kit ([#27](https://github.com/MdaaaaO/ai-baton/issues/27)) ([122fad0](https://github.com/MdaaaaO/ai-baton/commit/122fad0bb16aeae4332a9577105f2f9f9bb741f5))
+* **kit-health:** print hints with the kit as $BATON, not .claude/ ([#28](https://github.com/MdaaaaO/ai-baton/issues/28)) ([a90c643](https://github.com/MdaaaaO/ai-baton/commit/a90c64385914702339a8202a826db4cfa61015e3))
+
+
+### Tests
+
+* ignore a Claude Code session's exports in the suite ([#24](https://github.com/MdaaaaO/ai-baton/issues/24)) ([77051ab](https://github.com/MdaaaaO/ai-baton/commit/77051ab5799d49f8f7c770e4025cf69aca64d531))
+
 ## 0.2.0 (2026-09-27)
 
 
