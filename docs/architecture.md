@@ -15,11 +15,11 @@ flowchart TB
   EN["engine: context-db/bin — kb.py · kit_profile.py · session.py · gen_index.py · verify.py · kit_verify.py · review_gate.py"]
 
   S --> C
-  C -->|"@.claude/WORKSPACE.md"| W
+  C -->|"@.claude/WORKSPACE.md (clone)"| W
   C -->|"@.context/reference/environment.md"| E
   S --> SK
   SK -->|"context: fork"| AG
-  SK -->|"python3 .claude/context-db/bin/… · make -C .claude/context-db …"| EN
+  SK -->|"python3 $BATON/context-db/bin/… · make -C $BATON/context-db …"| EN
   AG --> EN
 
   subgraph DB[".context/ — the context DB, local to the machine, never synced"]
@@ -35,22 +35,27 @@ flowchart TB
   E -.->|"seeded once by setup.sh"| D2
 
   subgraph HK["hooks"]
-    H1["settings.json SessionEnd → sync.sh"]
-    H2["hooks/hooks.json SessionStart → kit_profile.py session-env"]
+    H1["settings.json SessionEnd → sync.sh (clone)"]
+    H2["hooks/hooks.json SessionStart → kit_profile.py session-env + workspace-rules (plugin)"]
     H3["git hooks: pre-push (main guard) · commit-msg (commit style)"]
   end
   H1 --> SY["sync.sh — fast-forward the kit, install the git hooks"]
   SY -.->|".sync-status, read by sync-check.sh at session-register"| EN
-  SY -.-> K[".claude/ — the kit, on main"]
-  H2 -.->|"WORKSPACE_* for every Bash"| EN
+  SY -.-> K["$BATON — the kit: .claude/ on main (clone) or the plugin cache (plugin)"]
+  H2 -.->|"WORKSPACE_* · CLAUDE_PROJECT_DIR · BATON for every Bash"| EN
+  H2 -->|"workspace-rules: WORKSPACE.md on stdout (plugin)"| W
+  PU["claude plugin update — the next release into the plugin cache"] -.-> K
   H3 --> K
 ```
 
 ## Reading the picture
 
-- **Session → root `CLAUDE.md`**: the one file the user owns; its two `@` imports pull in the shared body
-  (`WORKSPACE.md`, from the kit) and the environment's prose (`.context/reference/environment.md`, seeded by
-  `setup.sh` from `environment-template/environment.md`). Together with every unit's description this is the
+- **Session → root `CLAUDE.md` / SessionStart hook**: the root `CLAUDE.md` is the one file the user owns; it imports
+  the environment's prose (`.context/reference/environment.md`, seeded by `setup.sh` from
+  `environment-template/environment.md`). The shared body (`WORKSPACE.md`, from the kit) arrives by import or hook:
+  on a clone the same file imports `@.claude/WORKSPACE.md`; on a plugin install there is no `.claude/WORKSPACE.md`,
+  so the SessionStart hook prints it (`kit_profile.py workspace-rules`) and Claude Code adds that output to the
+  session's context (`docs/packaging.md` § Installing). Together with every unit's description this is the
   always-on layer.
 - **Skills and agents**: Claude Code discovers `skills/*/SKILL.md` and `agents/*.md` (clone path) or the plugin's
   copies (`docs/packaging.md`). A skill body loads on invoke; a `context: fork` skill runs under the agent its
@@ -62,6 +67,9 @@ flowchart TB
 - **Context DB**: `.context/` beside the kit (or `CLAUDE_PROJECT_DIR/.context` on a plugin install, `CONTEXT_ROOT`
   to override). Its spec is `.context/README.md` (seeded from `context-db/context-README.template.md`); the env
   store's is `docs/env-facts.md`.
-- **Hooks and sync**: `settings.json` runs `sync.sh` at `SessionEnd` (a fast-forward of `.claude/` to `origin/main`,
-  never a commit); `hooks/hooks.json` re-exports plugin `userConfig` identity as `WORKSPACE_*` at `SessionStart`;
-  `hooks/pre-push` and `hooks/commit-msg` are git hooks installed by `setup.sh` / `sync.sh` (`core.hooksPath`).
+- **Hooks and sync**: on a clone, `settings.json` runs `sync.sh` at `SessionEnd` (a fast-forward of `.claude/` to
+  `origin/main`, never a commit), and `hooks/pre-push` and `hooks/commit-msg` are git hooks installed by `setup.sh` /
+  `sync.sh` (`core.hooksPath`). On a plugin install `hooks/hooks.json` runs at `SessionStart`: `session-env`
+  re-exports plugin `userConfig` identity as `WORKSPACE_*`, plus `CLAUDE_PROJECT_DIR` and `BATON`, and
+  `workspace-rules` injects `WORKSPACE.md`. A plugin install has no `sync.sh`: the kit moves with
+  `claude plugin update` (`docs/sync.md`).

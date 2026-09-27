@@ -7,7 +7,7 @@ skill's Sonnet fork). Prints a markdown report; exit 0 = green, 1 = warnings onl
   python3 $BATON/skills/kit-health/kit-health.py [--stale N] [--stamp] [--report FILE] [--quiet] [--ci]
 
 Sections:
-  1. kit        — kit_verify (frontmatter + env store), stale units, git state (sync-check)
+  1. kit        — kit_verify (frontmatter + env store), stale units, git state (sync-check), newer kit release (#33)
   2. leaks      — environment-specific values anywhere in the kit (every skill, agent, engine file, doc,
                   `.github/`): generic SHAPES (Slack ids, custom-field ids, ticket keys, account ids, hosts,
                   tz literals, memory-note pointers) plus every literal VALUE this environment has configured
@@ -199,13 +199,95 @@ def sec_kit(r: Report, stale: int) -> None:
         for line in out.splitlines():
             r.add(WARN, "kit", line.replace("WARN kit sync: ", "sync: "))
     elif plugin is not None:  # sync-check skips the git half without a checkout: never claim "in step with origin" (#3)
-        r.add(OK, "kit", "sync: plugin install — Claude Code updates it from the marketplace (`claude plugin update`), "
-              "there is no checkout to sync; env store up to date")
+        r.add(OK, "kit", "sync: plugin install — no checkout to sync (updates come from the marketplace, see the release "
+              "line below); env store up to date")
     else:
         r.add(OK, "kit", "sync: in step with origin, tree clean")
+    release_check(r, plugin)
     if plugin is not None:
         cache_wiring(r, plugin)
     review_ratio(r)
+
+
+def semver(tag: str) -> tuple[int, ...] | None:
+    """`v0.3.0` / `0.3.0` → (0, 3, 0); None for anything else (a pre-release, a `+N` suffix, a non-version tag)."""
+    m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag.strip())
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def latest_release_plugin(repo: str) -> tuple[dict | None, str]:
+    """({tag, published, url}, "") for the kit repo's latest GitHub release, or (None, why) when it cannot be read."""
+    if not repo:
+        return None, "plugin.json names no `repository`"
+    if not shutil.which("gh"):
+        return None, "`gh` not installed"
+    rc, out, err = sh(["gh", "release", "view", "-R", repo, "--json", "tagName,publishedAt,url"], env=kit_profile.gh_env(), timeout=30)
+    if rc != 0:
+        return None, f"`gh release view -R {repo}` failed: {(err or out).splitlines()[-1] if (err or out) else f'exit {rc}'}"
+    try:
+        d = json.loads(out)
+        return {"tag": d["tagName"], "published": str(d.get("publishedAt") or "")[:10], "url": str(d.get("url") or "")}, ""
+    except (ValueError, KeyError, TypeError):
+        return None, "`gh release view` returned no release"
+
+
+def latest_release_clone() -> tuple[dict | None, str]:
+    """({tag, published, url}, "") for the highest `vX.Y.Z` tag on the checkout's origin, or (None, why). Asks origin
+    with `git ls-remote` — read-only, no local ref moves (kit-health writes nothing without `--stamp`)."""
+    rc, out, err = sh(["git", "-C", str(KIT), "ls-remote", "--tags", "--refs", "origin", "v*"], timeout=30)
+    if rc != 0:
+        return None, f"`git ls-remote origin` failed: {(err or out).splitlines()[-1] if (err or out) else f'exit {rc}'}"
+    tags = [ln.rsplit("refs/tags/", 1)[-1] for ln in out.splitlines() if "refs/tags/" in ln]
+    tags = [t for t in tags if semver(t)]
+    if not tags:
+        return None, "origin has no `vX.Y.Z` tag"
+    return {"tag": max(tags, key=semver), "published": "", "url": ""}, ""
+
+
+def installed_release_clone() -> str:
+    """The release tag the checkout's HEAD descends from (`v0.2.2` also for `v0.2.2+3`), "" before the first tag."""
+    rc, out, _ = sh(["git", "-C", str(KIT), "describe", "--tags", "--match", "v[0-9]*", "--abbrev=0"])
+    return out if rc == 0 else ""
+
+
+def plugin_names() -> tuple[str, str]:
+    """(plugin, marketplace) as the kit's own manifests name them — the `claude plugin update` arguments."""
+    names = []
+    for f, default in (("plugin.json", "ai-baton"), ("marketplace.json", "ai-baton-kit")):
+        try:
+            names.append(str(json.loads((KIT / ".claude-plugin" / f).read_text(encoding="utf-8")).get("name") or default))
+        except (OSError, ValueError, AttributeError):
+            names.append(default)
+    return names[0], names[1]
+
+
+def release_check(r: Report, plugin: dict | None) -> None:
+    """§ 1: is a newer kit release out than the one installed (#33)? Newer → WARN with the update command for this
+    install mode; unreadable → an informational `latest release unknown` line, never a ✅ (a failed lookup is not
+    "up to date"); otherwise ✅."""
+    if plugin is not None:
+        installed = f"v{plugin['version']}" if plugin.get("version") else ""
+        latest, why = latest_release_plugin(plugin.get("repo", ""))
+        name, market = plugin_names()
+        how = (f"`claude plugin marketplace update {market} && claude plugin update {name}@{market}`, "
+               "restart Claude Code, re-run /kit-health")
+    else:
+        installed = installed_release_clone()
+        latest, why = latest_release_clone()
+        how = "`make claude_sync` (or `sh $BATON/sync.sh`), re-run /kit-health"
+    if latest is None:
+        r.raw(f"- ❔ release: latest release unknown — {why}; installed {installed or 'unknown'}")
+        return
+    have, want = semver(installed), semver(latest["tag"])
+    if have is None or want is None:  # a pre-release or non-version tag on either side: say so, never crash
+        r.raw(f"- ❔ release: latest is {latest['tag']}, installed {installed or 'unknown'} — cannot compare")
+    elif want > have:
+        when = f", published {latest['published']}" if latest["published"] else ""
+        notes = f" — release notes: {latest['url']}" if latest["url"] else ""
+        r.add(WARN, "kit", f"release: {latest['tag']} available (installed {installed}{when}) — run {how}{notes}")
+    else:
+        r.add(OK, "kit", f"release: {installed} = latest release" if want == have
+              else f"release: {installed} is ahead of the latest release {latest['tag']}")
 
 
 def cache_runtime(parts: tuple[str, ...]) -> bool:

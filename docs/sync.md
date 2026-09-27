@@ -2,6 +2,10 @@
 
 The kit's `main` only ever fast-forwards to `origin/main`; every change arrives as a merged PR.
 
+> **Plugin install:** this page is about a clone (`.claude/`, a git checkout). A plugin install has no `sync.sh`, no
+> SessionEnd sync hook and no git hooks; it moves release by release through `claude plugin update`
+> (`docs/packaging.md` § Updating).
+
 ## Commands
 
 ```
@@ -13,15 +17,16 @@ sh .claude/sync.sh        # equivalent
 
 **The kit's `main` is PR-only.** Nothing in `.claude/` is committed or pushed by any script: `.claude/`
 stays on `main` and only ever moves by fast-forward to `origin/main`. A kit change travels
-issue → branch → PR → merge on GitHub → `make claude_sync` on every machine (the full model — issue per PR,
+issue → branch → PR → merge on GitHub → `make claude_sync` on each clone, run by that machine itself or by its
+`SessionEnd` hook (the full model — issue per PR,
 checks, Claude review, labels — is [`CONTRIBUTING.md`](../CONTRIBUTING.md)):
 
 ```
 git -C .claude worktree add ../.worktrees/kit_<topic> -b <topic> origin/main
 # edit there, commit (unsigned is fine; subject = Conventional Commits, hooks/commit-msg enforces it), then
 git -C ../.worktrees/kit_<topic> push -u origin <topic>       # branch pushes pass the hook
-# open the PR (pr-open skill: labels, diagram plan, watch); merge on GitHub; then everywhere:
-make claude_sync
+# open the PR (pr-open skill: labels, diagram plan, watch); merge on GitHub; then on every clone:
+make claude_sync          # a plugin install: claude plugin update, once the change is released
 ```
 
 ## What `sync.sh` does
