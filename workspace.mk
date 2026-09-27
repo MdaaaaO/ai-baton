@@ -34,12 +34,14 @@ sign_show sign_log sign_retry sign_drop:
 # .claude/ is its own git repo (see .claude/docs/sync.md) and its main is PR-only: sync.sh
 # installs the hooks/pre-push guard and fast-forwards .claude/ to origin/main (refuses, with an
 # `error` in .sync-status, when .claude/ is dirty, off main or ahead — move that work to a branch
-# + PR). Nothing is committed or pushed by it. Lock-guarded, never fails, logs to .claude/sync.log.
+# + PR). Nothing is committed or pushed by it. Lock-guarded, never fails, logs to .claude/sync.log;
+# the target prints the log's tail and .sync-status (pending/ok/offline/error, .claude/docs/sync.md).
 # A SessionEnd hook in .claude/settings.json runs it too.
 #   make claude_sync                    # kit: pull (ff-only)
 claude_sync:
 	@sh .claude/sync.sh
-	@tail -n 3 .claude/sync.log
+	@tail -n 3 .claude/sync.log 2>/dev/null || true
+	@cat .claude/.sync-status 2>/dev/null || true
 
 # ── kit releases (conventional-release) ──────────────────────────────────────────────────
 # A kit release = a CHANGELOG.md section + the VERSION bump, as a `chore(release): X.Y.Z` PR; CI tags the
