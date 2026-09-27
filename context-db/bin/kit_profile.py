@@ -583,6 +583,25 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
     return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
 
 
+FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+
+
+def session_name() -> str:
+    """The registry name of the running session (`session-register` writes it to the session's scratch dir), or ""."""
+    try:
+        p = scratch() / "session-name"
+        return p.read_text(encoding="utf-8").strip() if p.is_file() else ""
+    except (OSError, ScratchError):
+        return ""
+
+
+def footer() -> str:
+    """The attribution line with the session that wrote the text: `… · session `<name>``; without a registered
+    session, the bare line."""
+    n = session_name()
+    return f"{FOOTER} · session `{n}`" if n else FOOTER
+
+
 NEEDS_ARG = {"template": "<type>", "identity-source": "<WORKSPACE_* variable>", "get": "<dotted.config.key>"}
 
 
@@ -620,6 +639,15 @@ def main(argv: list[str]) -> int:
         except ScratchError as e:
             print(f"kit_profile: {e}", file=sys.stderr)
             return 2
+    elif cmd == "session-name":
+        # the registry name this session registered under (session-register records it), exit 1 when none
+        n = session_name()
+        if not n:
+            return 1
+        print(n)
+    elif cmd == "footer":
+        # the last line of every PR body and PR comment a session posts on its OWN PRs (pr-open, pr-watch)
+        print(footer())
     elif cmd == "identity-env":
         # for a SessionStart hook / shell callers: eval "$(python3 kit_profile.py identity-env)" — prints an export line per
         # identity value set through plugin userConfig, nothing otherwise (settings.local.json is never echoed)
