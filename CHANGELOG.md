@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.3.1 (2026-09-27)
+
+
+### Bug Fixes
+
+* **kit:** #40 drop pre-public tracker refs, guard new ones in kit-verify ([#84](https://github.com/MdaaaaO/ai-baton/issues/84)) ([d34d3ed](https://github.com/MdaaaaO/ai-baton/commit/d34d3eda9ca2bfa2e1197fa138c30d59bf218479))
+* **kit:** #85 cut kit_release from a KIT_CHECKOUT on plugin installs ([#86](https://github.com/MdaaaaO/ai-baton/issues/86)) ([e7044a7](https://github.com/MdaaaaO/ai-baton/commit/e7044a7bd5b07b4690fd89cb4e855e04ade4d397))
+* **skills:** #74 resolve pr-review state through kit_profile context ([#87](https://github.com/MdaaaaO/ai-baton/issues/87)) ([9b79ee7](https://github.com/MdaaaaO/ai-baton/commit/9b79ee7e9334deca432b1d422f378cc352fba21d))
+
+
+### Documentation
+
+* **kit:** #70 development setup for clone and plugin installs ([#88](https://github.com/MdaaaaO/ai-baton/issues/88)) ([6dc435e](https://github.com/MdaaaaO/ai-baton/commit/6dc435e7b50e55a3384876102be59b75ae13382c))
+
 ## 0.3.0 (2026-09-27)
 
 
