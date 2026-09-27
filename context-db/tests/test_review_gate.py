@@ -148,8 +148,8 @@ class Leaks(unittest.TestCase):
             r.write("docs/note.md", "# note\n\nsee KEY-" + "9876 and key-" + "9876-foo\nok KEY-123 key-123-<slug>\n")
             r.commit("placeholder")
             f = r.gate(skip_bump=True)
-            self.assertEqual(len(f), 1, f)  # one hit per line; the canonical line is clean
-            self.assertIn("docs/note.md:3", f[0]); self.assertIn("placeholder prefix", f[0])
+            self.assertEqual(len(f), 2, f)  # both values on line 3 (every match is checked); the canonical line is clean
+            self.assertTrue(all("docs/note.md:3" in x for x in f), f); self.assertIn("placeholder prefix", f[0])
 
     def test_pre_existing_leak_deleted_file_and_allow_list_are_not_findings(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -62,6 +62,17 @@ LEAK_SHAPES = [
 ]
 SKIP_LINE = re.compile(r"^\s*(requires|facts):")  # not `tools:`: an agent's roster is where an install-specific MCP id hides (#94)
 SKIP_FILES = frozenset({"leak_shapes.py", "kit-health.py", "allow.txt"})
+# One skip rule for every scanner — kit-health's tree walk and the review gate (diff and --tree) decide the same:
+# a `fixtures/` directory holds deliberate test data (decoy leaks the tests must see), a binary suffix has no lines.
+SKIP_DIRS = frozenset({"fixtures", "__pycache__"})
+SKIP_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".gz", ".woff", ".woff2", ".jsonl", ".pyc"})
+
+
+def skip_path(rel: str) -> bool:
+    """True when no leak scanner reads `rel` (a path relative to the kit root, `/`-separated)."""
+    parts = rel.split("/")
+    return (parts[-1] in SKIP_FILES or any(d in SKIP_DIRS for d in parts[:-1])
+            or any(rel.lower().endswith(x) for x in SKIP_SUFFIXES))
 
 
 def shapes(tracker_kind: str | None = None, key_regex: str | None = None) -> list[tuple[re.Pattern, str]]:
@@ -99,26 +110,43 @@ def allowed(path: Path = ALLOW_FILE) -> tuple[re.Pattern, ...]:
 
 
 def is_allowed(rel: str, hit: str, allow) -> bool:
-    """An allow-list entry is anchored at the start of `<path>:<match>` (a bare `acme` cannot allow `notacme`); append
-    `$` for an exact match."""
-    return any(a.match(f"{rel}:{hit}") for a in allow)
+    """An allow-list entry is anchored at the start of `<path>:<match>` (a bare `acme` cannot allow `notacme`) and must
+    consume the whole path and its colon (`docs/a` does not allow a hit in `docs/ab.md`); append `$` for an
+    exact match."""
+    key = f"{rel}:{hit}"
+    return any((m := a.match(key)) is not None and m.end() > len(rel) for a in allow)
+
+
+def line_hits(line: str, pats, rel: str = "", allow=None, keep=None) -> list[tuple[str, str]]:
+    """(what, matched text) for EVERY shape match on `line` that is not allow-listed (an allowed first match no
+    longer hides a second value on the same line). A span already claimed by an earlier shape — allowed or reported —
+    is not reported again, so a key that fits both the generic ticket shape and `tracker.key_regex` is one hit.
+    `keep(match)` (optional) returns False for a match the caller exempts on its own terms."""
+    out: list[tuple[str, str]] = []
+    taken: list[tuple[int, int]] = []
+    for rx, what in pats:
+        for m in rx.finditer(line):
+            a, b = m.span()
+            if a == b or any(a < y and x < b for x, y in taken):
+                continue
+            taken.append((a, b))
+            if allow and is_allowed(rel, m.group(0), allow):
+                continue
+            if keep is not None and not keep(m):
+                continue
+            out.append((what, m.group(0)))
+    return out
 
 
 def scan(text: str, shapes: list[tuple[re.Pattern, str]] | None = None, rel: str = "",
          allow=None) -> list[tuple[int, str, str]]:
-    """(line number, what, matched text) for every shape hit in `text`, first shape per line (so a key that fits both the
-    generic ticket shape and `tracker.key_regex` is one hit, not two — kit-health's own loop stops the same way), skipping
-    SKIP_LINE lines and, when `rel` (the file's path relative to .claude) and `allow` are given, the allow-listed
-    `<rel>:<match>` hits."""
+    """(line number, what, matched text) for every un-allowed shape hit in `text` — every match on a line (`line_hits`),
+    skipping SKIP_LINE lines and, when `rel` (the file's path relative to .claude) and `allow` are given, the
+    allow-listed `<rel>:<match>` hits."""
     pats = shapes if shapes is not None else [(re.compile(rx), what) for rx, what in LEAK_SHAPES]
     out: list[tuple[int, str, str]] = []
     for n, line in enumerate(text.split("\n"), 1):
         if SKIP_LINE.search(line):
             continue
-        for rx, what in pats:
-            m = rx.search(line)
-            if m:
-                if not (allow and is_allowed(rel, m.group(0), allow)):
-                    out.append((n, what, m.group(0)))
-                break
+        out += [(n, what, hit) for what, hit in line_hits(line, pats, rel, allow)]
     return out

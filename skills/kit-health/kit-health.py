@@ -445,7 +445,6 @@ LEAK_SHAPES = leak_shapes.LEAK_SHAPES
 # skipped per file (SKIP_FILE) — a line that merely mentions `kit-health` is scanned like any other
 SKIP_LINE = leak_shapes.SKIP_LINE
 SKIP_FILE = set(leak_shapes.SKIP_FILES)  # the scanners' own files, per file (leak_shapes.py owns the set)
-SKIP_SUFFIX = {".jsonl", ".pyc", ".png", ".jpg", ".gif", ".pdf", ".zip", ".gz"}
 GENERIC = {"true", "false", "none", "jira", "github", "slack", "notion", "datalake", "airflow", "dbt",
            "issues", "main", "master"}
 # bare repo names that half of GitHub has and the kit uses as ordinary words: `setup.sh --personal` fills
@@ -464,8 +463,9 @@ def scan_files() -> list[Path]:
              KIT / "CONTRIBUTING.md"]  # not the root CHANGELOG.md: the generated release log is history
     for sub in ("context-db", "agents", "environment-template", "docs", "skills", ".github"):
         files += [p for p in (KIT / sub).rglob("*") if p.is_file()]
+    # leak_shapes.skip_path is the one rule; `fixtures/` files stay in the list so section 2 can count them
     return sorted({f for f in files if f.is_file() and "__pycache__" not in f.parts
-                   and f.name not in SKIP_FILE and f.suffix not in SKIP_SUFFIX})
+                   and ("fixtures" in f.relative_to(KIT).parts or not leak_shapes.skip_path(str(f.relative_to(KIT))))})
 
 
 def kit_repo() -> str:
@@ -718,7 +718,7 @@ def sec_leaks(r: Report) -> None:
     files_hit = 0
     for f in files:
         frel = str(f.relative_to(KIT))
-        if "fixtures" in f.relative_to(KIT).parts:
+        if leak_shapes.skip_path(frel):  # the review gate's rule too: fixtures/ dirs are test data
             fixtures_skipped += 1
             continue
         pats = pats_all
@@ -731,17 +731,16 @@ def sec_leaks(r: Report) -> None:
         for n, line in enumerate(text.split("\n"), 1):
             if SKIP_LINE.search(line):
                 continue
-            for rx, what in pats:
-                m = rx.search(line)
-                if m and not leak_shapes.is_allowed(frel, m.group(0), allowed) and not kit_owner_handle(frel, line, m, owner):
-                    hits += 1
-                    if shown < 3:
-                        shown += 1
-                        shown_val = "(value withheld)" if what.startswith(IDENTITY) else f"`{redact(what, m.group(0))}`"
-                        r.add(WARN, "leaks", f"`{frel}:{n}` {what} {shown_val} — move it to the env store (`kb.py set <system>.<kind> <name> <value>`, read back with `kb.py get`) or use a `<placeholder>`")
-                    else:
-                        more += 1
-                    break
+            # every match on the line, each checked against the allow-list
+            for what, hit in leak_shapes.line_hits(line, pats, frel, allowed,
+                                                   keep=lambda m, line=line: not kit_owner_handle(frel, line, m, owner)):
+                hits += 1
+                if shown < 3:
+                    shown += 1
+                    shown_val = "(value withheld)" if what.startswith(IDENTITY) else f"`{redact(what, hit)}`"
+                    r.add(WARN, "leaks", f"`{frel}:{n}` {what} {shown_val} — move it to the env store (`kb.py set <system>.<kind> <name> <value>`, read back with `kb.py get`) or use a `<placeholder>`")
+                else:
+                    more += 1
         if shown:
             files_hit += 1
         if more:

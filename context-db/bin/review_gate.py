@@ -57,7 +57,6 @@ PII_SHAPES = [
     (r"\bglpat-[A-Za-z0-9_-]{20,}\b", "GitLab token"),
     (r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "private key"),
 ]
-SKIP_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".ico", ".woff", ".woff2")
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
@@ -156,7 +155,7 @@ def leak_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] |
     binary = binary_files(base, head, cwd)
     out: list[str] = []
     for path, status in sorted(files.items()):
-        if status == "D" or Path(path).name in leak_shapes.SKIP_FILES or path.lower().endswith(SKIP_SUFFIXES) or path in binary:
+        if status == "D" or leak_shapes.skip_path(path) or path in binary:  # the one skip rule kit-health uses too
             continue
         if path == "context-db/bin/review_gate.py":  # this file names the shapes it scans for
             continue
@@ -205,8 +204,6 @@ def meta(text: str | None) -> tuple[int | None, str]:
     return vi, fmt.unquote(md.get("updated", ""))
 
 
-# the engine's deliberately leaky test inputs (kit-verify must flag them; an allow-list line would blind that test)
-TREE_SKIP_DIRS = ("context-db/tests/fixtures/",)
 
 
 def tree_files(head: str = "HEAD", cwd: Path = KIT) -> list[str]:
@@ -219,9 +216,7 @@ def tree_findings(head: str = "HEAD", cwd: Path = KIT) -> tuple[list[str], int]:
     shapes = leak_shapes.shapes() + [(re.compile(rx), what) for rx, what in PII_SHAPES]
     allow = allowed_at(head, cwd)  # a pushed tree has no base: the list as that tree has it
     out: list[str] = []
-    files = [p for p in tree_files(head, cwd) if Path(p).name not in leak_shapes.SKIP_FILES
-             and not p.lower().endswith(SKIP_SUFFIXES) and p != "context-db/bin/review_gate.py"
-             and not p.startswith(TREE_SKIP_DIRS)]
+    files = [p for p in tree_files(head, cwd) if not leak_shapes.skip_path(p) and p != "context-db/bin/review_gate.py"]
     for path in files:
         text = show(head, path, cwd)
         if text is None:
