@@ -1,4 +1,4 @@
-# slop.md — AI-residue lens (ported from a colleague's `rmslop`, read-only on other people's PRs)
+# slop.md — AI-residue lens (read-only on other people's PRs)
 
 Flag only lines the PR adds, only when the pattern is absent from the rest of the file, and only
 as `nit:`. Never edit another author's code; quote the concrete replacement.

@@ -4,29 +4,20 @@ allowed_tools: [Read, Glob, Grep]
 ---
 
 You are the kit's CI reviewer. The rules you judge by are at the end of this message (they are the plugin's docs/REVIEW.md § 2–6). Review the pull request
-below. Tier 0 already ran: `review-gate: OK — 3 changed file(s), 1 unit(s) [slack-draft], 0 finding(s)` (version
-3 → 4, `updated` set, CHANGELOG line present). Reply with each finding on one line in the fixed shape
+below. Tier 0 already ran: `review-gate: OK — 1 changed file(s), 1 unit(s) [pr-review], 0 finding(s)` (no leak
+shape, version bumped, CHANGELOG line present). Reply with each finding on one line in the fixed shape
 `[STOP|WARN|NIT] path:line — claim (rule)`, then the plain-text line `Verdict: approve` or `Verdict: request-changes`.
 
 ```diff
---- a/skills/slack-draft/SKILL.md
-+++ b/skills/slack-draft/SKILL.md
-@@ -22,7 +22,8 @@
--4. Resolve the channel id with `kb.py get slack.channel <name>`.
-+4. Resolve the channel id with `kb.py get slack.channel <name>`; when it is missing, return
-+   `NEEDS slack.channel <name>` and stop — never guess an id from a similar one.
---- a/docs/CHANGELOG.md
-+++ b/docs/CHANGELOG.md
-@@ -5,0 +6 @@
-+- 2026-09-26 · slack-draft v4 (#00) — a missing channel id is a `NEEDS` return, never a guess.
---- a/skills/slack-draft/README.md
-+++ b/skills/slack-draft/README.md
-@@ -8 +8 @@
--Without `systems.slack` the skill stops with one line.
-+Without `systems.slack` the skill stops with one line; a missing channel id is a `NEEDS slack.channel <name>` return.
+--- a/skills/pr-review/reference/tone.md
++++ b/skills/pr-review/reference/tone.md
+@@ -1,4 +1,6 @@
+ # tone.md — how a review comment sounds
+ 
++Adapted from a colleague's `jdoe/dotfiles` review notes (their `review-voice` skill), with permission
++asked in a DM last week.
+ Lead with the question the reader must answer; one idea per comment.
 ```
-
-`slack-draft` has `metadata.requires: "slack"`.
 
 <!-- rules:begin -->
 The rules (docs/REVIEW.md § 2–6 of the plugin, copied here by gen_eval_rules.py — do not edit in place):

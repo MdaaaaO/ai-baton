@@ -126,8 +126,7 @@ the script.
   window that is equal for everyone (the user's own start date is the fair floor — never a different one per person).
 - **Exclude bots** (the env config's `github.bots` list + `github.review_bot`) from author counts, and say so.
 - **Agent-drafted reviews exist**: reviews whose body carries `<!-- gh-review-snapshot:v1 … -->`
-  come from the `gh-review` skill in colleagues' personal workspaces. Count them, but
-  label them.
+  come from an agent that drafted the review for its author. Count them, but label them.
 - **Repo scope matters**: a four-repo count can halve someone whose work is cross-repo; run the
   org-wide (`user:<org>`) count next to it.
 - Numbers go in a table in the reply, never in prose (`CLAUDE.md` § Writing for the user).
