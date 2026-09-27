@@ -448,6 +448,12 @@ SKIP_FILE = set(leak_shapes.SKIP_FILES)  # the scanners' own files, per file (le
 SKIP_SUFFIX = {".jsonl", ".pyc", ".png", ".jpg", ".gif", ".pdf", ".zip", ".gz"}
 GENERIC = {"true", "false", "none", "jira", "github", "slack", "notion", "datalake", "airflow", "dbt",
            "issues", "main", "master"}
+# bare repo names that half of GitHub has and the kit uses as ordinary words: `setup.sh --personal` fills
+# `tracker.repos` from `gh repo list` on a fresh workspace, and a `config` repo flagged every kit file (#118).
+# The full `owner/<repo>` slug and the `<org>/<repo>` path shape still catch these repos.
+COMMON_REPO_NAMES = {"config", "configs", "dotfiles", "docs", "notes", "scripts", "tools", "utils", "setup",
+                     "infra", "test", "tests", "templates", "examples", "sandbox", "playground", "website",
+                     "blog", "archive", "backup", "workspace", "projects"}
 IDENTITY = "identity"  # `what` prefix of patterns whose match is never printed (settings.local.json values)
 
 
@@ -522,11 +528,15 @@ def identity_values() -> list[tuple[re.Pattern, str]]:
     login = str(env.get("WORKSPACE_GITHUB_LOGIN") or "").strip()
     if len(login) >= 3:
         forms[login] = "WORKSPACE_GITHUB_LOGIN"
-    # the owner of the kit's own repo or of a dependency is part of its address (`<owner>/<dep>`), not a leak
-    deps = "|".join(re.escape(d) for d in sorted(kit_dependencies()))
-    tail = rf"(?![\w-])(?!/(?:{deps})\b)" if deps else r"(?![\w-])"
-    return [(re.compile(rf"(?<![\w-]){re.escape(v)}{tail}", re.I), f"{IDENTITY} ({k}, identity value)")
+    return [(re.compile(rf"(?<![\w-]){re.escape(v)}{address_tail()}", re.I), f"{IDENTITY} ({k}, identity value)")
             for v, k in forms.items()]
+
+
+def address_tail() -> str:
+    """Regex tail for a login: a whole word, and not the owner part of the kit's own repo or a dependency
+    (`<owner>/<dep>` is the kit's address, not a leak)."""
+    deps = "|".join(re.escape(d) for d in sorted(kit_dependencies()))
+    return rf"(?![\w-])(?!/(?:{deps})\b)" if deps else r"(?![\w-])"
 
 
 def common_word_kinds() -> set[str]:
@@ -618,6 +628,7 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
     + the user's own identity. Short / numeric / generic values are skipped — they would match everywhere. A store
     that cannot be read is an ERROR the caller reports, never a silent shapes-only scan."""
     vals: dict[str, str] = {}
+    logins: list[tuple[re.Pattern, str]] = []
     errors: list[str] = []
 
     common = common_word_kinds()
@@ -642,7 +653,9 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
         gh = cfg.get("github", {})
         keep(gh.get("review_bot"), "github.review_bot")
         for login in (gh.get("display_names") or {}):
-            keep(login, "colleague login (github.display_names)")
+            if keep_value(str(login)):  # the kit's own `<owner>/<repo>` address is not a leak (#118)
+                logins.append((re.compile(rf"(?<![\w-]){re.escape(str(login).strip())}{address_tail()}"),
+                               "colleague login (github.display_names)"))
         for team in gh.get("owner_teams") or []:
             keep(team, "github.owner_teams")
         keep(cfg.get("slack", {}).get("domain"), "slack.domain")
@@ -656,7 +669,8 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
             if str(repo).rsplit("/", 1)[-1] in deps:
                 continue
             keep(repo, "tracker.repos")
-            keep(str(repo).rsplit("/", 1)[-1], "tracker.repos (repo name)")
+            if str(repo).rsplit("/", 1)[-1].lower() not in COMMON_REPO_NAMES:
+                keep(str(repo).rsplit("/", 1)[-1], "tracker.repos (repo name)")
     pats: list[tuple[re.Pattern, str]] = []
     # a domain name is often an ordinary word — flag only its path-like uses; a domain the engine itself
     # owns (verify.py CORE_DOMAINS — e.g. `on-call`, where `new.sh TYPE=oncall` writes) is a kit constant,
@@ -677,7 +691,7 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
         not_dep = rf"(?!(?:{deps})\b)" if deps else ""
         pats.append((re.compile(rf"\b{re.escape(org)}/{not_dep}[a-z][\w.-]*"), f"`{org}/<repo>` path"))
         pats.append((re.compile(rf"@{re.escape(org)}/"), "org team handle"))
-    return pats + identity_values(), errors
+    return pats + logins + identity_values(), errors
 
 
 def sec_leaks(r: Report) -> None:

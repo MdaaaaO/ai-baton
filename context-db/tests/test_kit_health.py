@@ -283,6 +283,27 @@ class Verdict(unittest.TestCase):
         self.assertTrue(kh.keep_value("Mark", ""))
         self.assertEqual(kh.common_word_kinds() >= {"github.person", "github.team", "github.label-set"}, True)
 
+    def test_fresh_personal_store_does_not_flood_the_scan(self):
+        # #118: `setup.sh --personal` lists every `gh repo list` repo; a `config` repo must not make the word a leak,
+        # and the user's own login in the kit's `<owner>/<repo>` address is not a colleague login
+        kh = load_kit_health()
+        cfg = {"github": {"display_names": {"octo-maint": "Octo"}},
+               "tracker": {"repos": ["octo-maint/config", "octo-maint/secret-bot"]}}
+        with mock.patch.object(kh.kb, "all_facts", return_value={}), \
+             mock.patch.object(kh.kit_profile, "load", return_value=cfg), \
+             mock.patch.object(kh, "kit_dependencies", return_value=frozenset({"ai-baton"})), \
+             mock.patch.object(kh, "identity_env", return_value={}):
+            pats, errors = kh.configured_values()
+        self.assertEqual(errors, [])
+
+        def hits(line: str) -> list[str]:
+            return [what for rx, what in pats if rx.search(line)]
+        self.assertEqual(hits("read the pr-review config first"), [])
+        self.assertEqual(hits("claude plugin marketplace add octo-maint/ai-baton"), [])
+        self.assertIn("tracker.repos", hits("clone octo-maint/config"))              # the full slug still scans
+        self.assertIn("tracker.repos (repo name)", hits("the secret-bot runbook"))   # a distinctive name still scans
+        self.assertIn("colleague login (github.display_names)", hits("ask octo-maint"))
+
     def test_redact_names_the_kind_and_two_characters(self):
         kh = load_kit_health()
         self.assertEqual(kh.redact("Slack channel/DM id", "C0" + "AB12CD3EF"), "Slack channel/DM id:C0…")
