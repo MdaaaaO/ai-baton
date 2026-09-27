@@ -136,7 +136,8 @@ pre-2026-09-26 unit under `metadata:` and adds `compatibility` (idempotent).
 **The env-free validator.** `make -C .claude/context-db verify-skill [UNIT=skills/<name>]` (= `kit_verify.py
 --no-env`) runs everything that needs no environment — the schema above, `name` = directory, the description caps,
 `metadata.requires` ∈ the capability flags, every `metadata.facts` entry has a discovery manifest, no bare scalar
-that YAML would cut at a `#` comment, the body ≤ 500
+that YAML would cut at a `#` comment, no frontmatter key repeated at one level, no numbered list that repeats a
+step number or a step's text, the body ≤ 500
 lines, every `scripts/…` / `references/…` path the body cites exists, no `skills/<x>/SKILL.md` path literal
 (§ Skills: cross-reference by name), and no fact-shaped literal (Slack id,
 custom-field id, account id, ticket key, org host, tz literal — `context-db/bin/leak_shapes.py`) — and prints
