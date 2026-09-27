@@ -71,6 +71,18 @@ class InstallMode(unittest.TestCase):
                                capture_output=True, text=True, env=dict(os.environ, CONTEXT_ROOT=str(Path(tmp) / ".context")))
             self.assertEqual(p.stdout.strip(), "clone", p.stderr)
 
+    def test_a_repointed_kit_is_named_by_its_own_path(self):
+        # CI checks the kit out as `<ws>/.claude`: a caller that points KIT at another copy (a plugin cache in a test)
+        # must get that copy's mode, never the running checkout's name
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "cache" / "mkt" / "kit"
+            (fake / ".claude-plugin").mkdir(parents=True)
+            (fake / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+            with mock.patch.object(kit_profile, "KIT", fake), \
+                 mock.patch.object(kit_profile, "KIT_AS_CALLED", Path(tmp) / "ws" / ".claude"):
+                self.assertEqual(kit_profile.install_mode(), "plugin")
+                self.assertEqual(kit_profile.install_mode(fake), "plugin")
+
     def test_mode_table_hints(self):
         kit = Path("/somewhere/kit")
         self.assertEqual(kit_profile.mode_hint("kit_ref", "clone", kit), ".claude")
