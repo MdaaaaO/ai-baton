@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # new.sh — scaffold a new context doc from a template, with frontmatter filled in.
 # Called by `make -C .claude/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug> [TITLE="..."]`.
 #
@@ -23,8 +23,11 @@ SLUG="${SLUG:?set SLUG= (kebab-case file slug, e.g. key-123-foo or 2026-09-11-te
 DOMAIN="${DOMAIN:-}"
 TITLE="${TITLE:-$SLUG}"
 TODAY="$(date +%F)"
-# env-store template override for this type (empty when the store has none)
-ENV_TMPL="$(python3 "$ENGINE/bin/kit_profile.py" template "$TYPE" 2>/dev/null || true)"
+
+# SLUG and DOMAIN become path components: one lower-case name each, never `/`, `..` or a leading dot (#139)
+name_ok() { case "$2" in ""|.*|*[!a-z0-9._-]*) echo "$1 '$2' must match [a-z0-9][a-z0-9._-]* (no '/', no leading '.')" >&2; exit 2;; esac; }
+name_ok SLUG "$SLUG"
+[ -z "$DOMAIN" ] || name_ok DOMAIN "$DOMAIN"
 
 # Resolve destination directory + default domain from TYPE.
 case "$TYPE" in
@@ -45,6 +48,11 @@ case "$TYPE" in
   log)              DIR="$CTX/${DOMAIN:?log needs DOMAIN=}" ;;
   *) echo "unknown TYPE '$TYPE'" >&2; exit 2 ;;
 esac
+name_ok DOMAIN "$DOMAIN"  # a default or an epic/log domain given above
+# env-store template override for this type (empty when the store has none); a failed lookup is an error,
+# never a silent fall-through to the built-in template (#139)
+ENV_TMPL="$(python3 "$ENGINE/bin/kit_profile.py" template "$TYPE")" \
+  || { echo "new.sh: kit_profile.py template $TYPE failed — fix the env store (kit-health) before scaffolding" >&2; exit 1; }
 
 mkdir -p "$DIR"
 DEST="$DIR/$SLUG.md"

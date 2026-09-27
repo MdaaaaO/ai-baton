@@ -174,6 +174,37 @@ class NewSh(ContextRoot):
         r = self.new(TYPE="epic", SLUG="x")  # epic needs a domain
         self.assertNotEqual(r.returncode, 0)
 
+    def test_slug_and_domain_cannot_leave_the_content_root(self):
+        # #139: SLUG/DOMAIN are path components — `make new` must never write outside .context/
+        for env in ({"TYPE": "repo", "SLUG": "../../escape"}, {"TYPE": "repo", "SLUG": ".hidden"},
+                    {"TYPE": "log", "DOMAIN": "../..", "SLUG": "x"}, {"TYPE": "epic", "DOMAIN": "a/b", "SLUG": "x"},
+                    {"TYPE": "repo", "SLUG": "Upper"}, {"TYPE": "repo", "SLUG": "a b"}):
+            r = self.new(**env)
+            self.assertEqual(r.returncode, 2, f"{env}: {r.stderr}")
+            self.assertIn("must match", r.stderr)
+        for escaped in (self.root.parent / "escape.md", self.root.parent.parent / "escape.md", self.root.parent / "x.md"):
+            self.assertFalse(escaped.exists(), escaped)
+
+    def test_a_failed_template_lookup_is_an_error(self):
+        # was `2>/dev/null || true`: a broken lookup silently fell back to the built-in template
+        fake = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, fake)
+        (fake / "python3").write_text('#!/bin/sh\n[ "$2" = template ] && { echo boom >&2; exit 3; }\nexec ' + sys.executable + ' "$@"\n')
+        (fake / "python3").chmod(0o755)
+        r = self.new(TYPE="repo", SLUG="tmpl-fail", PATH=f"{fake}:{os.environ['PATH']}")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("boom", r.stderr)
+        self.assertIn("template repo failed", r.stderr)
+        self.assertFalse((self.root / "repos" / "tmpl-fail.md").exists())
+
+    def test_make_new_passes_the_title_verbatim(self):
+        title = """it's "q" $(touch PWNED-a) `touch PWNED-b` $(shell touch PWNED-c) $$x"""
+        r = subprocess.run(["make", "-s", "-C", str(BIN.parent), "new", f"CONTEXT={self.root}", "TYPE=repo", "SLUG=mk-title",
+                            f"TITLE={title}"], env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"title: {title}\n", (self.root / "repos" / "mk-title.md").read_text(encoding="utf-8"))
+        self.assertEqual([p.name for p in self.root.parent.rglob("PWNED*")] + [p.name for p in BIN.parent.rglob("PWNED*")], [])
+
     def test_env_store_template_override_wins(self):
         tdir = self.root / "reference" / "env" / "_templates"
         tdir.mkdir(parents=True, exist_ok=True)

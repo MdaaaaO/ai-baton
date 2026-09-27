@@ -107,8 +107,12 @@ kit-health:
 engine-cli-doc:
 	@$(PY) $(BIN)/gen_engine_cli.py
 
+# TITLE= is often a ticket or PR title: each value reaches new.sh unexpanded and single-quoted (`$(call sq,VAR)`),
+# and `unexport` keeps make from expanding it into the recipe environment, so `$(…)`, quotes and backticks are data (#139).
+sq ?= '$(subst ','\'',$(value $(1)))'
+unexport TYPE DOMAIN SLUG TITLE
 new:
-	@dest=$$(CONTEXT_ROOT="$(CONTEXT)" TYPE="$(TYPE)" DOMAIN="$(DOMAIN)" SLUG="$(SLUG)" TITLE="$(TITLE)" sh $(BIN)/new.sh) && \
+	@dest=$$(CONTEXT_ROOT="$(CONTEXT)" TYPE=$(call sq,TYPE) DOMAIN=$(call sq,DOMAIN) SLUG=$(call sq,SLUG) TITLE=$(call sq,TITLE) sh $(BIN)/new.sh) && \
 		echo "created $$dest" && \
 		$(MAKE) --no-print-directory -f $(lastword $(MAKEFILE_LIST)) index
 
