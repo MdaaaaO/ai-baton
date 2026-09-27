@@ -381,6 +381,11 @@ class Release(unittest.TestCase):
             self.assertIn("latest release unknown", r.lines[-1])
         self.assertIn("`gh` not installed", self.plugin_run((0, "", ""), None)[1].lines[-1])
 
+    def test_plugin_non_version_latest_tag_is_unknown_not_a_crash(self):
+        kh, r, _ = self.plugin_run((0, '{"tagName": "v0.3.0-rc1", "publishedAt": "", "url": ""}', ""))
+        self.assertEqual((r.counts[kh.OK], r.counts[kh.WARN], r.counts[kh.ERR]), (0, 0, 0), r.lines)
+        self.assertIn("cannot compare", r.lines[-1])
+
     def clone_run(self, remote, describe="v0.2.2"):
         kh = load_kit_health()
         r = kh.Report()
