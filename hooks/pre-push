@@ -5,7 +5,7 @@
 # open a PR (`pr-open` skill) → merge on GitHub → `make claude_sync` fast-forwards `.claude/`.
 #
 # Installed on every machine by setup.sh and sync.sh (`git config core.hooksPath <kit>/hooks`);
-# GitHub cannot enforce this on a private repo without a paid plan, so the guard is local.
+# Defence in depth: the repo's `main` ruleset lets admins bypass it, and this refuses before the push leaves the machine.
 # Deliberate override for one push: KIT_ALLOW_MAIN_PUSH=1 git push …
 set -u
 [ "${KIT_ALLOW_MAIN_PUSH:-0}" = 1 ] && exit 0
