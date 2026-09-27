@@ -21,6 +21,7 @@ Usage: eval_check.py [--require-all] [--kit DIR]   exit 0 = OK, 1 = a failure ab
 from __future__ import annotations
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -29,8 +30,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import frontmatter  # noqa: E402
 
 KIT = Path(__file__).resolve().parents[2]
-MIN_CASES = 10  # docs/authoring.md § 3: >= 10 trigger cases per skill
-MIN_EACH = 3    # of which at least this many positives and this many near misses
+# docs/authoring.md § 3 and evals/README.md: >= MIN_CASES trigger cases per skill, of which at least MIN_EACH positives
+# and MIN_EACH near misses. EVAL_MIN_CASES / EVAL_MIN_EACH lower them while a new suite is being built up.
+MIN_CASES = int(os.environ.get("EVAL_MIN_CASES") or 10)
+MIN_EACH = int(os.environ.get("EVAL_MIN_EACH") or 3)
+INT_KEYS = ("runs", "max_turns", "timeout_seconds", "schema_version")
 # The keys `claude plugin eval` accepts in a prompt.md frontmatter (an unknown key fails the case load) and the grader
 # types it knows — as the pinned CLI (ci.yml CLAUDE_CODE_VERSION) reports them.
 PROMPT_KEYS = frozenset({
@@ -78,6 +82,23 @@ def read_md(p: Path) -> tuple[dict, str]:
     return frontmatter.parse_lines(parts[0]), parts[1]
 
 
+def names_skill(input_match: str, skill: str) -> str:
+    """'' when a Skill grader's `input_match` regex selects exactly `skill`, else why not. It must match the skill as the
+    Skill tool is called (`<skill>`, `<plugin>:<skill>`) and must NOT match a longer name that contains it — a substring
+    test (`skill in input_match`) let `pr-open` pass for `pr-open-helper` and `session-handoff` inside another name."""
+    try:
+        rx = re.compile(input_match)
+    except re.error as e:
+        return f"`input_match` is not a valid regex ({e})"
+    if not any(rx.search(c) for c in (skill, f"ai-baton:{skill}", f'"skill": "{skill}"')):
+        return f"`input_match` {input_match!r} does not match the skill name {skill!r}"
+    decoys = [d for d in (f"{skill}-helper", f"my{skill}", f"{skill}_x", f"x-{skill}") if rx.search(d)]
+    if decoys:
+        return (f"`input_match` {input_match!r} also matches {', '.join(repr(d) for d in decoys)} — bound it, "
+                f"e.g. '(?<![\\w-]){re.escape(skill)}(?![\\w-])'")
+    return ""
+
+
 def check_case(case_dir: Path, skills: list[str]) -> tuple[list[str], dict | None]:
     """(errors, trigger info {skill, kind} or None) for one case directory."""
     name = case_dir.name
@@ -93,6 +114,11 @@ def check_case(case_dir: Path, skills: list[str]) -> tuple[list[str], dict | Non
         errors.append(f"{name}/prompt.md: frontmatter key(s) the runner rejects: {', '.join(unknown)}")
     if not body.strip():
         errors.append(f"{name}/prompt.md: empty prompt body")
+    for k in INT_KEYS:
+        if k in fm and as_int(fm.get(k), None) is None:
+            errors.append(f"{name}/prompt.md: `{k}` must be a whole number, got {frontmatter.unquote(fm.get(k))!r}")
+    if "allowed_tools" in fm and not isinstance(fm.get("allowed_tools"), list) and not str(fm.get("allowed_tools")).strip().startswith("["):
+        errors.append(f"{name}/prompt.md: `allowed_tools` must be a list")
     graders = sorted((case_dir / "graders").glob("*.md"))
     if not graders:
         errors.append(f"{name}: no graders/*.md")
@@ -120,9 +146,14 @@ def check_case(case_dir: Path, skills: list[str]) -> tuple[list[str], dict | Non
     if skill is None or len(kinds) != 1:
         return errors, None
     kind = kinds[0]
-    fired = [(gn, gfm) for gn, gt, gfm in parsed
-             if gt == "tool_used" and frontmatter.unquote(gfm.get("tool")) == "Skill"
-             and skill in frontmatter.unquote(gfm.get("input_match"))]
+    skill_graders = [(gn, gfm) for gn, gt, gfm in parsed if gt == "tool_used" and frontmatter.unquote(gfm.get("tool")) == "Skill"]
+    fired = []
+    for gn, gfm in skill_graders:
+        why = names_skill(frontmatter.unquote(gfm.get("input_match")) or "", skill)
+        if why:
+            errors.append(f"{name}/graders/{gn}: {why}")
+        else:
+            fired.append((gn, gfm))
     if not fired:
         errors.append(f"{name}: no `tool_used` grader with `tool: Skill` whose `input_match` names {skill}")
     for gn, gfm in fired:

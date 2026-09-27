@@ -118,6 +118,32 @@ class Suites(unittest.TestCase):
         errors, _, _ = self.kit.run()
         self.assertTrue(any("foo-wrong-skill: no `tool_used` grader" in e for e in errors), errors)
 
+    def test_an_unbounded_input_match_is_rejected(self):
+        # #153: `skill in input_match` let a pattern that also fires for foo-helper / myfoo count as "names foo"
+        self.kit.suite()
+        d = self.kit.case("foo-loose")
+        (d / "graders" / "fired.md").write_text("---\ntype: tool_used\ntool: Skill\ninput_match: 'foo'\nmin: 1\narm: both\n---\n",
+                                               encoding="utf-8")
+        errors, _, _ = self.kit.run()
+        self.assertTrue(any("foo-loose/graders/fired.md: `input_match` 'foo' also matches 'foo-helper'" in e for e in errors), errors)
+
+    def test_an_input_match_naming_a_longer_skill_does_not_count(self):
+        self.kit.suite()
+        d = self.kit.case("foo-longer")
+        (d / "graders" / "fired.md").write_text(
+            "---\ntype: tool_used\ntool: Skill\ninput_match: '(?<![\\w-])foo-helper(?![\\w-])'\nmin: 1\narm: both\n---\n", encoding="utf-8")
+        errors, _, _ = self.kit.run()
+        self.assertTrue(any("does not match the skill name 'foo'" in e for e in errors), errors)
+
+    def test_an_invalid_input_match_and_a_non_integer_key_are_named(self):
+        self.kit.suite()
+        d = self.kit.case("foo-bad", extra="max_turns: many\n")
+        (d / "graders" / "fired.md").write_text("---\ntype: tool_used\ntool: Skill\ninput_match: '(foo'\nmin: 1\narm: both\n---\n",
+                                               encoding="utf-8")
+        errors, _, _ = self.kit.run()
+        self.assertTrue(any("foo-bad/graders/fired.md: `input_match` is not a valid regex" in e for e in errors), errors)
+        self.assertTrue(any("foo-bad/prompt.md: `max_turns` must be a whole number" in e for e in errors), errors)
+
     def test_a_trigger_case_needs_an_outcome_grader(self):
         self.kit.suite()
         self.kit.case("foo-bare", outcome=False)
