@@ -191,6 +191,92 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.status()[1], "ok")
         self.assertFalse((self.kit / ".sync.lock.d").exists())
 
+    # ── lock owner, stale lock, busy exit ──
+    def _dead_pid(self) -> int:
+        p = subprocess.Popen(["true"])
+        p.wait()
+        return p.pid
+
+    def _owned_lockdir(self, pid: int) -> Path:
+        d = self.kit / ".sync.lock.d"
+        d.mkdir()
+        (d / "owner").write_text(f"{pid} 2026-01-01T00:00:00Z\n")
+        return d
+
+    def test_lock_busy_exits_3_and_names_the_holder(self):
+        self._owned_lockdir(os.getpid())
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn(f"held by pid {os.getpid()} since 2026-01-01T00:00:00Z", r.stderr)
+        self.assertIn(f"pid {os.getpid()}", self.log_file.read_text())
+        self.assertFalse(self.status_file.exists())
+
+    def test_flock_busy_exits_3_and_names_the_holder(self):
+        if not shutil.which("flock"):
+            self.skipTest("no flock on this host")
+        with open(self.kit / ".sync.lock", "w") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(f"{os.getpid()} 2026-01-01T00:00:00Z\n")
+            fh.flush()
+            r = self.sync(env=dict(self.env, SYNC_LOCK_WAIT="1"))
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn(f"held by pid {os.getpid()}", r.stderr)
+
+    def test_flock_holder_records_its_pid(self):
+        if not shutil.which("flock"):
+            self.skipTest("no flock on this host")
+        self.assertEqual(self.sync().returncode, 0)
+        self.assertRegex((self.kit / ".sync.lock").read_text(), r"^\d+ \d{4}-\d\d-\d\dT")
+
+    def test_mkdir_lock_of_a_dead_owner_is_reclaimed_at_once(self):
+        self._owned_lockdir(self._dead_pid())
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("removed a stale lock dir (owner pid", self.log_file.read_text())
+        self.assertFalse((self.kit / ".sync.lock.d").exists())
+
+    def test_mkdir_lock_of_a_live_owner_is_never_aged_out(self):
+        d = self._owned_lockdir(os.getpid())
+        old = time.time() - 3600
+        os.utime(d, (old, old))
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertTrue((d / "owner").is_file(), "a live run's lock is left alone however old")
+
+    def test_concurrent_runs_break_a_stale_lock_once(self):
+        """Six runs start together on a stale (ownerless, old) mkdir lock. `find` (the age check) answers
+        at once but each run then stalls a little longer than the one before, so every run acts on a
+        staleness verdict taken before the first one broke the lock: exactly one run may take it and
+        fetch, the rest exit 3 without removing the fresh lock."""
+        path = self.path_without("flock", "find")
+        real_find = shutil.which("find")
+        turns = self.tmp / "turns"
+        turns.mkdir()
+        slow = Path(path) / "find"
+        slow.write_text("#!/bin/sh\n"
+                        f"out=$({real_find} \"$@\")\n"
+                        f"n=1; until mkdir {turns}/$n 2>/dev/null; do n=$((n + 1)); done\n"
+                        "sleep \"$(awk \"BEGIN{print $n * 0.2}\")\"\n"
+                        "[ -z \"$out\" ] || printf '%s\\n' \"$out\"\n")
+        slow.chmod(0o755)
+        fetches = self.tmp / "fetches"
+        self.upload_pack(f"echo x >>{fetches}; sleep 8; exec git upload-pack \"$@\"")
+        d = self.kit / ".sync.lock.d"
+        d.mkdir()
+        old = time.time() - 3600
+        os.utime(d, (old, old))
+        env = _env(self.tmp, path)
+        procs = [subprocess.Popen([SH, str(self.kit / "sync.sh")], env=env, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.PIPE, text=True) for _ in range(6)]
+        rcs = sorted(p.wait(timeout=60) for p in procs)
+        for p in procs:
+            p.stderr.close()
+        self.assertEqual(len(fetches.read_text().splitlines()), 1, f"runs that fetched; exit codes {rcs}")
+        self.assertEqual(rcs, [0, 3, 3, 3, 3, 3])
+        self.assertEqual(self.status()[1], "ok")
+        self.assertFalse(d.exists())
+
     # ── offline ──
     def test_offline_streak_warns_after_days(self):
         self.upload_pack("echo 'ssh: Could not resolve hostname github.com: nodename nor servname provided' >&2; exit 128")

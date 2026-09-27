@@ -5,8 +5,8 @@
 # a versioned pre-push hook (hooks/pre-push, installed via core.hooksPath by this script and
 # setup.sh) refuses any push to the kit's `main`. Nothing else is synced: an environment's facts
 # live in the local env store (.context/reference/env/, never in git), its prose in
-# .context/reference/environment.md. Idempotent, lock-guarded, never fails the caller (it is also
-# run from a SessionEnd hook). Takes no arguments.
+# .context/reference/environment.md. Idempotent, lock-guarded; exits 0 except 3 when another run holds
+# the lock (it is also run from a SessionEnd hook, which ignores the exit). Takes no arguments.
 #
 #   sh .claude/sync.sh                  (from the workspace root, or via `make claude_sync`)
 #
@@ -17,7 +17,7 @@
 #   ok <what>                   fetched; fast-forwarded or already in step
 #   offline <epoch> since <ts>  the fetch could not resolve/reach origin; <epoch> = first run of the streak
 #   error <reason>              needs the user: off main, dirty, ahead, fetch failed or timed out, ff failed
-# A run that finds the lock busy logs `skipped` and leaves .sync-status alone (the holder writes it).
+# A run that finds the lock busy logs `skipped`, exits 3 and leaves .sync-status alone (the holder writes it).
 # The sync reports `error` — and pulls nothing — when .claude/ is not on main, has uncommitted
 # changes, or carries local commits on main: each of those is work that must move to a branch + PR.
 set -u
@@ -115,28 +115,79 @@ sync_kit() {
 [ -d "$HERE/.git" ] || { log "skip: .claude is not a git repo"; exit 0; }
 
 # lock: flock where it exists (Linux); on hosts without it (macOS without coreutils) an atomic mkdir
-# lock, treated as stale after 10 minutes. A busy lock is logged as `skipped` (and said on stderr for
-# `make claude_sync`) but never written to .sync-status: the holder's pending/ok/error is newer.
-LOCKDIR="$HERE/.sync.lock.d"; HAVE_LOCKDIR=""
-cleanup() { [ -n "$ERRF" ] && rm -f "$ERRF"; [ -n "$HAVE_LOCKDIR" ] && rmdir "$LOCKDIR" 2>/dev/null; return 0; }
+# lock. Either way the holder records `<pid> <utc-ts>` (in .sync.lock, or .sync.lock.d/owner). A lock
+# dir is stale only when its owner pid is gone (`kill -0`) — or, with no owner file (a sync.sh from
+# before owner files, or one killed between its mkdir and the write), when older than 10 minutes.
+# Breaking a stale lock is serialised by a second mkdir lock and re-checked inside it, so two runs that
+# both saw the same dead owner can never both remove-and-retake it (the second would delete the
+# first's fresh lock). A busy lock is logged as `skipped`, said on stderr with the holder, and exits 3
+# (the SessionEnd hook swallows it; `make claude_sync` shows it) but never writes .sync-status: the
+# holder's pending/ok/error is newer.
+LOCKDIR="$HERE/.sync.lock.d"; LOCKBRK="$HERE/.sync.lock.break"; HAVE_LOCKDIR=""; HAVE_LOCKBRK=""
+OWNER_PID=""; OWNER_TS=""; STALE_WHY=""
+cleanup() {
+  [ -n "$ERRF" ] && rm -f "$ERRF"
+  [ -n "$HAVE_LOCKBRK" ] && rmdir "$LOCKBRK" 2>/dev/null
+  [ -n "$HAVE_LOCKDIR" ] && rm -f "$LOCKDIR/owner" && rmdir "$LOCKDIR" 2>/dev/null
+  return 0
+}
 trap cleanup EXIT
-skipped() { log "skipped: lock busy — $*"; printf 'sync.sh: skipped, lock busy — %s\n' "$*" >&2; }
+owner_stamp() { printf '%s %s\n' "$$" "$(date -u +%FT%TZ)"; }
+# owner_of <file> — sets OWNER_PID / OWNER_TS from a `<pid> <utc-ts>` owner file; empty when absent or partial
+owner_of() {
+  OWNER_PID=""; OWNER_TS=""
+  [ -f "$1" ] || return 0
+  local p="" t=""
+  read -r p t _ <"$1" 2>/dev/null || true
+  case "$p" in ''|*[!0-9]*) return 0 ;; esac
+  OWNER_PID=$p; OWNER_TS=${t:-?}
+}
+# lockdir_stale — is $LOCKDIR left behind by a run that is no longer there? (sets STALE_WHY)
+lockdir_stale() {
+  owner_of "$LOCKDIR/owner"
+  if [ -n "$OWNER_PID" ]; then
+    kill -0 "$OWNER_PID" 2>/dev/null && return 1
+    STALE_WHY="owner pid $OWNER_PID is gone"; return 0
+  fi
+  [ -d "$LOCKDIR" ] && [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null)" ] || return 1
+  STALE_WHY="no owner recorded, older than 10 min"; return 0
+}
+own_lockdir() { HAVE_LOCKDIR=1; owner_stamp >"$LOCKDIR/owner"; }
+take_lockdir() {
+  if mkdir "$LOCKDIR" 2>/dev/null; then own_lockdir; return 0; fi
+  lockdir_stale || return 1
+  mkdir "$LOCKBRK" 2>/dev/null || return 1
+  HAVE_LOCKBRK=1
+  local rc=1
+  # re-check under the breaker: another run may have broken it and taken a fresh lock meanwhile
+  if lockdir_stale; then
+    rm -f "$LOCKDIR/owner"; rmdir "$LOCKDIR" 2>/dev/null
+    if mkdir "$LOCKDIR" 2>/dev/null; then own_lockdir; log "lock: removed a stale lock dir ($STALE_WHY)"; rc=0; fi
+  fi
+  rmdir "$LOCKBRK" 2>/dev/null; HAVE_LOCKBRK=""
+  return "$rc"
+}
+skipped() {
+  local who="lock busy"
+  [ -n "$OWNER_PID" ] && who="lock busy (held by pid $OWNER_PID since $OWNER_TS)"
+  log "skipped: $who — $*"; printf 'sync.sh: skipped, %s — %s\n' "$who" "$*" >&2
+}
 take_lock() {
   if command -v flock >/dev/null 2>&1; then
-    exec 9>"$HERE/.sync.lock"
-    flock -w "$LOCK_WAIT" 9 && return 0
+    exec 9>>"$HERE/.sync.lock"
+    if flock -w "$LOCK_WAIT" 9; then owner_stamp >"$HERE/.sync.lock"; return 0; fi
+    owner_of "$HERE/.sync.lock"
     skipped "another sync.sh holds .sync.lock (hung SessionEnd sync? \`pgrep -af sync.sh\`, kill it)"
   else
-    if mkdir "$LOCKDIR" 2>/dev/null; then HAVE_LOCKDIR=1; return 0; fi
-    if [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
-      rmdir "$LOCKDIR" 2>/dev/null
-      if mkdir "$LOCKDIR" 2>/dev/null; then log "lock: removed a stale lock dir (>10 min)"; HAVE_LOCKDIR=1; return 0; fi
-    fi
-    skipped "no flock on this host and $LOCKDIR exists (another sync running; \`rmdir\` it if none is)"
+    take_lockdir && return 0
+    owner_of "$LOCKDIR/owner"
+    local hint="\`rm -r\` it if no sync is running"
+    [ -d "$LOCKBRK" ] && hint="$hint; so is $LOCKBRK, left by a run killed while breaking a stale lock"
+    skipped "no flock on this host and $LOCKDIR is held ($hint)"
   fi
   return 1
 }
-take_lock || exit 0
+take_lock || exit 3
 
 # sync.log keeps its last LOG_KEEP lines, trimmed in place (a temp file outside the checkout, never
 # a second file inside it — an untracked file would make the next sync refuse to pull)

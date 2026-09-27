@@ -50,7 +50,7 @@ it fetches and fast-forwards. It refuses — `.sync-status` says `error …` and
 is work that belongs on a branch + PR, and the message says how to move it there. It never
 resets, stashes or discards anything.
 
-It takes a lock so two sessions never run the pull at once, never fails the caller, logs to
+It takes a lock so two sessions never run the pull at once, exits 0 unless that lock is busy, logs to
 `sync.log` (ignored, trimmed to its last 200 lines; the `main at <sha>` line only when `HEAD` moved) and
 leaves the outcome in `.sync-status` — which `sync-check.sh` reads at every `session-register`, so a
 refused pull is seen by the next session instead of staying silent:
@@ -62,8 +62,13 @@ refused pull is seen by the next session instead of staying silent:
 | `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
 | `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed | always |
 
-A run that finds the lock busy logs `skipped` and leaves `.sync-status` alone: the holder writes the newer
-state. The thresholds are constants at the top of `sync.sh` and `sync-check.sh`.
+A run that finds the lock busy logs `skipped` with the holder (`held by pid N since T`), says so on stderr,
+exits 3 and leaves `.sync-status` alone: the holder writes the newer state. The lock is `flock` on
+`.sync.lock` where it exists, else an atomic `mkdir` of `.sync.lock.d/`; the holder writes its pid and start
+time into it. A `.sync.lock.d/` whose owner pid is gone is stale and taken over at once (a lock dir without
+an owner file only after 10 minutes); the take-over runs under a second `mkdir` lock (`.sync.lock.break/`)
+and re-checks there, so two runs that saw the same dead owner cannot both take the lock. The thresholds are
+constants at the top of `sync.sh` and `sync-check.sh`.
 
 The `SessionEnd` hook in `settings.json` runs it in the background whenever a session ends
 (`sh "$CLAUDE_PROJECT_DIR/.claude/sync.sh"`, `async: true`) — for the kit that is a pull, nothing more.
