@@ -45,8 +45,11 @@ claude_sync:
 
 # ── kit releases (conventional-release) ──────────────────────────────────────────────────
 # A kit release = a CHANGELOG.md section + the VERSION bump, as a `chore(release): X.Y.Z` PR; CI tags the
-# squash-merged commit vX.Y.Z and publishes the GitHub Release (.claude/docs/contributing.md § Releases).
-# .claude/ itself stays on main, so the release branch is cut in a throwaway worktree off origin/main.
+# squash-merged commit vX.Y.Z and publishes the GitHub Release (docs/contributing.md § Releases).
+# The kit checkout (KIT_CHECKOUT) stays on its branch, so the release branch is cut in a throwaway worktree off
+# origin/main. KIT_CHECKOUT defaults to the workspace's .claude/ clone; a plugin install has none (the plugin cache
+# is not a git checkout), so name a clone of the kit repo and include this file by path (#85):
+#   make -f $BATON/workspace.mk kit_release_dry KIT_CHECKOUT=<kit clone>
 # Needs uv (uvx) and gh; the PR gets the `release` label (a failed label fails the target). A run that fails
 # after cutting the branch keeps the branch and the worktree — the release commit may be only there — and
 # prints the push/PR commands that finish it.
@@ -55,13 +58,16 @@ claude_sync:
 _CREL    := uvx -q --from 'conventional-release>=0.2,<1' conventional-release
 _REL_WT  := .worktrees/kit_release-run
 LEVEL    ?=
+KIT_CHECKOUT ?= $(if $(wildcard .claude/.git),.claude,)
+_CTXROOT := $(if $(wildcard .context/reference/env/config.json),CONTEXT_ROOT=$(CURDIR)/.context,)
 
 # both run in a detached worktree off origin/main, so the dry run shows exactly what kit_release would cut
 kit_release_dry kit_release:
-	@git -C .claude fetch -q --tags origin
-	@test ! -e $(_REL_WT) || { echo "$(_REL_WT) exists — a release run in progress, or left over: git -C .claude worktree remove --force $(CURDIR)/$(_REL_WT)"; exit 1; }
-	@git -C .claude worktree add -q --detach $(CURDIR)/$(_REL_WT) origin/main
-	@eval "$$(python3 .claude/context-db/bin/kit_profile.py gh-env)"; \
+	@git -C "$(or $(KIT_CHECKOUT),.)" rev-parse --is-inside-work-tree >/dev/null 2>&1 && [ -n "$(KIT_CHECKOUT)" ] || { echo "kit_release: no kit git checkout ('$(KIT_CHECKOUT)') — pass KIT_CHECKOUT=<a clone of the kit repo>; a plugin install has no clone of its own"; exit 2; }
+	@git -C $(KIT_CHECKOUT) fetch -q --tags origin
+	@test ! -e $(_REL_WT) || { echo "$(_REL_WT) exists — a release run in progress, or left over: git -C $(KIT_CHECKOUT) worktree remove --force $(CURDIR)/$(_REL_WT)"; exit 1; }
+	@git -C $(KIT_CHECKOUT) worktree add -q --detach $(CURDIR)/$(_REL_WT) origin/main
+	@eval "$$($(_CTXROOT) python3 $(_REL_WT)/context-db/bin/kit_profile.py gh-env)"; \
 	  out="$$(cd $(_REL_WT) && $(_CREL) release $(if $(filter kit_release_dry,$@),--dry-run) $(LEVEL))"; rc=$$?; \
 	  br="$$(git -C $(_REL_WT) branch --show-current)"; \
 	  printf '%s\n' "$$out"; \
@@ -72,11 +78,11 @@ kit_release_dry kit_release:
 	    echo "finish it (skip what already happened — the output above says how far it got):"; \
 	    echo "  cd $(CURDIR)/$(_REL_WT) && git push -u origin $$br && gh pr create --base main --head $$br --fill --label release"; \
 	    echo "then clean up:"; \
-	    echo "  git -C .claude worktree remove $(CURDIR)/$(_REL_WT) && git -C .claude branch -D $$br"; \
+	    echo "  git -C $(KIT_CHECKOUT) worktree remove $(CURDIR)/$(_REL_WT) && git -C $(KIT_CHECKOUT) branch -D $$br"; \
 	    exit $$rc; \
 	  fi; \
-	  git -C .claude worktree remove --force $(CURDIR)/$(_REL_WT); \
-	  if [ -n "$$br" ]; then git -C .claude branch -q -D "$$br"; fi; \
+	  git -C $(KIT_CHECKOUT) worktree remove --force $(CURDIR)/$(_REL_WT); \
+	  if [ -n "$$br" ]; then git -C $(KIT_CHECKOUT) branch -q -D "$$br"; fi; \
 	  [ $$rc -eq 0 ] || exit $$rc; \
 	  $(if $(filter kit_release_dry,$@),exit 0;) \
 	  url="$$(printf '%s\n' "$$out" | grep -o 'https://github.com/[^ ]*/pull/[0-9]*' | tail -n 1)"; \

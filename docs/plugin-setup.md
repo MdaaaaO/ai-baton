@@ -85,7 +85,7 @@ A plugin installs skills, agents and hooks. The rest of the workspace kit is con
 |---|---|
 | `.context/`, the env store, the root `CLAUDE.md` | `setup.sh` seeds them (step 3) |
 | `@.claude/WORKSPACE.md` import | the SessionStart hook prints `WORKSPACE.md` instead |
-| root `Makefile` with `include .claude/workspace.mk` (`make claude_sync`, `make sign*`, `make kit_release`) | none; the engine runs as `make -C $BATON/context-db …` |
+| root `Makefile` with `include .claude/workspace.mk` (`make claude_sync`, `make sign*`, `make kit_release`) | none; the engine runs as `make -C $BATON/context-db …`, a release as `make -f $BATON/workspace.mk kit_release KIT_CHECKOUT=<kit clone>` |
 | kit git hooks (`pre-push`, `commit-msg`) | none: they guard kit commits, which you make from a kit checkout (`CONTRIBUTING.md`) |
 | `SessionEnd` hook that runs `sync.sh` | none: the plugin update is the sync (§ Updating) |
 

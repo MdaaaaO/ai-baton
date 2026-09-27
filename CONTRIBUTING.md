@@ -50,7 +50,8 @@ Writing a skill? Start from [`docs/authoring.md`](docs/authoring.md), the checkl
 
 ## Releasing (maintainers)
 
-`make kit_release_dry` shows the next version, and `make kit_release` opens the release PR. Squash-merge it with
+`make kit_release_dry` shows the next version, and `make kit_release` opens the release PR. On a plugin install, run
+them as `make -f $BATON/workspace.mk … KIT_CHECKOUT=<kit clone>`. Squash-merge it with
 the title unchanged. The `release` workflow then tags it and publishes the notes.
 
 ## The full rules
