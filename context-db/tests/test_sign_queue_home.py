@@ -43,6 +43,31 @@ class QueueHome(unittest.TestCase):
         self.assertIn("no workspace .context/ found", r.stderr)
 
 
+class FirstEnqueue(unittest.TestCase):
+    def test_a_fresh_workspace_gets_its_queue_dir_on_the_first_enqueue(self):
+        # review of #27: nothing ships or seeds `.context/state/sign-queue/` — enqueue.sh must create it
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Path(tmp) / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = Path(tmp) / "ws" / "repo"
+            wt.mkdir()
+            git = ["git", "-C", str(wt), "-c", "user.name=t", "-c", "user.email=t"]
+            subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True)
+            (wt / "a.txt").write_text("a\n")
+            subprocess.run([*git, "add", "a.txt"], check=True)
+            subprocess.run([*git, "commit", "-q", "-m", "chore: seed"], check=True)
+            (wt / "a.txt").write_text("b\n")
+            msg = Path(tmp) / "msg.txt"
+            msg.write_text("fix: change a\n")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
+            r = subprocess.run(["sh", str(ENQUEUE), "topic-a", str(wt), "main", str(msg), "--files", "a.txt",
+                                "--ticket", "none", "--epic", "none", "--pr", "none", "--summary", "s", "--by", "t"],
+                               env={**env, "CONTEXT_ROOT": str(ctx)}, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            jobs = list((ctx / "state" / "sign-queue").glob("*-topic-a.sh"))
+            self.assertEqual(len(jobs), 1, r.stdout + r.stderr)
+
+
 class Migration(unittest.TestCase):
     def test_legacy_jobs_move_without_overwriting(self):
         with tempfile.TemporaryDirectory() as tmp:

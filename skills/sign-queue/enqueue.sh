@@ -108,6 +108,7 @@ nfiles=-1
 [ -n "$files" ] && nfiles=$(printf '%s\n' $files | grep -c .)
 meta=$(python3 "$(dirname "$0")/signq.py" meta "$wt" "$br" "$msg" --topic "$topic" --by "$by" --ticket "$ticket" \
          --epic "$epic" --pr "$pr" --summary "$summary" --flags "${flags#,}" --files "$nfiles" 2>/dev/null || true)
+mkdir -p "$Q"  # the workspace queue dir is created on first use (#7) — nothing ships or seeds it
 job="$Q/$(date -u +%Y%m%dT%H%M%SZ)-$topic.sh"
 tmp="$job.tmp"
 {
