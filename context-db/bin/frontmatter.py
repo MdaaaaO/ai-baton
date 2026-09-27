@@ -101,6 +101,33 @@ def parse_lines(lines: list[str]) -> Frontmatter:
     return fm
 
 
+def duplicate_keys(lines: list[str]) -> list[str]:
+    """Keys a block repeats at the same level, as `key` / `parent.key` with both line numbers (1-based within the
+    block) — the parser keeps the last value silently, so a mis-resolved merge that leaves two `version:` lines under
+    `metadata:` would otherwise pass (#19)."""
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    current: str | None = None
+    for n, line in enumerate(lines, 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = KEY.match(line)
+        if m:
+            name = m.group(1)
+            val = m.group(2)
+            current = name if val is None or not strip_comment(val) else None
+        else:
+            sm = SUBKEY.match(line)
+            if not (sm and current is not None):
+                continue
+            name = f"{current}.{sm.group(1)}"
+        if name in seen:
+            out.append(f"`{name}` on lines {seen[name]} and {n}")
+        else:
+            seen[name] = n
+    return out
+
+
 def parse_flat(lines: list[str]) -> dict[str, str]:
     """The flat `key: value` reading a `.context/` document gets (gen_index, verify, session.py): every line with a
     colon is a column, split at the first colon, both sides stripped, values verbatim (a quoted or bracketed value
