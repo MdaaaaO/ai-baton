@@ -46,7 +46,7 @@ RULE_BUMP = "docs/contributing.md § Versioning"
 # Shapes a diff scan adds to the shared list: they are PII/secret shapes, not environment facts, so kit-health's
 # every-file scan (which has this machine's real values) does not need them, and a diff scan has nothing else.
 PII_SHAPES = [
-    (r"(?<![\w.+-])(?!git@)[\w.+-]+@(?!example\.(?:com|org|net)\b)(?![\w.-]*\.(?:invalid|test|example)\b)(?!users\.noreply\.github\.com\b)(?!noreply\.github\.com\b)[\w-]+(?:\.[\w-]+)+(?![\w-])", "e-mail address"),
+    (r"(?<![\w.+-])(?!git@)[\w.+-]+@(?!example\.(?:com|org|net)\b)(?![\w-]+(?:\.[\w-]+)*\.(?:invalid|test|example)(?!\.?[\w-]))(?!users\.noreply\.github\.com\b)(?!noreply\.github\.com\b)[\w-]+(?:\.[\w-]+)+(?![\w-])", "e-mail address"),
     (r"(?<![\w-])/(?:home|Users)/(?!<)(?!user\b)(?!runner\b)(?!\$)[A-Za-z][\w.-]*(?=[/\s`'\")]|$)", "home path (use `~`, `$HOME` or `<user>`)"),
     (r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", "GitHub token"),
     (r"\bgithub_pat_[A-Za-z0-9_]{20,}\b", "GitHub fine-grained token"),

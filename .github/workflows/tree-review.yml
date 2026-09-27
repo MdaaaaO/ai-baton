@@ -4,7 +4,7 @@ name: tree-review
 # leak SHAPES over every tracked file on every PR and push; what no shape can know (a team name in prose, a colleague
 # named as a source, a product marker) is the lens of docs/REVIEW.md § 2.1, and claude-review.yml applies it only to a
 # PR's added lines. A release commit, a squash of many PRs or a derived repo's first push is never such a diff, so this
-# run is the pre-publish step (docs/packaging.md § Pre-publish checklist): once per minor release, and before the
+# run is a pre-publish step (#95): once per minor release, and before the
 # first push of any repo created from the kit. The findings go to the job summary; nothing is posted or pushed.
 #
 # Authenticated like evals.yml: the CLAUDE_CODE_OAUTH_TOKEN repository secret. Without it the job ends green with a

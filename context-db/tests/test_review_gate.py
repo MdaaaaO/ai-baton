@@ -140,12 +140,14 @@ class Tree(unittest.TestCase):
             sh(r.root, "git", "checkout", "-q", "main")
             r.write("docs/old.md", f"# old\n\nchannel {LEAK}\n")
             r.write("docs/allowed.md", f"allowed {LEAK}\n")
-            r.write("docs/fine.md", "mail t@example.invalid\n")  # an RFC 2606 reserved domain is no address
+            r.write("docs/fine.md", "mail t@example.invalid and u@host.test.\n")  # an RFC 2606 reserved TLD is no address
+            r.write("docs/sub.md", "mail " + "x@mail.test" + ".acmecorp.com\n")  # ...but only as the LAST label
             r.commit("main has a leak")
             self.assertEqual(gate.run("main", "HEAD", skip_bump=True, cwd=r.root)[0], [])
             f, n = gate.tree_findings("HEAD", cwd=r.root)
-            self.assertEqual(len(f), 1, f)
+            self.assertEqual(len(f), 2, f)
             self.assertTrue(f[0].startswith("[STOP] docs/old.md:3 — Slack channel/DM id"), f[0])
+            self.assertTrue(f[1].startswith("[STOP] docs/sub.md:1 — e-mail address"), f[1])
             self.assertIn("in the tree", f[0])
             self.assertGreater(n, 3)
 
