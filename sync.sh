@@ -143,13 +143,18 @@ owner_of() {
   OWNER_PID=$p; OWNER_TS=${t:-?}
 }
 # lockdir_stale — is $LOCKDIR left behind by a run that is no longer there? (sets STALE_WHY)
+# $LOCKDIR itself may already be gone: the fast `mkdir` in take_lockdir can lose to a holder that
+# releases the lock in the gap before this runs, and a missing dir is a free lock, not a busy one —
+# treat it as stale so take_lockdir's break-and-retake path (already serialised by $LOCKBRK) just
+# recreates it, instead of reporting busy on a lock nothing holds any more.
 lockdir_stale() {
+  [ -d "$LOCKDIR" ] || { STALE_WHY="lock dir vanished before the staleness check"; return 0; }
   owner_of "$LOCKDIR/owner"
   if [ -n "$OWNER_PID" ]; then
     kill -0 "$OWNER_PID" 2>/dev/null && return 1
     STALE_WHY="owner pid $OWNER_PID is gone"; return 0
   fi
-  [ -d "$LOCKDIR" ] && [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null)" ] || return 1
+  [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null)" ] || return 1
   STALE_WHY="no owner recorded, older than 10 min"; return 0
 }
 own_lockdir() { HAVE_LOCKDIR=1; owner_stamp >"$LOCKDIR/owner"; }

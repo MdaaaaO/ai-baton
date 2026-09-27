@@ -244,6 +244,37 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertTrue((d / "owner").is_file(), "a live run's lock is left alone however old")
 
+    def test_lockdir_vanishing_mid_check_is_retaken_not_reported_busy(self):
+        """The fast `mkdir $LOCKDIR` in take_lockdir can lose to a holder that releases the lock in the
+        gap before lockdir_stale runs: `find`/`owner_of` then see a directory that simply isn't there any
+        more. That must read as a free lock (retake it), not a busy one (exit 3) — a fake `mkdir` stands
+        in for the racing holder, removing the pre-seeded lock dir the instant our fast attempt fails."""
+        path = self.path_without("flock", "mkdir")
+        real_mkdir = shutil.which("mkdir")
+        raced_marker = self.tmp / "mkdir.raced"  # outside the kit checkout: must not trip the dirty-tree check
+        fake = Path(path) / "mkdir"
+        fake.write_text(
+            "#!/bin/sh\n"
+            'case "$1" in\n'
+            '  */.sync.lock.d)\n'
+            f'    if [ ! -e "{raced_marker}" ]; then\n'
+            f'      : >"{raced_marker}"\n'
+            f'      {real_mkdir} "$@" 2>/dev/null && exit 0\n'
+            '      rm -f "$1/owner"; rmdir "$1" 2>/dev/null\n'
+            "      exit 1\n"
+            "    fi\n"
+            "    ;;\n"
+            "esac\n"
+            f'exec {real_mkdir} "$@"\n'
+        )
+        fake.chmod(0o755)
+        (self.kit / ".sync.lock.d").mkdir()  # no owner file: just something for the fast mkdir to fail against
+        r = self.sync(env=_env(self.tmp, path))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("removed a stale lock dir (lock dir vanished", self.log_file.read_text())
+        self.assertFalse((self.kit / ".sync.lock.d").exists())
+
     def test_concurrent_runs_break_a_stale_lock_once(self):
         """Six runs start together on a stale (ownerless, old) mkdir lock. `find` (the age check) answers
         at once but each run then stalls a little longer than the one before, so every run acts on a
