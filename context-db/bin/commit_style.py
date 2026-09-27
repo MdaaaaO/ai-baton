@@ -20,7 +20,7 @@ Styles:
 
 Usage:
   commit_style.py resolve  [--dir <repo-dir>] [--repo <owner/repo>]
-  commit_style.py check    [--dir …] [--repo …] [--style <s>] <msg-file | ->      exit 0 ok / 1 fail / 2 usage
+  commit_style.py check    [--dir …] [--repo …] [--style <s>] <msg-file | ->      exit 0 ok / 1 style / 2 usage, config or I/O
   commit_style.py title    [--dir …] [--repo …] [--style <s>] "<subject>"          same, for a PR title
   commit_style.py label    "<subject>"      → the GitHub type label a conventional subject implies (or "")
   commit_style.py types                     → the accepted types, one per line
@@ -52,12 +52,12 @@ CREL_TABLE = re.compile(r"^\[\[?tool\.conventional-release[\].]", re.M)
 
 
 def _config() -> dict:
-    if kit_profile is None:
+    """The env store config, `{}` outside a workspace (no store: the kit default applies). A store that exists but
+    cannot be read is NOT `{}`: its SystemExit propagates, and main() reports it as exit 2 — a broken `commits`
+    override must never silently turn into "default style" and refuse every commit with a style hint."""
+    if kit_profile is None or not kit_profile.env_config():
         return {}
-    try:
-        return kit_profile.load() or {}
-    except (SystemExit, Exception):  # SystemExit when there is no env store; never KeyboardInterrupt
-        return {}
+    return kit_profile.load() or {}
 
 
 def repo_slug(d: Path) -> str:
@@ -178,6 +178,8 @@ def comment_char(d: Path | None) -> str:
 
 
 def check_message(text: str, style: str, comment: str = "#") -> list[str]:
+    # exactly git's rule (`cleanup=strip`, any editor-driven commit): EVERY line starting with the comment char goes, so
+    # a `#123 fix` subject would be stripped by git too — a repo that wants `#`-first subjects sets core.commentChar
     lines = [ln for ln in text.splitlines() if not ln.startswith(comment)]
     while lines and not lines[0].strip():
         lines.pop(0)
@@ -195,6 +197,20 @@ def label_for(subject: str) -> str:
 
 
 def main(argv: list[str]) -> int:
+    """0 ok · 1 the message / title breaks the style · 2 a usage, config or I/O error (the hook tells them apart)."""
+    try:
+        return _main(argv)
+    except SystemExit as e:
+        if isinstance(e.code, str):
+            print(f"commit_style: {e.code}", file=sys.stderr)
+            return 2
+        raise
+    except OSError as e:
+        print(f"commit_style: {e}", file=sys.stderr)
+        return 2
+
+
+def _main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=("resolve", "check", "title", "label", "types"))
     ap.add_argument("arg", nargs="?", help="message file (`-` = stdin) for check; subject for title/label")
