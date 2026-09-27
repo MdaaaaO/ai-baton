@@ -2,7 +2,7 @@
 name: kit-health
 description: Audit the kit on this machine: versioning frontmatter, env-value leaks in kit files, env-store coverage and stale rows, wiring (CLAUDE.md imports, memory symlink, CLIs, systems), an engine smoke, the green stamp. Walks each finding (Fix, Ticket, Accept), reports to `.context/kit-health/`, stamps `HEALTH-<env>.md`. Run after `make claude_sync`, monthly, and when a skill misbehaves.
 metadata:
-  version: "31"
+  version: "32"
   updated: "2026-09-26"
   reviewed: "2026-09-26"
   facts: "aws.profile kit-health"
@@ -31,8 +31,10 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    file** (an Accept, a Fix) is made in a worktree of a kit **checkout** off `origin/main`, never under `$BATON`
    on a plugin install: that is Claude Code's plugin cache, and `claude plugin update` overwrites it (§ 1 warns
    about a file changed there). No checkout yet: `gh repo clone <kit repo>` (§ 1 names it) into the workspace.
-5. **Report.** `make -C $BATON/context-db new TYPE=log DOMAIN=kit-health SLUG=<YYYY-MM-DD>-<env>
-   TITLE="kit-health <date> · <env>"`, paste the report and each finding's outcome, `make … index`.
+5. **Report.** One log per day and environment: `make -C $BATON/context-db new TYPE=log DOMAIN=kit-health
+   SLUG=<YYYY-MM-DD>-<env> TITLE="kit-health <date> · <env>"` (the date of the report header), paste the report
+   and each finding's outcome, `make … index`. When that log already exists (an earlier run today, or the re-run
+   after a Fix), `new` refuses to clobber it: append a `## Run <HH:MM>` section with the same content instead.
 6. **Stamp.** Re-run step 1 with `--stamp`: it refuses on any error **or un-accepted leak hit**, else
    writes the HEALTH doc (`last_green`, `kit_commit`, `kit_version`, `warnings`) and re-indexes.
 7. **PR.** Kit files the walk touched go out as one PR from that worktree (`pr-open`); after the merge (and

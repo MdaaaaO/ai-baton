@@ -6,6 +6,7 @@ do not bump a version. The generated per-release log is the root [`CHANGELOG.md`
 merge date in UTC, as GitHub shows it — a shared file cannot carry one machine's zone. A removed
 skill or agent keeps its last version in git history: `git log --diff-filter=D -- skills/<name>` names the commit.
 
+- 2026-09-26 · **kit-health v32** — step 5 keeps one log per day and environment: a second run that day (the re-run after a Fix) appends a `## Run <HH:MM>` section instead of failing at `new`, which refuses to clobber (#10). Machines: nothing to do.
 - 2026-09-26 · **kit-health v31 · kit_profile.py** — an Accept or Fix edits a worktree of a kit checkout and ships as a PR, never a file under `$BATON` on a plugin install (the plugin cache, which `claude plugin update` overwrites); § 1 warns when a kit file in the cache changed after the install (`installed_plugins.json` `lastUpdated`, now in `plugin_install()`) (#11). Machines: nothing to do.
 - 2026-09-26 · **kit-health v30** — the report header is in the user's zone (`2026-09-26 21:04 EDT`, via `kit_profile.zone()`), so it names the same day as the `<YYYY-MM-DD>-<env>` log it is pasted into; the stamp's `last_green` stays UTC (#12). Machines: nothing to do.
 - 2026-09-26 · **kit-health v29** — the maintainer's `@<owner>` entries in `.github/CODEOWNERS` are no longer an identity leak when the handle is the kit repo's own owner (`kit_repo()`); any other login there, and the handle anywhere else, still is (#5). Machines: nothing to do; a maintainer machine stamps green again.
