@@ -11,6 +11,7 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 - **session-handoff** — flushes the context doc, indexes and stats, and writes the prompt the next session starts
   from.
 - **env-init** — fills or refreshes this machine's env fact store from the discovery manifests.
+- **kit-setup** — scaffolds this workspace from inside a session (runs the kit's `setup.sh --personal`), once per machine.
 - **kit-health** — audits the kit on this machine: frontmatter, env-value leaks, store coverage, wiring.
 - **cost-report** — your Claude Code spend against the work shipped, week over week.
 - **self-assessment** — writes the weekly self-assessment from `.context/` and the systems of record.
