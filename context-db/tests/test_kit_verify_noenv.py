@@ -52,9 +52,20 @@ class NoEnv(unittest.TestCase):
         rc, _, err = run("--no-env", str(FIX / "leaky-skill" / "SKILL.md"))
         self.assertEqual(rc, 1)
         self.assertIn(f"Slack channel/DM id `{LEAK}`", err)
-        self.assertIn("real-looking number behind a placeholder prefix", err)  # #92
         self.assertIn("cites `scripts/missing.sh` but", err)
         self.assertIn("'version:' belongs under `metadata:`", err)
+
+    def test_real_number_behind_a_placeholder_prefix_fails(self):
+        # #92: written at run time, so no file in the kit carries the real-looking number
+        import shutil, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "placeholder-skill"
+            shutil.copytree(FIX / "good-skill", skill)
+            md = skill / "SKILL.md"
+            md.write_text(md.read_text() + "\nExample commit: KEY-" + "9876 fix the thing.\n")
+            rc, _, err = run("--no-env", str(md))
+        self.assertEqual(rc, 1, err)
+        self.assertIn("real-looking number behind a placeholder prefix", err)
 
     def test_unknown_path_is_a_usage_error(self):
         rc, _, err = run("--no-env", str(FIX / "no-such-skill"))
