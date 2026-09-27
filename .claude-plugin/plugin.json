@@ -33,7 +33,7 @@
     "tz": {
       "type": "string",
       "title": "Timezone (IANA)",
-      "description": "The zone timestamps render in (WORKSPACE_TZ), e.g. a Region/City name. UTC when empty or unknown.",
+      "description": "The zone timestamps render in (WORKSPACE_TZ): an IANA Region/City name such as America/New_York, not an abbreviation like EDT. UTC when empty or unknown.",
       "default": "UTC"
     },
     "slack_self_dm": {
