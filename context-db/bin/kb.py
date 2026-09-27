@@ -37,7 +37,7 @@ Usage:
   kb.py discover --all | --check               → every manifest fact with its state here | validate manifests
   kb.py stale [--days N] [--check]             → tool/import/derived rows older than their manifest ttl_days
                                                  (N overrides every ttl); --check = exit 3 when any
-  kb.py migrate [--check]                      → bring the store up to the kit's schema: renamed system
+  kb.py migrate [--check | --off]               → bring the store up to the kit's schema: renamed system
                                                  flags moved (value kept), missing flags added (seeded from
                                                  their legacy flag, else false), rows under a renamed kind
                                                  (`slack.channels` → `slack.channel`) moved; prints the
@@ -963,6 +963,8 @@ def config_value_problem(key: str, val) -> str:
                 return f"'{parts[0]}' has no flag '{part}' — known: {', '.join(sorted(k for k in node if not k.startswith('_')))}"
             return ""  # the template stops here: an open map, nothing to compare
         node = node[part]
+    if key == "tracker.kind" and val not in kit_profile.TRACKER_KINDS:
+        return f"'tracker.kind' must be one of {', '.join(kit_profile.TRACKER_KINDS)}, not {val!r}"
     if node is None or (isinstance(node, str) and isinstance(val, (int, float)) and not isinstance(val, bool)):
         return ""  # template null = any; a number where the template shows a placeholder string is an id, fine
     if _shape(node) != _shape(val):
@@ -1063,7 +1065,7 @@ def absent(msg: str) -> SystemExit:
 
 
 def _main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(prog="kb.py", description=__doc__.split("\n\n")[0],
+    ap = argparse.ArgumentParser(prog="kb.py", formatter_class=argparse.RawDescriptionHelpFormatter, description=__doc__,
                                  epilog="exit: 0 ok · 1 the value / fact asked about is absent · 2 usage or I/O error · 3 stale --check found rows")
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("get"); g.add_argument("key"); g.add_argument("name")
@@ -1143,7 +1145,7 @@ def _main(argv: list[str]) -> int:
     elif a.cmd == "config":
         cfg = load_config()
         if not cfg:
-            print("kb: no env/config.json — run `kb.py init --blank` (or `kb.py import <dir>`)", file=sys.stderr)
+            print("kb: no env/config.json — run `kb.py init --blank` (or `--personal`)", file=sys.stderr)
             return 1
         v = dotted_get(cfg, a.key) if a.key else cfg
         if v is None:
@@ -1164,7 +1166,7 @@ def _main(argv: list[str]) -> int:
     elif a.cmd == "migrate":
         cfg = load_config()
         if not cfg:
-            print("kb: no env/config.json — run `kb.py init --blank` (or `kb.py import <dir>`)", file=sys.stderr)
+            print("kb: no env/config.json — run `kb.py init --blank` (or `--personal`)", file=sys.stderr)
             return 1
         if a.off:
             off = unmet_units(cfg)

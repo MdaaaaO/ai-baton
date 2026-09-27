@@ -6,7 +6,7 @@
     "<area-b>"
   ],
   "tracker": {
-    "kind": "jira | github | linear | none",
+    "kind": "jira | github | none — kit_profile.py's TRACKER_KINDS is the enum; kit-verify rejects any other value",
     "site": "<jira site host, e.g. acme.atlassian.net — jira only>",
     "project": "<jira project key — jira only>",
     "board_sprint_prefix": "<sprint name prefix to match on, jira only, or empty>",

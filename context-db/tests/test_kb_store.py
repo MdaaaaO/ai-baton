@@ -468,7 +468,8 @@ class ConfigSetShapes(StoreCase):
     def test_refused_shapes_and_keys(self):
         for key, val in (("systems", "notanobject"), ("systems.slack", "yes"), ("systems.nosuch", "true"),
                          ("tracker", "null"), ("trackr.kind", "github"), ("domains", '"one"'),
-                         ("systems", '{"jirra": true}'), ("systems", '{"slack": "yes"}')):
+                         ("systems", '{"jirra": true}'), ("systems", '{"slack": "yes"}'),
+                         ("tracker.kind", "linear")):
             rc, _out, err = self.cli("config-set", key, val)
             self.assertEqual(rc, 2, (key, val, err))
             self.assertIn("config-set refused", err)
@@ -476,7 +477,8 @@ class ConfigSetShapes(StoreCase):
 
     def test_accepted_values(self):
         for key, val in (("systems.slack", "true"), ("environment", "ci"), ("leaks.markers", '["x"]'),
-                         ("cost.columns.user", '"u"'), ("tracker.transitions.done", "31"), ("tracker.key_regex", "(#\\d+)")):
+                         ("cost.columns.user", '"u"'), ("tracker.transitions.done", "31"), ("tracker.key_regex", "(#\\d+)"),
+                         ("tracker.kind", "jira")):
             rc, _out, err = self.cli("config-set", key, val)
             self.assertEqual(rc, 0, (key, val, err))
 

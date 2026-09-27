@@ -91,6 +91,14 @@ class EnvStore(unittest.TestCase):
         self.edit(tracker={"kind": "jira", "key_regex": r"\b(KEY-\d+)\b", "close_reasons": {}})
         self.assertEqual(self.check(), [])
 
+    def test_tracker_kind_enum(self):
+        self.edit(tracker={"kind": "linear", "key_regex": "", "close_reasons": {}})
+        errors = self.check()
+        self.assertTrue(any("tracker.kind 'linear' is not one of" in e for e in errors), errors)
+        for kind in kit_profile.TRACKER_KINDS:
+            self.edit(tracker={"kind": kind, "key_regex": r"(#\d+)" if kind != "none" else "", "close_reasons": {}})
+            self.assertEqual([e for e in self.check() if "tracker.kind" in e], [])
+
     def test_null_or_wrong_typed_sections_are_problems_not_tracebacks(self):
         # `tracker: null` raised AttributeError inside the verifier
         self.edit(tracker=None)
