@@ -75,6 +75,13 @@ class KitRelease(unittest.TestCase):
                 checkout = self.clone(self.tmp / name)
                 self.assert_dry_ran(self.make("kit_release_dry", f"KIT_CHECKOUT={checkout}"), checkout)
 
+    def test_workspace_path_with_a_space(self):
+        # the throwaway worktree lives under the workspace: its path must stay one argument in every git call
+        self.ws = self.tmp / "my ws"
+        self.ws.mkdir()
+        checkout = self.clone(self.ws / ".claude")
+        self.assert_dry_ran(self.make("kit_release_dry"), checkout)
+
     def test_no_checkout_names_kit_checkout(self):
         for extra in ((), (f"KIT_CHECKOUT={self.tmp / 'missing'}",)):
             with self.subTest(extra=extra):
