@@ -109,7 +109,7 @@ engine-cli-doc:
 
 # TITLE= is often a ticket or PR title: each value reaches new.sh unexpanded and single-quoted (`$(call sq,VAR)`),
 # and `unexport` keeps make from expanding it into the recipe environment, so `$(…)`, quotes and backticks are data (#139).
-sq ?= '$(subst ','\'',$(value $(1)))'
+override sq = '$(subst ','\'',$(value $(1)))'
 unexport TYPE DOMAIN SLUG TITLE
 new:
 	@dest=$$(CONTEXT_ROOT="$(CONTEXT)" TYPE=$(call sq,TYPE) DOMAIN=$(call sq,DOMAIN) SLUG=$(call sq,SLUG) TITLE=$(call sq,TITLE) sh $(BIN)/new.sh) && \
