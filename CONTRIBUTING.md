@@ -10,7 +10,8 @@ through an issue and a reviewed PR.
 - **Title the PR as a Conventional Commit**, for example `feat(pr-open): add the diagram plan`. The title becomes the
   squash commit.
 - **Start the PR body with `Closes #N`**, or with `Refs #N` for one step of a larger issue.
-- **Run `make -C context-db ci` in your worktree** before you push. It is the same job CI runs, and it needs no setup.
+- **Run `make -C context-db ci` in your worktree** before you push. It runs every gate CI runs; it needs `origin/main`
+  fetched, and a missing tool (shellcheck, the `claude` CLI) fails it unless you pass `ALLOW_SKIP=1`.
 - **Bump a skill whose behaviour changes.** Raise `metadata.version` and add one line to the top of
   [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 - **Keep machine values out of the kit.** No ids, hosts, org names or people. They belong in the env store.
@@ -35,7 +36,7 @@ Then, from the workspace root, with `<checkout>` from the table:
 ```sh
 git -C <checkout> worktree add ../.worktrees/kit_<topic> -b <topic> origin/main
 cd .worktrees/kit_<topic>
-make -C context-db ci                                 # validator, tests, compile and link checks
+make -C context-db ci                                 # every CI gate (ALLOW_SKIP=1 where a tool is missing)
 make -C context-db verify-skill UNIT=skills/<name>    # one skill only
 ```
 

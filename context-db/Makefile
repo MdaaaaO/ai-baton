@@ -30,7 +30,7 @@
 #   make -C .claude/context-db profile KEY=tracker.kind  # one env-config value
 #   make -C .claude/context-db kit-verify [STALE=90]     # every skill/agent carries versioning frontmatter; env store complete
 #   make -C .claude/context-db verify-skill [UNIT=skills/x] # env-free validator: frontmatter schema, body, leak shapes — no .context/ needed
-#   make -C .claude/context-db ci                        # exactly what .github/workflows/ci.yml runs, minus the blank env store
+#   make -C .claude/context-db ci                        # every gate .github/workflows/ci.yml runs (ALLOW_SKIP=1: tolerate a missing tool)
 #   make -C .claude/context-db check-links               # every relative Markdown link resolves
 #   make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
 #   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
@@ -143,14 +143,29 @@ kit-verify:
 verify-skill:
 	@cd $(ENGINE).. && $(PY) context-db/bin/kit_verify.py --no-env $(UNIT)
 
-# make ci  — what .github/workflows/ci.yml runs, reproducible on any clone: the env-free validator, the engine
-# tests, every Python file compiles, every shell script parses. (CI additionally runs kit-verify against a blank
-# env store — `python3 context-db/bin/kb.py init --blank` from the workspace root gives you one.)
-ci: verify-skill review-gate-tree test eval-check plugin-validate check-links shellcheck
+# make ci [BASE=origin/main] [ALLOW_SKIP=1]  — every gate .github/workflows/ci.yml runs, so a green `make ci` predicts a
+# green CI: the review gate on this branch's diff and over the tree, the env-free validator, kit-verify + kit-health --ci
+# against a throw-away blank store, the engine tests, the eval static gate, the plugin manifests, links, shellcheck,
+# py_compile, bash -n and the dash parse, and the README install smoke. A gate whose tool is missing here (shellcheck,
+# `claude`) FAILS unless ALLOW_SKIP=1 — a skipped gate must never read as a pass. Not here: the token-spending evals.
+ci: review-gate review-gate-tree verify-skill kit-verify-blank test eval-check plugin-validate check-links shellcheck parse install-smoke
+	@echo "make ci: OK — the CI gates ran$(if $(ALLOW_SKIP), (ALLOW_SKIP=1: see the \"skipped\" lines above),)"
+
+# kit-verify and kit-health's CI scan against a throw-away blank store, as CI builds it (environment "ci")
+kit-verify-blank:
+	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; export CONTEXT_ROOT="$$tmp/.context"; \
+	  $(PY) $(BIN)/kb.py init --blank >/dev/null && $(PY) $(BIN)/kb.py config-set environment ci >/dev/null && \
+	  (cd $(BIN) && $(PY) kit_verify.py) && $(PY) $(ENGINE)../skills/kit-health/kit-health.py --ci --quiet
+
+# every Python file compiles; every shell script parses with bash; every `#!/bin/sh` script (they run under `sh`,
+# dash on most hosts) parses with dash too — ci.yml calls this target, so the selection lives in one place
+parse:
 	@cd $(ENGINE).. && git ls-files -z '*.py' | xargs -0 -r $(PY) -m py_compile && echo "py_compile: OK"
 	@cd $(ENGINE).. && git ls-files -z '*.sh' hooks/ ':!hooks/*.json' | xargs -0 -n1 bash -n && echo "bash -n: OK"
-	@cd $(ENGINE).. && sh_files="$$(git ls-files '*.sh' | while read -r f; do head -1 "$$f" | grep -q '^#!/bin/sh' && echo "$$f"; done)"; \
-	  for f in $$sh_files; do if command -v dash >/dev/null 2>&1; then dash -n "$$f"; else sh -n "$$f"; fi || exit 1; done; echo "sh -n (dash): OK"
+	@cd $(ENGINE).. && rc=0; sh_files="$$(git ls-files '*.sh' hooks/ ':!hooks/*.json' | while read -r f; do head -1 "$$f" | grep -q '^#!/bin/sh' && echo "$$f"; done)"; \
+	  if command -v dash >/dev/null 2>&1; then p=dash; else p=sh; echo "parse: no dash here — sh -n instead (CI uses dash)"; fi; \
+	  for f in $$sh_files; do $$p -n "$$f" || { echo "$$p -n failed: $$f"; rc=1; }; done; \
+	  [ $$rc -eq 0 ] && echo "sh -n ($$p): OK — $$(echo $$sh_files | wc -w) #!/bin/sh script(s)"; exit $$rc
 
 # make eval-check [REQUIRE_ALL=1]  — the eval suite's static gate (#54; no model, no tokens): every case loads
 # (prompt.md keys, graders of a known type), every trigger suite has >= 10 cases with positives and near misses.
@@ -178,7 +193,9 @@ check-links:
 # The README's install blocks replayed on a scratch HOME (#98): the clone path, then the plugin path (skipped without
 # the `claude` CLI). The same script is CI's install-smoke job.
 install-smoke:
-	@cd $(ENGINE).. && $(PY) context-db/tests/install_smoke.py clone && $(PY) context-db/tests/install_smoke.py plugin
+	@cd $(ENGINE).. && $(PY) context-db/tests/install_smoke.py clone && \
+	  if command -v claude >/dev/null 2>&1 || [ -z "$(ALLOW_SKIP)" ]; then $(PY) context-db/tests/install_smoke.py plugin $(if $(ALLOW_SKIP),,--require-cli); \
+	  else echo "install-smoke plugin: skipped (no \`claude\` CLI; ALLOW_SKIP=1)"; fi
 
 # shellcheck -S warning over every tracked shell script and the git hooks: the system binary, else the
 # PyPI wheel through uvx; a machine with neither says so (CI has uv).
@@ -186,21 +203,24 @@ shellcheck:
 	@cd $(ENGINE).. && files="$$(git ls-files '*.sh' | grep -v /fixtures/) hooks/pre-push hooks/commit-msg"; \
 	  if command -v shellcheck >/dev/null 2>&1; then shellcheck -S warning $$files && echo "shellcheck: OK"; \
 	  elif command -v uvx >/dev/null 2>&1; then uvx --from shellcheck-py shellcheck -S warning $$files && echo "shellcheck: OK (uvx)"; \
-	  else echo "shellcheck: skipped (neither shellcheck nor uvx on this machine)"; fi
+	  elif [ -n "$(ALLOW_SKIP)" ]; then echo "shellcheck: skipped (neither shellcheck nor uvx on this machine; ALLOW_SKIP=1)"; \
+	  else echo "shellcheck: FAILED — neither shellcheck nor uvx on this machine (install one, or ALLOW_SKIP=1 to skip it knowingly)"; exit 1; fi
 
 # make plugin-validate  — the plugin and marketplace manifests + every skill/agent, through Claude Code's own validator
 # (`claude plugin validate --strict`, docs/packaging.md). A clone without the `claude` CLI says so instead of failing:
 # kit-verify still checks the version discipline (plugin.json version == VERSION) on every machine.
 plugin-validate:
 	@cd $(ENGINE).. && if command -v claude >/dev/null 2>&1; then claude plugin validate --strict . && claude plugin validate --strict skills >/dev/null && claude plugin validate --strict agents >/dev/null && echo "plugin validate: OK"; \
-	  else echo "plugin validate: skipped (no \`claude\` CLI on this machine)"; fi
+	  elif [ -n "$(ALLOW_SKIP)" ]; then echo "plugin validate: skipped (no \`claude\` CLI on this machine; ALLOW_SKIP=1)"; \
+	  else echo "plugin validate: FAILED — no \`claude\` CLI on this machine (npm i -g @anthropic-ai/claude-code, or ALLOW_SKIP=1)"; exit 1; fi
 
 # Tier 0 and tier 1 of the review (docs/REVIEW.md): the gate fails on a leak shape in an added line or a changed
 # unit without version/CHANGELOG bump (SKIP_BUMP=1 for a wording-only change); the evidence file is what the CI
 # reviewer reads (.review/ is git-ignored).
 BASE ?= origin/main
 review-gate:
-	@cd $(ENGINE).. && $(PY) $(BIN)/review_gate.py --base $(BASE) --head HEAD $(if $(SKIP_BUMP),--skip-bump,)
+	@cd $(ENGINE).. && git rev-parse -q --verify "$(BASE)^{commit}" >/dev/null || { echo "review-gate: base $(BASE) not found — git fetch origin main (or BASE=<ref>)"; exit 1; }; \
+	  $(PY) $(BIN)/review_gate.py --base $(BASE) --head HEAD $(if $(SKIP_BUMP),--skip-bump,)
 review-gate-tree:
 	@cd $(ENGINE).. && $(PY) $(BIN)/review_gate.py --tree --head HEAD
 review-evidence:
