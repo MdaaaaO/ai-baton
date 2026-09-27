@@ -127,6 +127,22 @@ files disagree (every machine, no `claude` CLI needed); `.conventional-release.t
 so a release PR bumps them together. `make -C .claude/context-db plugin-validate` (part of `make ci` and
 `ci.yml`) runs `claude plugin validate --strict` on the manifests, the skills and the agents where the CLI exists.
 
+## Pre-publish checklist
+
+A release commit, a squash of many PRs or a new repository's first push is never a PR diff, so the per-PR review
+never sees it as one piece (#95). Run this once per minor release, and before the first push of any repository
+created from the kit:
+
+1. `make -C context-db review-gate-tree`: the leak shapes over every tracked file (CI runs it too, and it must pass).
+2. The `tree-review` workflow (Actions → tree-review → Run workflow): the leak-by-meaning lens over the whole tree.
+   Read the job summary and fix or ticket every finding.
+3. `python3 skills/kit-health/kit-health.py --ci` with `skills/kit-health/allow.txt` moved aside: every hit is
+   either a placeholder to fix or an allow line to justify again.
+4. `git log --format='%an <%ae>' | sort -u`: the author identities that ship with the history. They are the owner's
+   decision, so list them consciously.
+5. An eyeball pass over `git grep -n -i -E 'colleague|coworker|former|team\b'`: attribution and team names are
+   meaning, not shape.
+
 ## Name
 
 The project is **ai-baton** (styled bAIton on the front page): the plugin `ai-baton`, the marketplace `ai-baton-kit`,
