@@ -334,6 +334,36 @@ HARDCODED_KIT_PATH = re.compile(r"(?<![~\w>*/.$-])\.claude/(?:context-db|skills/
                                 r"environment-template/)[\w./<>-]*")
 
 
+STEP = re.compile(r"^(\d+)\.\s+(.*\S)")
+
+
+def duplicated_steps(body: str) -> list[str]:
+    """Top-level numbered lists that repeat a step number or a step's text (#19). A list runs until a heading or an
+    unindented line that is not a step; blank and indented (continuation) lines keep it open. Fenced code is skipped."""
+    out: list[str] = []
+    nums: dict[str, int] = {}
+    texts: dict[str, int] = {}
+    fenced = False
+    for n, line in enumerate(body.split("\n"), 1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        m = STEP.match(line)
+        if m:
+            num, text = m.group(1), " ".join(m.group(2).split())
+            if num in nums:
+                out.append(f"body line {n} repeats step `{num}.` (first on line {nums[num]})")
+            elif text in texts:
+                out.append(f"body line {n} repeats the text of the step on line {texts[text]}")
+            nums.setdefault(num, n)
+            texts.setdefault(text, n)
+        elif line.startswith("#") or (line.strip() and not line[0].isspace()):
+            nums, texts = {}, {}  # a heading or a paragraph ends the list
+    return out
+
+
 def check_body(p: Path, rel, body: str, errors: list[str]) -> None:
     """Environment-free checks on a unit's body: length, cited own paths exist, no fact-shaped literal."""
     n_lines = body.count("\n") + (1 if body and not body.endswith("\n") else 0)
@@ -358,6 +388,8 @@ def check_body(p: Path, rel, body: str, errors: list[str]) -> None:
             target = unit_dir / cited
         if not target.exists() and not target.with_suffix("").exists():
             errors.append(f"{rel}: cites `{cited}` but {target.relative_to(KIT.parent) if target.is_relative_to(KIT.parent) else target} does not exist")
+    for dup in duplicated_steps(body):
+        errors.append(f"{rel}: {dup} — a mis-resolved merge? keep one (#19)")
     for n, line in enumerate(body.split("\n"), 1):
         for m in HARDCODED_KIT_PATH.finditer(line):
             errors.append(f"{rel}: body line {n} cites `{m.group(0)}` — the kit is not at `.claude/` on a plugin install; "
@@ -379,11 +411,13 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
     today = today or date.today()
     desc_total = 0
     is_agent = p.parent.name == "agents"
-    fm = fmt.load(p)
+    parts = fmt.split(p.read_text(encoding="utf-8", errors="replace"))  # one read + split, reused below
+    fm = fmt.parse_lines(parts[0]) if parts else None
+    for dup in (fmt.duplicate_keys(parts[0]) if parts else []):  # #19: the parser keeps the last value silently
+        errors.append(f"{rel}: frontmatter repeats {dup} (block lines) — a mis-resolved merge? keep one")
     if fm is None:
         errors.append(f"{rel}: no frontmatter block")
         return 0
-    parts = fmt.split(p.read_text(encoding="utf-8", errors="replace"))
     check_body(p, rel, parts[1] if parts else "", errors)
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there
         km = fmt.KEY.match(line) or fmt.SUBKEY.match(line)
