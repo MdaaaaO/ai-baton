@@ -179,8 +179,13 @@ PR_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 # or a tab/newline between subcommand and verb — anywhere `gh` starts a fresh word — while still
 # refusing a false hit inside a longer word (e.g. "weigh pr create"). `pr_verb` names the PR verb so
 # `prs_opened` (a PR actually *opened*) can share this one match instead of a second regex.
+# `api\b[^;|&]*?-X` (not `api\s+(?:-X\s+)?`) so an endpoint or other flags between `api` and the
+# method flag don't hide it — `gh api repos/o/r/issues -f title=x -X POST`, the form GitHub CLI's
+# own docs use, not just `gh api -X POST <endpoint>` — while `;`/`|`/`&` still stop the match at a
+# real command boundary, so a POST in an unrelated command chained after a read-only `gh api` call
+# isn't miscounted as its write.
 GH_WRITE_RE = re.compile(
-    r"(?<![\w-])gh\s+(?:api\s+(?:-X\s+)?(?:POST|PATCH|PUT|DELETE)"
+    r"(?<![\w-])gh\s+(?:api\b[^;|&]*?-X\s+(?:POST|PATCH|PUT|DELETE)"
     r"|pr\s+(?P<pr_verb>create|merge|review|comment|edit|ready|close|reopen)"
     r"|issue\s+(?:create|comment|edit|close|reopen))\b"
 )
@@ -189,12 +194,16 @@ ENQUEUE_RE = re.compile(r"enqueue\.sh\s+[a-z0-9][A-Za-z0-9._-]*\s+[/$\"']")
 
 
 def collect(path: str) -> dict:
-    """One pass over the transcript for turns/tools/timestamps; usage is priced from
-    `transcripts.usage_records`'s per-request LAST line (a streamed request's final chunk carries
-    the real `output_tokens` — an earlier chunk of the same request always undercounts it), read
-    once up front and looked up here by request id so tool-call parsing stays a single pass."""
-    final_usage = {rid: (fm, fu) for _fo, fm, fu, rid in transcripts.usage_records(path)}
-    seen_req: set[str] = set()
+    """One pass over the transcript for turns/tools/timestamps/usage: a streamed request's usage
+    is written on several assistant lines under the same request id, and only the LAST of them
+    carries the real `output_tokens` (an earlier chunk always undercounts it), so each new line for
+    an already-seen request id backs out that request's previous (smaller) contribution to the
+    running totals before adding its own — the running totals always reflect the latest line seen
+    for every request, without a second read of the file (a second read would race a transcript
+    that's still growing, e.g. heartbeat.sh reading a live session: a request appended between the
+    two reads would have its tool_use counted from the second but its usage missing from the
+    first)."""
+    contrib: dict[str, tuple[int, int, int, int, int, float, int]] = {}  # rid -> (i, cw, cr, out, think, cost, ctx) last added to the running totals
     n_turns = 0
     tok_in = tok_cw = tok_cr = tok_out = tok_think = 0
     peak_ctx = 0
@@ -250,19 +259,25 @@ def collect(path: str) -> dict:
             if t != "assistant":
                 continue
             rid = o.get("requestId") or m.get("id")
-            if rid and rid not in seen_req and rid in final_usage:
-                seen_req.add(rid)
-                n_turns += 1
-                fm, fu = final_usage[rid]  # the request's LAST usage line, not necessarily this one
-                i, cw, cr, out = transcripts.tokens(fu)
-                tok_in += i; tok_cw += cw; tok_cr += cr; tok_out += out
-                spend += _cost(fu, fm.get("model"))
-                tok_think += (fu.get("output_tokens_details") or {}).get("thinking_tokens") or 0
+            u = m.get("usage") or {}
+            if rid and u:
+                i, cw, cr, out = transcripts.tokens(u)
+                think = (u.get("output_tokens_details") or {}).get("thinking_tokens") or 0
+                cost = _cost(u, m.get("model"))
                 ctx = i + cw + cr
+                if rid in contrib:
+                    pi, pcw, pcr, pout, pthink, pcost, pctx = contrib[rid]
+                    tok_in -= pi; tok_cw -= pcw; tok_cr -= pcr; tok_out -= pout
+                    tok_think -= pthink; spend -= pcost; ctx_sum -= pctx
+                else:
+                    n_turns += 1
+                    if m.get("model"):
+                        models[m["model"]] += 1
+                contrib[rid] = (i, cw, cr, out, think, cost, ctx)
+                tok_in += i; tok_cw += cw; tok_cr += cr; tok_out += out
+                tok_think += think; spend += cost
                 ctx_sum += ctx
                 peak_ctx = max(peak_ctx, ctx)
-                if fm.get("model"):
-                    models[fm["model"]] += 1
             for b in m.get("content") or []:
                 if not isinstance(b, dict) or b.get("type") != "tool_use":
                     continue

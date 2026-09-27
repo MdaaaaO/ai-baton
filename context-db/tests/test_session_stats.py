@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parents[1] / "bin"
@@ -175,6 +176,39 @@ class Transcript(unittest.TestCase):
             self.assertEqual(s["turns"], 1)  # one API request, however many chunks it streamed as
             self.assertEqual(s["tokens"]["output"], 90)  # the final chunk's count, not the first or the sum
 
+    def test_collect_streamed_chunks_do_not_double_count_running_totals(self):
+        """Each new line for an already-seen request id must back out that request's previous
+        contribution before adding the new one — summing every chunk instead (the bug a naive
+        single-pass rewrite could reintroduce) would inflate tokens/spend/context by chunk count."""
+        with tempfile.TemporaryDirectory() as d:
+            path = write_transcript(Path(d), "stream3", [
+                assistant("rs3", "2026-09-26T09:00:00Z", u=usage(i=200, out=10)),
+                assistant("rs3", "2026-09-26T09:00:01Z", u=usage(i=200, out=40)),
+            ])
+            s = ss.collect(str(path))
+            self.assertEqual(s["turns"], 1)
+            self.assertEqual(s["tokens"], {"input": 200, "cache_write": 0, "cache_read": 0, "output": 40, "thinking": 0})
+            self.assertEqual(s["context"], {"peak": 200, "avg": 200})  # not 400: the first chunk's ctx was backed out
+
+    def test_collect_reads_transcript_in_one_pass(self):
+        """collect() must open the transcript exactly once (#133 — the previous fix read it twice:
+        `transcripts.usage_records(path)` up front to get each request's last usage line, then a
+        second `with open(path)` loop for turns/tools; a request appended between the two reads had
+        its tool_use counted from the second read but was absent from the first read's usage snapshot,
+        so heartbeat.sh — which runs this against a still-growing transcript — silently dropped that
+        turn's tokens/spend from the count). A single open means no such window exists."""
+        opens = []
+        real_open = open
+
+        def counting_open(file, *a, **k):
+            if str(file) == str(self.path):
+                opens.append(1)
+            return real_open(file, *a, **k)
+
+        with unittest.mock.patch("builtins.open", counting_open):
+            ss.collect(str(self.path))
+        self.assertEqual(len(opens), 1)
+
     def test_gh_write_regex_table(self):
         """One anchored regex covers every `gh` write verb (#133 — the old GH_WRITE_RE/PR_CREATE_RE
         pair missed `gh issue`, a subshell, and a wrapped line, while also false-hitting a word that
@@ -187,6 +221,12 @@ class Transcript(unittest.TestCase):
             ("weigh pr create everything", False, False),           # "gh" ending a longer word: no false hit
             ("gh pr ready 12 --undo", True, False),               # ready / close / reopen change a PR: writes
             ("gh pr close 12", True, False),
+            # #133 — the endpoint (or other flags) between `api` and `-X POST`, the form GitHub CLI's
+            # own docs use, must still count as a write.
+            ("gh api repos/o/r/issues -f title=x -X POST", True, False),
+            # a `-X POST` in an unrelated command chained after a read-only `gh api` call must not
+            # be miscounted as that call's write.
+            ("gh api repos/o/r/issues; curl -X POST http://example.com", False, False),
         ]
         for cmd, want_write, want_open in cases:
             with self.subTest(cmd=cmd):
