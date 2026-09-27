@@ -19,9 +19,11 @@ inherited by the detached heartbeat). Missing id or transcript => exit 3, empty 
 treat that as "no stats", never as an error.
 
 Spend is a LIST-PRICE ESTIMATE priced per API request by the model that served it: Sonnet
-3/3.75/0.3/15, Haiku 1/1.25/0.1/5, everything else (Opus, Fable/Mythos) at the Opus-class default
-15/18.75/1.5/75 $/Mtok (in/cache_write/cache_read/out) — override the default with
-SESSION_STATS_PRICES="in,cw,cr,out". Subagents are billed too: every Agent/fork child writes its
+3/3.75/0.3/15/6, Haiku 1/1.25/0.1/5/2, everything else (Opus, Fable/Mythos) at the Opus-class default
+15/18.75/1.5/75/30 $/Mtok (in/cache_write_5m/cache_read/out/cache_write_1h) — a cache write against
+the 1-hour TTL (`cache_creation.ephemeral_1h_input_tokens`) is billed at its own, higher rate, not
+the 5-minute one. Override the default with SESSION_STATS_PRICES="in,cw,cr,out[,cw_1h]"; the 1h
+rate defaults to 2x the input price when the list has only 4 numbers. Subagents are billed too: every Agent/fork child writes its
 own transcript under <project>/<session-id>/subagents/*.jsonl, and those are summed into
 `subagents_cost` and `spend_total_usd_est` (main + subagents). Before 2026-09-22 the figure was
 main-session only; this session's review-runners alone cost ~3.4x the main prefix, so the total
@@ -54,27 +56,29 @@ def _local_str(iso_utc: str) -> str:
         return iso_utc
     return t.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p %Z")
 
-DEFAULT_PRICES = (15.0, 18.75, 1.5, 75.0)  # $/Mtok: input, cache write, cache read, output
+DEFAULT_PRICES = (15.0, 18.75, 1.5, 75.0, 30.0)  # $/Mtok: input, cache write (5m TTL), cache read, output, cache write (1h TTL)
 # (model-id substring, prices) — first match wins; anything else (opus, fable, mythos, unknown) = default
 MODEL_PRICES = (
-    ("haiku", (1.0, 1.25, 0.1, 5.0)),
-    ("sonnet", (3.0, 3.75, 0.3, 15.0)),
+    ("haiku", (1.0, 1.25, 0.1, 5.0, 2.0)),
+    ("sonnet", (3.0, 3.75, 0.3, 15.0, 6.0)),
 )
 
 
-def prices() -> tuple[float, float, float, float]:
+def prices() -> tuple[float, float, float, float, float]:
     raw = os.environ.get("SESSION_STATS_PRICES", "")
     if raw:
         try:
             p = tuple(float(x) for x in raw.split(","))
-            if len(p) == 4:
+            if len(p) == 5:
                 return p  # type: ignore[return-value]
+            if len(p) == 4:
+                return p + (p[0] * 2,)  # 1h cache-write rate not given: 2x input, same ratio as the default table
         except ValueError:
             pass
     return DEFAULT_PRICES
 
 
-def price_for(model: str | None) -> tuple[float, float, float, float]:
+def price_for(model: str | None) -> tuple[float, float, float, float, float]:
     m = (model or "").lower()
     for key, p in MODEL_PRICES:
         if key in m:
@@ -83,8 +87,18 @@ def price_for(model: str | None) -> tuple[float, float, float, float]:
 
 
 def _cost(u: dict, model: str | None) -> float:
-    p_in, p_cw, p_cr, p_out = price_for(model)
-    return ((u.get("input_tokens") or 0) * p_in + (u.get("cache_creation_input_tokens") or 0) * p_cw
+    """Cache writes are split by TTL: `cache_creation.ephemeral_1h_input_tokens` costs the 1h rate,
+    everything else in `cache_creation_input_tokens` costs the 5m rate — a transcript with no TTL
+    breakdown (older format) prices its whole cache-write total at the 5m rate, as before."""
+    p_in, p_cw, p_cr, p_out, p_cw1h = price_for(model)
+    cc = u.get("cache_creation") or {}
+    if cc:
+        cw_5m = cc.get("ephemeral_5m_input_tokens") or 0
+        cw_1h = cc.get("ephemeral_1h_input_tokens") or 0
+    else:
+        cw_5m = u.get("cache_creation_input_tokens") or 0
+        cw_1h = 0
+    return ((u.get("input_tokens") or 0) * p_in + cw_5m * p_cw + cw_1h * p_cw1h
             + (u.get("cache_read_input_tokens") or 0) * p_cr + (u.get("output_tokens") or 0) * p_out) / 1e6
 
 
@@ -160,15 +174,26 @@ def _ticket_key(k: str) -> tuple:
 _T = profile.get("tracker.mcp_tools") or {}
 TRACKER_CREATE, TRACKER_COMMENT, TRACKER_TRANSITION = (_T.get(k) or None for k in ("create", "comment", "transition"))
 PR_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
-GH_WRITE_RE = re.compile(r"gh api\b[^|;\n]*-X\s+(POST|PATCH|PUT|DELETE)|gh pr (create|merge|ready|edit|review|comment|close)")
+# One anchored regex for every `gh` write verb: `-X POST` variants, `gh pr` and `gh issue` writes.
+# `(?<![\w-])` (not `^`/`[;&|]`) so it matches after `&&`, inside `$(...)`, after a line continuation
+# or a tab/newline between subcommand and verb — anywhere `gh` starts a fresh word — while still
+# refusing a false hit inside a longer word (e.g. "weigh pr create"). `pr_verb` names the PR verb so
+# `prs_opened` (a PR actually *opened*) can share this one match instead of a second regex.
+GH_WRITE_RE = re.compile(
+    r"(?<![\w-])gh\s+(?:api\s+(?:-X\s+)?(?:POST|PATCH|PUT|DELETE)"
+    r"|pr\s+(?P<pr_verb>create|merge|review|comment|edit)"
+    r"|issue\s+(?:create|comment|edit|close))\b"
+)
 # a real enqueue: `enqueue.sh <topic> /abs/worktree …` — not `cat enqueue.sh` or a mention in a comment
 ENQUEUE_RE = re.compile(r"enqueue\.sh\s+[a-z0-9][A-Za-z0-9._-]*\s+[/$\"']")
-PR_CREATE_RE = re.compile(r"(^|[;&|]\s*)gh pr create\b", re.M)
 
 
 def collect(path: str) -> dict:
-    """One pass over the transcript. Usage is deduped per API request (a message with several
-    content blocks is written as several assistant lines that repeat the same usage)."""
+    """One pass over the transcript for turns/tools/timestamps; usage is priced from
+    `transcripts.usage_records`'s per-request LAST line (a streamed request's final chunk carries
+    the real `output_tokens` — an earlier chunk of the same request always undercounts it), read
+    once up front and looked up here by request id so tool-call parsing stays a single pass."""
+    final_usage = {rid: (fm, fu) for _fo, fm, fu, rid in transcripts.usage_records(path)}
     seen_req: set[str] = set()
     n_turns = 0
     tok_in = tok_cw = tok_cr = tok_out = tok_think = 0
@@ -225,19 +250,19 @@ def collect(path: str) -> dict:
             if t != "assistant":
                 continue
             rid = o.get("requestId") or m.get("id")
-            u = m.get("usage") or {}
-            if rid and rid not in seen_req and u:
+            if rid and rid not in seen_req and rid in final_usage:
                 seen_req.add(rid)
                 n_turns += 1
-                i, cw, cr, out = transcripts.tokens(u)
+                fm, fu = final_usage[rid]  # the request's LAST usage line, not necessarily this one
+                i, cw, cr, out = transcripts.tokens(fu)
                 tok_in += i; tok_cw += cw; tok_cr += cr; tok_out += out
-                spend += _cost(u, m.get("model"))
-                tok_think += (u.get("output_tokens_details") or {}).get("thinking_tokens") or 0
+                spend += _cost(fu, fm.get("model"))
+                tok_think += (fu.get("output_tokens_details") or {}).get("thinking_tokens") or 0
                 ctx = i + cw + cr
                 ctx_sum += ctx
                 peak_ctx = max(peak_ctx, ctx)
-                if m.get("model"):
-                    models[m["model"]] += 1
+                if fm.get("model"):
+                    models[fm["model"]] += 1
             for b in m.get("content") or []:
                 if not isinstance(b, dict) or b.get("type") != "tool_use":
                     continue
@@ -257,10 +282,11 @@ def collect(path: str) -> dict:
                     cmd = inp.get("command", "")
                     if ENQUEUE_RE.search(cmd):
                         sign_jobs += 1
-                    if PR_CREATE_RE.search(cmd):
-                        prs_opened += 1
-                    if GH_WRITE_RE.search(cmd):
+                    gw = GH_WRITE_RE.search(cmd)
+                    if gw:
                         gh_writes += 1
+                        if gw.group("pr_verb") == "create":
+                            prs_opened += 1
                 elif TRACKER_CREATE and name.endswith(TRACKER_CREATE):
                     jira_created += 1
                 elif TRACKER_COMMENT and name.endswith(TRACKER_COMMENT):
@@ -272,7 +298,7 @@ def collect(path: str) -> dict:
                 elif name.endswith("slack_send_message"):
                     slack_sends += 1
 
-    p_in, p_cw, p_cr, p_out = prices()
+    p_in, p_cw, p_cr, p_out, p_cw1h = prices()
     sub = collect_subagents(path)
     hours = ((last_ts - first_ts).total_seconds() / 3600.0) if first_ts and last_ts else 0.0
     return {
@@ -289,7 +315,7 @@ def collect(path: str) -> dict:
         "spend_usd_est": round(spend, 2),
         "subagents_cost": sub,
         "spend_total_usd_est": round(spend + sub["spend_usd_est"], 2),
-        "prices_per_mtok": {"input": p_in, "cache_write": p_cw, "cache_read": p_cr, "output": p_out},
+        "prices_per_mtok": {"input": p_in, "cache_write": p_cw, "cache_read": p_cr, "output": p_out, "cache_write_1h": p_cw1h},
         "compactions": compactions,
         "api_errors": api_errors,
         "models": dict(models),
