@@ -965,6 +965,15 @@ def config_value_problem(key: str, val) -> str:
         return ""  # template null = any; a number where the template shows a placeholder string is an id, fine
     if _shape(node) != _shape(val):
         return f"'{key}' is {_shape(node)} in environment-template/config.json, not {_shape(val)} ({json.dumps(val)})"
+    if len(parts) == 1 and parts[0] in CLOSED_SECTIONS and isinstance(val, dict):
+        # the whole closed section in one write: every flag must be a known one, with the template's shape
+        known_flags = {k for k in node if not k.startswith("_")}
+        unknown = sorted(set(val) - known_flags)
+        if unknown:
+            return f"'{parts[0]}' has no flag {', '.join(repr(u) for u in unknown)} — known: {', '.join(sorted(known_flags))}"
+        for k, v in val.items():
+            if _shape(node[k]) != _shape(v):
+                return f"'{parts[0]}.{k}' is {_shape(node[k])} in environment-template/config.json, not {_shape(v)} ({json.dumps(v)})"
     return ""
 
 
