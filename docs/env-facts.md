@@ -84,7 +84,9 @@ kb.py values                                          # every literal value (kit
 kb.py discover <system>.<kind> [<name>] | <config.key> # the discovery PLAN for one fact (below) — never calls the tool
 kb.py discover --all | --check                        # every manifest fact with its state here | validate the manifests
 kb.py stale [--days N] [--check]                      # tool/import/derived rows older than their ttl_days (--check: exit 3)
-kb.py config [<dotted.key>] · kb.py config-set <dotted.key> <json-or-string>
+kb.py config [<dotted.key>] · kb.py config-set <dotted.key> <json-or-string> [--force]
+                                                      # config-set checks the key and the value's shape against
+                                                      # environment-template/config.json (exit 2); --force writes anyway
 kb.py migrate [--check|--off]                         # schema catch-up: renamed flags/kinds, missing flags (--check: exit 3 when pending; --off: just the not-applicable units)
 kb.py init --blank                                    # create an empty store (setup.sh does this)
 kb.py init --personal                                 # blank store + the zero-config GitHub-only fill: identity from gh,
