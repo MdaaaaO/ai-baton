@@ -7,8 +7,6 @@
 # double-quoted, so a workspace path with a space stays one argument.
 _WORKSPACE_MK := $(lastword $(MAKEFILE_LIST))
 KIT := $(patsubst %/,%,$(dir $(_WORKSPACE_MK)))
-# the kit's install mode (clone | plugin | dev-checkout), asked of the kit itself once, on first use
-_KIT_MODE = $(eval _KIT_MODE := $$(shell python3 "$(KIT)/context-db/bin/kit_profile.py" install-mode 2>/dev/null))$(_KIT_MODE)
 
 # ── sign queue (host side) ───────────────────────────────────────────────────────────────
 # Sessions enqueue signed-commit jobs under .context/state/sign-queue/ (skill `sign-queue`); the user
@@ -66,9 +64,9 @@ claude_sync:
 _CREL    := uvx -q --from 'conventional-release>=0.2,<1' conventional-release
 _REL_WT  := .worktrees/kit_release-run
 LEVEL    ?=
-# the default checkout: the kit itself when it is the workspace's clone (install mode `clone`), else the workspace's
-# `.claude/` clone when this file is included from another copy of the kit (`make -f $BATON/workspace.mk`), else none
-KIT_CHECKOUT ?= $(or $(if $(wildcard $(KIT)/.git),$(if $(filter clone,$(_KIT_MODE)),$(KIT))),$(if $(wildcard .claude/.git),.claude))
+# the default checkout: the workspace's own `.claude/` clone, and nothing else — a release never defaults to a kit that
+# is not this workspace's (e.g. `make -f $BATON/workspace.mk` run from another directory); KIT_CHECKOUT=<dir> names one
+KIT_CHECKOUT ?= $(if $(wildcard .claude/.git),.claude,)
 _CTXROOT := $(if $(wildcard .context/reference/env/config.json),CONTEXT_ROOT="$(CURDIR)/.context",)
 _REL_ABS  = $(CURDIR)/$(_REL_WT)
 
