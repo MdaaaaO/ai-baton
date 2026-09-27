@@ -47,7 +47,9 @@ claude_sync:
 # A kit release = a CHANGELOG.md section + the VERSION bump, as a `chore(release): X.Y.Z` PR; CI tags the
 # squash-merged commit vX.Y.Z and publishes the GitHub Release (.claude/docs/contributing.md § Releases).
 # .claude/ itself stays on main, so the release branch is cut in a throwaway worktree off origin/main.
-# Needs uv (uvx) and gh; the PR gets the `release` label.
+# Needs uv (uvx) and gh; the PR gets the `release` label (a failed label fails the target). A run that fails
+# after cutting the branch keeps the branch and the worktree — the release commit may be only there — and
+# prints the push/PR commands that finish it.
 #   make kit_release_dry               # the next version and its changelog section (as of origin/main), nothing written
 #   make kit_release [LEVEL=minor]     # branch, commit, push, PR (LEVEL: major|minor|patch|X.Y.Z; default inferred)
 _CREL    := uvx -q --from 'conventional-release>=0.2,<1' conventional-release
@@ -62,12 +64,25 @@ kit_release_dry kit_release:
 	@eval "$$(python3 .claude/context-db/bin/kit_profile.py gh-env)"; \
 	  out="$$(cd $(_REL_WT) && $(_CREL) release $(if $(filter kit_release_dry,$@),--dry-run) $(LEVEL))"; rc=$$?; \
 	  br="$$(git -C $(_REL_WT) branch --show-current)"; \
-	  git -C .claude worktree remove --force $(CURDIR)/$(_REL_WT); \
-	  [ -n "$$br" ] && git -C .claude branch -q -D "$$br"; \
 	  printf '%s\n' "$$out"; \
+	  if [ $$rc -ne 0 ] && [ -n "$$br" ]; then \
+	    echo "kit_release: failed (exit $$rc) after cutting $$br — kept it and its worktree, which may hold the release commit:"; \
+	    echo "  worktree  $(CURDIR)/$(_REL_WT)"; \
+	    echo "  branch    $$br"; \
+	    echo "finish it (skip what already happened — the output above says how far it got):"; \
+	    echo "  cd $(CURDIR)/$(_REL_WT) && git push -u origin $$br && gh pr create --base main --head $$br --fill --label release"; \
+	    echo "then clean up:"; \
+	    echo "  git -C .claude worktree remove $(CURDIR)/$(_REL_WT) && git -C .claude branch -D $$br"; \
+	    exit $$rc; \
+	  fi; \
+	  git -C .claude worktree remove --force $(CURDIR)/$(_REL_WT); \
+	  if [ -n "$$br" ]; then git -C .claude branch -q -D "$$br"; fi; \
+	  [ $$rc -eq 0 ] || exit $$rc; \
+	  $(if $(filter kit_release_dry,$@),exit 0;) \
 	  url="$$(printf '%s\n' "$$out" | grep -o 'https://github.com/[^ ]*/pull/[0-9]*' | tail -n 1)"; \
-	  [ $$rc -eq 0 ] && [ -n "$$url" ] && gh pr edit "$$url" --add-label release >/dev/null && echo "labelled: release"; \
-	  exit $$rc
+	  if [ -z "$$url" ]; then echo "kit_release: no PR URL in the output above — add the release label by hand: gh pr edit <url> --add-label release"; exit 1; fi; \
+	  gh pr edit "$$url" --add-label release >/dev/null || { echo "kit_release: PR $$url is open, but labelling it failed — gh pr edit $$url --add-label release"; exit 1; }; \
+	  echo "labelled: release"
 
 # ── .context document DB shorthand ───────────────────────────────────────────────────────
 # The engine lives in .claude/context-db (make -C .claude/context-db <target>); these are aliases.

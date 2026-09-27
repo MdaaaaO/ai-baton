@@ -32,6 +32,9 @@ scenario() {  # scenario <name> → sets WS (workspace root), HOME_DIR, MEM (har
   SLUG="$(printf '%s' "$WS" | sed 's#/#-#g')"
   MEM="$HOME_DIR/.claude/projects/$SLUG/memory"; DUR="$WS/.context/memory"
 }
+recorded() {  # recorded <ws> → the kit.install_mode setup.sh wrote to <ws>'s env store, "" when none (#34)
+  python3 -c 'import json, sys; print((json.load(open(sys.argv[1])).get("kit") or {}).get("install_mode", ""))' "$1/.context/reference/env/config.json"
+}
 run_setup() {  # run_setup [args…] → stdout+stderr in $OUT, exit status in $RC
   set +e
   OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS="$WS" sh "$WS/.claude/setup.sh" "$@" 2>&1)"; RC=$?
@@ -174,6 +177,7 @@ OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/
 set -e
 check "exit 0" '[ "$RC" -eq 0 ]'
 check "store and files land in the cwd, not beside the plugin" '[ -f "$WS/.context/reference/env/config.json" ] && [ -f "$WS/CLAUDE.md" ] && [ ! -e "$WORK/plugin/.context" ]'
+check "plugin path: the install mode is recorded as plugin (#34)" '[ "$(recorded "$WS")" = plugin ]'
 check "plugin path: CLAUDE.md imports no .claude/WORKSPACE.md and no Makefile is seeded (#3)" '! grep -q "^@.claude/WORKSPACE.md" "$WS/CLAUDE.md" && grep -q "^@.context/reference/environment.md" "$WS/CLAUDE.md" && [ ! -e "$WS/Makefile" ] && [ ! -e "$WS/.CLAUDE.md.seed" ]'
 printf 'include .claude/workspace.mk\n' > "$WS/Makefile"; printf '@.claude/WORKSPACE.md\n' >> "$WS/CLAUDE.md"
 set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/plugin/cache-kit/setup.sh" 2>&1)"; RC=$?; set -e
@@ -190,6 +194,7 @@ git -C "$WORK/plugin/cache-kit" init -q && git -C "$WORK/plugin/cache-kit" add -
 python3 -c 'import os, sys; os.utime(sys.argv[1], (946684800, 946684800))' "$WS/CLAUDE.md"  # 2000-01-01
 set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS='' CLAUDE_PROJECT_DIR='' sh "$WORK/plugin/cache-kit/setup.sh" --refresh-seeds 2>&1)"; RC=$?; set -e
 check "git-tracked plugin dir: a stale CLAUDE.md is detected against the kit template, diffed against the trimmed one (#3)" '[ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "seed CLAUDE.md predates its template CLAUDE.example.md" && ! printf "%s" "$OUT" | grep -q "^ *+@.claude/WORKSPACE.md"'
+check "a git checkout not named .claude is a dev-checkout, recorded as such, seeded like a plugin (#34)" '[ "$(recorded "$WS")" = dev-checkout ] && printf "%s" "$OUT" | grep -q "install mode: dev-checkout — recorded in kit.install_mode (was plugin)"'
 rm -rf "$WORK/plugin/cache-kit/.git"
 check "settings.local.json is seeded under <root>/.claude/, nothing is written below the plugin dir" '[ -f "$WS/.claude/settings.local.json" ] && [ ! -e "$WORK/plugin/cache-kit/settings.local.json" ] && [ -z "$(find "$WORK/plugin/cache-kit" -type f -newer "$WORK/plugin/stamp" -not -path "*/__pycache__*" 2>/dev/null)" ]'
 mkdir -p "$WORK/plugin/proj"
@@ -232,6 +237,21 @@ set +e
 OUT="$(cd "$WS" && HOME="$WS" PROJECTS="$WS" sh "$WS/.claude/setup.sh" 2>&1)"; RC=$?
 set -e
 check "setup.sh refuses \$HOME as the root with exit 2 and creates nothing" '[ "$RC" -eq 2 ] && printf "%s" "$OUT" | grep -q "refusing the home directory" && [ ! -d "$WS/.context" ]'
+
+echo "== 12. install mode (#34): one rule, recorded in kit.install_mode; hints follow the mode =="
+scenario modes
+run_setup
+check "a .claude/ copy is a clone, recorded" '[ "$RC" -eq 0 ] && [ "$(recorded "$WS")" = clone ] && printf "%s" "$OUT" | grep -q "install mode: clone — recorded in kit.install_mode"'
+check "a re-run finds it recorded" 'run_setup; [ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "install mode: clone (kit.install_mode)"'
+git -C "$WS/.claude" init -q
+cp -R "$KITCOPY" "$WORK/modes/kitdev" && git -C "$WORK/modes/kitdev" init -q
+set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS="$WS" sh "$WORK/modes/kitdev/setup.sh" 2>&1)"; RC=$?; set -e
+check "a dev checkout beside the workspace's clone keeps clone recorded" '[ "$RC" -eq 0 ] && [ "$(recorded "$WS")" = clone ] && printf "%s" "$OUT" | grep -q "install mode: dev-checkout — a development checkout beside"'
+mkdir -p "$WORK/modes/cache" && cp -R "$KITCOPY" "$WORK/modes/cache/1.0.0"
+rm -f "$WS/.context/reference/environment.md"
+set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS="$WS" sh "$WORK/modes/cache/1.0.0/setup.sh" 2>&1)"; RC=$?; set -e
+check "a switch to a plugin install is recorded and the old clone's wiring is named" '[ "$RC" -eq 0 ] && [ "$(recorded "$WS")" = plugin ] && printf "%s" "$OUT" | grep -q "(was clone)" && printf "%s" "$OUT" | grep -q "the old clone.s wiring may be left"'
+check "plugin-path hints name the plugin's own kit path, never .claude/context-db" 'printf "%s" "$OUT" | grep -q "cache/1.0.0/context-db index" && ! printf "%s" "$OUT" | grep -q "make -C .claude/context-db"'
 
 echo
 if [ "$fails" -eq 0 ]; then echo "setup.sh scenarios: all passed"; else echo "setup.sh scenarios: $fails FAILED" >&2; exit 1; fi

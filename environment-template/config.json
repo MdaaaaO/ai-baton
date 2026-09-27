@@ -144,5 +144,9 @@
     "lattice": false,
     "signed_commits": false
   },
-  "tz_default": "UTC"
+  "tz_default": "UTC",
+  "kit": {
+    "_comment": "Written by setup.sh, never by hand (#34): how the kit is installed on this machine — kit_profile.install_mode(). kit-health § 1 warns when the kit it runs from is installed another way (re-run setup.sh). Optional: absent until setup.sh has run.",
+    "install_mode": "clone | plugin | dev-checkout"
+  }
 }

@@ -2,7 +2,7 @@
 name: kit-health
 description: Audit the kit on this machine: versioning frontmatter, env-value leaks in kit files, env-store coverage and stale rows, wiring (CLAUDE.md imports, memory symlink, CLIs, systems), an engine smoke, the green stamp. Walks each finding (Fix, Ticket, Accept), reports to `.context/kit-health/`, stamps `HEALTH-<env>.md`. Run after `make claude_sync`, monthly, and when a skill misbehaves.
 metadata:
-  version: "38"
+  version: "39"
   updated: "2026-09-27"
   reviewed: "2026-09-26"
   facts: "aws.profile kit-health"
@@ -17,7 +17,8 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
 1. **Run.** `SCRATCH=$(python3 $BATON/context-db/bin/kit_profile.py scratch); echo "report: $SCRATCH/kit-health.md"`
    then `python3 $BATON/skills/kit-health/kit-health.py --stale 90 --quiet --report "$SCRATCH/kit-health.md"`
    and Read the echoed path (shell variables do not survive between tool calls). Exit 0 GREEN · 1 AMBER ·
-   2 RED. Read-only: only `--stamp` writes. Sections 1–6 (kit, leaks, config, machine, engine, stamp); § 1
+   2 RED. Read-only: only `--stamp` writes. Sections 1–6 (kit, leaks, config, machine, engine, stamp); § 1 names
+   the install mode (warns when it differs from the one setup.sh recorded) and
    warns when a newer kit release is out and names the update command; § 6 lists the units changed since the
    last stamp. A stale row in § 3: `/env-init --refresh`, never a hand-dated row.
 2. **Judgement pass** — only when § 6 lists changed units or a unit is flagged: fork `triage` with
@@ -38,7 +39,7 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    after a Fix), `new` refuses to clobber it: add a `## Run <HH:MM>` section with the same content at the top of
    its body instead (newest first, as in every log).
 6. **Stamp.** Re-run step 1 with `--stamp`: it refuses on any error **or un-accepted leak hit**, else
-   writes the HEALTH doc (`last_green`, `kit_commit`, `kit_version`, `warnings`) and re-indexes.
+   writes the HEALTH doc (`last_green`, `kit_commit`, `kit_version`, `install_mode`, `warnings`) and re-indexes.
 7. **PR.** Kit files the walk touched go out as one PR from that worktree (`pr-open`); after the merge (and
    `claude plugin update` on a plugin install), a run on each machine stamps it. Tell the user the verdict.
 

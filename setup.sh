@@ -40,8 +40,9 @@
 #   5. Reports skill discovery.
 #
 # Nothing here is user- or machine-specific: the root is derived from this script's location when it is a
-# `.claude/` clone, else from CLAUDE_PROJECT_DIR / the current directory (a plugin install — docs/packaging.md)
-# (override with PROJECTS=/path if you must).
+# `.claude/` clone, else from CLAUDE_PROJECT_DIR / the current directory (a plugin install or a dev checkout —
+# docs/packaging.md § Install mode) (override with PROJECTS=/path if you must). The install mode is
+# `kit_profile.py install-mode` (clone | plugin | dev-checkout), recorded in the env store as `kit.install_mode`.
 set -eu
 
 FORCE=0
@@ -58,11 +59,15 @@ for arg in "$@"; do
 done
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# clone | plugin | dev-checkout — the one rule (#34), kit_profile.install_mode(); every mode-dependent step below follows it
+MODE="$(python3 "$HERE/context-db/bin/kit_profile.py" install-mode)" || { echo "setup.sh: kit_profile.py install-mode failed (see above)" >&2; exit 1; }
+# how a hint names the kit for a shell in the workspace root: `.claude` on a clone, else the kit's own path
+KITREF="$(python3 "$HERE/context-db/bin/kit_profile.py" mode-hint kit_ref)" || { echo "setup.sh: kit_profile.py mode-hint failed (see above)" >&2; exit 1; }
 # The workspace root: the parent of a `.claude/` clone. Run from anywhere else (a plugin install lives in Claude Code's
 # plugin cache, #118) the parent is the cache, so the root is CLAUDE_PROJECT_DIR, else the current directory — never a
 # directory an update may delete. PROJECTS=/path overrides all of it.
 if [ -z "${PROJECTS:-}" ]; then
-  if [ "$(basename "$HERE")" = ".claude" ]; then PROJECTS="$(dirname "$HERE")"
+  if [ "$MODE" = clone ]; then PROJECTS="$(dirname "$HERE")"
   elif [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then PROJECTS="$CLAUDE_PROJECT_DIR"
   else PROJECTS="$PWD"; fi
 fi
@@ -76,7 +81,7 @@ CONTEXT="$PROJECTS/.context"
 DURABLE_MEM="$CONTEXT/memory"
 # Where the ignored settings.local.json lives: beside the kit on the clone path, else `<root>/.claude/` — the one
 # directory Claude Code reads project settings from. Never the plugin cache: an update would delete the identity.
-if [ "$(basename "$HERE")" = ".claude" ]; then SETTINGS_DIR="$HERE"; else SETTINGS_DIR="$PROJECTS/.claude"; fi
+if [ "$MODE" = clone ]; then SETTINGS_DIR="$HERE"; else SETTINGS_DIR="$PROJECTS/.claude"; fi
 SETTINGS="$SETTINGS_DIR/settings.local.json"
 
 # The harness derives its per-project dir by replacing '/' with '-' in the project path.
@@ -228,6 +233,22 @@ if [ "$PERSONAL" = 1 ]; then
 fi
 ACTIVE="$(CONTEXT_ROOT="$CONTEXT" python3 "$HERE/context-db/bin/kit_profile.py" name)" || { echo "  ERROR: kit_profile.py name failed — the env store's config.json is unreadable (see above); setup stopped" >&2; exit 1; }
 echo "  active environment: $ACTIVE (config.json \`environment\`)"
+# Record the install mode (#34) so kit-health § 1 can tell when the kit it runs from is installed another way. A dev
+# checkout beside this workspace's `.claude/` clone keeps `clone` recorded (`install-mode --to-record`).
+WANT="$(CONTEXT_ROOT="$CONTEXT" python3 "$HERE/context-db/bin/kit_profile.py" install-mode --to-record)" || { echo "  ERROR: kit_profile.py install-mode failed; setup stopped" >&2; exit 1; }
+# `get` exits 1 only for an unset key here — the store was read above (`name`), so an unreadable one already stopped us
+REC="$(CONTEXT_ROOT="$CONTEXT" python3 "$HERE/context-db/bin/kit_profile.py" get kit.install_mode)" || REC=""
+if [ "$WANT" != "$MODE" ]; then
+  echo "  install mode: $MODE — a development checkout beside this workspace's .claude/ clone; kit.install_mode stays $WANT"
+elif [ "$REC" = "$MODE" ]; then
+  echo "  install mode: $MODE (kit.install_mode)"
+else
+  CONTEXT_ROOT="$CONTEXT" python3 "$HERE/context-db/bin/kb.py" config-set kit.install_mode "$MODE" >/dev/null || { echo "  ERROR: kb.py config-set kit.install_mode failed; setup stopped" >&2; exit 1; }
+  echo "  install mode: $MODE — recorded in kit.install_mode${REC:+ (was $REC)}"
+  if [ "$REC" = clone ]; then
+    echo "  the old clone's wiring may be left: a .claude/ clone, @.claude/WORKSPACE.md in CLAUDE.md, include .claude/workspace.mk — the lines below name what is still there"
+  fi
+fi
 # housekeeping (#78): bytecode caches and empty directories are never tracked by git, so a removed skill leaves them
 # behind on every machine until something deletes them — this does, inside the kit only (never the workspace).
 # Non-fatal (setup runs under set -e): an unreadable or vanishing entry ends the sweep with one visible line, not the
@@ -251,16 +272,17 @@ if [ ! -f "$ENV_DOC" ]; then
   mkdir -p "$(dirname "$ENV_DOC")"
   seed "$HERE/environment-template/environment.md" "$ENV_DOC"
   sed -i.bak -e "s|<name>|$ACTIVE|g" -e "s|<YYYY-MM-DD>|$(date +%F)|" "$ENV_DOC" && rm -f "$ENV_DOC.bak"
-  echo "  created .context/reference/environment.md from environment-template/environment.md — FILL IT (repos, venues, capabilities), then make -C .claude/context-db index"
+  echo "  created .context/reference/environment.md from environment-template/environment.md — FILL IT (repos, venues, capabilities), then make -C $KITREF/context-db index"
 else
   echo "  .context/reference/environment.md present"
 fi
-# A plugin install (#3) has no kit files in <root>/.claude/: the plugin's SessionStart hook injects WORKSPACE.md
+# A plugin install (#3) and a dev checkout (run like one, `--plugin-dir`) have no kit files in <root>/.claude/: the
+# plugin's SessionStart hook injects WORKSPACE.md
 # (`kit_profile.py workspace-rules`), so the seeded CLAUDE.md drops that import and the Makefile gets no include —
 # workspace.mk's targets (claude_sync, sign*, releases) drive a `.claude/` clone.
 # CLAUDE_TPL is the template this path seeds from — also what --refresh-seeds diffs against, so it never proposes the
 # import back.
-if [ "$(basename "$HERE")" = ".claude" ]; then CLONE=1; CLAUDE_TPL="$HERE/CLAUDE.example.md"
+if [ "$MODE" = clone ]; then CLONE=1; CLAUDE_TPL="$HERE/CLAUDE.example.md"
 else
   CLONE=0; CLAUDE_TPL="$(mktemp "${TMPDIR:-/tmp}/claude-md-tpl.XXXXXX")"; trap 'rm -f "$CLAUDE_TPL"' EXIT
   sed '/^@\.claude\/WORKSPACE\.md$/d' "$HERE/CLAUDE.example.md" > "$CLAUDE_TPL"
@@ -311,9 +333,9 @@ else
 fi
 if [ -d "$HERE/.git" ]; then
   if [ "$(git -C "$HERE" config --get core.hooksPath 2>/dev/null)" = "$HERE/hooks" ]; then
-    echo "  kit git hooks installed (core.hooksPath=.claude/hooks: pre-push main guard + commit-msg style check)"
+    echo "  kit git hooks installed (core.hooksPath=$KITREF/hooks: pre-push main guard + commit-msg style check)"
   else
-    git -C "$HERE" config core.hooksPath "$HERE/hooks" && echo "  installed the kit git hooks (core.hooksPath=.claude/hooks: pre-push main guard + commit-msg Conventional Commits check) — the kit's main is PR-only: branch + PR, then make claude_sync"
+    git -C "$HERE" config core.hooksPath "$HERE/hooks" && echo "  installed the kit git hooks (core.hooksPath=$KITREF/hooks: pre-push main guard + commit-msg Conventional Commits check) — the kit's main is PR-only: branch + PR, then make claude_sync"
   fi
 fi
 if [ ! -f "$CONTEXT/README.md" ]; then
@@ -362,7 +384,7 @@ done <<EOF_SEEDS
 $(seed_pairs)
 EOF_SEEDS
 if [ "$stale_seeds" -gt 0 ] && [ "$REFRESH" != 1 ]; then
-  echo "  $stale_seeds seeded file(s) predate their template — sh .claude/setup.sh --refresh-seeds shows the diffs"
+  echo "  $stale_seeds seeded file(s) predate their template — sh $KITREF/setup.sh --refresh-seeds shows the diffs"
 fi
 
 if [ "$PERSONAL" = 1 ]; then
@@ -370,7 +392,7 @@ if [ "$PERSONAL" = 1 ]; then
   if CONTEXT_ROOT="$CONTEXT" python3 "$HERE/context-db/bin/gen_index.py" >/dev/null 2>&1; then
     echo "  indexed .context/ (INDEX.md) so the first /kit-health starts clean"
   else
-    echo "  WARNING: could not index .context/ — run: make -C .claude/context-db index" >&2
+    echo "  WARNING: could not index .context/ — run: make -C $KITREF/context-db index" >&2
   fi
 fi
 

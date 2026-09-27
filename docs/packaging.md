@@ -46,8 +46,7 @@ current directory, stopping below `$HOME` (#3).
   claude plugin install ai-baton@ai-baton-kit    # the plugin entry it lists
   ```
   Then, **from the workspace root**, run `sh <plugin root>/setup.sh` once to scaffold `.context/`, the root `CLAUDE.md`
-  and `Makefile` — the conventions the plugin cannot install. Run from a plugin install (a directory not named
-  `.claude/`) the script takes `CLAUDE_PROJECT_DIR`, else the current directory, as the workspace root, and seeds the
+  and `Makefile` — the conventions the plugin cannot install. Run from a plugin install (§ Install mode) the script takes `CLAUDE_PROJECT_DIR`, else the current directory, as the workspace root, and seeds the
   ignored `settings.local.json` in `<root>/.claude/` (the directory Claude Code reads project settings from) — nothing
   is written below the plugin cache; `PROJECTS=/path` overrides. Skill and agent bodies reach the kit as `$BATON/…` (§ Kit root below), so the engine-backed skills work from
   a plugin install too.
@@ -61,6 +60,24 @@ current directory, stopping below `$HOME` (#3).
   A leftover import or include is flagged by `setup.sh` and is an error in `kit-health` § 4 (it checks the targets,
   not just the lines). The engine finds `.context/` through the `CLAUDE_PROJECT_DIR` the same hook exports (the
   Bash tool isn't handed it), else by walking up from the current directory.
+
+## Install mode (#34)
+
+One rule, `kit_profile.install_mode()` (`kit_profile.py install-mode` for `setup.sh`), names how the kit runs; every
+mode-dependent step follows it, and `kit_profile.MODES` is the one table of what differs:
+
+| mode | what it is | workspace root (`setup.sh`) | WORKSPACE.md | root Makefile | update to a new release |
+|---|---|---|---|---|---|
+| `clone` | the workspace's `.claude/` — a git checkout, or a copy without git (sync.sh skips it) | the parent of `.claude/` | `@.claude/WORKSPACE.md` import | `include .claude/workspace.mk` | `make claude_sync` |
+| `plugin` | no git checkout, `.claude-plugin/plugin.json` present — Claude Code's plugin cache | `CLAUDE_PROJECT_DIR`, else the cwd | the SessionStart hook | no include | `claude plugin marketplace update … && claude plugin update …` |
+| `dev-checkout` | any other kit copy — a git checkout not named `.claude` (a `.worktrees/kit_<topic>` worktree, a `claude --plugin-dir` checkout) | `CLAUDE_PROJECT_DIR`, else the cwd | the SessionStart hook | no include | `git -C <checkout> pull --ff-only` on its own branch |
+
+`setup.sh` records the mode in the env store as `kit.install_mode`; a dev checkout run beside the workspace's
+`.claude/` clone leaves `clone` recorded (the clone is the installed kit). `kit-health` § 1 prints the mode and
+warns when it is not recorded or differs from the recorded one — a machine that switched from a clone to a plugin
+and still has the `.claude/` clone, the import or the include; re-running `setup.sh` records the new mode. The
+`HEALTH-<env>.md` stamp records `install_mode`. Hints `setup.sh` prints name the kit as `.claude` on a clone and by
+its own path otherwise.
 
 ## Updating
 

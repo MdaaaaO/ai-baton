@@ -37,9 +37,10 @@ refuses every push that would update `refs/heads/main`, including `push origin H
 pushes and deletes). That guard is local, so it has real bypasses: `KIT_ALLOW_MAIN_PUSH=1` is the
 deliberate one-off override, `git push --no-verify` skips it outright, a fresh clone has no guard until
 `setup.sh`/`sync.sh` installs `core.hooksPath`, and any other machine or the GitHub UI can push straight
-to `main` regardless. GitHub offers no branch protection on a free-plan private repo, so
-`.github/workflows/main-guard.yml` is the server-side backstop: on every push to `main` it checks the
-commit against a squash-merged PR and, when the two don't match, opens (or comments on) a tracking issue
+to `main` regardless. On GitHub the repo's `main` ruleset (PR required, no force-push or delete) stops
+most of those, but repo admins bypass it — so the hook stays as defence in depth that refuses before a push
+ever leaves the machine, and `.github/workflows/main-guard.yml` is the server-side backstop: on every push
+to `main` it checks the commit against a squash-merged PR and, when the two don't match, opens (or comments on) a tracking issue
 — it cannot block the push, only flag it after the fact. Then, with `.claude/` on `main` and clean,
 it fetches and fast-forwards. It refuses — `.sync-status` says `error …` and it pulls nothing — when
 `.claude/` is on another branch, has uncommitted changes, or carries local commits on `main`: each

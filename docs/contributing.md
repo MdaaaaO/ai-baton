@@ -26,7 +26,7 @@ Every change is traceable both ways: **issue → PR → squash commit → CHANGE
 | **6. Merge** | Squash only. `auto-merge.yml` merges as soon as the four checks are green, the review verdict on the head is `approve` and every thread is resolved; a PR that misses a gate waits for the owner. GitHub closes every `Closes` issue. | `auto-merge` workflow · owner as fallback |
 | **7. Sync** | `make claude_sync` on each machine; then `/kit-health` there if the PR says an environment needs a step. | owner, per machine |
 
-Exempt from step 1/3's issue link: dependabot PRs.
+Exempt from step 1/3's issue link: dependabot PRs and release PRs (title `chore(release): …`).
 
 ## Commits and PR titles
 
@@ -178,9 +178,11 @@ tags that commit `vX.Y.Z` and publishes a GitHub Release with the section as not
   inferred from the subjects (`feat` → minor, `!` / `BREAKING CHANGE:` → major, else patch) unless given.
 - Release PRs need no issue (`pr-issue` exempts them) and get no Claude review.
 - `v0.0.0` marks the history before Conventional Commits; the first release lists what came after it.
-- **A failed release job:** a re-run finds the tag already there and does nothing. If the tag got pushed
-  but the GitHub Release did not, create it by hand: `uvx conventional-release notes X.Y.Z > notes.md &&
-  gh release create vX.Y.Z --title vX.Y.Z --notes-file notes.md --verify-tag`.
+- **A failed release job:** re-run it. Each step does only what is missing — a tag already on the commit is
+  kept, a Release is created only when there is none — so a re-run finishes a half-done release and is a
+  no-op on a finished one. The job runs only for a `chore(release):` commit; every other push skips it.
+- **A failed `make kit_release`:** once the branch is cut, a failure keeps the branch and its worktree (the
+  release commit may exist only there) and prints the push and `gh pr create` commands that finish the run.
 - `sync.sh` logs the version a machine is at (`kit: main at 1a2b3c4 (v0.3.0+2)`), and the kit-health
   stamp records it as `kit_version`. A sync between the merge and the tag job shows the release
   commit against the previous tag (the 0.2.0 commit as `v0.1.0+5`); the next sync shows `v0.2.0`. That is expected, not a bug.
@@ -224,7 +226,7 @@ no install; a clone without an env store gets a throw-away blank one) — and CI
 schema, env-store checks, `--stale`, `--no-env`), `gen_index.py` / `verify.py` / `new.sh` on a throw-away
 `CONTEXT_ROOT`, `gen_sessions.py`, `commit_style.py`, `session_stats.py` + `transcripts.py` on a synthetic
 transcript, `frontmatter.py` + `migrate_frontmatter.py`, and the pure functions of `pr-review/scripts/trivial-check.py`
-and `pr-open/diagram-plan.py`.
+and `pr-open/diagram-plan.py`, and the `pr-issue` parser (`.github/scripts/check-pr-issue.sh`, with a stub `gh`).
 
 - **A fix PR adds the regression test** that fails before the fix and passes after it — in the module that owns the
   code (`tests/test_<module>.py`), on a temp store or `CONTEXT_ROOT`, never on this machine's `.context/`.
@@ -277,15 +279,15 @@ Three tiers (#121), one rule book — [`docs/REVIEW.md`](REVIEW.md):
   validation failed. The workflow file must exist and have identical content to the version on the repository's
   default branch" — verified on #150's run), so the check turns green without a verdict, auto-merge never fires
   and the owner merges that PR by hand. Everything else in the PR's copy is live, which is why the rules are read
-  from the base branch (`.review/RULES.md`) and why a ruleset requiring owner review on `.github/workflows/**` is
-  the server-side gate to add when the repo goes public (rulesets answer 403 on a free-plan private repo).
+  from the base branch (`.review/RULES.md`) and why the server-side gate on `.github/workflows/**` is the
+  `main` ruleset's code-owner review (`.github/CODEOWNERS` assigns that path to the maintainer).
   **Its threads are not optional** either: a PR is merged only when every
   review thread is answered and resolved — fixed on the branch (the default), or deferred to a `review-followup`
   issue cited in the thread. Never resolve a thread without a reply that names the commit or the issue.
 - It is **read-only** on the repo — it can comment, it cannot push.
-- GitHub cannot enforce any of this on a free-plan private repo (rulesets and branch protection answer
-  403), so the gate is this file, `hooks/pre-push` and `auto-merge.yml` (it merges only what passed every gate;
-  everything else waits for the owner) — `main-guard.yml` is
+- GitHub's `main` ruleset requires a PR and blocks force-pushes and deletes, but repo admins bypass it and it
+  does not check the verdict or the threads, so the gate is this file, `hooks/pre-push` and `auto-merge.yml`
+  (it merges only what passed every gate; everything else waits for the owner) — `main-guard.yml` is
   the server-side backstop, flagging (not blocking) a commit on `main` that isn't a squash-merged PR.
 
 Setup, once, by the repo owner: `claude setup-token` locally (Claude Pro/Max), add the value as the

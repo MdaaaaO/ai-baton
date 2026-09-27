@@ -20,8 +20,8 @@ repo (§ History).
 
 ## Install prompt — the full path (paste into Claude Code)
 
-Nobody runs shell scripts by hand. Get read access to the kit repo, make sure `git clone` of a private GitHub repo
-works on your machine (`gh auth login` or an SSH key), start **Claude Code in your workspace root** (the directory
+Nobody runs shell scripts by hand. The kit repo is public, so cloning it needs no access step; have `gh auth login`
+(or an SSH key) working for your own team repos, start **Claude Code in your workspace root** (the directory
 that holds your team repos, e.g. `~/Projects`) and paste this:
 
 ```
