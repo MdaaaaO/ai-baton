@@ -130,7 +130,8 @@ def main(argv: list[str]) -> int:
         env.update(HOME=str(home), PATH=f"{stub}{os.pathsep}{os.environ['PATH']}", KIT_SRC=str(src),
                    GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t",
                    GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t")
-        r = subprocess.run(["bash", "-c", script], cwd=home, env=env, capture_output=True, text=True, timeout=600)
+        # errors="replace": the block trims display lines with `cut -c`, which counts bytes and can split a UTF-8 character
+        r = subprocess.run(["bash", "-c", script], cwd=home, env=env, capture_output=True, text=True, errors="replace", timeout=600)
         print("\n".join("   | " + l for l in (r.stdout + r.stderr).rstrip().splitlines()[-40:]))
         fails = []
         if r.returncode != 0:

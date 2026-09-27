@@ -298,6 +298,8 @@ def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", l
         p.write_text(new_doc(system, DEFAULT_KINDS.get(system, [kind])), encoding="utf-8")
     lines, facts = parse_doc(system)
     explicit = bool(learned.strip())
+    # compare what the table will hold, not the raw input: a cell is trimmed and escaped, so " C123 " is "C123"
+    value, purpose = unesc(esc(value)), unesc(esc(purpose))
     learned = learned if keep_learned and learned else normalize_provenance(learned)
     new_row = f"| {esc(name)} | {esc(value)} | {esc(purpose)} | {esc(learned)} |"
     existing = facts.get(kind, {}).get(name)
@@ -561,7 +563,7 @@ def mutually_exclusive(a: dict, b: dict) -> bool:
 def applicable(m: dict, cfg: dict) -> str:
     """'' when the manifest applies on this machine, else why it does not."""
     req = m.get("requires")
-    if req and cfg.get("systems", {}).get(req) is not True:
+    if req and (cfg.get("systems") or {}).get(req) is not True:
         return f"systems.{req} is not true here"
     when = m.get("when")
     if when and dotted_get(cfg, when["config"]) != when["equals"]:
@@ -626,7 +628,7 @@ def discover_plan(key: str, name: str, cfg: dict) -> str:
     hit = find_fact(key, name, cfg)
     label = f"{key} {name}".strip()
     if hit is None:
-        raise SystemExit(f"kb: no discovery manifest covers '{label}' — ask the user, then `kb.py set {key} {shlex.quote(name) if name else '<name>'} <value> --from user`; "
+        raise absent(f"kb: no discovery manifest covers '{label}' — ask the user, then `kb.py set {key} {shlex.quote(name) if name else '<name>'} <value> --from user`; "
                          f"to make it discoverable add an entry to context-db/discovery/<system>.json (schema: its README.md)")
     m, f = hit
     target = f.get("target", "row")
@@ -925,6 +927,58 @@ def template_config_keys() -> set[str]:
     return {k for k in tmpl if not k.startswith("_")}
 
 
+CLOSED_SECTIONS = frozenset({"systems"})  # a fixed flag set: an unknown key there is a typo, not a new entry
+# keys a script writes that the template does not document (yet): accepted like template keys
+EXTRA_CONFIG_KEYS = frozenset({"leaks"})
+
+
+def _shape(v) -> str:
+    if isinstance(v, bool):
+        return "true/false"
+    if isinstance(v, (int, float)):
+        return "a number"
+    if isinstance(v, str):
+        return "a string"
+    if isinstance(v, list):
+        return "a list"
+    if isinstance(v, dict):
+        return "an object"
+    return "null"
+
+
+def config_value_problem(key: str, val) -> str:
+    """'' when `config-set <key> <val>` fits environment-template/config.json, else why not. Only what the template
+    defines is checked: an unknown top-level key, an unknown flag in a closed section (`systems`), and a value whose
+    shape (object / list / true-false / string / number) differs from the template's at that path. Below a path the
+    template leaves open (`cost.columns.<x>`, `tracker.mcp_tools.<x>`) any value is accepted."""
+    parts = key.split(".")
+    tmpl = json.loads(TEMPLATE_CONFIG.read_text(encoding="utf-8"))
+    known = template_config_keys() | OPTIONAL_CONFIG_KEYS | EXTRA_CONFIG_KEYS
+    if parts[0] not in known:
+        return f"unknown config key '{parts[0]}' — known: {', '.join(sorted(known))}"
+    node = tmpl
+    for i, part in enumerate(parts):
+        if not isinstance(node, dict) or part not in node:
+            if i > 0 and parts[i - 1] in CLOSED_SECTIONS and i == 1:
+                return f"'{parts[0]}' has no flag '{part}' — known: {', '.join(sorted(k for k in node if not k.startswith('_')))}"
+            return ""  # the template stops here: an open map, nothing to compare
+        node = node[part]
+    if node is None or (isinstance(node, str) and isinstance(val, (int, float)) and not isinstance(val, bool)):
+        return ""  # template null = any; a number where the template shows a placeholder string is an id, fine
+    if _shape(node) != _shape(val):
+        return f"'{key}' is {_shape(node)} in environment-template/config.json, not {_shape(val)} ({json.dumps(val)})"
+    if len(parts) == 1 and parts[0] in CLOSED_SECTIONS and isinstance(val, dict):
+        # the whole closed section in one write: every flag must be a known one, with the template's shape
+        known_flags = {k for k in node if not k.startswith("_")}
+        unknown = sorted(set(val) - known_flags)
+        if unknown:
+            return f"'{parts[0]}' has no flag {', '.join(repr(u) for u in unknown)} — known: {', '.join(sorted(known_flags))}"
+        for k, v in val.items():
+            if _shape(node[k]) != _shape(v):
+                return f"'{parts[0]}.{k}' is {_shape(node[k])} in environment-template/config.json, not {_shape(v)} ({json.dumps(v)})"
+    return ""
+
+
 def config_key_drift() -> list[str]:
     """Where blank_config() and the template disagree on the key set — empty when they are one list:
     every non-optional template key is in the blank store, every blank key is documented by the template, the
@@ -988,7 +1042,29 @@ def split_key(key: str) -> tuple[str, str]:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(prog="kb.py", description=__doc__.split("\n\n")[0])
+    """Exit codes (docs/engine-cli.md): 0 ok · 1 the thing asked about is absent (`get` of a missing row, a fact no
+    manifest covers, `discover --check` finding invalid manifests) · 2 a usage or I/O error · 3 `stale --check` found rows.
+    Library code raises `SystemExit("<message>")`; here that becomes one stderr line and exit 2 (or 1 when marked
+    `absent`), never Python's default exit 1 for a message — callers that import kb still see the message."""
+    try:
+        return _main(argv)
+    except SystemExit as e:
+        if isinstance(e.code, str):
+            print(e.code if e.code.startswith("kb:") else f"kb: {e.code}", file=sys.stderr)
+            return 1 if getattr(e, "absent", False) else 2
+        raise
+
+
+def absent(msg: str) -> SystemExit:
+    """A SystemExit that the CLI turns into exit 1: the thing asked about does not exist (not a caller error)."""
+    e = SystemExit(msg)
+    e.absent = True  # type: ignore[attr-defined]
+    return e
+
+
+def _main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="kb.py", description=__doc__.split("\n\n")[0],
+                                 epilog="exit: 0 ok · 1 the value / fact asked about is absent · 2 usage or I/O error · 3 stale --check found rows")
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("get"); g.add_argument("key"); g.add_argument("name")
     s = sub.add_parser("set"); s.add_argument("key"); s.add_argument("name"); s.add_argument("value")
@@ -998,6 +1074,7 @@ def main(argv: list[str]) -> int:
     sub.add_parser("values")
     c = sub.add_parser("config"); c.add_argument("key", nargs="?", default="")
     cs = sub.add_parser("config-set"); cs.add_argument("key"); cs.add_argument("value")
+    cs.add_argument("--force", action="store_true", help="write even when the key or the value's shape differs from the template")
     i = sub.add_parser("init"); grp = i.add_mutually_exclusive_group(required=True)
     grp.add_argument("--blank", action="store_true")
     grp.add_argument("--personal", action="store_true", help="blank store + the zero-config GitHub-only fill: identity from gh, repos from the workspace clones, tz from the OS — no questions")
@@ -1078,6 +1155,9 @@ def main(argv: list[str]) -> int:
             val = json.loads(a.value)
         except json.JSONDecodeError:
             val = a.value
+        why = config_value_problem(a.key, val)
+        if why and not a.force:
+            raise usage_error(f"config-set refused: {why} — fix the value, or --force to write it anyway")
         dotted_set(cfg, a.key, val)
         save_config(cfg)
         print(f"set {a.key}")
@@ -1127,7 +1207,7 @@ def main(argv: list[str]) -> int:
                     print(f"{stem}: {m['_error']}")
                     continue
                 na = applicable(m, cfg)
-                print(f"{stem}  (system {m['system']}; {'not applicable — ' + na if na else 'applicable'})")
+                print(f"{stem}  (system {m.get('system', '?')}; {'not applicable — ' + na if na else 'applicable'})")
                 for f in m.get("facts", []):
                     key = f.get("key", "?")
                     if f.get("target", "row") == "config":
@@ -1136,10 +1216,12 @@ def main(argv: list[str]) -> int:
                     elif " " in key:
                         s_, k_, n_ = key.replace(" ", ".", 1).split(".", 2)
                         state = "set" if get(s_, k_, n_) else "—"
-                    else:
+                    elif key.count(".") == 1:
                         s_, k_ = key.split(".")
                         n = len(kind_rows(all_facts().get(s_, {}), s_, k_))
                         state = f"{n} row(s)" if n else "—"
+                    else:  # `discover --check` names the malformed key; --all lists it rather than crash
+                        state = "malformed key"
                     print(f"  {key:<32} {f.get('target', 'row'):<6} {f.get('tool', '?'):<32} ttl {f.get('ttl_days', 0):<4} {state}")
             return 0
         if not a.key:

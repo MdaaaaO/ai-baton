@@ -80,14 +80,19 @@ class Subjects(BlankStore):
 
 
 class ConfigLoad(unittest.TestCase):
-    def test_missing_store_is_swallowed_but_interrupts_propagate(self):
-        # `except BaseException` also ate KeyboardInterrupt
-        saved = cs.kit_profile.load
+    def test_no_store_is_the_default_a_broken_one_is_an_error(self):
+        saved = (cs.kit_profile.env_config, cs.kit_profile.load)
         try:
-            def no_store(*a, **k):
-                raise SystemExit("no configuration")
-            cs.kit_profile.load = no_store
+            cs.kit_profile.env_config = lambda: {}          # outside a workspace: the kit default, silently
             self.assertEqual(cs._config(), {})
+
+            def broken(*a, **k):
+                raise SystemExit("config.json: invalid JSON")
+            cs.kit_profile.env_config = broken              # a store that exists but cannot be read: reported
+            with self.assertRaises(SystemExit):
+                cs._config()
+
+            cs.kit_profile.env_config = lambda: {"commits": {}}
 
             def interrupted(*a, **k):
                 raise KeyboardInterrupt
@@ -95,7 +100,38 @@ class ConfigLoad(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt):
                 cs._config()
         finally:
-            cs.kit_profile.load = saved
+            cs.kit_profile.env_config, cs.kit_profile.load = saved
+
+
+class ExitCodes(BlankStore):
+    """0 ok · 1 style broken · 2 config or I/O error; `#123 …` is a subject, `# …` a comment."""
+
+    def cs(self, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(BIN / "commit_style.py"), *args], input=stdin, capture_output=True,
+                              text=True, env=self.env)
+
+    def test_comment_lines_follow_git_and_core_commentchar(self):
+        # git's cleanup=strip drops EVERY line starting with the comment char, so the hook must too (review of #224):
+        # a `#123 …` subject is gone after git's cleanup; with core.commentChar=';' it is a subject
+        self.assertEqual(cs.check_message("#123 fix crash\n", "free"), ["empty message"])
+        self.assertEqual(cs.check_message("#123 fix crash\n; a comment\n", "free", comment=";"), [])
+        self.assertEqual(cs.check_message("fix: x\n\n# Please enter the message\n#\n", "conventional"), [])
+
+    def test_a_broken_commits_override_is_exit_2(self):
+        kb.save_config({**kb.load_config(), "commits": {"default": "shouty"}})
+        p = self.cs("check", "-", stdin="fix: x\n")
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("is not one of", p.stderr)
+        self.assertNotIn("does not follow", p.stderr)
+
+    def test_an_unreadable_message_file_is_exit_2(self):
+        p = self.cs("check", "/nonexistent/msg")
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
+    def test_style_violation_is_exit_1(self):
+        p = self.cs("check", "--style", "conventional", "-", stdin="Fixed things\n")
+        self.assertEqual(p.returncode, 1, p.stderr)
 
 
 class Resolve(BlankStore):

@@ -10,7 +10,10 @@ here=$(cd "$(dirname "$0")" && pwd)
 checker="$here/../context-db/bin/commit_style.py"
 [ -f "$checker" ] || exit 0            # hook copied somewhere without the kit: nothing to check with
 top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
-if ! python3 "$checker" check --quiet --dir "$top" "$1"; then
-  echo "commit refused — fix the subject (or KIT_SKIP_COMMIT_STYLE=1 for a deliberate one-off)" >&2
-  exit 1
-fi
+python3 "$checker" check --quiet --dir "$top" "$1"
+rc=$?
+case $rc in
+  0) ;;
+  1) echo "commit refused — fix the subject (or KIT_SKIP_COMMIT_STYLE=1 for a deliberate one-off)" >&2; exit 1 ;;
+  *) echo "commit refused — the style check itself failed (exit $rc, reason above): fix that, or KIT_SKIP_COMMIT_STYLE=1" >&2; exit 1 ;;
+esac

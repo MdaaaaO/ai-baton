@@ -8,7 +8,7 @@ every commit a session writes in any repo and to every PR title (the squash-comm
 
 ```
 python3 .claude/context-db/bin/commit_style.py resolve [--dir <repo-dir>] [--repo <owner/repo>]
-python3 .claude/context-db/bin/commit_style.py check   [--dir …] <msg-file | ->        # exit 0 / 1
+python3 .claude/context-db/bin/commit_style.py check   [--dir …] <msg-file | ->        # exit 0 ok / 1 style / 2 config or I/O error
 python3 .claude/context-db/bin/commit_style.py title   [--dir …] "<PR title>"          # same, one line
 python3 .claude/context-db/bin/commit_style.py label   "<subject>"                     # type → GitHub label
 ```
@@ -38,7 +38,8 @@ file to someone else's repo — propose it to the owner if the style there reall
 | `free` | anything non-empty | for repos that explicitly want no rule |
 
 Always accepted: `Merge …`, `Revert "…"`, `fixup! …`, `squash! …` (git writes them). A message's
-second line must be blank; `#` comment lines are ignored (the hook sees the editor template).
+second line must be blank; every line that starts with the comment char (`#`, or the repo's `core.commentChar`) is
+ignored, exactly as git's `cleanup=strip` removes it — so a `#123 …` subject needs `core.commentChar` set to another char.
 
 Type → GitHub type label (`pr-open` step 3): `feat` → `enhancement`, `fix` → `bug`, `docs` →
 `documentation`; the other types take no type label unless the repo names one (`labels.repos`).
