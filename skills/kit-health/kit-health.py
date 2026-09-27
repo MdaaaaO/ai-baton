@@ -689,7 +689,7 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
              "settings.local.json": "`WORKSPACE_TZ` in settings.local.json",
              "environment": "`WORKSPACE_TZ` in the environment"}.get(src.get("WORKSPACE_TZ", ""), "the env store's `tz_default`")
     r.add(WARN, "machine", f"the display zone from {where} is not an IANA zone — timestamps and the log date render in UTC; "
-          "set a Region/City name, e.g. `America/New_York` (an abbreviation like `EST` or `EDT` is not one)")
+          "set an IANA Region/City name (an abbreviation like `EST` or `EDT` is not one)")
 
 
 def seed_pairs() -> list[tuple[Path, Path]]:

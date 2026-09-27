@@ -205,7 +205,7 @@ class KitHealth(unittest.TestCase):
 
     def test_an_unknown_zone_is_a_warning_naming_its_source_not_its_value(self):
         # #22: an abbreviation typed into /config rendered everything in UTC behind a GREEN verdict
-        for value, warned in (("EDT", True), ("America/New_" + "York", False)):
+        for value, warned in (("nowhere-zone", True), (TOKYO, False)):
             with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_TZ": value}):
                 kh = self.load(Path(tempfile.gettempdir()))
                 r = kh.Report(); kh.zone_warning(r, kh.identity_sources())
@@ -213,7 +213,7 @@ class KitHealth(unittest.TestCase):
                 self.assertEqual(bool(hits), warned, r.lines)
                 if hits:
                     self.assertIn("plugin option `tz`", hits[0])
-                    self.assertNotIn(value, hits[0].split("e.g.")[0])  # the value itself is never printed
+                    self.assertNotIn(value, hits[0])  # the value itself is never printed
 
 
 if __name__ == "__main__":
