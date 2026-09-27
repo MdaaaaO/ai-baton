@@ -40,7 +40,7 @@ sign_show sign_log sign_retry sign_drop:
 # A SessionEnd hook in .claude/settings.json runs it too.
 #   make claude_sync                    # kit: pull (ff-only)
 claude_sync:
-	@sh .claude/sync.sh
+	@sh .claude/sync.sh || [ $$? -eq 3 ]  # 3 = another sync holds the lock (it said who): not a failure here
 	@tail -n 3 .claude/sync.log 2>/dev/null || true
 	@cat .claude/.sync-status 2>/dev/null || true
 
