@@ -1,6 +1,6 @@
 # review-writing.md — how the posted text reads
 
-Adapted from a colleague's `engineering-writing/pull-requests.md` plus this workspace's rules.
+Adapted from an engineering-writing guide for pull requests, plus this kit's rules.
 
 ## Inline comments
 - One finding per comment, anchored to the line where the reader must look. Lead with the concrete risk and the evidence, then the fix: "`created_at` here is naive UTC; `CONVERT_TIMEZONE` shifts it +7h (checked: the column type is TIMESTAMP_NTZ). Drop the conversion or cast first."
