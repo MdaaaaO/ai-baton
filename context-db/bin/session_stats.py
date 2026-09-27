@@ -181,11 +181,12 @@ PR_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 # `prs_opened` (a PR actually *opened*) can share this one match instead of a second regex.
 # `api\b[^;|&]*?-X` (not `api\s+(?:-X\s+)?`) so an endpoint or other flags between `api` and the
 # method flag don't hide it — `gh api repos/o/r/issues -f title=x -X POST`, the form GitHub CLI's
-# own docs use, not just `gh api -X POST <endpoint>` — while `;`/`|`/`&` still stop the match at a
+# own docs use, not just `gh api -X POST <endpoint>` — while `;`/`|`/`&` and a newline (unless the line ends in `\`,
+# a continuation) still stop the match at a
 # real command boundary, so a POST in an unrelated command chained after a read-only `gh api` call
 # isn't miscounted as its write.
 GH_WRITE_RE = re.compile(
-    r"(?<![\w-])gh\s+(?:api\b[^;|&]*?-X\s+(?:POST|PATCH|PUT|DELETE)"
+    r"(?<![\w-])gh\s+(?:api\b(?:[^;|&\n]|\\\n)*?-X\s+(?:POST|PATCH|PUT|DELETE)"
     r"|pr\s+(?P<pr_verb>create|merge|review|comment|edit|ready|close|reopen)"
     r"|issue\s+(?:create|comment|edit|close|reopen))\b"
 )

@@ -214,7 +214,8 @@ class Transcript(unittest.TestCase):
         pair missed `gh issue`, a subshell, and a wrapped line, while also false-hitting a word that
         merely ends in "gh")."""
         cases = [
-            ("gh api\n  -X POST /repos/o/r/issues", True, False),   # -X wrapped onto its own line
+            ("gh api \\\n  -X POST /repos/o/r/issues", True, False),   # -X on a continuation line (`\` + newline)
+            ("gh api repos/o/r/issues\ncurl -X POST http://x", False, False),  # a newline ends the gh command
             ('$(gh pr create --title "x")', True, True),            # inside a subshell
             ("gh issue comment 5 --body hi", True, False),          # `gh issue` was not covered at all
             ("gh pr view 12", False, False),                        # read-only: not a write
