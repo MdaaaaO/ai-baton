@@ -272,6 +272,23 @@ class Verdict(unittest.TestCase):
         self.assertEqual(kh.redact("tracker.repos (repo name)", "ab"), "tracker.repos:…")
         self.assertNotIn("AB12CD3EF", kh.redact("Slack channel/DM id", "C0" + "AB12CD3EF"))
 
+    def test_codeowners_names_the_kit_owner_without_a_leak(self):
+        # #5: the maintainer's `@<owner>` in .github/CODEOWNERS is the kit's own config; another login there, or the
+        # owner's handle in any other file, is still a hit
+        kh = load_kit_health()
+        with mock.patch.object(kh, "identity_env", return_value={"WORKSPACE_GITHUB_LOGIN": "octo-maint"}):
+            (rx, _what), = kh.identity_values()
+
+        def hit(frel: str, line: str, owner: str = "octo-maint") -> bool:
+            m = rx.search(line)
+            return bool(m) and not kh.kit_owner_handle(frel, line, m, owner)
+        self.assertFalse(hit(".github/CODEOWNERS", "/.github/workflows/ @octo-maint"))
+        self.assertFalse(hit(".github/CODEOWNERS", "/.github/CODEOWNERS @Octo-Maint"))
+        self.assertTrue(hit(".github/CODEOWNERS", "/.github/ @octo-maint", owner="someone-else"))  # not the kit's owner
+        self.assertTrue(hit(".github/CODEOWNERS", "# maintainer: octo-maint"))                   # not an owner entry
+        self.assertTrue(hit("docs/contributing.md", "ask @octo-maint"))                          # not CODEOWNERS
+        self.assertTrue(hit(".github/CODEOWNERS", "/.github/ @octo-maint", owner=""))            # owner unknown
+
     def test_changed_units_groups_by_skill_dir(self):
         kh = load_kit_health()
         with mock.patch.object(kh, "sh", return_value=(0, "skills/a/SKILL.md\nskills/a/run.sh\nagents/t.md\nWORKSPACE.md\n", "")):

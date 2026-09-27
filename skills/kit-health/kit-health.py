@@ -310,6 +310,14 @@ def kit_head() -> str:
     return plugin["commit"] if plugin else ""
 
 
+def kit_owner_handle(frel: str, line: str, m: re.Match, owner: str) -> bool:
+    """True for an `@<owner>` entry in `.github/CODEOWNERS` naming the kit repo's own owner (#5): CODEOWNERS must name a
+    person, so the maintainer's handle there is the kit's own configuration, not a machine value. Any other login in
+    CODEOWNERS, and the owner's handle anywhere else, still counts."""
+    return (frel == ".github/CODEOWNERS" and bool(owner) and m.group(0).lower() == owner.lower()
+            and m.start() > 0 and line[m.start() - 1] == "@")
+
+
 @functools.lru_cache(maxsize=None)
 def kit_dependencies() -> frozenset[str]:
     """Names of the tools the kit itself installs or calls (`uvx --from '<pkg>`, `uses: <owner>/<repo>`) plus
@@ -494,6 +502,8 @@ def sec_leaks(r: Report) -> None:
     pats_all = shapes + values
     fixtures_skipped = 0
     allowed = leak_shapes.allowed()  # skills/kit-health/allow.txt — the same list kit-verify's unit scan reads
+    repo = kit_repo()
+    owner = repo.split("/", 1)[0] if "/" in repo else ""
     files = scan_files()
     hits = 0
     files_hit = 0
@@ -514,7 +524,7 @@ def sec_leaks(r: Report) -> None:
                 continue
             for rx, what in pats:
                 m = rx.search(line)
-                if m and not leak_shapes.is_allowed(frel, m.group(0), allowed):
+                if m and not leak_shapes.is_allowed(frel, m.group(0), allowed) and not kit_owner_handle(frel, line, m, owner):
                     hits += 1
                     if shown < 3:
                         shown += 1
