@@ -2,10 +2,11 @@
 # Include it from the root Makefile:   include .claude/workspace.mk
 # Everything here is user-agnostic; keep personal/host-specific targets in the root Makefile.
 # Every target names the kit as $(KIT): the directory this file was included from (`.claude` on a clone, the
-# plugin root or a checkout under any other name when included by path); KIT=<dir> overrides. Recipe paths are
+# plugin root or a checkout under any other name when included by path); `make … KIT=<dir>` overrides (an environment
+# variable does not). Recipe paths are
 # double-quoted, so a workspace path with a space stays one argument.
 _WORKSPACE_MK := $(lastword $(MAKEFILE_LIST))
-KIT ?= $(patsubst %/,%,$(dir $(_WORKSPACE_MK)))
+KIT := $(patsubst %/,%,$(dir $(_WORKSPACE_MK)))
 # the kit's install mode (clone | plugin | dev-checkout), asked of the kit itself once, on first use
 _KIT_MODE = $(eval _KIT_MODE := $$(shell python3 "$(KIT)/context-db/bin/kit_profile.py" install-mode 2>/dev/null))$(_KIT_MODE)
 
