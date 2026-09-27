@@ -73,7 +73,9 @@ def install_mode(kit: Path | None = None) -> str:
     git, `.claude/` is still a clone (a copy sync.sh skips), a dir with the plugin manifest is a plugin install, and
     anything else is a dev checkout."""
     kit = kit or KIT
-    name = KIT_AS_CALLED.name if kit == KIT else kit.name  # the name the workspace uses, not a symlink's target
+    # the name the workspace uses, not a symlink's target — only for this very kit (a caller or test may point KIT
+    # or `kit` at another copy, whose own name decides)
+    name = KIT_AS_CALLED.name if KIT_AS_CALLED.resolve() == kit.resolve() else kit.name
     if (kit / ".git").exists():  # a directory, or a worktree's `.git` file
         return "clone" if name == ".claude" else "dev-checkout"
     if name == ".claude":
