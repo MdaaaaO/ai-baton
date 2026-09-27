@@ -9,7 +9,7 @@ them into `<content-root>/SESSION_INDEX.md` — the one place a session reads to
 who else is active and whether it must coordinate.
 
 Subcommands (each regenerates SESSION_INDEX.md):
-  register  create/update this session's entry (upsert; preserves the free-text body)
+  register  create/update this session's entry (upsert; preserves the free-text body — `--note` fills only `## Notes`)
   touch     refresh heartbeat + updated only — the <=12h keep-alive
   end       mark the session ended; writes the `## Session stats` block into the body and
             (with --next FILE) the `## Next session` hand-off prompt, and
@@ -61,6 +61,7 @@ FIELDS = ["session", "ref", "status", "epic", "repos",
           "working_on", "responsibilities", "stats", "heartbeat", "updated"]
 STATS_HEADING = "## Session stats"
 NEXT_HEADING = "## Next session"
+NOTES_HEADING = "## Notes"
 LEDGER = os.path.join(SESS_DIR, "_ledger.md")   # `_` prefix: gen_sessions.py skips it
 LEDGER_HEADER = """# Session ledger — one row per ended session (stats for geeks)
 
@@ -186,15 +187,21 @@ def _apply_stats(meta: dict, st) -> None:
 
 
 def _replace_section(body: str, heading: str, content: str) -> str:
-    """Replace (or append) a `## heading` section in the free-text body."""
+    """Replace (or append) a `## heading` section in the free-text body. Headings inside a fenced block (a pasted
+    prompt that shows `## …`) are text, not sections: neither the heading nor the section end is matched there."""
     lines = body.rstrip("\n").split("\n")
-    out, i, replaced = [], 0, False
+    out, i, replaced, fence = [], 0, False, False
     while i < len(lines):
-        if lines[i].strip() == heading:
+        if lines[i].lstrip().startswith("```"):
+            fence = not fence
+        if not fence and lines[i].strip() == heading:
             replaced = True
             out += [heading, "", content, ""]
             i += 1
-            while i < len(lines) and not lines[i].startswith("## "):
+            inner = False
+            while i < len(lines) and (inner or not lines[i].startswith("## ")):
+                if lines[i].lstrip().startswith("```"):
+                    inner = not inner
                 i += 1
             continue
         out.append(lines[i]); i += 1
@@ -242,7 +249,7 @@ def cmd_register(a) -> None:
     if a.repos:  meta["repos"] = a.repos
     if a.working is not None: meta["working_on"] = a.working
     if a.resp:   meta["responsibilities"] = a.resp
-    if a.note:   body = a.note
+    if a.note:   body = _replace_section(body, NOTES_HEADING, a.note)  # never the whole body: `## Open PRs` lives there
     _apply_stats(meta, _stats(a))
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
@@ -343,7 +350,7 @@ def main() -> int:
         sp.add_argument("--repos", default="")
         sp.add_argument("--working", default=None)   # None = unchanged; "" allowed to clear
         sp.add_argument("--resp", default="")
-        sp.add_argument("--note", default="")
+        sp.add_argument("--note", default="", help="text for the body's `## Notes` section (replaces that section only)")
         sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session (written to '## Next session')")
     a = p.parse_args()
     # Empty --working means "leave unchanged" (so a bare keep-alive touch never

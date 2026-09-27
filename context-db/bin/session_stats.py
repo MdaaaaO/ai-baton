@@ -29,6 +29,7 @@ is the number to quote. Discounts/batch are ignored. Stdlib only.
 """
 from __future__ import annotations
 import argparse
+import functools
 import json
 import os
 import re
@@ -130,7 +131,23 @@ def _ts(s: str | None):
 
 # Ticket keys look different per tracker (Jira `KEY-123` vs GitHub `#123`); the env config's
 # config carries the regex (one capture group). No regex → nothing counts as a ticket.
-TICKET_RE = re.compile(profile.get("tracker.key_regex") or r"(?!x)x")
+_NEVER = re.compile(r"(?!x)x")
+
+
+@functools.lru_cache(maxsize=1)
+def ticket_re() -> re.Pattern:
+    """`tracker.key_regex`, compiled on first use — never at import: a bad regex in the store must not take every
+    registry command (session-register / touch / end, the heartbeat) down with it. It is reported once on stderr and
+    no ticket is counted; kit-verify names the bad regex too."""
+    rx = profile.get("tracker.key_regex") or ""
+    if not rx:
+        return _NEVER
+    try:
+        return re.compile(rx)
+    except re.error as e:
+        print(f"session_stats: tracker.key_regex invalid ({e}) — tickets are not counted until it is fixed "
+              f"(`kb.py config-set tracker.key_regex …`)", file=sys.stderr)
+        return _NEVER
 
 
 def _ticket_key(k: str) -> tuple:
@@ -228,7 +245,7 @@ def collect(path: str) -> dict:
                 blob = json.dumps(inp, ensure_ascii=False)
                 for repo, num in PR_RE.findall(blob):
                     prs_touched.add((repo, num))
-                tickets.update(TICKET_RE.findall(blob))
+                tickets.update(ticket_re().findall(blob))
                 if name == "Agent":
                     subagents += 1
                 elif name == "Monitor":
@@ -343,7 +360,8 @@ def stats_for(session_id: str | None) -> dict | None:
         return None
     try:
         return collect(path)
-    except OSError:
+    except OSError as e:  # not "0 turns": say why there are no stats, then report none
+        print(f"session_stats: transcript {path} unreadable ({e}) — no stats this time", file=sys.stderr)
         return None
 
 
