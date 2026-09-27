@@ -39,6 +39,7 @@ TOOLS = (
     "kit_verify.py",
     "review_gate.py",
     "review_evidence.py",
+    "eval_check.py",
     "personal.py",
     "session.py",
     "session_stats.py",

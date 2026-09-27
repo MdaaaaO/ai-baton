@@ -17,6 +17,9 @@
     "session-registry",
     "kit-health"
   ],
+  "experimental": {
+    "evals": "evals"
+  },
   "userConfig": {
     "user_name": {
       "type": "string",

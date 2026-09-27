@@ -48,9 +48,29 @@ is work that belongs on a branch + PR, and the message says how to move it there
 resets, stashes or discards anything.
 
 It takes a lock so two sessions never run the pull at once, never fails the caller, logs to
-`sync.log` (ignored) and leaves the outcome in `.sync-status` — which `sync-check.sh` reads at every
-`session-register`, so a refused pull is seen by the next session instead of staying silent. The `SessionEnd` hook in `settings.json` runs it in the background whenever a
-session ends (`sh "$CLAUDE_PROJECT_DIR/.claude/sync.sh"`) — for the kit that is a pull, nothing more.
+`sync.log` (ignored, trimmed to its last 200 lines; the `main at <sha>` line only when `HEAD` moved) and
+leaves the outcome in `.sync-status` — which `sync-check.sh` reads at every `session-register`, so a
+refused pull is seen by the next session instead of staying silent:
+
+| `.sync-status` | means | `sync-check` warns |
+|---|---|---|
+| `pending <epoch>` | written just before the fetch (bounded by `timeout 60`, or a shell watchdog where `timeout` is missing); still there = the run was killed | when older than 5 minutes |
+| `ok <kit@sha>` | fetched; fast-forwarded or already in step | never |
+| `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
+| `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed | always |
+
+A run that finds the lock busy logs `skipped` and leaves `.sync-status` alone: the holder writes the newer
+state. The thresholds are constants at the top of `sync.sh` and `sync-check.sh`.
+
+The `SessionEnd` hook in `settings.json` runs it in the background whenever a session ends
+(`sh "$CLAUDE_PROJECT_DIR/.claude/sync.sh"`, `async: true`) — for the kit that is a pull, nothing more.
+What Claude Code does with that hook, per the [hooks reference](https://code.claude.com/docs/en/hooks)
+(§ Run hooks in the background, § SessionEnd): an `async` command hook is spawned and Claude Code
+"continues immediately"; "the `timeout` field is not enforced on async hooks", so the hook's `timeout: 120`
+is only a reminder and `sync.sh` bounds its own fetch. On a normal exit Claude Code "waits up to 5 seconds
+for all async hooks to finish", then exits and "the hook process is orphaned"; on a forced exit (`Ctrl-C`) it
+"exits immediately without waiting". Output of an async hook goes to the debug log only. A sync that is
+killed on the way out (the terminal closing with it) is what a stale `pending` reports.
 
 Nothing here commits: kit changes are branch + PR (`CONTRIBUTING.md`). Signing is a host-only
 concern for the repos under `github.signed_commits`, handled by the `sign-queue` skill.

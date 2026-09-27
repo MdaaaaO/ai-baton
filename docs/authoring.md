@@ -60,8 +60,10 @@ Also failed: a bare value with a ` #` in it (YAML cuts it there — quote it), a
 3. **Tests**: a script beside the skill or an engine change gets a stdlib `unittest` in `context-db/tests/`
    (`make -C .claude/context-db test`); a fix adds the regression test; a fact-shaped literal a test needs is
    assembled at run time, never written out.
-4. **Evals**: ≥ 10 trigger cases per skill, positives and same-domain near misses, in `evals/<name>-<case>/`
-   (`prompt.md` + `graders/*.md`, the `claude plugin eval` format; `evals/results/` is ignored).
+4. **Evals**: ≥ 10 trigger cases per skill, ≥ 3 positives and ≥ 3 same-domain near misses, in `evals/<name>-<case>/`
+   (`prompt.md` + `graders/*.md`, the `claude plugin eval` format; `evals/results/` is ignored) — `evals/README.md`.
+   `make -C .claude/context-db eval-check` checks the suite without tokens (part of `make ci`); a changed
+   `description:` cites a green `make -C .claude/context-db eval SKILL=<name>` or `evals` workflow run in the PR.
 5. A new native frontmatter key goes into `NATIVE_KEYS` / `AGENT_KEYS` in `kit_verify.py` **and** the table in
    `docs/contributing.md` § Skill frontmatter, with the reason in the PR.
 6. Open the PR with the `pr-open` skill: Conventional Commit title, `Closes #N` / `Refs #N`, type + area labels;

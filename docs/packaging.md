@@ -16,7 +16,7 @@ covers both: the kit is `$BATON` (§ Kit root), `WORKSPACE.md` arrives by import
 |---|---|---|
 | `skills/<name>/` | plugin skills, invoked as `/ai-baton:<name>` (or `/<name>` when unambiguous) | discovered from `.claude/skills/` |
 | `agents/*.md` | plugin agents | discovered from `.claude/agents/` |
-| `evals/` (arrives with #115; cases per #98) | the default eval dir — `claude plugin eval .`; no manifest key until cases exist | same files, same command |
+| `evals/` | the eval dir, named by `plugin.json` `"experimental": {"evals": "evals"}` — `claude plugin eval .` (`make -C context-db eval`) | same files, same command |
 | `context-db/` (engine, discovery manifests, templates) | ships inside the plugin root; scripts find the kit from their own location | `.claude/context-db/` |
 | `hooks/` (`pre-push`, `commit-msg`) | **git** hooks, not Claude Code hooks — not a plugin component | installed by `setup.sh` / `sync.sh` (`core.hooksPath`) |
 | `settings.json` (`SessionEnd` → `sync.sh`) | not shipped: the plugin update **is** the sync | the kit's project settings |

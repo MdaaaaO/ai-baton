@@ -1,0 +1,105 @@
+name: evals
+
+# The token-spending half of the eval suite (#54): `claude plugin eval` over evals/, started by hand only. The static
+# half (`make -C .claude/context-db eval-check`, no model) runs on every PR in ci.yml; this one scores whether each
+# skill still triggers on its positives and stays quiet on its near misses — run it before merging a change to a
+# skill's `description:` and cite the result in the PR.
+#
+# Authenticated like claude-review.yml: the CLAUDE_CODE_OAUTH_TOKEN repository secret (a Claude subscription token from
+# `claude setup-token`). Without it the job ends green with a notice. workflow_dispatch only — never on a pull request,
+# so no PR's code runs with the token, and nobody spends tokens by pushing. GitHub-hosted runner like every workflow
+# (docs/contributing.md § Where CI runs).
+
+on:
+  workflow_dispatch:
+    inputs:
+      skill:
+        description: "Skill whose trigger suite to run (evals/<skill>-*); empty = every case"
+        required: false
+        default: ""
+      models:
+        description: "Comma-separated model ids to run the suite on, one run per model; empty = the CLI's default"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  evals:
+    name: evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - id: token
+        name: Is the eval credential configured?
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=evals skipped::CLAUDE_CODE_OAUTH_TOKEN is not set. Run 'claude setup-token' locally and add it with: gh secret set CLAUDE_CODE_OAUTH_TOKEN -R ${{ github.repository }}"
+          fi
+
+      - if: steps.token.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .claude
+
+      # Inputs arrive through env, never spliced into the script, and are checked against the shapes they may take.
+      - id: inputs
+        if: steps.token.outputs.enabled == 'true'
+        name: Check the inputs
+        working-directory: .claude
+        env:
+          SKILL: ${{ inputs.skill }}
+          MODELS: ${{ inputs.models }}
+        run: |
+          if [ -n "$SKILL" ]; then
+            printf '%s' "$SKILL" | grep -Eq '^[a-z0-9][a-z0-9-]*$' && [ -f "skills/$SKILL/SKILL.md" ] \
+              || { echo "::error::skill '$SKILL' is not a skill in this kit"; exit 1; }
+          fi
+          models=""
+          for m in $(printf '%s' "$MODELS" | tr ',' ' '); do
+            printf '%s' "$m" | grep -Eq '^[A-Za-z0-9._:@-]+(\[[0-9a-z]+\])?$' || { echo "::error::model '$m' is not a model id"; exit 1; }
+            models="$models $m"
+          done
+          echo "models=${models# }" >> "$GITHUB_OUTPUT"
+
+      # Same pinned CLI as ci.yml; bubblewrap + socat so the runner can sandbox the eval's tool calls on Linux.
+      - if: steps.token.outputs.enabled == 'true'
+        name: Install the Claude Code CLI
+        env:
+          CLAUDE_CODE_VERSION: 2.1.283
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat >/dev/null
+          npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
+
+      - if: steps.token.outputs.enabled == 'true'
+        name: Static check first (no tokens)
+        run: make -C .claude/context-db eval-check
+
+      - if: steps.token.outputs.enabled == 'true'
+        name: Run the suite
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          SKILL: ${{ inputs.skill }}
+          MODELS: ${{ steps.inputs.outputs.models }}
+        shell: bash
+        run: |
+          set -o pipefail
+          rc=0
+          for model in ${MODELS:-default}; do
+            [ "$model" = default ] && model=""
+            echo "## evals — ${SKILL:-every case} on ${model:-the default model}" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            make -C .claude/context-db eval TRUST=1 SKILL="$SKILL" MODEL="$model" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit $rc

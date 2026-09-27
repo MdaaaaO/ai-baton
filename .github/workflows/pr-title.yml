@@ -37,7 +37,8 @@ jobs:
           python3 context-db/bin/commit_style.py title --style conventional "$TITLE"
 
   # Every change comes from an issue (docs/contributing.md, "From issue to merge"). The rule and the
-  # parser live in .github/scripts/check-pr-issue.sh — run it locally before `gh pr create`.
+  # parser live in .github/scripts/check-pr-issue.sh — run it locally before `gh pr create`. A change to
+  # the script takes effect for the PRs after it (#43).
   pr-issue:
     name: pr-issue
     runs-on: ubuntu-latest
@@ -46,7 +47,12 @@ jobs:
       contents: read
       issues: read  # the check looks each linked issue up
     steps:
+      # The script comes from the base commit, as in pr-title: a PR cannot relax the check that judges it.
+      # Title, body and author come from the event payload (env below), not from the checkout.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
       - name: PR description links the issue it came from
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

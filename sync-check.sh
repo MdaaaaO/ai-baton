@@ -6,14 +6,29 @@
 # PR-only), or whether origin has moved on (a PR merged). Exit 0 always; the WARN lines are the signal.
 #
 #   sh .claude/sync-check.sh            # prints nothing when everything is in step
+OFFLINE_WARN_DAYS=3      # an offline laptop is normal; warn once no fetch has reached origin for this long
+PENDING_STALE_SECS=300   # a sync's fetch is bounded at 60 s (sync.sh); `pending` older than this = the run was killed
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 warn() { printf 'WARN kit sync: %s\n' "$*" >&2; }
+is_epoch() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
 
 if [ -f "$HERE/.sync-status" ]; then
-  # `<utc-ts> ok|error <detail>`
+  # `<utc-ts> <state> <detail>` — states in sync.sh's header; `ok` and a fresh `pending` are silent
   read -r ts state detail <"$HERE/.sync-status"
+  now=$(date -u +%s)
+  first=${detail%% *}
   case "$state" in
     error) warn "last sync at $ts failed — $detail; run \`make claude_sync\` and read its tail" ;;
+    pending)
+      if is_epoch "$first" && [ $((now - first)) -ge "$PENDING_STALE_SECS" ]; then
+        warn "the sync started at $ts never finished (killed mid-fetch, e.g. the terminal closed) — nothing is known about origin since; run \`make claude_sync\`"
+      fi ;;
+    offline)
+      if is_epoch "$first" && [ $((now - first)) -ge $((OFFLINE_WARN_DAYS * 86400)) ]; then
+        since=${detail#* since }
+        warn "origin unreachable for $(((now - first) / 86400)) day(s), since ${since%% *} — offline, or a DNS/proxy problem? run \`make claude_sync\` once online and read its tail"
+      fi ;;
   esac
 fi
 

@@ -75,6 +75,11 @@ jobs:
       - name: Engine tests
         run: make -C .claude/context-db test
 
+      # The eval suite's static gate (#54): every case loads, every skill's trigger suite has >= 10 cases with positives
+      # and near misses. No model and no tokens — the token-spending run is the manual `evals` workflow.
+      - name: Eval suite (static, no tokens)
+        run: make -C .claude/context-db eval-check
+
       # The plugin manifests (#118) through Claude Code's own validator. A hosted runner has no `claude` CLI, and the
       # Makefile target skips silently without one — so install it first (no account needed to validate); a failed
       # install fails the step rather than dropping the check. Pinned like every other CI dependency; bump on purpose.

@@ -49,6 +49,8 @@ Kit / config (env fact store .context/reference/env/):
   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
   make -C .claude/context-db test                      # the engine's stdlib unittest suite (context-db/tests/)
+  make -C .claude/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
+  make -C .claude/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
   make -C .claude/context-db sync-check                # warn when .claude/ is ahead of origin or the last sync errored
   make -C .claude/context-db kit-health [STALE=90]     # full kit audit for this machine (the kit-health skill's script)
   make -C .claude/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
@@ -172,6 +174,21 @@ options:
   --out OUT    evidence path; RULES.md is written beside it
   --json       print the evidence object instead of writing files
   --repo REPO  the repository (default: the working directory's git top level)
+```
+
+## `eval_check.py`
+
+```text
+usage: eval_check.py [-h] [--require-all] [--kit KIT]
+
+Static check of the eval suite (no tokens): case format, trigger suites of >=
+10 cases with positives and near misses, and notes on coverage.
+
+options:
+  -h, --help     show this help message and exit
+  --require-all  also fail on a skill without a trigger suite or a description
+                 without "Use when"
+  --kit KIT      the kit root (default: this checkout)
 ```
 
 ## `personal.py`

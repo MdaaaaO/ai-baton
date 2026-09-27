@@ -36,6 +36,8 @@
 #   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
 #   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
 #   make -C .claude/context-db test                      # the engine's stdlib unittest suite (context-db/tests/)
+#   make -C .claude/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
+#   make -C .claude/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
 #   make -C .claude/context-db sync-check                # warn when .claude/ is ahead of origin or the last sync errored
 #   make -C .claude/context-db kit-health [STALE=90]     # full kit audit for this machine (the kit-health skill's script)
 #   make -C .claude/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
@@ -76,7 +78,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test session-register session-touch session-end session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-evidence plugin-validate check-links shellcheck engine-cli-doc
+.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-evidence plugin-validate check-links shellcheck engine-cli-doc
 SESSION_ID ?= $(CLAUDE_CODE_SESSION_ID)
 STATSFLAGS  = $(if $(SESSION_ID),--session-id "$(SESSION_ID)",) $(if $(NOSTATS),--no-stats,)
 
@@ -136,11 +138,30 @@ verify-skill:
 # make ci  — what .github/workflows/ci.yml runs, reproducible on any clone: the env-free validator, the engine
 # tests, every Python file compiles, every shell script parses. (CI additionally runs kit-verify against a blank
 # env store — `python3 context-db/bin/kb.py init --blank` from the workspace root gives you one.)
-ci: verify-skill test plugin-validate check-links shellcheck
+ci: verify-skill test eval-check plugin-validate check-links shellcheck
 	@cd $(ENGINE).. && git ls-files -z '*.py' | xargs -0 -r $(PY) -m py_compile && echo "py_compile: OK"
 	@cd $(ENGINE).. && git ls-files -z '*.sh' hooks/ ':!hooks/*.json' | xargs -0 -n1 bash -n && echo "bash -n: OK"
 	@cd $(ENGINE).. && sh_files="$$(git ls-files '*.sh' | while read -r f; do head -1 "$$f" | grep -q '^#!/bin/sh' && echo "$$f"; done)"; \
 	  for f in $$sh_files; do if command -v dash >/dev/null 2>&1; then dash -n "$$f"; else sh -n "$$f"; fi || exit 1; done; echo "sh -n (dash): OK"
+
+# make eval-check [REQUIRE_ALL=1]  — the eval suite's static gate (#54; no model, no tokens): every case loads
+# (prompt.md keys, graders of a known type), every trigger suite has >= 10 cases with positives and near misses.
+# Skills without a suite and descriptions without "Use when" are notes; REQUIRE_ALL=1 turns them into failures.
+eval-check:
+	@cd $(ENGINE).. && $(PY) $(BIN)/eval_check.py $(if $(REQUIRE_ALL),--require-all,)
+
+# make eval [SKILL=<name>] [CASE=<glob>] [MODEL=<id>] [RUNS=<n>] [ABLATION=none|with-without] [THRESHOLD=<0..1>]
+#           [MAX_COST=<usd>] [TRUST=1]  — `claude plugin eval` on this plugin. It SPENDS TOKENS on your credential; CI
+# runs it only through the manual `evals` workflow. SKILL narrows to evals/<skill>-*; ABLATION=none (the default here)
+# scores every grader, which is what a trigger suite measures. Results land in evals/results/ (git-ignored) and the
+# report stays local (--no-publish). TRUST=1 answers the first-run trust prompt (CI only).
+ABLATION ?= none
+eval:
+	@command -v claude >/dev/null 2>&1 || { echo "eval: needs the claude CLI"; exit 2; }
+	@cd $(ENGINE).. && claude plugin eval . --no-publish --ablation $(ABLATION) \
+	  $(if $(CASE),--case '$(CASE)',$(if $(SKILL),--case '$(SKILL)-*',)) \
+	  $(if $(MODEL),--model '$(MODEL)',) $(if $(RUNS),--runs $(RUNS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),) \
+	  $(if $(MAX_COST),--max-cost-usd $(MAX_COST),) $(if $(TRUST),--trust-plugin,)
 
 # The relative Markdown links of every tracked *.md resolve (#81 A30); templates seeded elsewhere are skipped.
 check-links:
