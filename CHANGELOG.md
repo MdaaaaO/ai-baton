@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.2.2 (2026-09-27)
+
+
+### Bug Fixes
+
+* **kit-health:** point the zone warning to /plugin configure ([#31](https://github.com/MdaaaaO/ai-baton/issues/31)) ([c00755d](https://github.com/MdaaaaO/ai-baton/commit/c00755d6a02caf39f96e312b5ef570c64e629b17))
+
 ## 0.2.1 (2026-09-27)
 
 
