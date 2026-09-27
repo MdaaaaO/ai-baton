@@ -4,11 +4,11 @@
 Walks every *.md doc under the content root (except the engine files), reads its
 YAML frontmatter "row" (title/type/domain/tags/status/updated), and emits a
 grouped, sorted catalog. INDEX.md is generated — never hand-edit it; run
-`make -C .claude/context-db index`.
+`make -C $BATON/context-db index`.
 
 The content root is the CONTEXT_ROOT env var (set by the Makefile from CONTEXT,
 default the sibling ../../.context). It is NOT this file's parent any more: the
-engine lives under .claude/context-db/, the content under .context/.
+engine lives under $BATON/context-db/, the content under .context/.
 
 Stdlib only (no PyYAML): frontmatter is a flat `key: value` block, parsed here.
 """
@@ -88,7 +88,7 @@ def render(rows: list[dict]) -> str:
     out.append("")
     out.append(
         "> **Generated file — do not hand-edit.** Regenerate with "
-        "`make -C .claude/context-db index` after adding or changing any doc. This is the "
+        "`make -C $BATON/context-db index` after adding or changing any doc. This is the "
         "queryable catalog of the context DB; each row is one doc's frontmatter. Read this "
         "first (cheap), then open only the leaf docs your task needs."
     )

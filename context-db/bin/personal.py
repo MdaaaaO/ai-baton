@@ -2,8 +2,8 @@
 """personal.py — the zero-config personal path (#117): a GitHub-only machine becomes a working environment in one
 command and zero questions.
 
-    python3 .claude/context-db/bin/personal.py [--workspace DIR] [--settings FILE] [--pr-review FILE] [--dry-run]
-    python3 .claude/context-db/bin/kb.py init --personal        # the store part alone
+    python3 $BATON/context-db/bin/personal.py [--workspace DIR] [--settings FILE] [--pr-review FILE] [--dry-run]
+    python3 $BATON/context-db/bin/kb.py init --personal        # the store part alone
 
 Everything is DISCOVERED, nothing asked: identity from `gh api user` (login, display name), the tracked repos from the
 clones under the workspace root (their `origin` remotes; `gh repo list` when there are none), the timezone from the OS.

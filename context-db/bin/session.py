@@ -234,7 +234,7 @@ def cmd_touch(a) -> None:
     meta, body = read_doc(path)
     if meta is None:
         sys.exit(f"no session entry {a.name}.md — run "
-                 f"`make -C .claude/context-db session-register NAME={a.name} …` first")
+                 f"`make -C $BATON/context-db session-register NAME={a.name} …` first")
     meta["session"] = meta.get("session") or a.name  # a field-less doc must not be written back with a blank one
     if a.status:              meta["status"] = a.status
     if a.working is not None: meta["working_on"] = a.working

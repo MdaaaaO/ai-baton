@@ -128,7 +128,7 @@ def new_doc(system: str, kinds: list[str]) -> str:
         "",
         f"# Env facts — {system}",
         "",
-        "<!-- Managed by `python3 .claude/context-db/bin/kb.py` (get / set / list). One `## <kind>` section per",
+        "<!-- Managed by `python3 $BATON/context-db/bin/kb.py` (get / set / list). One `## <kind>` section per",
         "     fact kind, one row per fact; hand edits are fine — keep the four columns. `learned-from` says how the",
         "     value was established (a discovery tool, the user, a derivation) so a stale row can be re-verified. -->",
         "",

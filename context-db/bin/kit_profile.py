@@ -94,7 +94,7 @@ def env_config() -> dict:
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        raise SystemExit(f"{p}: invalid JSON — {e}; fix it (or move it aside and `python3 .claude/context-db/bin/kb.py init --blank`)")
+        raise SystemExit(f"{p}: invalid JSON — {e}; fix it (or move it aside and `python3 $BATON/context-db/bin/kb.py init --blank`)")
     except OSError as e:
         raise SystemExit(f"{p}: cannot read — {e}")
 
@@ -103,7 +103,7 @@ def env_config() -> dict:
 def _warn_no_store() -> None:
     """One stderr line per process when a script runs without an env store (the state env-init starts from)."""
     print(f"kit_profile: no env store at {ENV_DIR} — kit defaults apply (zone UTC, no ticket regex, no tracker tools); "
-          "`python3 .claude/context-db/bin/kb.py init --blank` creates one", file=sys.stderr)
+          "`python3 $BATON/context-db/bin/kb.py init --blank` creates one", file=sys.stderr)
 
 
 def name() -> str:
@@ -170,7 +170,7 @@ def load(strict: bool = True) -> dict:
     if not cfg:
         if strict:
             raise SystemExit(f"no configuration: no env store at {ENV_DIR} — run "
-                             f"`python3 .claude/context-db/bin/kb.py init --blank`")
+                             f"`python3 $BATON/context-db/bin/kb.py init --blank`")
         _warn_no_store()
         return {}
     _project_tables(cfg)

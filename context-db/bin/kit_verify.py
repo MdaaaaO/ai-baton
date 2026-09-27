@@ -4,7 +4,7 @@ machine's env store is complete.
 
 Checks `skills/*/SKILL.md` and `agents/*.md` (relative to the kit root, ../.. from here) against the
 Agent Skills spec's "Claude Code profile" (docs/contributing.md § Skill frontmatter):
-  - every `make -C .claude/context-db <target>` a unit or kit doc cites is a Makefile target (#81),
+  - every `make -C $BATON/context-db <target>` a unit or kit doc cites is a Makefile target (#81),
   - only spec keys (`name`, `description`, `license`, `compatibility`, `metadata`, `allowed-tools`) and the
     allow-listed Claude Code native keys at the top level (NATIVE_KEYS; agents also AGENT_KEYS) — any other
     key fails, and the kit's own `version`/`updated`/`reviewed`/`requires`/`facts` at the top level fail with
@@ -23,16 +23,16 @@ And the env store (`.context/reference/env/config.json`, see kb.py — one per m
 kit) for every top-level key `environment-template/config.json` has, `systems.*` covering every
 flag a skill may `require` as booleans, a compiling one-group `tracker.key_regex`, and no rows left
 under a renamed kind (`kb.py migrate` moves them).
-  - the body: ≤ 500 lines (evolve's Tier 0 cap), every `scripts/…` / `references/…` / `.claude/skills/<name>/…`
+  - the body: ≤ 500 lines (evolve's Tier 0 cap), every `scripts/…` / `references/…` / `$BATON/skills/<name>/…`
     path it cites exists, and no generic environment-fact shape (Slack id, custom-field id, account id, ticket
     key, org host, tz literal — `leak_shapes.py`, shared with kit-health) in the file.
 With --stale N also lists units whose `reviewed` is older than N days (warning, not an error).
 
 `--no-env` is the ENVIRONMENT-FREE validator (#114): everything above except the env-store checks, which are
 skipped and listed — it passes on a bare `git clone` with no `.context/` at all, so a contributor's PR (and CI,
-before it builds a blank store) can run it. Positional paths verify only those units (`make -C .claude/context-db
+before it builds a blank store) can run it. Positional paths verify only those units (`make -C $BATON/context-db
 verify-skill UNIT=skills/<name>`): the kit-wide totals (always-on budget, description total) are skipped too.
-Run via `make -C .claude/context-db kit-verify`. Stdlib only.
+Run via `make -C $BATON/context-db kit-verify`. Stdlib only.
 """
 from __future__ import annotations
 import argparse
@@ -68,7 +68,7 @@ def check_env_store(errors: list[str]) -> str:
     want_keys = kb.template_config_keys()
     p = kit_profile.ENV_DIR / "config.json"
     if not p.is_file():
-        errors.append(f"no configuration: env store {p} missing — run `python3 .claude/context-db/bin/kb.py init --blank`")
+        errors.append(f"no configuration: env store {p} missing — run `python3 $BATON/context-db/bin/kb.py init --blank`")
         return ""
     rel = f"{p.parent.name}/{p.name}"
     try:
@@ -94,11 +94,11 @@ def check_env_store(errors: list[str]) -> str:
         renamed = sorted(o for o in kb.RENAMED_SYSTEMS if o in have)
         if renamed:
             errors.append(f"{rel}: renamed system flag(s) {', '.join('systems.' + o for o in renamed)} — "
-                          "run `python3 .claude/context-db/bin/kb.py migrate` (keeps the value)")
+                          "run `python3 $BATON/context-db/bin/kb.py migrate` (keeps the value)")
         missing = sorted(SYSTEMS - have)
         if missing:
             errors.append(f"{rel}: {', '.join('systems.' + s_ for s_ in missing)} missing (true/false) — "
-                          "`python3 .claude/context-db/bin/kb.py migrate` adds them as false; set true what this machine has")
+                          "`python3 $BATON/context-db/bin/kb.py migrate` adds them as false; set true what this machine has")
         for s_, v in systems.items():
             if not isinstance(v, bool):
                 errors.append(f"{rel}: systems.{s_} must be true/false")
@@ -121,9 +121,9 @@ def check_env_store(errors: list[str]) -> str:
     for (s_, old), (_, new) in kb.RENAMED_KINDS.items():
         if kb.parse_doc(s_)[1].get(old):
             errors.append(f"{s_}.md: rows under `## {old}` belong under `## {new}` — run "
-                          "`python3 .claude/context-db/bin/kb.py migrate` (moves them, keeps the cells)")
+                          "`python3 $BATON/context-db/bin/kb.py migrate` (moves them, keeps the cells)")
     for problem in kb.close_reason_problems(cfg):
-        errors.append(f"{rel}: {problem} — run `python3 .claude/context-db/bin/kb.py migrate`")
+        errors.append(f"{rel}: {problem} — run `python3 $BATON/context-db/bin/kb.py migrate`")
     tracker = cfg.get("tracker")
     if tracker is None:
         tracker = {}
@@ -258,12 +258,12 @@ def make_targets() -> set[str]:
 
 
 def cited_make_targets(text: str) -> list[tuple[int, str]]:
-    """(line, target) for every `make -C .claude/context-db <target>` a text cites."""
+    """(line, target) for every `make -C $BATON/context-db <target>` a text cites."""
     return [(n, m.group(1)) for n, line in enumerate(text.split("\n"), 1) for m in MAKE_TARGET.finditer(line)]
 
 
 def check_make_targets(errors: list[str], files=None) -> None:
-    """A doc or unit that cites `make -C .claude/context-db <target>` names a target the Makefile has (#81 E14):
+    """A doc or unit that cites `make -C $BATON/context-db <target>` names a target the Makefile has (#81 E14):
     a session following the instruction otherwise stops on `No rule to make target`."""
     have = make_targets()
     if not have:
@@ -275,7 +275,7 @@ def check_make_targets(errors: list[str], files=None) -> None:
         rel = p.relative_to(KIT) if p.is_relative_to(KIT) else p
         for n, target in cited_make_targets(p.read_text(encoding="utf-8", errors="replace")):
             if target not in have:
-                errors.append(f"{rel}:{n}: cites `make -C .claude/context-db {target}` but the Makefile has no such target "
+                errors.append(f"{rel}:{n}: cites `make -C $BATON/context-db {target}` but the Makefile has no such target "
                               f"(targets: {', '.join(sorted(have))})")
 
 
@@ -372,7 +372,7 @@ def check_body(p: Path, rel, body: str, errors: list[str]) -> None:
     unit_dir = p.parent
     for n, target in cited_make_targets(body):
         if target not in make_targets():
-            errors.append(f"{rel}: cites `make -C .claude/context-db {target}` (body line {n}) but the Makefile has no such target")
+            errors.append(f"{rel}: cites `make -C $BATON/context-db {target}` (body line {n}) but the Makefile has no such target")
     for m in OWN_PATH.finditer(body):
         cited = m.group(1)
         if cited.startswith("$BATON/"):  # the kit root on both install paths (#3) — resolve it like the clone path
@@ -437,7 +437,7 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
                           "with `metadata.requires: \"<capability>\"` instead (or nothing, if it works everywhere)")
         elif k in fmt.KIT_META_KEYS:
             errors.append(f"{rel}: '{k}:' belongs under `metadata:` as a string — run "
-                          "`python3 .claude/context-db/bin/migrate_frontmatter.py`")
+                          "`python3 $BATON/context-db/bin/migrate_frontmatter.py`")
         elif k not in allowed:
             errors.append(f"{rel}: top-level key '{k}' is neither an Agent Skills spec key nor an allow-listed Claude Code "
                           f"key {sorted(allowed)} — kit bookkeeping goes under `metadata:`; a new native key is added to "

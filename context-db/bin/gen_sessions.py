@@ -8,7 +8,7 @@ coordinate before touching a shared epic, PR, or worktree.
 
 An active entry whose heartbeat is older than STALE_HOURS is flagged ⚠ STALE — the
 owning session may be gone; re-verify with `ListAgents` (match by ref) before
-trusting or messaging it. Stdlib only; run via `make -C .claude/context-db session-index`.
+trusting or messaging it. Stdlib only; run via `make -C $BATON/context-db session-index`.
 
 Size discipline (#71): WORKSPACE.md tells every session to read this file first, so it is
 part of every session's start-up cost. Active/idle rows carry everything (working_on,
@@ -259,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         "# `.context/` — SESSION INDEX (live registry)",
         "",
         "> **Generated — do not hand-edit.** Rebuilt from `sessions/<name>.md` (one per session, via "
-        "`make -C .claude/context-db session-register|touch|end`). **Read it at the start of any session "
+        "`make -C $BATON/context-db session-register|touch|end`). **Read it at the start of any session "
         "that will touch a shared epic, PR, or worktree**, then agree ownership explicitly (a worktree "
         f"isolates branch/HEAD, not directory access). ⚠ **STALE** = no heartbeat for over {STALE_HOURS}h; "
         "re-verify with `ListAgents` (match by ref). **Stats** / **~$ est.** come from the session's "

@@ -4,7 +4,7 @@
 Deterministic part of the `kit-health` skill (the judgement part — re-reading flagged skills — is the
 skill's Sonnet fork). Prints a markdown report; exit 0 = green, 1 = warnings only, 2 = errors.
 
-  python3 .claude/skills/kit-health/kit-health.py [--stale N] [--stamp] [--report FILE] [--quiet] [--ci]
+  python3 $BATON/skills/kit-health/kit-health.py [--stale N] [--stamp] [--report FILE] [--quiet] [--ci]
 
 Sections:
   1. kit        — kit_verify (frontmatter + env store), stale units, git state (sync-check)
@@ -641,7 +641,7 @@ def sec_config(r: Report) -> None:
         else:
             r.add(ERR, "config", f"`kb.py stale --check` failed (exit {rc}): {out[-300:]}")
     else:
-        r.add(ERR, "config", "env store missing — `python3 .claude/context-db/bin/kb.py init --blank`, "
+        r.add(ERR, "config", "env store missing — `python3 $BATON/context-db/bin/kb.py init --blank`, "
                              "then fill config.json (`kb.py config-set`) and facts (`kb.py set`)")
         return
     systems_active = kit_profile.get("systems") or {}
@@ -651,7 +651,7 @@ def sec_config(r: Report) -> None:
     renamed = [o for o in kb.RENAMED_SYSTEMS if o in systems_active]
     if renamed:
         r.add(WARN, "config", f"renamed capability flag(s) still in config.json: {', '.join('systems.' + o for o in renamed)} — "
-                              "run `python3 .claude/context-db/bin/kb.py migrate` (keeps the value)")
+                              "run `python3 $BATON/context-db/bin/kb.py migrate` (keeps the value)")
 
 
 # ── 4. machine ──────────────────────────────────────────────────────────────────────────────
@@ -668,7 +668,7 @@ def identity_wiring(r: Report) -> None:
     elif not settings.is_file():
         r.add(ERR, "machine", "no identity from any source: `settings.local.json` missing (looked at `"
               + (str(settings.relative_to(ROOT)) if settings.is_relative_to(ROOT) else str(settings))
-              + "`) and no `WORKSPACE_*` in the environment — run `sh .claude/setup.sh`, or `/plugin configure ai-baton` on a plugin install "
+              + "`) and no `WORKSPACE_*` in the environment — run `sh $BATON/setup.sh`, or `/plugin configure ai-baton` on a plugin install "
               "(values set there reach Bash from the next session on: restart it if you just configured them)")
     for k in ("WORKSPACE_USER", "WORKSPACE_GITHUB_LOGIN", "WORKSPACE_TZ"):
         if not src[k]:
@@ -724,10 +724,10 @@ def stale_seeds(pairs: list[tuple[Path, Path]] | None = None, template_time=None
 def seed_wiring(r: Report) -> None:
     stale, unknown = stale_seeds()
     for tpl, copy in stale:
-        r.add(WARN, "machine", f"seed `{rel(copy)}` predates its template `{rel(tpl)}` — `sh .claude/setup.sh --refresh-seeds` shows the diff; merge what you want by hand")
+        r.add(WARN, "machine", f"seed `{rel(copy)}` predates its template `{rel(tpl)}` — `sh $BATON/setup.sh --refresh-seeds` shows the diff; merge what you want by hand")
     if unknown:
         r.raw("- seed freshness not checked for " + ", ".join(f"`{rel(c)}`" for _t, c in unknown)
-              + " — the kit has no git history here (plugin install?); `sh .claude/setup.sh --refresh-seeds` still prints the diffs")
+              + " — the kit has no git history here (plugin install?); `sh $BATON/setup.sh --refresh-seeds` still prints the diffs")
     elif not stale:
         r.add(OK, "machine", "seeded files (.context/README.md, environment.md, CLAUDE.md, the self-assessment charter) are not older than their templates")
 
@@ -738,7 +738,7 @@ def sec_machine(r: Report) -> str:
     identity_wiring(r)
     seed_wiring(r)
     if not (ENV / "config.json").is_file():
-        r.add(ERR, "machine", "no configuration at all — `python3 .claude/context-db/bin/kb.py init --blank`")
+        r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):
         r.add(OK, "machine", f"active environment `{envname}` from the env store")
     else:
@@ -746,7 +746,7 @@ def sec_machine(r: Report) -> str:
     claude_md = ROOT / "CLAUDE.md"
     env_doc = CTX / "reference" / "environment.md"
     if not claude_md.is_file():
-        r.add(ERR, "machine", "root `CLAUDE.md` missing — `sh .claude/setup.sh` seeds it")
+        r.add(ERR, "machine", "root `CLAUDE.md` missing — `sh $BATON/setup.sh` seeds it")
     else:
         text = claude_md.read_text(encoding="utf-8", errors="replace")
         imp_ws = re.search(r"^@\.claude/WORKSPACE\.md\s*$", text, re.M)
@@ -769,9 +769,9 @@ def sec_machine(r: Report) -> str:
         elif env_doc.is_file():
             r.add(WARN, "machine", "`.context/reference/environment.md` exists but CLAUDE.md does not import it — its rules are not loaded")
         elif imp_env:
-            r.add(ERR, "machine", "CLAUDE.md imports `@.context/reference/environment.md` but the doc is missing — seed it from `.claude/environment-template/environment.md`")
+            r.add(ERR, "machine", "CLAUDE.md imports `@.context/reference/environment.md` but the doc is missing — seed it from `$BATON/environment-template/environment.md`")
         else:
-            r.add(WARN, "machine", "no `.context/reference/environment.md` — the environment's prose (repos, venues, capabilities) is not written down; seed it from `.claude/environment-template/environment.md`")
+            r.add(WARN, "machine", "no `.context/reference/environment.md` — the environment's prose (repos, venues, capabilities) is not written down; seed it from `$BATON/environment-template/environment.md`")
     if LEGACY_PROFILES.exists():  # the one legacy line kept (#78)
         r.add(WARN, "machine", "legacy `.claude/profiles/` present → delete it (`rm -rf .claude/profiles`; the layer retired 2026-09-25, nothing reads it)")
     mk = ROOT / "Makefile"
@@ -788,13 +788,13 @@ def sec_machine(r: Report) -> str:
     if (CTX / "README.md").is_file():
         r.add(OK, "machine", "`.context/README.md` present")
     else:
-        r.add(WARN, "machine", "`.context/README.md` missing — `sh .claude/setup.sh` seeds it")
+        r.add(WARN, "machine", "`.context/README.md` missing — `sh $BATON/setup.sh` seeds it")
     slug = str(ROOT).replace("/", "-")
     hm = Path.home() / ".claude" / "projects" / slug / "memory"
     if hm.is_symlink() and hm.resolve() == (CTX / "memory").resolve():
         r.add(OK, "machine", "harness memory dir → `.context/memory` symlink")
     else:
-        r.add(WARN, "machine", "harness memory dir is not a symlink to `.context/memory` — `sh .claude/setup.sh`")
+        r.add(WARN, "machine", "harness memory dir is not a symlink to `.context/memory` — `sh $BATON/setup.sh`")
     prc = CTX / "state" / "pr-review" / "config.json"
     org = kit_profile.get("github.org") or ""
     if prc.is_file():
@@ -812,7 +812,7 @@ def sec_machine(r: Report) -> str:
         except json.JSONDecodeError:
             r.add(ERR, "machine", "`.context/state/pr-review/config.json` is not valid JSON")
     else:
-        r.add(WARN, "machine", "`.context/state/pr-review/config.json` missing — `sh .claude/setup.sh` seeds it")
+        r.add(WARN, "machine", "`.context/state/pr-review/config.json` missing — `sh $BATON/setup.sh` seeds it")
     for tool in ("git", "make", "python3", "gh", "jq"):
         if shutil.which(tool):
             r.add(OK, "machine", f"CLI `{tool}` present")
@@ -885,7 +885,7 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
     if rc == 0:
         r.add(OK, "engine", "`make verify` on the live `.context/`: " + (out.splitlines()[-1] if out else "OK"))
     elif problems and all("INDEX.md is stale" in p for p in problems):
-        r.add(WARN, "engine", "`.context/INDEX.md` is stale — `make -C .claude/context-db index`" +
+        r.add(WARN, "engine", "`.context/INDEX.md` is stale — `make -C $BATON/context-db index`" +
               (" (this run re-indexes after the stamp)" if stamping else " (a `--stamp` run does it; a plain run never writes the DB)"))
     else:
         r.add(ERR, "engine", "`make verify` failed:\n```\n" + both(out, err)[-1500:] + "\n```")
@@ -996,16 +996,16 @@ def stamp(envname: str, r: Report) -> "tuple[Path, bool]":
         f"# kit-health — `{envname}`\n\n"
         f"Last green run: **{now}** on kit commit `{head[:7] if rc == 0 else '?'}`{f' ({ver})' if ver else ''} with {r.counts[WARN]} warning(s) "
         "(written by `skills/kit-health/kit-health.py --stamp`, local to this machine). "
-        "The report of that run is the `.context/` log doc the skill writes (`make -C .claude/context-db new TYPE=log DOMAIN=kit-health …`); this stamp is local, not synced.\n\n"
+        "The report of that run is the `.context/` log doc the skill writes (`make -C $BATON/context-db new TYPE=log DOMAIN=kit-health …`); this stamp is local, not synced.\n\n"
         "\"The kit works everywhere\" = every environment's stamp is at the current kit HEAD; check each machine's stamp after a kit change.\n",
         encoding="utf-8",
     )
     # the stamp is a .context/ doc: re-index now, or the next run's `make verify index` reads it as stale
     rc, out, err = sh(["make", "-C", str(KIT / "context-db"), "-s", f"CONTEXT={CTX}", "index"], timeout=300)
     if rc != 0:
-        r.raw("\n⚠ `make index` after the stamp failed — run `make -C .claude/context-db index` by hand:\n```\n" + both(out, err)[-800:] + "\n```")
+        r.raw("\n⚠ `make index` after the stamp failed — run `make -C $BATON/context-db index` by hand:\n```\n" + both(out, err)[-800:] + "\n```")
         # the verdict is already built and --quiet prints only it: stderr + a non-zero exit keep this visible
-        print(f"kit-health: `make index` after --stamp failed (rc={rc}) — run `make -C .claude/context-db index`",
+        print(f"kit-health: `make index` after --stamp failed (rc={rc}) — run `make -C $BATON/context-db index`",
               file=sys.stderr)
     return p, rc == 0
 

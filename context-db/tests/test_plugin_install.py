@@ -6,6 +6,7 @@ Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import importlib.util
 import json
+import re
 import os
 import subprocess
 import sys
@@ -224,6 +225,23 @@ class KitPathResolver(unittest.TestCase):
             for n, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):
                 errors += [f"{p.relative_to(KIT)}:{n}: {m.group(0)}" for m in kit_verify.HARDCODED_KIT_PATH.finditer(line)]
         self.assertEqual(errors, [])
+
+
+class ScriptHints(unittest.TestCase):
+    def test_no_script_prints_a_clone_path_command(self):
+        # #23: a hint a session follows says `$BATON/…` — a plugin install has no kit at `.claude/`. Comments and the
+        # Makefile's own help (a human's terminal, where BATON is unset) are not hints; kit_verify's own path logic isn't either.
+        import kit_verify
+        pat = re.compile(kit_verify.HARDCODED_KIT_PATH.pattern.replace("(?<![~\\w>*/.$-])", "(?<![~\\w>*/.$\\\\-])"))
+        files = [*(KIT / "context-db" / "bin").glob("*.py"), *(KIT / "skills").glob("*/*.py"), *(KIT / "skills").glob("*/*.sh"),
+                 KIT / "sync-check.sh"]
+        hits = []
+        for f in sorted(files):
+            for n, line in enumerate(f.read_text(encoding="utf-8").split("\n"), 1):
+                if line.lstrip().startswith("#") or 'cited.startswith(".claude/skills/")' in line:
+                    continue
+                hits += [f"{f.relative_to(KIT)}:{n}: {m.group(0)}" for m in pat.finditer(line)]
+        self.assertEqual(hits, [])
 
 
 class KitHealthOnAPluginInstall(unittest.TestCase):

@@ -91,7 +91,7 @@ class MakeTargets(unittest.TestCase):
             self.assertEqual(errors, [])
             kit_verify.check_make_targets(errors, files=[bad])
             self.assertEqual(len(errors), 1)
-            self.assertIn("bad.md:2: cites `make -C .claude/context-db no-such-target-ever`", errors[0])
+            self.assertIn("bad.md:2: cites `make -C $BATON/context-db no-such-target-ever`", errors[0])
 
     def test_kit_docs_cite_only_real_targets(self):
         errors: list[str] = []

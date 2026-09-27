@@ -40,6 +40,6 @@ check_kit() {
 check_kit "$HERE"
 # env store behind the kit's capability flags: kit-verify fails and re-gated skills read as off until migrated
 rc=0; python3 "$HERE/context-db/bin/kb.py" migrate --check >/dev/null 2>&1 || rc=$?
-[ "$rc" -ne 0 ] && [ "$rc" -ne 3 ] && warn "\`kb.py migrate --check\` failed (exit $rc) — no or unreadable env store? \`python3 .claude/context-db/bin/kb.py init --blank\` creates one"
-[ "$rc" -eq 3 ] && warn "env store predates the kit's capability flags — \`python3 .claude/context-db/bin/kb.py migrate\` (keeps values, lists what it changed)"
+[ "$rc" -ne 0 ] && [ "$rc" -ne 3 ] && warn "\`kb.py migrate --check\` failed (exit $rc) — no or unreadable env store? \`python3 \$BATON/context-db/bin/kb.py init --blank\` creates one"
+[ "$rc" -eq 3 ] && warn "env store predates the kit's capability flags — \`python3 \$BATON/context-db/bin/kb.py migrate\` (keeps values, lists what it changed)"
 exit 0

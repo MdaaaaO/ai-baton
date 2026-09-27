@@ -27,7 +27,7 @@ class EngineCliDoc(unittest.TestCase):
     def test_generator_runs_and_covers_make_help_and_every_tool(self):
         p = run("--stdout")
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertIn("## `make -C .claude/context-db help`", p.stdout)
+        self.assertIn("## `make -C $BATON/context-db help`", p.stdout)
         self.assertIn("make -C .claude/context-db engine-cli-doc", p.stdout)  # the Makefile header names the target
         for tool in ("kb.py", "kit_verify.py", "review_gate.py", "session.py", "gen_index.py"):
             self.assertIn(f"## `{tool}`", p.stdout)

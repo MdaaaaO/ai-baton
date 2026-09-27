@@ -9,7 +9,7 @@ Checks every content doc for:
   - INDEX.md being up to date (regenerate and diff).
 
 Operates on the content root gen_index resolves from CONTEXT_ROOT (default the
-sibling ../../.context). Run via `make -C .claude/context-db verify`. Stdlib only.
+sibling ../../.context). Run via `make -C $BATON/context-db verify`. Stdlib only.
 """
 from __future__ import annotations
 import os
