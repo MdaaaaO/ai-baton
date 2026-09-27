@@ -180,6 +180,20 @@ class CaseFormat(unittest.TestCase):
         errors, _, _ = self.kit.run()
         self.assertTrue(any("foo-empty/prompt.md: empty prompt body" in e for e in errors), errors)
 
+    def test_a_block_style_allowed_tools_is_not_a_list(self):
+        # frontmatter.parse_lines never produces a Python list (str/dict only); a block mapping under
+        # `allowed_tools:` reads back as `{}`, which must still fail — pins the surviving `startswith("[")` check
+        # now that the dead `isinstance(..., list)` branch is gone.
+        d = self.kit.case("foo-block")
+        (d / "prompt.md").write_text(
+            "---\nmax_turns: 6\nallowed_tools:\n  Read: yes\ntags: [trigger, positive]\n---\n\nDo foo.\n",
+            encoding="utf-8")
+        (d / "graders" / "fired.md").write_text(
+            "---\ntype: tool_used\ntool: Skill\ninput_match: '(?<![\\w-])foo(?![\\w-])'\nmin: 1\narm: both\n---\n",
+            encoding="utf-8")
+        errors, _, _ = self.kit.run()
+        self.assertTrue(any("foo-block/prompt.md: `allowed_tools` must be a list" in e for e in errors), errors)
+
     def test_unknown_grader_type_fails(self):
         self.kit.case("foo-grader", grader_type="judge")
         errors, _, _ = self.kit.run()

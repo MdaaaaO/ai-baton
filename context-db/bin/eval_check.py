@@ -117,7 +117,9 @@ def check_case(case_dir: Path, skills: list[str]) -> tuple[list[str], dict | Non
     for k in INT_KEYS:
         if k in fm and as_int(fm.get(k), None) is None:
             errors.append(f"{name}/prompt.md: `{k}` must be a whole number, got {frontmatter.unquote(fm.get(k))!r}")
-    if "allowed_tools" in fm and not isinstance(fm.get("allowed_tools"), list) and not str(fm.get("allowed_tools")).strip().startswith("["):
+    # frontmatter.parse_lines never yields a Python list (only str/dict — frontmatter.py's docstring), so a real
+    # inline list reads back as the raw string `[a, b]`; anything else (a block mapping, a bare scalar) is invalid.
+    if "allowed_tools" in fm and not str(fm.get("allowed_tools")).strip().startswith("["):
         errors.append(f"{name}/prompt.md: `allowed_tools` must be a list")
     graders = sorted((case_dir / "graders").glob("*.md"))
     if not graders:
