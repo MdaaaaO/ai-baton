@@ -369,7 +369,7 @@ Styles:
 
 Usage:
   commit_style.py resolve  [--dir <repo-dir>] [--repo <owner/repo>]
-  commit_style.py check    [--dir …] [--repo …] [--style <s>] <msg-file | ->      exit 0 ok / 1 fail / 2 usage
+  commit_style.py check    [--dir …] [--repo …] [--style <s>] <msg-file | ->      exit 0 ok / 1 style / 2 usage, config or I/O
   commit_style.py title    [--dir …] [--repo …] [--style <s>] "<subject>"          same, for a PR title
   commit_style.py label    "<subject>"      → the GitHub type label a conventional subject implies (or "")
   commit_style.py types                     → the accepted types, one per line

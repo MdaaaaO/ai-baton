@@ -8,7 +8,7 @@ every commit a session writes in any repo and to every PR title (the squash-comm
 
 ```
 python3 .claude/context-db/bin/commit_style.py resolve [--dir <repo-dir>] [--repo <owner/repo>]
-python3 .claude/context-db/bin/commit_style.py check   [--dir …] <msg-file | ->        # exit 0 / 1
+python3 .claude/context-db/bin/commit_style.py check   [--dir …] <msg-file | ->        # exit 0 ok / 1 style / 2 config or I/O error
 python3 .claude/context-db/bin/commit_style.py title   [--dir …] "<PR title>"          # same, one line
 python3 .claude/context-db/bin/commit_style.py label   "<subject>"                     # type → GitHub label
 ```
