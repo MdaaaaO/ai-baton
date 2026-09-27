@@ -3,7 +3,7 @@ name: sign-queue
 description: Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains the queue with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners for the user to run. Inert where `systems.signed_commits` is false.
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-09-26"
   reviewed: "2026-09-24"
   requires: "signed_commits"
@@ -59,7 +59,7 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
   worktree, otherwise the default `add -A` commits the message file itself (enqueue.sh refuses that unless `--files` is given).
 - Then tell the user in one line: "queued `<topic>` — `make sign` when convenient." Do NOT paste
   git commands. Keep your `pr-watch` monitor armed; it reports the head move when the push lands.
-- Job files are plain sh under `.claude/sign-queue/`; `python3 …/signq.py list`
+- Job files are plain sh under `.context/state/sign-queue/` (in the workspace, so a plugin update never deletes them); `python3 …/signq.py list`
   (or `make sign_list` on the host) shows what is pending with ticket / epic / PR. A failed job is parked as `<job>.failed` (the user gets told which) and the other
   jobs still run; fix the worktree (e.g. resolve the rebase, or `rebase --abort` and re-plan), delete the
   `.failed` file and enqueue again. If the commit itself was made but only the **push** failed (worktree clean,
@@ -86,7 +86,7 @@ the milestones as they happen (`committed <sha>`, `rebased`, `pushed a..b`) and 
 `✘ FAILED … → parked` line with a diagnosis hint and the last output lines, and finally a **summary** with one line
 per job and its PR link. Git runs with `GIT_PAGER=cat`, `GIT_EDITOR=true`, `GIT_SEQUENCE_EDITOR=true`,
 `GIT_TERMINAL_PROMPT=0`, so nothing ever waits for a `q` or `:wq`. Full per-job output is kept in
-`.claude/sign-queue/logs/<job>.log`.
+`.context/state/sign-queue/logs/<job>.log`.
 
 Jobs run in enqueue order: stage → `commit -S -F <msg>` (skipped if nothing is staged, so a retry after a failed
 push works) → optional `fetch` + `rebase -S` → `push`. Success deletes the job. A failure parks it as `<job>.failed`

@@ -26,12 +26,18 @@
 #                  `gh pr list --head`, summary = first line of the message file. Pass them when you know
 #                  better (a new branch has no PR yet; a ticket outside any context doc has no epic).
 #
-# The job is a self-contained POSIX sh script under .claude/sign-queue/ that sign.sh runs on the
+# The job is a self-contained POSIX sh script under .context/state/sign-queue/ that sign.sh runs on the
 # host. Before enqueuing, verify `git -C <wt> status --short` shows exactly what the commit should
 # contain and that the message file exists. One job = one commit.
 set -eu
 eval "$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" identity-env 2>/dev/null)"  # WORKSPACE_* from plugin userConfig, if set (#116)
-Q=${SIGN_QUEUE_DIR:-$(cd "$(dirname "$0")/../../.." && pwd)/.claude/sign-queue}
+# the queue lives in the workspace (#7): `<.context>/state/sign-queue/`, never under the kit (a plugin update deletes it)
+if [ -z "${SIGN_QUEUE_DIR:-}" ]; then
+  ctx=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" context)
+  [ -d "$ctx" ] || { echo "enqueue.sh: no workspace .context/ found ($ctx) — run from the workspace, or set SIGN_QUEUE_DIR" >&2; exit 2; }
+  SIGN_QUEUE_DIR="$ctx/state/sign-queue"
+fi
+Q=$SIGN_QUEUE_DIR
 topic=$1; wt=$2; br=$3; msg=$4; shift 4
 rebase=0; newbr=0; files=""; explicit_files=""; by="${SIGN_QUEUE_BY:-${WORKSPACE_USER:-?}}"; onto=""; lease=""
 ticket=""; epic=""; pr=""; summary=""

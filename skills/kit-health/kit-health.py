@@ -833,8 +833,14 @@ def sec_machine(r: Report) -> str:
         else:
             r.add(WARN, "machine", "aws_sso enabled but the `aws` CLI is missing")
     if systems.get("signed_commits"):
-        sq = KIT / "sign-queue"
-        r.add(OK if sq.is_dir() else ERR, "machine", "signed_commits: `.claude/sign-queue/` " + ("present" if sq.is_dir() else "missing"))
+        # the queue lives in the workspace (#7); the kit's own `sign-queue/` is where a pre-#7 kit left jobs
+        sq = CTX / "state" / "sign-queue"
+        pending = len(list(sq.glob("*.sh"))) if sq.is_dir() else 0
+        r.add(OK, "machine", f"signed_commits: queue `.context/state/sign-queue/` " + (f"({pending} pending)" if sq.is_dir()
+              else "not created yet (the first enqueue creates it)"))
+        legacy = [p for p in (KIT / "sign-queue").glob("*.sh*")] if (KIT / "sign-queue").is_dir() else []
+        if legacy:
+            r.add(WARN, "machine", f"signed_commits: {len(legacy)} job(s) left in the kit's old `sign-queue/` — `make sign_list` moves them")
     if systems.get("lattice"):
         # Lattice has no connector (SSO web form): the self-assessment skill reads the Lattice bot DM
         # through Slack and hands the user a paste-ready block. Wiring = Slack on + the DM id set.

@@ -100,9 +100,6 @@ and nothing reserved or impersonating is used. A future rename is a one-line cha
 
 ## Open items (follow-ups, not this decision)
 
-- `sign-queue` keeps its job queue under the kit (`.claude/sign-queue/`); on a plugin install that is the plugin
-  cache, which an update deletes. The queue needs a workspace home before signed-commit environments use the plugin
-  path (#7).
 - `install.sh` for agents without a marketplace (symlink `skills/` into `~/.claude/skills`) — the clone path already
   serves them (`~/.claude/skills` shadows `.claude/skills`, so a symlink there is a choice, not a need).
 - Skipped on purpose (amendment on #118): a second agent's manifest pair, a toolchain submodule, a package tap —

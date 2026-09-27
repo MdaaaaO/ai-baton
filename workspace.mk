@@ -3,13 +3,13 @@
 # Everything here is user-agnostic; keep personal/host-specific targets in the root Makefile.
 
 # ── sign queue (host side) ───────────────────────────────────────────────────────────────
-# Sessions enqueue signed-commit jobs under .claude/sign-queue/ (skill `sign-queue`); the user
+# Sessions enqueue signed-commit jobs under .context/state/sign-queue/ (skill `sign-queue`); the user
 # drains them here with signq.py. Runs on the HOST (signing + SSH push need the host keys), in
 # enqueue order, fully non-interactive (no pager, no editor): an overview table (ticket / epic /
 # repo / PR / commit) first, then one card per job with the milestones and a ✔/✘ line, then a
 # summary with the PR links. A job is deleted on success, parked as <job>.failed on failure (the
 # owning session re-enqueues; `sign_retry` re-runs it as is). Per-job output:
-# .claude/sign-queue/logs/<job>.log.
+# .context/state/sign-queue/logs/<job>.log.
 #   make sign                  # drain every pending job        (make sign V=1 streams all git output)
 #   make sign_list             # overview of pending + parked jobs, runs nothing
 #   make sign_show JOB=1       # metadata + script of one job (index from sign_list, or topic)

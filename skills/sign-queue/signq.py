@@ -11,12 +11,12 @@
                                         emit the META JSON line enqueue.sh embeds in a job
 
 <job> is the 1-based index from `list`, the topic, or the file name. Jobs are self-contained POSIX sh
-scripts under .claude/sign-queue/ (written by enqueue.sh). A job carries one `# META {...}` line with
+scripts under .context/state/sign-queue/ (written by enqueue.sh). A job carries one `# META {...}` line with
 ticket / epic / repo / PR / subject; legacy jobs without it are parsed from their header + worktree.
 
 Everything git might make interactive is disabled for the drain: GIT_PAGER=cat (no `q`), GIT_EDITOR=true
 and GIT_SEQUENCE_EDITOR=true (no `:wq`), GIT_TERMINAL_PROMPT=0. Per-job output goes to
-.claude/sign-queue/logs/<job>.log; the terminal only gets the milestones (or everything with -v).
+.context/state/sign-queue/logs/<job>.log; the terminal only gets the milestones (or everything with -v).
 Stdlib only; runs on the host's system python3 (3.9+).
 """
 from __future__ import annotations
@@ -31,9 +31,20 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-ROOT = Path(os.environ.get("SIGN_QUEUE_ROOT", str(Path(__file__).resolve().parents[3])))  # skills/sign-queue → .claude → workspace root
-Q = Path(os.environ.get("SIGN_QUEUE_DIR", str(ROOT / ".claude" / "sign-queue")))
-CONTEXT = Path(os.environ.get("SIGN_QUEUE_CONTEXT", str(ROOT / ".context")))
+KIT = Path(__file__).resolve().parents[2]  # skills/sign-queue → the kit (a .claude/ clone or the plugin root)
+sys.path.insert(0, str(KIT / "context-db" / "bin"))
+import kit_profile  # noqa: E402
+
+# The queue lives in the workspace's `.context/state/sign-queue/` (#7): under the kit it sat in the plugin cache on a
+# plugin install, which an update deletes. SIGN_QUEUE_ROOT / SIGN_QUEUE_CONTEXT / SIGN_QUEUE_DIR still override.
+if os.environ.get("SIGN_QUEUE_ROOT"):
+    ROOT = Path(os.environ["SIGN_QUEUE_ROOT"])
+    CONTEXT = Path(os.environ.get("SIGN_QUEUE_CONTEXT", str(ROOT / ".context")))
+else:
+    CONTEXT = Path(os.environ.get("SIGN_QUEUE_CONTEXT", str(kit_profile.context_root())))
+    ROOT = CONTEXT.parent
+Q = Path(os.environ.get("SIGN_QUEUE_DIR", str(CONTEXT / "state" / "sign-queue")))
+LEGACY_Q = KIT / "sign-queue"  # where jobs were queued before #7
 LOGS = Q / "logs"
 KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b")
 
@@ -543,7 +554,27 @@ def cmd_meta(argv: List[str]) -> int:
     return 0
 
 
+def migrate_legacy(legacy: Path = LEGACY_Q, q: Path = Q) -> int:
+    """Move jobs and logs a pre-#7 kit queued under the kit dir into the workspace queue; returns how many files
+    moved. Never overwrites a job already in the new queue (it stays in place and is named)."""
+    if "SIGN_QUEUE_DIR" in os.environ or not legacy.is_dir() or legacy.resolve() == q.resolve():
+        return 0
+    moved = 0
+    for src in sorted([*legacy.glob("*.sh"), *legacy.glob("*.sh.failed"), *legacy.glob("logs/*.log")]):
+        dst = q / src.relative_to(legacy)
+        if dst.exists():
+            print(f"sign-queue: {src} not moved — {dst} exists; resolve by hand", file=sys.stderr)
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        moved += 1
+    if moved:
+        print(f"sign-queue: moved {moved} file(s) from {legacy} to {q} (#7)", file=sys.stderr)
+    return moved
+
+
 def main(argv: List[str]) -> int:
+    migrate_legacy()
     cmd, rest = (argv[0], argv[1:]) if argv else ("run", [])
     if cmd in ("-v", "--verbose", "--dry-run"):
         cmd, rest = "run", argv
