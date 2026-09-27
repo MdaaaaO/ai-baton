@@ -378,10 +378,11 @@ def gh_env(base: dict | None = None) -> dict:
 
 
 def plugin_install(kit: Path | None = None, environ: dict | None = None) -> dict[str, str] | None:
-    """`{repo, commit, version}` when the kit is a Claude Code plugin install (no git checkout: the plugin cache),
-    None on a clone. `repo` = `owner/repo` from plugin.json `repository`; `commit` = the `gitCommitSha` Claude Code
-    recorded for this install path in `installed_plugins.json` ("" when not recorded); `version` = plugin.json's.
-    Lets kit-health name the installed kit where git cannot (#3)."""
+    """`{repo, commit, version, updated}` when the kit is a Claude Code plugin install (no git checkout: the plugin
+    cache), None on a clone. `repo` = `owner/repo` from plugin.json `repository`; `commit` and `updated` = the
+    `gitCommitSha` and `lastUpdated` (ISO, else `installedAt`) Claude Code recorded for this install path in
+    `installed_plugins.json` ("" when not recorded); `version` = plugin.json's. Lets kit-health name the installed kit
+    where git cannot (#3) and notice a hand edit in the cache (#11)."""
     kit = kit or KIT
     env = os.environ if environ is None else environ
     if (kit / ".git").exists():
@@ -391,7 +392,7 @@ def plugin_install(kit: Path | None = None, environ: dict | None = None) -> dict
     except (OSError, ValueError):
         return None
     m = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", str(manifest.get("repository") or ""))
-    out = {"repo": m.group(1) if m else "", "commit": "", "version": str(manifest.get("version") or "")}
+    out = {"repo": m.group(1) if m else "", "commit": "", "version": str(manifest.get("version") or ""), "updated": ""}
     # <config>/plugins/cache/<marketplace>/<plugin>/<version> — the registry sits in <config>/plugins/
     registries = [kit.parents[3] / "installed_plugins.json"] if len(kit.parents) > 3 and kit.parents[2].name == "cache" else []
     config = env.get("CLAUDE_CONFIG_DIR", "").strip()
@@ -405,6 +406,7 @@ def plugin_install(kit: Path | None = None, environ: dict | None = None) -> dict
             for e in entries if isinstance(entries, list) else []:
                 if isinstance(e, dict) and e.get("installPath") and Path(e["installPath"]).resolve() == kit.resolve():
                     out["commit"] = str(e.get("gitCommitSha") or "")
+                    out["updated"] = str(e.get("lastUpdated") or e.get("installedAt") or "")
                     return out
     return out
 

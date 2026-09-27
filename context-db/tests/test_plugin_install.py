@@ -22,6 +22,7 @@ import kit_profile  # noqa: E402
 
 OWNER = "octo-" + "org"
 SHA = "0123456789abcdef" * 2 + "01234567"
+UPDATED = "2026-09-26T21:02:14.934Z"
 
 
 def fake_install(tmp: Path) -> Path:
@@ -33,7 +34,7 @@ def fake_install(tmp: Path) -> Path:
         {"name": "kit", "version": "1.2.3", "repository": f"https://github.com/{OWNER}/kit"}), encoding="utf-8")
     (plugins / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {
         "other@mkt": [{"installPath": str(plugins / "cache" / "mkt" / "other" / "0.1.0"), "gitCommitSha": "f" * 40}],
-        "kit@mkt": [{"installPath": str(kit), "gitCommitSha": SHA}]}}), encoding="utf-8")
+        "kit@mkt": [{"installPath": str(kit), "gitCommitSha": SHA, "lastUpdated": UPDATED}]}}), encoding="utf-8")
     return kit
 
 
@@ -41,7 +42,7 @@ class PluginInstall(unittest.TestCase):
     def test_names_repo_commit_and_version_from_the_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
             kit = fake_install(Path(tmp))
-            self.assertEqual(kit_profile.plugin_install(kit, {}), {"repo": f"{OWNER}/kit", "commit": SHA, "version": "1.2.3"})
+            self.assertEqual(kit_profile.plugin_install(kit, {}), {"repo": f"{OWNER}/kit", "commit": SHA, "version": "1.2.3", "updated": UPDATED})
 
     def test_a_checkout_is_not_a_plugin_install(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -57,7 +58,29 @@ class PluginInstall(unittest.TestCase):
             (kit / ".claude-plugin" / "plugin.json").write_text(json.dumps(
                 {"version": "0.1.0", "repository": f"https://github.com/{OWNER}/kit.git"}), encoding="utf-8")
             info = kit_profile.plugin_install(kit, {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "none")})
-            self.assertEqual(info, {"repo": f"{OWNER}/kit", "commit": "", "version": "0.1.0"})
+            self.assertEqual(info, {"repo": f"{OWNER}/kit", "commit": "", "version": "0.1.0", "updated": ""})
+
+
+class CacheEdits(unittest.TestCase):
+    """#11: a kit file changed in the plugin cache after the install is a hand edit an update would wipe."""
+
+    def test_files_newer_than_the_install_are_listed_runtime_files_are_not(self):
+        spec = importlib.util.spec_from_file_location("kit_health_cache", KIT / "skills" / "kit-health" / "kit-health.py")
+        kh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(kh)  # type: ignore[union-attr]
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = fake_install(Path(tmp))
+            install = kit_profile.plugin_install(kit, {})["updated"]
+            t0 = kh.dt.datetime.fromisoformat(install.replace("Z", "+00:00")).timestamp()
+            for rel in ("skills/x/allow.txt", "skills/x/SKILL.md", ".in_use/42", "skills/x/__pycache__/a.pyc", "sign-queue/job"):
+                f = kit / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text("x\n", encoding="utf-8")
+                os.utime(f, (t0 + 3600, t0 + 3600))
+            os.utime(kit / "skills" / "x" / "SKILL.md", (t0 + 5, t0 + 5))  # written by the unpack itself
+            os.utime(kit / ".claude-plugin" / "plugin.json", (t0, t0))
+            self.assertEqual(kh.cache_edits(kit, install), ["skills/x/allow.txt"])
+            self.assertIsNone(kh.cache_edits(kit, ""))  # install time unknown: not "no edits"
 
 
 class ContextRoot(unittest.TestCase):

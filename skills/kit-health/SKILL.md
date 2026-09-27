@@ -2,7 +2,7 @@
 name: kit-health
 description: Audit the kit on this machine: versioning frontmatter, env-value leaks in kit files, env-store coverage and stale rows, wiring (CLAUDE.md imports, memory symlink, CLIs, systems), an engine smoke, the green stamp. Walks each finding (Fix, Ticket, Accept), reports to `.context/kit-health/`, stamps `HEALTH-<env>.md`. Run after `make claude_sync`, monthly, and when a skill misbehaves.
 metadata:
-  version: "30"
+  version: "31"
   updated: "2026-09-26"
   reviewed: "2026-09-26"
   facts: "aws.profile kit-health"
@@ -27,13 +27,16 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
 4. **Walk the findings** — one `AskUserQuestion` per finding (batch trivial ones): **Fix** (do it, re-run), **Ticket** (`ticket-open`, title `[KIT] …`, unassigned), **Accept** (leaks only: add the
    anchored `path:value` regex to `skills/kit-health/allow.txt` with a `# reason`; a stale unit is accepted
    by bumping `metadata.reviewed` after re-reading it). A leak's Fix: `kb.py set …`, then the skill
-   reads it back. A Fix that touches a skill bumps `metadata.version` + a CHANGELOG line.
+   reads it back. A Fix that touches a skill bumps `metadata.version` + a CHANGELOG line. **Every edit to a kit
+   file** (an Accept, a Fix) is made in a worktree of a kit **checkout** off `origin/main`, never under `$BATON`
+   on a plugin install: that is Claude Code's plugin cache, and `claude plugin update` overwrites it (§ 1 warns
+   about a file changed there). No checkout yet: `gh repo clone <kit repo>` (§ 1 names it) into the workspace.
 5. **Report.** `make -C $BATON/context-db new TYPE=log DOMAIN=kit-health SLUG=<YYYY-MM-DD>-<env>
    TITLE="kit-health <date> · <env>"`, paste the report and each finding's outcome, `make … index`.
 6. **Stamp.** Re-run step 1 with `--stamp`: it refuses on any error **or un-accepted leak hit**, else
    writes the HEALTH doc (`last_green`, `kit_commit`, `kit_version`, `warnings`) and re-indexes.
-7. **PR.** Kit files the walk touched go out as one PR (`pr-open`); after the merge, a run on each other
-   machine stamps it. Tell the user the verdict.
+7. **PR.** Kit files the walk touched go out as one PR from that worktree (`pr-open`); after the merge (and
+   `claude plugin update` on a plugin install), a run on each machine stamps it. Tell the user the verdict.
 
 The script carries no environment's values: generic shapes plus this machine's configured values
 (redacted). Optional fact `aws.profile kit-health`: the `aws_sso` probe's profile.

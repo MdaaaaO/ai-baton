@@ -203,7 +203,40 @@ def sec_kit(r: Report, stale: int) -> None:
               "there is no checkout to sync; env store up to date")
     else:
         r.add(OK, "kit", "sync: in step with origin, tree clean")
+    if plugin is not None:
+        cache_wiring(r, plugin)
     review_ratio(r)
+
+
+# the plugin cache's own runtime files, never a hand edit: Claude Code's `.in_use/` markers, bytecode, the gitignored
+# queue and eval results (`.gitignore`)
+CACHE_RUNTIME = {"__pycache__", ".in_use", "sign-queue", "results"}
+
+
+def cache_edits(kit: Path, updated: str, grace: int = 120) -> list[str] | None:
+    """Kit files in a plugin cache modified after Claude Code wrote the install (`updated`, the registry's ISO
+    `lastUpdated`) — a hand edit that `claude plugin update` would overwrite and no PR carries (#11). None when the
+    install time is unknown; runtime files (CACHE_RUNTIME, `*.pyc`) are skipped. `grace` seconds absorb the unpack."""
+    try:
+        since = dt.datetime.fromisoformat(updated.replace("Z", "+00:00")).timestamp() + grace
+    except ValueError:
+        return None
+    out = []
+    for p in sorted(kit.rglob("*")):
+        parts = p.relative_to(kit).parts
+        if p.is_file() and p.suffix != ".pyc" and not CACHE_RUNTIME & set(parts) and p.stat().st_mtime > since:
+            out.append("/".join(parts))
+    return out
+
+
+def cache_wiring(r: Report, plugin: dict) -> None:
+    edits = cache_edits(KIT, plugin.get("updated", ""))
+    if edits:
+        r.add(WARN, "kit", f"plugin cache: {len(edits)} kit file(s) changed after the install ("
+              + ", ".join(f"`{e}`" for e in edits[:3]) + (", …" if len(edits) > 3 else "")
+              + ") — `claude plugin update` overwrites them: make the change in a kit checkout and open a PR (skill step 4)")
+    elif edits is not None:
+        r.add(OK, "kit", "plugin cache: no kit file changed since the install")
 
 
 # ── review findings (#121) ────────────────────────────────
