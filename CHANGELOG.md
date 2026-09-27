@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.3.0 (2026-09-27)
+
+
+### Features
+
+* **kit-health:** warn when a newer kit release is out ([#38](https://github.com/MdaaaaO/ai-baton/issues/38)) ([6558fa4](https://github.com/MdaaaaO/ai-baton/commit/6558fa4564c266a89338f97d8f812e1fcad3c74c))
+* **kit-profile:** one install-mode rule driving mode hints ([#76](https://github.com/MdaaaaO/ai-baton/issues/76)) ([f1c98ae](https://github.com/MdaaaaO/ai-baton/commit/f1c98ae26ae1078d9428a202f082747d3e1a609b))
+* **evals:** trigger suites for three skills, eval target and ci check ([#80](https://github.com/MdaaaaO/ai-baton/issues/80)) ([42ff403](https://github.com/MdaaaaO/ai-baton/commit/42ff4037a26d4222e03f18198e9dd02c4209200f))
+
+
+### Bug Fixes
+
+* **ci:** pin pr-issue to base, self-healing release, safe kit_release ([#78](https://github.com/MdaaaaO/ai-baton/issues/78)) ([06b1b47](https://github.com/MdaaaaO/ai-baton/commit/06b1b475ebe6b1efbdddb7d071588129024e694e))
+* **sync:** truthful pending, offline and skipped sync statuses ([#77](https://github.com/MdaaaaO/ai-baton/issues/77)) ([e751a56](https://github.com/MdaaaaO/ai-baton/commit/e751a56be25fdb191c4b6d338877d08fa9cd7066))
+* **setup:** plugin-install output names paths that exist ([#79](https://github.com/MdaaaaO/ai-baton/issues/79)) ([ad636c4](https://github.com/MdaaaaO/ai-baton/commit/ad636c4c4adcbe3b2d8e57d2092b35debddae11d))
+
+
+### Documentation
+
+* **workspace:** cost rule states prompt-caching billing [skip-bump] ([#75](https://github.com/MdaaaaO/ai-baton/issues/75)) ([1f5e13c](https://github.com/MdaaaaO/ai-baton/commit/1f5e13c50bc4d3d2e601a37ca3534302e8f172d4))
+* **kit:** loading, layout and updates on both install paths [skip-bump] ([#73](https://github.com/MdaaaaO/ai-baton/issues/73)) ([97e86f7](https://github.com/MdaaaaO/ai-baton/commit/97e86f7f12d08be7245bc19313f9d3bf0d246d09))
+* **readme:** plugin and clone as peer install paths [skip-bump] ([#72](https://github.com/MdaaaaO/ai-baton/issues/72)) ([f04f33e](https://github.com/MdaaaaO/ai-baton/commit/f04f33e045c99855cb75141a8683c51631aa2135))
+* **kit:** drop private-repo assumptions [skip-bump] ([#71](https://github.com/MdaaaaO/ai-baton/issues/71)) ([ee00f2b](https://github.com/MdaaaaO/ai-baton/commit/ee00f2b84a859e0f79e402f557bbb4d6f6d39181))
+* **kit:** step-by-step setup guide for the plugin install [skip-bump] ([#81](https://github.com/MdaaaaO/ai-baton/issues/81)) ([13a5361](https://github.com/MdaaaaO/ai-baton/commit/13a5361b5af6dffb985e02a4c7d621915b619117))
+
 ## 0.2.2 (2026-09-27)
 
 
