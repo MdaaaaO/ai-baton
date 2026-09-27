@@ -8,8 +8,8 @@ env store (`docs/env-facts.md`); the file map is `docs/layout.md`.
   `$BATON/skills/pr-watch/pr-watch.sh`, never `.claude/…` and never an absolute path (`docs/packaging.md`
   § Kit root). Sessions run in the workspace root, so its own files are plain relative paths
   (`.context/reference/env/`). Scripts find the kit from their own location, never through `$BATON`, and
-  `.context/` through `kit_profile` (`context_root()`, `kit_profile.py context`) — the `pr-scan` / `pr-review`
-  scripts still derive it from their own location (the kit's parent directory), which holds on a clone only; env
+  `.context/` through `kit_profile` (`context_root()`, `kit_profile.py context`), never from their own location
+  (on a plugin install that is the plugin cache); env
   overrides exist where a script had one before (`PR_REVIEW_HOME`, `SIGN_QUEUE_DIR`, `SIGN_QUEUE_ROOT`).
 - **Identity is `WORKSPACE_*`, from two sources, one reader.** On a plugin install Claude Code collects the five
   values through `userConfig` (`/plugin configure ai-baton`; the chat ids are `sensitive`, stored in

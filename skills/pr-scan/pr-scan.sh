@@ -11,7 +11,12 @@
 # errors= counts gh calls that failed after a retry (a failed call is never an empty queue); retries= the ones
 # that recovered. Concurrency: one scan at a time (.scan.lock); every ledger append takes .ledger.lock.
 set -uo pipefail
-ROOT=${PR_REVIEW_HOME:-$(cd "$(dirname "$0")/../../.." && pwd)/.context/state/pr-review}
+KIT=$(cd "$(dirname "$0")/../.." && pwd)
+# the workspace's .context/ (#74) the way every kit script finds it (kit_profile.py context), never from this
+# script's location: on a plugin install that is Claude Code's plugin cache, wiped on update. PR_REVIEW_HOME overrides.
+CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
+[ -n "${PR_REVIEW_HOME:-}" ] || [ -d "$CTX" ] || { echo "pr-scan: no workspace .context/ found ($CTX) — run from the workspace, or set PR_REVIEW_HOME" >&2; exit 2; }
+export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_HOME
 CFG=$ROOT/config.json; LEDGER=$ROOT/ledger.jsonl; touch "$LEDGER"
 # a STABLE per-user base (survives the session and the login): the 7-day run.* retention and the `latest` symlink
 # below only mean something in a directory shared across sweeps. PR_SCAN_OUT overrides.
@@ -25,7 +30,6 @@ DEEP=$(jq -r .deep_lines "$CFG"); BOTS=$(jq -c .bots "$CFG")
 AUTO_MODE=$(jq -r '.auto_approve.mode // "off"' "$CFG"); AUTO_BOTS=$(jq -c '.auto_approve.bot_authors // []' "$CFG")
 AUTO_MAXF=$(jq -r '.auto_approve.max_files // 10' "$CFG"); AUTO_MAXL=$(jq -r '.auto_approve.max_lines // 200' "$CFG")
 TRIVIAL=$(dirname "$0")/../pr-review/scripts/trivial-check.py
-KIT=$(cd "$(dirname "$0")/../.." && pwd)
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 mapfile -t REPOS < <(jq -r '.sweep_repos[]' "$CFG"); MARK=0; QUIET=0; REPO_OVERRIDE=()
 while [ $# -gt 0 ]; do case $1 in

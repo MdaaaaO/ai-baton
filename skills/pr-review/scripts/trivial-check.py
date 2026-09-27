@@ -23,11 +23,13 @@ Never posts anything. A PR is eligible only if EVERY gate passes:
 """
 import json, os, re, subprocess, sys, fnmatch, tempfile
 
-ROOT = os.environ.get("PR_REVIEW_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", ".context", "state", "pr-review"))
 _KIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
 sys.path.insert(0, os.path.join(_KIT, "context-db", "bin"))
+import kit_profile  # stdlib-only, ships with the kit
+
+# the workspace's .context/ (#74), never this script's location (the plugin cache on a plugin install)
+ROOT = os.environ.get("PR_REVIEW_HOME") or str(kit_profile.context_root() / "state" / "pr-review")
 try:
-    import kit_profile
     os.environ.update(kit_profile.gh_env())  # github.sandbox_token_prefix, if any
     REVIEW_BOT = os.environ.get("PR_WATCH_BOT_LOGIN") or kit_profile.get("github.review_bot") or ""
 except Exception:  # env store missing — no bot gate

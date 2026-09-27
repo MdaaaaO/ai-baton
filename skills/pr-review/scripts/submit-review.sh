@@ -12,7 +12,11 @@
 set -uo pipefail
 KIT="$(cd "$(dirname "$0")/../../.." && pwd)"
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
-ROOT=${PR_REVIEW_HOME:-$(cd "$(dirname "$0")/../../../.." && pwd)/.context/state/pr-review}
+# the workspace's .context/ (#74) the way every kit script finds it (kit_profile.py context), never from this
+# script's location: on a plugin install that is Claude Code's plugin cache, wiped on update. PR_REVIEW_HOME overrides.
+CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
+[ -n "${PR_REVIEW_HOME:-}" ] || [ -d "$CTX" ] || { echo "submit-review.sh: no workspace .context/ found ($CTX) — run from the workspace, or set PR_REVIEW_HOME" >&2; exit 2; }
+export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_HOME
 ME=$(jq -r .login "$ROOT/config.json"); FOOTER=$(jq -r '.footer // ""' "$ROOT/config.json"); LEDGER=$ROOT/ledger.jsonl
 AUTO_MODE=$(jq -r '.auto_approve.mode // "off"' "$ROOT/config.json"); RET=$(jq -r '.submitted_retention_days // 14' "$ROOT/config.json")
 TRIVIAL=$(dirname "$0")/trivial-check.py

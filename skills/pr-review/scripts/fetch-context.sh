@@ -7,9 +7,12 @@
 # kb-traps.md (repo KB § Known traps + sections matching touched paths), bundle.json (per-file stats, unresolved
 # threads with their last comment). Prints the manifest summary; the SKILL tells the model what to do with it.
 set -uo pipefail
-WS=$(cd "$(dirname "$0")/../../../.." && pwd)
-ROOT=${PR_REVIEW_HOME:-$WS/.context/state/pr-review}
 KIT="$(cd "$(dirname "$0")/../../.." && pwd)"
+# the workspace's .context/ (#74) the way every kit script finds it (kit_profile.py context), never from this
+# script's location: on a plugin install that is Claude Code's plugin cache, wiped on update. PR_REVIEW_HOME overrides.
+CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
+[ -n "${PR_REVIEW_HOME:-}" ] || [ -d "$CTX" ] || { echo "fetch-context.sh: no workspace .context/ found ($CTX) — run from the workspace, or set PR_REVIEW_HOME" >&2; exit 2; }
+export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_HOME
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 ME=$(jq -r .login "$ROOT/config.json"); BOTS=$(jq -c .bots "$ROOT/config.json")
 BMAXF=$(jq -r '.bundle_max_files // 60' "$ROOT/config.json"); BMAXKB=$(jq -r '.bundle_max_kb // 200' "$ROOT/config.json")
@@ -110,7 +113,7 @@ if [ "$bundle" = 1 ]; then
   bundled_head=$(find "$out/head" -type f | wc -l); bundled_base=$(find "$out/base" -type f | wc -l)
   [ -s "$ERR.blob" ] && cat "$ERR.blob" >> "$ERR"; rm -f "$ERR.blob"
   # KB traps pre-grepped: § Known traps + every section whose heading shares a word with a touched path
-  kb="$WS/.context/pr-reviews/$r.md"; : > "$out/kb-traps.md"
+  kb="$CTX/pr-reviews/$r.md"; : > "$out/kb-traps.md"
   if [ -f "$kb" ]; then
     words=$(jq -r '[.[] | .filename | split("/")[] | split(".")[0] | select(length>3)] | unique | .[]' "$out/files.json" | tr '\n' '|' | sed 's/|$//')
     awk -v words="$words" 'BEGIN{IGNORECASE=1; keep=0}

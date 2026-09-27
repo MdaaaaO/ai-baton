@@ -1,8 +1,8 @@
 # pr-review / pr-scan tooling
 
-Scripts live in `.claude/skills/pr-review/scripts/` and `.claude/skills/pr-scan/`. Their
-per-user **state** lives outside this repo, in `.context/state/pr-review/` (override with
-`PR_REVIEW_HOME`; `setup.sh` creates the dir and seeds the config):
+Scripts live in `$BATON/skills/pr-review/scripts/` and `$BATON/skills/pr-scan/`. Their
+per-user **state** lives outside this repo, in the workspace's `.context/state/pr-review/` (found through
+`kit_profile.py context` on a clone and a plugin install alike; override with `PR_REVIEW_HOME`; `setup.sh` creates the dir and seeds the config):
 
 - `config.json` — your GitHub `login`, sweep repos, freshness window, bot list, footer,
   auto-approve gate, bundle caps, `.submitted` retention. Seeded from `config.example.json` here.
