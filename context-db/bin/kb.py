@@ -10,7 +10,8 @@ Layout (all under `.context/reference/env/`, created by `kb.py init`):
   config.json          the few STRUCTURAL switches scripts branch on: `environment` (this machine's
                        environment name), tracker.kind / key_regex / url_template / mcp_tools,
                        github.org / review_bot / bots / owner_teams, slack.enabled / domain, systems.*,
-                       tz_default, domains, labels, self_assessment, diagrams
+                       tz_default, domains, labels, self_assessment, diagrams, kit.install_mode
+                       (written by setup.sh: clone | plugin | dev-checkout)
   _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
   <system>.md          one doc per system (slack, tracker, github, aws, notion, …); one `## <kind>`
                        section per fact kind; one table row per fact:
@@ -893,9 +894,10 @@ def migrate_kinds(apply: bool = True) -> list[str]:
 
 
 # Top-level config.json keys a store may leave out: absent means the kit default (commit_style.py falls back to
-# `conventional`; cost-report runs in private mode; datalake.kind is read only where systems.datalake is true).
+# `conventional`; cost-report runs in private mode; datalake.kind is read only where systems.datalake is true; `kit`
+# holds kit.install_mode, which setup.sh records — absent until it has run, and kit-health § 1 says so, #34).
 # kit_verify reads this set; `config_key_drift()` keeps blank_config() and environment-template/config.json in step.
-OPTIONAL_CONFIG_KEYS = frozenset({"commits", "cost", "datalake"})
+OPTIONAL_CONFIG_KEYS = frozenset({"commits", "cost", "datalake", "kit"})
 TEMPLATE_CONFIG = KIT / "environment-template" / "config.json"
 
 

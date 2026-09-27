@@ -356,7 +356,7 @@ class Release(unittest.TestCase):
         r = kh.Report()
         with mock.patch.object(kh.shutil, "which", return_value=gh), \
              mock.patch.object(kh, "sh", return_value=sh_result) as sh:
-            kh.release_check(r, dict(self.PLUGIN))
+            kh.release_check(r, dict(self.PLUGIN), "plugin")
         return kh, r, sh
 
     def test_plugin_newer_release_warns_with_the_update_command(self):
@@ -381,7 +381,7 @@ class Release(unittest.TestCase):
             self.assertIn("latest release unknown", r.lines[-1])
         self.assertIn("`gh` not installed", self.plugin_run((0, "", ""), None)[1].lines[-1])
 
-    def clone_run(self, remote, describe="v0.2.2"):
+    def clone_run(self, remote, describe="v0.2.2", mode="clone"):
         kh = load_kit_health()
         r = kh.Report()
 
@@ -392,7 +392,7 @@ class Release(unittest.TestCase):
                 return (0, describe, "") if describe else (128, "", "No names found")
             return (0, "", "")
         with mock.patch.object(kh, "sh", side_effect=fake):
-            kh.release_check(r, None)
+            kh.release_check(r, None, mode)
         return kh, r
 
     def test_clone_newer_tag_on_origin_warns_with_claude_sync(self):
@@ -411,6 +411,14 @@ class Release(unittest.TestCase):
         kh, r = self.clone_run((0, "a\trefs/tags/v0.2.2\n", ""), describe="")
         self.assertEqual(r.counts[kh.OK] + r.counts[kh.WARN], 0, r.lines)
         self.assertIn("cannot compare", r.lines[-1])
+
+    def test_dev_checkout_updates_with_git_pull_not_claude_sync(self):
+        # #34: the update command comes from the mode table — a dev checkout follows its own branch
+        kh, r = self.clone_run((0, "a\trefs/tags/v0.3.0\n", ""), mode="dev-checkout")
+        self.assertEqual(r.counts[kh.WARN], 1, r.lines)
+        text = r.findings[0][2]
+        self.assertIn(f"git -C {kh.KIT} pull --ff-only", text)
+        self.assertNotIn("run `make claude_sync`", text)
 
 
 if __name__ == "__main__":

@@ -25,7 +25,9 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig (#116)
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
-                        python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 on a clone
+                        python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
+                        python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
+                        python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 otherwise
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session, or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
@@ -42,7 +44,67 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 KIT = Path(__file__).resolve().parents[2]
+KIT_AS_CALLED = Path(os.path.abspath(__file__)).parents[2]  # symlinks kept: a `.claude` link to a checkout is a clone
 DEFAULT_NAME = "local"
+
+# How the kit is installed (#34) and what follows from it — the one table every mode-dependent hint reads.
+#   clone        — the workspace's `.claude/` (a git checkout, or a copy without git that sync.sh skips)
+#   plugin       — a Claude Code plugin install: no git checkout, `.claude-plugin/plugin.json` (the plugin cache)
+#   dev-checkout — any other kit copy: a git checkout not named `.claude` (a `.worktrees/kit_<topic>` worktree, a
+#                  `claude --plugin-dir` checkout) — its own branch, so it updates with git, never `make claude_sync`
+# kit_ref: how a hint names the kit for a shell in the workspace root (None = the kit's own absolute path — a plugin
+# install and a dev checkout sit outside the workspace); workspace_md: `import` = the root CLAUDE.md imports
+# `@.claude/WORKSPACE.md`, `hook` = the plugin's SessionStart hook injects it; makefile: the root Makefile does
+# `include .claude/workspace.mk`; update: the command that brings the kit to the latest release ({kit} {plugin} {market}).
+MODES: dict[str, dict] = {
+    "clone": {"kit_ref": ".claude", "workspace_md": "import", "makefile": True,
+              "update": "`make claude_sync` (or `sh $BATON/sync.sh`)"},
+    "plugin": {"kit_ref": None, "workspace_md": "hook", "makefile": False,
+               "update": "`claude plugin marketplace update {market} && claude plugin update {plugin}@{market}`, restart Claude Code"},
+    "dev-checkout": {"kit_ref": None, "workspace_md": "hook", "makefile": False,
+                     "update": "`git -C {kit} pull --ff-only` on its branch (a development checkout; `make claude_sync` "
+                               "drives only the workspace's `.claude/` clone)"},
+}
+
+
+def install_mode(kit: Path | None = None) -> str:
+    """`clone` | `plugin` | `dev-checkout` — the one rule (#34), used by setup.sh (`kit_profile.py install-mode`) and
+    every Python caller: a git checkout is a clone when it is the workspace's `.claude/`, else a dev checkout; without
+    git, `.claude/` is still a clone (a copy sync.sh skips), a dir with the plugin manifest is a plugin install, and
+    anything else is a dev checkout."""
+    kit = kit or KIT
+    name = KIT_AS_CALLED.name if kit == KIT else kit.name  # the name the workspace uses, not a symlink's target
+    if (kit / ".git").exists():  # a directory, or a worktree's `.git` file
+        return "clone" if name == ".claude" else "dev-checkout"
+    if name == ".claude":
+        return "clone"
+    return "plugin" if (kit / ".claude-plugin" / "plugin.json").is_file() else "dev-checkout"
+
+
+def mode_hint(key: str, mode: str | None = None, kit: Path | None = None, **fmt: str) -> str:
+    """One entry of `MODES` for `mode` (default: this kit's), formatted: `kit_ref` resolves None to the kit's path,
+    `update` fills `{kit}` and the caller's `{plugin}` / `{market}`."""
+    kit = kit or KIT
+    mode = mode or install_mode(kit)
+    v = MODES[mode][key]
+    if key == "kit_ref":
+        return v or str(kit)
+    return v.format(kit=kit, **fmt) if isinstance(v, str) else v
+
+
+def mode_to_record(recorded: str, detected: str, root: Path) -> str:
+    """The install mode the env store should hold: the detected one — except a dev checkout run inside a workspace
+    whose recorded mode is `clone` and whose `.claude/` clone is still there (a kit worktree beside the installed
+    kit), which keeps `clone`."""
+    if detected == "dev-checkout" and recorded == "clone" and (root / ".claude" / ".git").exists():
+        return "clone"
+    return detected
+
+
+def recorded_install_mode() -> str:
+    """`kit.install_mode` as setup.sh recorded it in the env store, "" when not recorded (or no store)."""
+    kit = env_config().get("kit")
+    return str(kit.get("install_mode") or "").strip() if isinstance(kit, dict) else ""
 
 
 def context_root() -> Path:
@@ -62,7 +124,7 @@ def context_root() -> Path:
     proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
     if proj and (Path(proj) / ".context").is_dir():
         return Path(proj) / ".context"
-    if (KIT / ".git").exists() or not (KIT / ".claude-plugin" / "plugin.json").is_file():
+    if install_mode(KIT) != "plugin":
         return KIT.parent / ".context"  # a checkout: its store is beside it or named by a variable, never guessed
     home = Path.home().resolve()
     try:
@@ -385,7 +447,7 @@ def plugin_install(kit: Path | None = None, environ: dict | None = None) -> dict
     where git cannot (#3) and notice a hand edit in the cache (#11)."""
     kit = kit or KIT
     env = os.environ if environ is None else environ
-    if (kit / ".git").exists():
+    if install_mode(kit) != "plugin":
         return None
     try:
         manifest = json.loads((kit / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
@@ -489,6 +551,20 @@ def main(argv: list[str]) -> int:
     elif cmd == "workspace-rules":
         # the plugin's SessionStart hook: WORKSPACE.md on stdout (→ the session's context) for a plugin-path workspace (#3)
         sys.stdout.write(workspace_rules())
+    elif cmd == "install-mode":
+        # clone | plugin | dev-checkout (#34); --to-record: the mode setup.sh writes to `kit.install_mode`
+        detected = install_mode()
+        if "--to-record" in argv[2:]:
+            print(mode_to_record(recorded_install_mode(), detected, context_root().parent))
+        else:
+            print(detected)
+    elif cmd == "mode-hint":
+        # one MODES entry for this kit's mode: kit_ref (how a workspace shell names the kit) | workspace_md | makefile
+        v = mode_hint(argv[2]) if len(argv) > 2 and argv[2] in ("kit_ref", "workspace_md", "makefile") else None
+        if v is None:
+            print("mode-hint: kit_ref | workspace_md | makefile", file=sys.stderr)
+            return 2
+        print(str(v).lower() if isinstance(v, bool) else v)
     elif cmd == "plugin":
         # `repo commit version` of a plugin install, nothing (exit 1) on a clone
         p = plugin_install()

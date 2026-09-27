@@ -63,7 +63,8 @@ Always run `index` after adding or editing a doc's frontmatter.
 
 ```text
 usage: kb.py [-h]
-             {get,set,rm,list,values,config,config-set,init,path,migrate,discover,stale} ...
+             {get,set,rm,list,values,config,config-set,init,path,migrate,discover,stale}
+             ...
 
 kb.py — the environment fact store: `.context/reference/env/`.
 
@@ -105,7 +106,9 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig (#116)
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
-                        python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 on a clone
+                        python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
+                        python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
+                        python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 otherwise
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session, or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
