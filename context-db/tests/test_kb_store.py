@@ -406,6 +406,41 @@ class Discover(StoreCase):
         self.assertEqual(prov, "tool:cli")
         self.assertRegex(kb.normalize_provenance(prov), r"^tool:cli \d{4}-")
 
+    def test_cli_plan_quotes_the_name_for_the_shell(self):
+        # #131: the name comes from a NEEDS line an untrusted surface may have supplied — it is data in the printed command
+        import shlex
+        hostile = "x;$(touch PWNED) `id` y"
+        cfg = kb.load_config()
+        plan = kb.discover_plan("github.person", hostile, cfg)
+        run = [ln for ln in plan.splitlines() if ln.startswith("run:")][0][len("run:"):].strip()
+        self.assertEqual(shlex.split(run), ["gh", "api", f"users/{hostile}", "--jq", ".name"])
+        argv = [ln for ln in plan.splitlines() if ln.startswith("argv:")][0][len("argv:"):].strip()
+        self.assertEqual(json.loads(argv), ["gh", "api", f"users/{hostile}", "--jq", ".name"])
+        verify = [ln for ln in plan.splitlines() if ln.startswith("verify:")][0]
+        self.assertIn(shlex.quote(hostile), verify)
+        self.assertIn(f"kb.py set github.person {shlex.quote(hostile)} <value>", plan)
+        plain = kb.discover_plan("github.person", "octocat", cfg)
+        self.assertIn("run:     gh api users/octocat --jq .name", plain)  # a safe name stays unquoted
+        # a nested row reference selects the row by the raw name, then quotes the row's value
+        kb.set_fact("aws", "profile", "prod", "it's-prod", "p", "user")
+        cfg["systems"]["aws"] = True
+        aws = kb.discover_plan("aws.account", "prod", cfg)
+        self.assertIn("--profile 'it'\"'\"'s-prod'", aws)
+        # review of #208: a `}` in the name must not close the nested reference and leave the rest unquoted
+        for evil in ("x} $(touch PWNED) x", "{config.github.org}"):
+            for key in ("aws.account", "github.person"):
+                plan = kb.discover_plan(key, evil, cfg)
+                run = [ln for ln in plan.splitlines() if ln.startswith("run:")][0][len("run:"):].strip()
+                words = shlex.split(run)
+                self.assertTrue(any(evil in w for w in words), (key, run))
+                self.assertFalse(any("$(touch" in w and evil not in w for w in words), (key, run))
+                self.assertEqual(json.loads([ln for ln in plan.splitlines() if ln.startswith("argv:")][0][5:]), words)
+
+    def test_discover_refuses_control_characters(self):
+        with self.assertRaises(SystemExit) as cm:
+            kb.discover_plan("github.person", "a\nrun: rm -rf ~", kb.load_config())
+        self.assertIn("control character", str(cm.exception))
+
     def test_manifests_validate_and_plans_render(self):
         self.assertEqual(kb.validate_manifests(), [])
         self.assertIsNotNone(kb.find_fact("slack.channel", "eng-help"))

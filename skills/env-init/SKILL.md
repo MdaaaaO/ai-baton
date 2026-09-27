@@ -2,8 +2,8 @@
 name: env-init
 description: Fill or refresh this machine's env fact store from the discovery manifests: run the named tool per missing or stale fact, verify, write back with provenance, and ask the user once for what no tool settles. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact.
 metadata:
-  version: "6"
-  updated: "2026-09-26"
+  version: "7"
+  updated: "2026-09-27"
   reviewed: "2026-09-26"
 user-invocable: true
 ---
@@ -55,7 +55,8 @@ secret, and asks the user only for what no tool can settle — once, batched.
    - **MCP tool** (the name in the plan's `call:` line — the manifests hold the concrete names, this skill
      never does): call it with the rendered args. If the tool is not in this session's roster, that system's facts go
      to the user round (step 4) with the note *tool unavailable here* — never substitute another tool.
-   - **`cli`**: run the rendered shell command exactly as the `call:` line prints it, with the `github.sandbox_token_prefix`
+   - **`cli`**: run the rendered shell command exactly as the `run:` line prints it (every filled value is
+     already shell-quoted; `argv:` is the same command as a list, for a caller without a shell), with the `github.sandbox_token_prefix`
      placeholder applied where one is set (`eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"`).
      Exit status is checked separately from the output; an error is a failed lookup, not an empty answer.
    - **`roster`**: the fact is "does this session have tool X" (a `<system>.enabled` switch) — answer from

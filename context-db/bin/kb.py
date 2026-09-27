@@ -569,18 +569,27 @@ def applicable(m: dict, cfg: dict) -> str:
     return ""
 
 
-def render(template, name: str, cfg: dict):
-    """Fill `{name}`, `{config.<key>[i]}` and `{row.<system>.<kind>.<name>}` in an args template."""
+def render(template, name: str, cfg: dict, shell: bool = False):
+    """Fill `{name}`, `{config.<key>[i]}` and `{row.<system>.<kind>.<name>}` in an args template.
+    `shell=True` (a command line or prose quoting one): every filled value is `shlex.quote`d — the name comes from a
+    `NEEDS` line an untrusted surface may have supplied, so it must never be read by the shell as code (#131)."""
     if isinstance(template, dict):
-        return {k: render(v, name, cfg) for k, v in template.items()}
+        return {k: render(v, name, cfg, shell) for k, v in template.items()}
     if isinstance(template, list):
-        return [render(v, name, cfg) for v in template]
+        return [render(v, name, cfg, shell) for v in template]
     if not isinstance(template, str):
         return template
-    s = template.replace("{name}", name or "<name>")
+    q = shlex.quote if shell else (lambda v: v)
 
     def sub(m: re.Match) -> str:
-        ref = m.group(1)
+        # ONE pass over the template: a filled value is never scanned again, so a name carrying `}` or `{config.…}`
+        # cannot re-open a placeholder; an unset placeholder names the fact, so it is quoted like a value.
+        if m.group("name") is not None:
+            return q(name) if name else "<name>"
+        if m.group("nested") is not None:   # `{row.aws.profile.{name}}`: the raw name selects the row
+            ref = f"{m.group('nested')}{name or '<name>'}{m.group('tail')}"
+        else:
+            ref = m.group("ref")
         if ref.startswith("config."):
             path, idx = ref[len("config."):], None
             mi = re.match(r"^(.*)\[(\d+)\]$", path)
@@ -589,13 +598,14 @@ def render(template, name: str, cfg: dict):
             v = dotted_get(cfg, path)
             if idx is not None:
                 v = v[idx] if isinstance(v, list) and idx < len(v) else None
-            return str(v) if v not in (None, "", [], {}) else f"<{path} unset — kb.py discover {path}>"
+            return q(str(v)) if v not in (None, "", [], {}) else q(f"<{path} unset — kb.py discover {path}>")
         parts = ref[len("row."):].split(".", 2)
         if len(parts) == 3:
             v = get(*parts)
-            return v if v else f"<{parts[0]}.{parts[1]} {parts[2]} unset — kb.py discover {parts[0]}.{parts[1]} {parts[2]}>"
-        return m.group(0)
-    return re.sub(r"\{((?:config|row)\.[^{}]+)\}", sub, s)
+            return q(v) if v else q(f"<{parts[0]}.{parts[1]} {parts[2]} unset — kb.py discover {parts[0]}.{parts[1]} {parts[2]}>")
+        return q(m.group(0)) if m.group("nested") is not None else m.group(0)
+    return re.sub(r"(?P<name>\{name\})|\{(?P<nested>row\.[^{}]*)\{name\}(?P<tail>[^{}]*)\}|\{(?P<ref>(?:config|row)\.[^{}]+)\}",
+                  sub, template)
 
 
 def cli_provenance(template_cmd: str, rendered_cmd: str) -> str:
@@ -610,10 +620,13 @@ def cli_provenance(template_cmd: str, rendered_cmd: str) -> str:
 
 
 def discover_plan(key: str, name: str, cfg: dict) -> str:
+    if any(ord(c) < 32 or ord(c) == 127 for c in f"{key}{name}"):
+        # a newline would print a forged `run:` line into the plan the caller executes (#131)
+        raise SystemExit(f"kb: discover refuses a key or name with a control character: {json.dumps(f'{key} {name}'.strip())}")
     hit = find_fact(key, name, cfg)
     label = f"{key} {name}".strip()
     if hit is None:
-        raise SystemExit(f"kb: no discovery manifest covers '{label}' — ask the user, then `kb.py set {label} <value> --from user`; "
+        raise SystemExit(f"kb: no discovery manifest covers '{label}' — ask the user, then `kb.py set {key} {shlex.quote(name) if name else '<name>'} <value> --from user`; "
                          f"to make it discoverable add an entry to context-db/discovery/<system>.json (schema: its README.md)")
     m, f = hit
     target = f.get("target", "row")
@@ -631,9 +644,14 @@ def discover_plan(key: str, name: str, cfg: dict) -> str:
         cur = dotted_get(cfg, key)
         if cur not in (None, "", [], {}):
             out.append(f"current: {cur if isinstance(cur, str) else json.dumps(cur, ensure_ascii=False)}")
-    tool, args = f["tool"], render(f.get("args", {}), name, cfg)
+    tool = f["tool"]
+    args = render(f.get("args", {}), name, cfg, shell=tool == "cli")
     if tool == "cli":
         out.append(f"run:     {args.get('cmd')}")
+        try:  # the same command as an argv list, for a caller that runs it without a shell
+            out.append(f"argv:    {json.dumps(shlex.split(str(args.get('cmd', ''))), ensure_ascii=False)}")
+        except ValueError:
+            pass
         prov = cli_provenance(str(f.get("args", {}).get("cmd", "")), str(args.get("cmd", "")))
     elif tool == "roster":
         out.append(f"check:   is `{args.get('tool')}` among this session's tools → true / false")
@@ -650,9 +668,9 @@ def discover_plan(key: str, name: str, cfg: dict) -> str:
     else:
         out.append(f"call:    {tool} {json.dumps(args, ensure_ascii=False)}")
         prov = f"tool:{tool}"
-    out.append(f"verify:  {render(f['verify'], name, cfg)}")
+    out.append(f"verify:  {render(f['verify'], name, cfg, shell=tool == 'cli')}")
     if f.get("note"):
-        out.append(f"note:    {render(f['note'], name, cfg)}")
+        out.append(f"note:    {render(f['note'], name, cfg, shell=tool == 'cli')}")
     ttl = f.get("ttl_days", 0)
     out.append(f"ttl:     {'never stale' if not ttl else f'{ttl} days'}")
     if target == "row":
