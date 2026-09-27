@@ -20,8 +20,8 @@ SH = shutil.which("sh") or "/bin/sh"
 def _env(home: Path, path: str | None = None) -> dict:
     env = {k: v for k, v in os.environ.items() if "proxy" not in k.lower() and not k.startswith("GIT_")}
     env.update(HOME=str(home), GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0",
-               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
-               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
+               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t")
     if path is not None:
         env["PATH"] = path
     return env
