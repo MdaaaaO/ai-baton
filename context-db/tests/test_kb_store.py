@@ -492,3 +492,35 @@ class ConfigSetShapes(StoreCase):
         finally:
             kit_profile.env_config.cache_clear()
             kit_profile.load.cache_clear()
+
+
+class NoSharedMutation(StoreCase):
+    """The cached config is never shared with callers; `set` compares what the table will hold."""
+
+    def reset(self):
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+
+    def test_a_caller_editing_the_config_does_not_change_the_next_read(self):
+        self.cli("config-set", "tracker.kind", "github")
+        self.reset()
+        try:
+            first = kit_profile.load()
+            first["tracker"]["kind"] = "edited"
+            first.setdefault("systems", {})["slack"] = True
+            kit_profile.env_config()["tracker"] = None
+            got = kit_profile.get("tracker")
+            got["kind"] = "edited-too"
+            self.assertEqual(kit_profile.load()["tracker"]["kind"], "github")
+            self.assertEqual(kit_profile.get("tracker.kind"), "github")
+            self.assertIs(kit_profile.load().get("systems", {}).get("slack"), False)
+            self.assertIsInstance(kit_profile.env_config()["tracker"], dict)
+        finally:
+            self.reset()
+
+    def test_set_with_surrounding_spaces_is_unchanged_on_rerun(self):
+        ch = "C0" + "AB12CD3"  # assembled: fact-shaped
+        self.assertEqual(kb.set_fact("slack", "channel", "eng", f" {ch} ", learned="user"), "added")
+        self.assertEqual(kb.get("slack", "channel", "eng"), ch)
+        self.assertEqual(kb.set_fact("slack", "channel", "eng", f" {ch} "), "unchanged")
+        self.assertEqual(kb.set_fact("slack", "channel", "eng", ch), "unchanged")

@@ -298,6 +298,8 @@ def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", l
         p.write_text(new_doc(system, DEFAULT_KINDS.get(system, [kind])), encoding="utf-8")
     lines, facts = parse_doc(system)
     explicit = bool(learned.strip())
+    # compare what the table will hold, not the raw input: a cell is trimmed and escaped, so " C123 " is "C123"
+    value, purpose = unesc(esc(value)), unesc(esc(purpose))
     learned = learned if keep_learned and learned else normalize_provenance(learned)
     new_row = f"| {esc(name)} | {esc(value)} | {esc(purpose)} | {esc(learned)} |"
     existing = facts.get(kind, {}).get(name)

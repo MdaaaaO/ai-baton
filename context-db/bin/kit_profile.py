@@ -34,6 +34,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 """
 from __future__ import annotations
+import copy
 import json
 import os
 import re
@@ -159,9 +160,8 @@ def section(cfg: dict, name: str) -> dict:
     return v
 
 @lru_cache(maxsize=None)
-def env_config() -> dict:
-    """config.json as written, `{}` when there is no store. Invalid JSON is a one-line error naming the file (exit 1),
-    never a traceback in every importer."""
+def _env_config() -> dict:
+    """config.json as written (cached, shared: never hand this object out — `env_config()` copies it)."""
     p = ENV_DIR / "config.json"
     if not p.is_file():
         return {}
@@ -171,6 +171,16 @@ def env_config() -> dict:
         raise SystemExit(f"{p}: invalid JSON — {e}; fix it (or move it aside and `python3 $BATON/context-db/bin/kb.py init --blank`)")
     except OSError as e:
         raise SystemExit(f"{p}: cannot read — {e}")
+
+
+def env_config() -> dict:
+    """config.json as written, `{}` when there is no store — a private copy per call, so a caller that edits it never
+    changes what the next reader in the process sees. Invalid JSON is a one-line error naming the file, never a
+    traceback in every importer."""
+    return copy.deepcopy(_env_config())
+
+
+env_config.cache_clear = _env_config.cache_clear  # type: ignore[attr-defined]  # the tests' reset hook, as before
 
 
 @lru_cache(maxsize=None)
@@ -234,13 +244,19 @@ def _project_tables(cfg: dict) -> None:
         section(cfg, "github")["display_names"] = {**(section(cfg, "github").get("display_names") or {}), **vals(rows("github", "person"))}
 
 
-@lru_cache(maxsize=None)
 def load(strict: bool = True) -> dict:
     """The merged config: env/config.json with the fact tables projected onto the legacy keys. With no store: `strict`
     (the default — a script that needs the configuration) raises a one-line SystemExit; `strict=False` (what
     `get()`, `tz()`, `zone()` use, so the session scripts and the heartbeat run before env-init) returns `{}`
-    after ONE stderr warning per process."""
-    cfg = {k: v for k, v in env_config().items() if not k.startswith("_")}
+    after ONE stderr warning per process. Each call returns a private copy of the cached merge: a caller may edit it."""
+    return copy.deepcopy(_load(strict))
+
+
+@lru_cache(maxsize=None)
+def _load(strict: bool = True) -> dict:
+    """The cached merge behind `load()`, built once from a deep copy of config.json — the projection and the alias
+    block below edit this copy, never the parsed file. Read-only for `get()`; everyone else goes through `load()`."""
+    cfg = {k: v for k, v in copy.deepcopy(_env_config()).items() if not k.startswith("_")}
     if not cfg:
         if strict:
             raise SystemExit(f"no configuration: no env store at {ENV_DIR} — run "
@@ -259,6 +275,9 @@ def load(strict: bool = True) -> dict:
     return cfg
 
 
+load.cache_clear = _load.cache_clear  # type: ignore[attr-defined]  # the tests' reset hook, as before
+
+
 def domains() -> list[str]:
     out: list[str] = []
     for dom in env_config().get("domains") or []:
@@ -269,12 +288,12 @@ def domains() -> list[str]:
 
 def get(path: str, default=None):
     """Dotted lookup: get('tracker.key_regex'). Without an env store every key is `default` (one warning)."""
-    cur: object = load(strict=False)
+    cur: object = _load(strict=False)  # walk the cached merge; an object or list is copied on the way out
     for part in path.split("."):
         if not isinstance(cur, dict) or part not in cur:
             return default
         cur = cur[part]
-    return cur
+    return copy.deepcopy(cur) if isinstance(cur, (dict, list)) else cur
 
 
 # Identity: the user's own values, never the environment's. Two sources, one reader. On the plugin path

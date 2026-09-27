@@ -42,8 +42,8 @@ class KitProfile(unittest.TestCase):
             env = Path(tmp) / ".context" / "reference" / "env"
             env.mkdir(parents=True)
             (env / "config.json").write_text(json.dumps({"profile": "old-name", "tracker": {"kind": "github"}, "systems": {}}), encoding="utf-8")
-            code = ("import kit_profile as k; c = k.load(strict=False); "
-                    "print(k.name(), c['environment'], k.tz.__code__.co_argcount, k.get.__code__.co_argcount, k.load.__wrapped__.__code__.co_varnames[:1])")
+            code = ("import inspect, kit_profile as k; c = k.load(strict=False); "
+                    "print(k.name(), c['environment'], k.tz.__code__.co_argcount, k.get.__code__.co_argcount, tuple(inspect.signature(k.load).parameters)[:1])")
             r = subprocess.run([sys.executable, "-c", code], cwd=BIN, capture_output=True, text=True,
                                env={**os.environ, "CONTEXT_ROOT": str(Path(tmp) / ".context")})
             self.assertEqual(r.returncode, 0, r.stderr)
