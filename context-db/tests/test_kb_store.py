@@ -460,3 +460,35 @@ class Discover(StoreCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfigSetShapes(StoreCase):
+    """config-set refuses what the template says is wrong; readers survive a null section (--force)."""
+
+    def test_refused_shapes_and_keys(self):
+        for key, val in (("systems", "notanobject"), ("systems.slack", "yes"), ("systems.nosuch", "true"),
+                         ("tracker", "null"), ("trackr.kind", "github"), ("domains", '"one"'),
+                         ("systems", '{"jirra": true}'), ("systems", '{"slack": "yes"}')):
+            rc, _out, err = self.cli("config-set", key, val)
+            self.assertEqual(rc, 2, (key, val, err))
+            self.assertIn("config-set refused", err)
+        self.assertEqual(kb.load_config().get("systems", {}).get("slack"), False)  # nothing was written
+
+    def test_accepted_values(self):
+        for key, val in (("systems.slack", "true"), ("environment", "ci"), ("leaks.markers", '["x"]'),
+                         ("cost.columns.user", '"u"'), ("tracker.transitions.done", "31"), ("tracker.key_regex", "(#\\d+)")):
+            rc, _out, err = self.cli("config-set", key, val)
+            self.assertEqual(rc, 0, (key, val, err))
+
+    def test_force_writes_and_readers_survive_a_null_section(self):
+        rc, _out, err = self.cli("config-set", "tracker", "null", "--force")
+        self.assertEqual(rc, 0, err)
+        self.assertIsNone(kb.load_config()["tracker"])
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+        try:
+            self.assertIsNone(kit_profile.get("tracker.kind"))
+            self.assertIsInstance(kit_profile.load(), dict)
+        finally:
+            kit_profile.env_config.cache_clear()
+            kit_profile.load.cache_clear()
