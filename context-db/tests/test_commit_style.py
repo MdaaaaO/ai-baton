@@ -110,10 +110,12 @@ class ExitCodes(BlankStore):
         return subprocess.run([sys.executable, str(BIN / "commit_style.py"), *args], input=stdin, capture_output=True,
                               text=True, env=self.env)
 
-    def test_a_hash_subject_is_kept_and_comments_are_dropped(self):
-        self.assertEqual(cs.check_message("#123 fix crash\n", "free"), [])
+    def test_comment_lines_follow_git_and_core_commentchar(self):
+        # git's cleanup=strip drops EVERY line starting with the comment char, so the hook must too (review of #224):
+        # a `#123 …` subject is gone after git's cleanup; with core.commentChar=';' it is a subject
+        self.assertEqual(cs.check_message("#123 fix crash\n", "free"), ["empty message"])
+        self.assertEqual(cs.check_message("#123 fix crash\n; a comment\n", "free", comment=";"), [])
         self.assertEqual(cs.check_message("fix: x\n\n# Please enter the message\n#\n", "conventional"), [])
-        self.assertEqual(cs.check_message("# only a comment\n#\n", "free"), ["empty message"])
 
     def test_a_broken_commits_override_is_exit_2(self):
         kb.save_config({**kb.load_config(), "commits": {"default": "shouty"}})

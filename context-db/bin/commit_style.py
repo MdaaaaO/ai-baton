@@ -178,9 +178,9 @@ def comment_char(d: Path | None) -> str:
 
 
 def check_message(text: str, style: str, comment: str = "#") -> list[str]:
-    # git's comment lines are the comment char followed by a space or nothing (`# Please enter…`, a bare `#`);
-    # `#123 fix crash` is a subject (a GitHub key first) and is kept
-    lines = [ln for ln in text.splitlines() if not (ln == comment or ln.startswith(comment + " "))]
+    # exactly git's rule (`cleanup=strip`, any editor-driven commit): EVERY line starting with the comment char goes, so
+    # a `#123 fix` subject would be stripped by git too — a repo that wants `#`-first subjects sets core.commentChar
+    lines = [ln for ln in text.splitlines() if not ln.startswith(comment)]
     while lines and not lines[0].strip():
         lines.pop(0)
     if not lines:
