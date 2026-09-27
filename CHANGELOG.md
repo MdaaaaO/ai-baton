@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.4.1 (2026-09-27)
+
+
+### Bug Fixes
+
+* **skills:** no leak flood on a fresh --personal workspace (#118) ([#119](https://github.com/MdaaaaO/ai-baton/issues/119)) ([da4a98e](https://github.com/MdaaaaO/ai-baton/commit/da4a98e56267d07978c8ebea9115ff50fba6bb12))
+
+
+### Documentation
+
+* **skills:** triage names Agent among its denied tools ([#117](https://github.com/MdaaaaO/ai-baton/issues/117)) ([33e1cfa](https://github.com/MdaaaaO/ai-baton/commit/33e1cfa6b5c8eb549f9f47351c2debc07c501987))
+
 ## 0.4.0 (2026-09-27)
 
 
