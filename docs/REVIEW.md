@@ -25,14 +25,16 @@ their `requires` sets and the lines pre-flagged for you. Read it first; do not r
    prefix); the owner's projects or any repository but this kit named as an example (use `<owner>/<repo>`); employer,
    org, team, channel or workspace names; dated anecdotes about a workplace incident ("seen on …", "after the
    <incident> outage"); a ticket or PR reference into another repository; an attribution to a third party or their
-   private material ("adapted from a colleague's `<repo>`", a handle, a private repo or skill name); a real number or
-   slug behind a placeholder prefix (examples use `KEY-123` / `KEY-456` / `key-123-<slug>`: tier 0 flags any other
-   number, the slug's words are yours to judge); a concrete system (a tracker, chat, warehouse, orchestrator, cloud,
-   review tool) named in a unit whose `metadata.requires` lacks that capability — the evidence pre-flags the
-   vocabulary, you decide whether the unit assumes the system or merely uses the word. **Not a finding:** the kit
-   owner's own provenance line `Owner decision (<date>): "<the rule, quoted>"` that names no person, workplace,
-   ticket or incident; a placeholder (`<owner>`, `acme.…` in a template); the kit's own repository; a tool the kit
-   installs.
+   private material ("adapted from a colleague's `<repo>`", a handle, a private repo or skill name); a team or org
+   name in a file header; an install-specific MCP tool id (`mcp__claude_ai_<connector>__<tool>`: the connector name
+   is one install's) or a specific sandbox product's CLI, paths or variables (tier 0 flags the id and the CLI name; a
+   product's file path or variable is yours to see); a real number or slug behind a placeholder prefix (examples use
+   `KEY-123` / `KEY-456` / `key-123-<slug>`: tier 0 flags any other number, the slug's words are yours to judge); a
+   concrete system (a tracker, chat, warehouse, orchestrator, cloud, review tool) named in a unit whose
+   `metadata.requires` lacks that capability — the evidence pre-flags the vocabulary, you decide whether the unit
+   assumes the system or merely uses the word. **Not a finding:** the kit owner's own provenance line `Owner decision
+   (<date>): "<the rule, quoted>"` that names no person, workplace, ticket or incident; a placeholder (`<owner>`,
+   `acme.…` in a template); the kit's own repository; a tool the kit installs.
    Every leak finding says where the value belongs instead (which env-store key or table, `environment.md`, a local
    doc, a placeholder) so the fix is mechanical.
 2. **Unfollowable or contradicting instructions.** A step a session cannot carry out on some machine (a script, flag,
