@@ -13,7 +13,7 @@ shared list `leak_shapes.py`); a changed skill or agent without a higher `metada
 on or after the base's, and a new `docs/CHANGELOG.md` line naming it (wording-only PRs carry the `wording` label or
 `[skip-bump]` — the author's visible claim, which you may question); frontmatter schema, description budget,
 referenced scripts and flags, always-on file budgets, plugin manifests (`kit_verify.py`); the unittest suite;
-`py_compile`, `bash -n`. The evidence file (`.review/evidence.md`) says whether tier 0 passed and lists the units,
+`py_compile`, `bash -n`. The same shapes also run over **every tracked file** (`review_gate.py --tree`, on every PR and push to `main`), so a leak that reached `main` without a PR diff (a release commit, a squash) still fails CI. The evidence file (`.review/evidence.md`) says whether tier 0 passed and lists the units,
 their `requires` sets and the lines pre-flagged for you. Read it first; do not re-derive it.
 
 ## 2. The four lenses — what only a reader can see

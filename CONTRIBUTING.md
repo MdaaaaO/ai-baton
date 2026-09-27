@@ -59,6 +59,18 @@ Every script gets a `unittest` in `context-db/tests/`, and every fix gets a regr
 
 A wording-only PR bumps nothing. Mark it with the `wording` label or put `[skip-bump]` in the title.
 
+**Placeholders only.** The kit reads the same on every machine, so an example never carries a real value:
+
+| Example of | Write | CI enforces |
+|---|---|---|
+| ticket key | `KEY-123`, `KEY-456`, `ABC-123` (a GitHub issue: `#42`) | any other number behind `KEY-`/`ABC-`, any other key shape |
+| slug or file name | `<slug>`, `key-123-<slug>` | a number other than 123/456 in `key-<n>-…`; the slug's words are the reviewer's |
+| repository, org, host | `<owner>/<repo>`, `acme/widgets`, `acme.example.com` | org hosts, `<org>/<repo>` paths from your env store |
+| person, team, employer | `<user>`, `<team>` | nothing: the reviewer's leak-by-meaning lens, and your own `leaks.markers` |
+| date | a kit release date | nothing: a dated workplace anecdote is a leak by meaning |
+
+`make -C context-db review-gate-tree` runs the same shapes over the whole tree before you push.
+
 Writing a skill? Start from [`docs/authoring.md`](docs/authoring.md), the checklist, and copy the scaffold in
 `docs/templates/skill/`.
 
