@@ -61,9 +61,8 @@ Specs: `docs/env-facts.md`, `docs/new-environment.md`.
   ownership in one `SendMessage` before editing — a worktree isolates branch/HEAD, not directory access.
 - **PR watches:** one multi-PR `pr-watch` Monitor per repo per session; every open PR has exactly one
   watcher across sessions. Watches die with their session — the successor re-arms them at startup.
-- **Kit changes are PR-only.** `.claude/` stays on `main` and is only fast-forwarded (`make claude_sync`);
-  edit the kit in `.worktrees/kit_<topic>` off `origin/main`, open a PR, let the user merge
-  (`docs/sync.md`). `.context/` content is local, never synced.
+- **Kit changes are PR-only.** The kit checkout (`.claude/`, or a clone on a plugin install) stays on `main`;
+  edit in `.worktrees/kit_<topic>` off `origin/main`, open a PR, let the user merge (`CONTRIBUTING.md`). `.context/` content is local, never synced.
 
 ## Skills
 

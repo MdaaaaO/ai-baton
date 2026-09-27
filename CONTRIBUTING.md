@@ -10,7 +10,7 @@ through an issue and a reviewed PR.
 - **Title the PR as a Conventional Commit**, for example `feat(pr-open): add the diagram plan`. The title becomes the
   squash commit.
 - **Start the PR body with `Closes #N`**, or with `Refs #N` for one step of a larger issue.
-- **Run `make -C .claude/context-db ci`** before you push. It is the same job CI runs, and it needs no setup.
+- **Run `make -C context-db ci` in your worktree** before you push. It is the same job CI runs, and it needs no setup.
 - **Bump a skill whose behaviour changes.** Raise `metadata.version` and add one line to the top of
   [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 - **Keep machine values out of the kit.** No ids, hosts, org names or people. They belong in the env store.
@@ -22,12 +22,26 @@ applies: **you must understand what you submit, whoever or whatever wrote it.**
 
 ## Development setup
 
+Develop in a worktree of a kit checkout, never in the checkout itself and never under the plugin cache
+(`$BATON` on a plugin install, overwritten on every update). Which checkout depends on how you installed the kit:
+
+| install | the kit checkout | once |
+|---|---|---|
+| clone (`.claude/` is the kit) | `.claude` | nothing: `sync.sh` sets the git hooks |
+| plugin | a plain clone beside your repos: `git clone https://github.com/MdaaaaO/ai-baton` | `git -C ai-baton config core.hooksPath hooks` (nothing else installs the hooks there) |
+
+Then, from the workspace root, with `<checkout>` from the table:
+
 ```sh
-git -C .claude worktree add ../.worktrees/kit_<topic> -b <topic> origin/main
+git -C <checkout> worktree add ../.worktrees/kit_<topic> -b <topic> origin/main
 cd .worktrees/kit_<topic>
 make -C context-db ci                                 # validator, tests, compile and link checks
 make -C context-db verify-skill UNIT=skills/<name>    # one skill only
 ```
+
+A session runs the installed kit, not your branch. To try a branch in a session, start Claude Code from the
+workspace root (project settings load from the start directory, not from the worktree) with
+`claude --plugin-dir .worktrees/kit_<topic>`, or use a clone install.
 
 The kit checkout itself stays on a clean `main`. `hooks/pre-push` refuses any push to `main`, and
 `hooks/commit-msg` checks every commit subject. Tests use the standard library only and need no network.

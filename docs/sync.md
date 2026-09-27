@@ -21,6 +21,9 @@ issue → branch → PR → merge on GitHub → `make claude_sync` on each clone
 `SessionEnd` hook (the full model — issue per PR,
 checks, Claude review, labels — is [`CONTRIBUTING.md`](../CONTRIBUTING.md)):
 
+The worktree comes off your kit checkout — `.claude` here, a plain clone of the repo on a plugin install
+([`CONTRIBUTING.md`](../CONTRIBUTING.md#development-setup) § Development setup has both):
+
 ```
 git -C .claude worktree add ../.worktrees/kit_<topic> -b <topic> origin/main
 # edit there, commit (unsigned is fine; subject = Conventional Commits, hooks/commit-msg enforces it), then
