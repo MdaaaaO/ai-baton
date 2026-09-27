@@ -62,7 +62,9 @@ lists the vocabulary.
 `self_assessment`, `diagrams` (pr-open's per-repo diagram overlays), `commits` (commit-subject style, `commit-style.md`), `datalake`, `cost` (cost-report's spend table,
 identity, phases — optional, absent = private mode), `datalake.kind` (warehouse vendor — optional, picks the
 `datalake-<vendor>` manifest), `kit.install_mode` (`clone`|`plugin`|`dev-checkout` — written by `setup.sh`, never by
-hand; kit-health § 1 compares it with how the kit actually runs, #34), plus `environment` (this
+hand; kit-health § 1 compares it with how the kit actually runs, #34), `kit.sandbox_markers` (optional: absolute
+paths or environment-variable names whose presence means this machine runs in a sandbox, so kit-health warns when
+`github.sandbox_token_prefix` is empty there; absent = no sandbox check, #94), plus `environment` (this
 environment's name, a lowercase slug) and `domains` (extra `.context/` folders). Template with every
 key: `.claude/environment-template/config.json`; `kit-verify` checks the store against it.
 Everything that is an id or a name is a table row, not a config key.

@@ -133,7 +133,7 @@ pre-2026-09-26 unit under `metadata:` and adds `compatibility` (idempotent).
 | `argument-hint` | Claude Code | the argument line shown for a `/slash` skill (`<owner/repo> <pr>`) |
 | `arguments` | Claude Code | named positional arguments a skill's body refers to |
 | `background` | Claude Code | whether a forked skill may run in the background (pr-event-brief must not: the main session waits for its ACTION) |
-| `tools` `color` `omitClaudeMd` `maxTurns` | Claude Code, **agents only** | the agent's tool roster, its colour in the UI, dropping the CLAUDE.md prefix for cheap workers, and its turn cap |
+| `tools` `disallowedTools` `color` `omitClaudeMd` `maxTurns` | Claude Code, **agents only** | the agent's tool roster (or, where the roster must include MCP connectors whose ids differ per install, the tools it must not have — #94), its colour in the UI, dropping the CLAUDE.md prefix for cheap workers, and its turn cap |
 
 **The env-free validator.** `make -C .claude/context-db verify-skill [UNIT=skills/<name>]` (= `kit_verify.py
 --no-env`) runs everything that needs no environment — the schema above, `name` = directory, the description caps,

@@ -1,4 +1,4 @@
-# workspace.mk — shared Make targets for a Data Engineering Claude workspace.
+# workspace.mk — shared Make targets for an ai-baton workspace.
 # Include it from the root Makefile:   include .claude/workspace.mk
 # Everything here is user-agnostic; keep personal/host-specific targets in the root Makefile.
 

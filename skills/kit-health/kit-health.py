@@ -852,6 +852,17 @@ def seed_wiring(r: Report) -> None:
         r.add(OK, "machine", "seeded files (.context/README.md, environment.md, CLAUDE.md, the self-assessment charter) are not older than their templates")
 
 
+def sandbox_detected(markers: list) -> bool:
+    """True when any `kit.sandbox_markers` entry holds (#94): an absolute path that exists, or an environment variable
+    that is set. The kit knows no sandbox product; a machine that runs in one names its own markers in the env store,
+    and without markers there is no sandbox check (the `gh` reachability line above still warns)."""
+    for mk in markers:
+        mk = str(mk).strip()
+        if mk and (os.path.exists(mk) if mk.startswith("/") else bool(os.environ.get(mk))):
+            return True
+    return False
+
+
 def sec_machine(r: Report) -> str:
     r.h("4 · This machine — wiring")
     envname = kit_profile.name()
@@ -953,7 +964,7 @@ def sec_machine(r: Report) -> str:
             r.add(WARN, "machine", f"GitHub API not reachable via `gh` ({how}) — offline, not logged in (`gh auth login`), "
                   "or a wrong `github.sandbox_token_prefix` (empty on a host whose gh is logged in; the placeholder "
                   "`NAME=value` in a sandbox whose proxy injects the token)")
-        in_sandbox = os.path.exists("/etc/sandbox-persistent.sh") or bool(os.environ.get("SANDBOX_VM_ID"))
+        in_sandbox = sandbox_detected(kit_profile.get("kit.sandbox_markers") or [])
         if in_sandbox and not kit_profile.configured_token_prefix() and not os.environ.get("GH_TOKEN"):
             r.add(WARN, "machine", "sandbox detected but `github.sandbox_token_prefix` is empty — gh refuses to run without a "
                   "token there: `kb.py config-set github.sandbox_token_prefix <NAME=value>`")

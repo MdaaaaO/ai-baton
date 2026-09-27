@@ -84,6 +84,15 @@ class Shapes(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(self.hits(line), [], line)
 
+    def test_install_specific_mcp_ids_and_sandbox_cli(self):
+        # #94: a concrete connector tool id or a sandbox product's CLI name is a hit; the placeholder form is not
+        for line in ("tools: Read, mcp__claude_" + "ai_Acme_Jira_2__getIssue", "run it in " + "sb" + "x first"):
+            with self.subTest(line=line):
+                self.assertTrue(self.hits(line), line)
+        for line in ("tools: `mcp__<server>__<tool>`", "mcp__github_inline_comment__create_inline_comment", "sbxtool", "a sandbox shell"):
+            with self.subTest(line=line):
+                self.assertEqual(self.hits(line), [], line)
+
     def kinds(self, text: str) -> list[str]:
         return [what.split(" (")[0] for what in self.hits(text)]
 
@@ -433,6 +442,20 @@ class Release(unittest.TestCase):
         text = r.findings[0][2]
         self.assertIn(f"git -C {kh.KIT} pull --ff-only", text)
         self.assertNotIn("run `make claude_sync`", text)
+
+
+class SandboxMarkers(unittest.TestCase):
+    """#94: kit-health's sandbox probe reads `kit.sandbox_markers` from the env store; the kit names no sandbox product of its own."""
+
+    def test_markers_are_paths_or_env_vars_and_none_means_no_check(self):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"KIT_TEST_SANDBOX": "1"}):
+            os.environ.pop("KIT_TEST_UNSET", None)
+            self.assertFalse(kh.sandbox_detected([]))
+            self.assertTrue(kh.sandbox_detected([tmp]))                       # an absolute path that exists
+            self.assertFalse(kh.sandbox_detected([tmp + "/missing"]))
+            self.assertTrue(kh.sandbox_detected(["KIT_TEST_UNSET", "KIT_TEST_SANDBOX"]))  # any set variable
+            self.assertFalse(kh.sandbox_detected(["KIT_TEST_UNSET", ""]))
 
 
 if __name__ == "__main__":

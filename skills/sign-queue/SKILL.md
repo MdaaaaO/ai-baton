@@ -3,8 +3,8 @@ name: sign-queue
 description: Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains the queue with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners for the user to run. Inert where `systems.signed_commits` is false.
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "11"
-  updated: "2026-09-26"
+  version: "12"
+  updated: "2026-09-27"
   reviewed: "2026-09-24"
   requires: "signed_commits"
 ---
@@ -97,7 +97,7 @@ the job itself was fine (transient network, remote fixed meanwhile).
 
 ## Why
 
-Owner decision, 2026-09-10: "the git one line message doesn't work anymore, i can't copy paste it … sbx doesn't like
-the line breaks" and "one script for all sessions … like a queue where other sessions can add if they
+Owner decision, 2026-09-10: "the git one line message doesn't work anymore, i can't copy paste it … a sandbox shell
+mangles the line breaks" and "one script for all sessions … like a queue where other sessions can add if they
 need something signed … cleans it on successful sign". The history of the one-liner failures is the
 `signed-git-commits` skill's reference file on hand-off incidents (`handoff-incidents.md` beside its SKILL.md).

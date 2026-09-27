@@ -35,6 +35,11 @@ LEAK_SHAPES = [
     # examples keep to the canonical numbers and a slug placeholder (`KEY-123`, `KEY-456`, `key-123-<slug>`)
     (r"\b(?:KEY|ABC)-(?!(?:123|456)\b)\d{2,6}\b", "real-looking number behind a placeholder prefix — use KEY-123 / KEY-456"),
     (r"\bkey-(?!(?:123|456)-)\d{2,6}-[a-z0-9]", "real-looking ticket slug or topic — use key-123-<slug>"),
+    # a concrete claude.ai connector tool id (#94): `mcp__claude_ai_<connector>__<tool>` names the connector as one install
+    # named it (a tool a GitHub Action or the kit itself serves has one fixed name and is not matched), so it leaks the
+    # install and breaks on every other — write the placeholder form `mcp__<server>__<tool>` or the bare tool name
+    (r"\bmcp__claude_ai_[A-Za-z0-9_-]+__[A-Za-z0-9_]+", "concrete claude.ai connector tool id (install-specific) — use mcp__<server>__<tool> or the bare tool name"),
+    (r"\bsbx\b", "a specific sandbox product's CLI — say \"a sandbox shell\" or name the capability"),
     # a pointer to a personal memory note (`memory \`x\``, `memory note \`x\``, `Memories: \`x\``, "in the memory note"):
     # the notes live in one machine's auto-memory; the content belongs in the skill's own reference/*.md
     (r"\b[Mm]emor(?:y(?: note)?|ies:)\s*`[a-z0-9-]+(?:\.md)?`|\b(?:in|the) memory notes?\b|\bMemories:",
@@ -51,7 +56,7 @@ LEAK_SHAPES = [
     (r"\b(?:[Tt]his|[Tt]he|[Ii]n the|[Oo]n the|[Ff]rom the) sandbox\b|\bsandbox-only\b|\b[Ss]andbox (?:can(?:'|\u2019)?t|cannot|has no|lacks)\b",
      "universal sandbox wording (the kit runs on any machine) — say what is true generically, or make it a conditional"),
 ]
-SKIP_LINE = re.compile(r"^\s*(requires|tools|facts):")
+SKIP_LINE = re.compile(r"^\s*(requires|facts):")  # not `tools:`: an agent's roster is where an install-specific MCP id hides (#94)
 SKIP_FILES = frozenset({"leak_shapes.py", "kit-health.py", "allow.txt"})
 
 

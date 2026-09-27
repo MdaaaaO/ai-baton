@@ -59,7 +59,7 @@ DATE = "%Y-%m-%d"
 # native key is added here AND there, with a justification in the PR; anything else is a failure.
 SPEC_KEYS = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
 NATIVE_KEYS = {"model", "effort", "context", "agent", "user-invocable", "argument-hint", "arguments", "background"}
-AGENT_KEYS = {"tools", "color", "omitClaudeMd", "maxTurns"}  # agents only
+AGENT_KEYS = {"tools", "disallowedTools", "color", "omitClaudeMd", "maxTurns"}  # agents only
 META_REQUIRED = ("version", "updated", "reviewed")
 RETIRED_KEYS = ("environments", "profiles")
 
