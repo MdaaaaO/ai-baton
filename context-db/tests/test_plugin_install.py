@@ -243,6 +243,27 @@ class ScriptHints(unittest.TestCase):
                 hits += [f"{f.relative_to(KIT)}:{n}: {m.group(0)}" for m in pat.finditer(line)]
         self.assertEqual(hits, [])
 
+    def test_setup_sh_prints_no_literal_clone_path(self):
+        # #69: setup.sh runs on every install mode, so a line it prints names the kit through $KITREF (`.claude` on a
+        # clone, the kit's own path otherwise) or labels it by $MODE — never a literal `.claude/<kit file>`, which on a
+        # plugin install points at nothing. sync-check.sh is covered above. sync.sh is not scanned: it drives only the
+        # workspace's `.claude/` clone (`make claude_sync`), so `.claude/` is where its kit really is. Workspace wiring
+        # (`.claude/WORKSPACE.md`, `.claude/workspace.mk`, `.claude/settings.local.json`) is not a kit path.
+        import kit_verify
+        pat = re.compile(kit_verify.HARDCODED_KIT_PATH.pattern
+                         .replace("(?<![~\\w>*/.$-])", "(?<![~\\w>*/.$\\\\-])")
+                         .replace("skills/|", "skills\\b|CLAUDE\\.example\\.md|sync\\.sh|"))
+        hits = []
+        for n, line in enumerate((KIT / "setup.sh").read_text(encoding="utf-8").split("\n"), 1):
+            if line.lstrip().startswith("#") or not re.search(r"\b(echo|printf)\b", line):
+                continue
+            hits += [f"setup.sh:{n}: {m.group(0)}" for m in pat.finditer(line)]
+        self.assertEqual(hits, [])
+        # the pattern still catches what #69 fixed
+        for bad in ('echo "  workspace (.claude/skills): x"', 'echo "then make -C .claude/context-db index"',
+                    'echo "created CLAUDE.md from .claude/CLAUDE.example.md"'):
+            self.assertTrue(pat.search(bad), bad)
+
 
 class KitHealthOnAPluginInstall(unittest.TestCase):
     def load(self, kit: Path, ws: Path):

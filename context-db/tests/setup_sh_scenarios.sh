@@ -243,15 +243,21 @@ scenario modes
 run_setup
 check "a .claude/ copy is a clone, recorded" '[ "$RC" -eq 0 ] && [ "$(recorded "$WS")" = clone ] && printf "%s" "$OUT" | grep -q "install mode: clone — recorded in kit.install_mode"'
 check "a re-run finds it recorded" 'run_setup; [ "$RC" -eq 0 ] && printf "%s" "$OUT" | grep -q "install mode: clone (kit.install_mode)"'
+check "a clone labels its skills as the workspace's .claude/skills (#69)" 'printf "%s" "$OUT" | grep -q "^  workspace (.claude/skills): .*kit-health"'
 git -C "$WS/.claude" init -q
 cp -R "$KITCOPY" "$WORK/modes/kitdev" && git -C "$WORK/modes/kitdev" init -q
 set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS="$WS" sh "$WORK/modes/kitdev/setup.sh" 2>&1)"; RC=$?; set -e
 check "a dev checkout beside the workspace's clone keeps clone recorded" '[ "$RC" -eq 0 ] && [ "$(recorded "$WS")" = clone ] && printf "%s" "$OUT" | grep -q "install mode: dev-checkout — a development checkout beside"'
+check "a dev checkout labels its skills by its own path (#69)" 'printf "%s" "$OUT" | grep -q "^  kit skills (dev checkout $WORK/modes/kitdev): .*kit-health" && ! printf "%s" "$OUT" | grep -q "workspace (.claude/skills)"'
 mkdir -p "$WORK/modes/cache" && cp -R "$KITCOPY" "$WORK/modes/cache/1.0.0"
 rm -f "$WS/.context/reference/environment.md"
 set +e; OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS="$WS" sh "$WORK/modes/cache/1.0.0/setup.sh" 2>&1)"; RC=$?; set -e
 check "a switch to a plugin install is recorded and the old clone's wiring is named" '[ "$RC" -eq 0 ] && [ "$(recorded "$WS")" = plugin ] && printf "%s" "$OUT" | grep -q "(was clone)" && printf "%s" "$OUT" | grep -q "the old clone.s wiring may be left"'
 check "plugin-path hints name the plugin's own kit path, never .claude/context-db" 'printf "%s" "$OUT" | grep -q "cache/1.0.0/context-db index" && ! printf "%s" "$OUT" | grep -q "make -C .claude/context-db"'
+PLUGIN_VERSION="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$KITCOPY/.claude-plugin/plugin.json")"
+check "a plugin install labels its skills by plugin version and path, not the workspace's .claude/skills (#69)" 'printf "%s" "$OUT" | grep -q "^  kit skills (plugin $PLUGIN_VERSION, $WORK/modes/cache/1.0.0/skills): .*kit-health" && ! printf "%s" "$OUT" | grep -q "workspace (.claude/skills)"'
+# every kit path a plugin-install line names must exist (#69): none may point into the workspace's .claude/ at a kit file
+check "no plugin-install output line names a kit file under .claude/ (#69)" '! printf "%s" "$OUT" | grep -E "(^|[^~/.$[:alnum:]_-])\.claude/(context-db|skills|agents|docs|hooks|setup\.sh|sync\.sh|CLAUDE\.example\.md|environment-template)"'
 
 echo
 if [ "$fails" -eq 0 ]; then echo "setup.sh scenarios: all passed"; else echo "setup.sh scenarios: $fails FAILED" >&2; exit 1; fi

@@ -74,7 +74,8 @@ fi
 # Never the home directory: `~/.claude` is Claude Code's own config dir, so a clone there overwrites the harness's
 # settings and puts `.context/` in $HOME (#168). Pick a workspace dir that holds your repos, e.g. ~/Projects.
 if [ "$(cd "$PROJECTS" 2>/dev/null && pwd -P)" = "$(cd "$HOME" && pwd -P)" ]; then
-  echo "setup.sh: refusing the home directory as the workspace root ($PROJECTS) — clone the kit into e.g. ~/Projects/.claude instead (#168)" >&2
+  if [ "$MODE" = clone ]; then echo "setup.sh: refusing the home directory as the workspace root ($PROJECTS) — clone the kit into e.g. ~/Projects/.claude instead (#168)" >&2
+  else echo "setup.sh: refusing the home directory as the workspace root ($PROJECTS) — run it from the project directory, or set CLAUDE_PROJECT_DIR / PROJECTS=/path (#168)" >&2; fi
   exit 2
 fi
 CONTEXT="$PROJECTS/.context"
@@ -292,7 +293,7 @@ if [ ! -f "$PROJECTS/CLAUDE.md" ] && [ "$CLONE" -eq 0 ]; then
   echo "  created CLAUDE.md from CLAUDE.example.md — EDIT the preamble (who you are); it imports .context/reference/environment.md (the plugin's SessionStart hook injects WORKSPACE.md)"
 elif [ ! -f "$PROJECTS/CLAUDE.md" ]; then
   seed "$HERE/CLAUDE.example.md" "$PROJECTS/CLAUDE.md"
-  echo "  created CLAUDE.md from .claude/CLAUDE.example.md — EDIT the preamble (who you are); it imports .claude/WORKSPACE.md + .context/reference/environment.md"
+  echo "  created CLAUDE.md from $KITREF/CLAUDE.example.md — EDIT the preamble (who you are); it imports .claude/WORKSPACE.md + .context/reference/environment.md"
 else
   if grep -q '^@.claude/WORKSPACE.md' "$PROJECTS/CLAUDE.md"; then IMP=1; else IMP=0; fi
   if [ -f "$PROJECTS/.claude/WORKSPACE.md" ]; then WSF=1; else WSF=0; fi
@@ -312,7 +313,8 @@ else
   if grep -q '^@.context/reference/environment.md' "$PROJECTS/CLAUDE.md"; then
     echo "  CLAUDE.md imports .context/reference/environment.md"
   else
-    echo "  CLAUDE.md does NOT import the environment prose — add a line right after @.claude/WORKSPACE.md: @.context/reference/environment.md"
+    if [ "$CLONE" -eq 1 ]; then echo "  CLAUDE.md does NOT import the environment prose — add a line right after @.claude/WORKSPACE.md: @.context/reference/environment.md"
+    else echo "  CLAUDE.md does NOT import the environment prose — add a line: @.context/reference/environment.md"; fi
   fi
 fi
 if [ "$CLONE" -eq 0 ]; then
@@ -321,7 +323,7 @@ if [ "$CLONE" -eq 0 ]; then
   elif [ -f "$PROJECTS/Makefile" ] && grep -q '^include .claude/workspace.mk' "$PROJECTS/Makefile"; then
     echo "  Makefile present, includes .claude/workspace.mk (the file exists)"
   else
-    echo "  Makefile: nothing to include on a plugin install (workspace.mk drives a .claude/ clone)"
+    echo "  Makefile: nothing to include on a $MODE install (workspace.mk drives a .claude/ clone)"
   fi
 elif [ ! -f "$PROJECTS/Makefile" ]; then
   printf '# Workspace-level helpers. Shared targets (sign*, claude_sync, ctx_*) come from the kit:\ninclude .claude/workspace.mk\n' > "$PROJECTS/Makefile"
@@ -398,8 +400,19 @@ fi
 
 echo
 echo "== skills =="
-echo "  workspace (.claude/skills): $(ls -1 "$HERE/skills" 2>/dev/null | tr '\n' ' ')"
+# label the kit's skills by where they are (#69): the workspace's .claude/skills only on a clone — elsewhere $HERE is the
+# plugin cache or a dev checkout, and the workspace has no .claude/skills
+KIT_SKILLS="$(ls -1 "$HERE/skills" 2>/dev/null | tr '\n' ' ')"
+case "$MODE" in
+  clone) echo "  workspace ($KITREF/skills): $KIT_SKILLS" ;;
+  plugin) echo "  kit skills (plugin $(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("version") or "?")' "$HERE/.claude-plugin/plugin.json" 2>/dev/null || echo "?"), $HERE/skills): $KIT_SKILLS" ;;
+  *) echo "  kit skills (dev checkout $HERE): $KIT_SKILLS" ;;
+esac
 echo "  user-level (~/.claude/skills): $(ls -1 "$HOME/.claude/skills" 2>/dev/null | tr '\n' ' ')"
-echo "  (both dirs are discovered each session.)"
+case "$MODE" in
+  clone) echo "  (both dirs are discovered each session.)" ;;
+  plugin) echo "  (the plugin's skills and the user-level ones are discovered each session.)" ;;
+  *) echo "  (a dev checkout's skills load in a session started with claude --plugin-dir $HERE; the user-level ones in every session.)" ;;
+esac
 echo
 echo "setup complete."
