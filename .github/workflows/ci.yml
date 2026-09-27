@@ -137,14 +137,7 @@ jobs:
       # breaks every machine, so every `#!/bin/sh` script is parsed by dash too.
       - name: POSIX scripts parse under dash
         working-directory: .claude
-        run: |
-          rc=0
-          for f in $(git ls-files '*.sh'); do
-            head -1 "$f" | grep -q '^#!/bin/sh' || continue
-            if command -v dash >/dev/null 2>&1; then dash -n "$f" || { echo "::error file=$f::dash -n failed"; rc=1; }
-            else sh -n "$f" || { echo "::error file=$f::sh -n failed"; rc=1; }; fi
-          done
-          exit $rc
+        run: make -C context-db parse  # the same selection `make ci` uses (every `#!/bin/sh` script + hook)
 
       # shellcheck -S warning: the system binary where the runner has one, else the PyPI wheel through uvx
       # (the runner has uv for pr-title/release); fixtures are test data.
@@ -179,4 +172,4 @@ jobs:
         if: matrix.path == 'plugin'
         run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
       - name: Replay the README install block
-        run: python3 context-db/tests/install_smoke.py ${{ matrix.path }}
+        run: python3 context-db/tests/install_smoke.py ${{ matrix.path }} --require-cli

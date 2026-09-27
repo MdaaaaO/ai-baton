@@ -43,7 +43,7 @@ Kit / config (env fact store .context/reference/env/):
   make -C .claude/context-db profile KEY=tracker.kind  # one env-config value
   make -C .claude/context-db kit-verify [STALE=90]     # every skill/agent carries versioning frontmatter; env store complete
   make -C .claude/context-db verify-skill [UNIT=skills/x] # env-free validator: frontmatter schema, body, leak shapes — no .context/ needed
-  make -C .claude/context-db ci                        # exactly what .github/workflows/ci.yml runs, minus the blank env store
+  make -C .claude/context-db ci                        # every gate .github/workflows/ci.yml runs (ALLOW_SKIP=1: tolerate a missing tool)
   make -C .claude/context-db check-links               # every relative Markdown link resolves
   make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks

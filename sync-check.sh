@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# shellcheck shell=dash  # run as `sh` everywhere (README, workspace.mk); dash has `local`
 # sync-check.sh — is the .claude kit in step with origin?
 # Non-fatal, a few lines on stderr. Run by `make -C .claude/context-db session-register` (and
 # `sync-check`), so every session sees at registration whether the previous session's background

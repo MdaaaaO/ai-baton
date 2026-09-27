@@ -20,7 +20,7 @@ Every change is traceable both ways: **issue → PR → squash commit → CHANGE
 |---|---|---|
 | **1. Issue** | An issue exists *before* the branch: what, why, which environments, one `area:*` label. Found something else mid-work? New issue, not a bigger PR. | `gh issue create` (template *Kit change*) |
 | **2. Branch** | A worktree off `origin/main` of your kit checkout (`.claude` on a clone install, a plain clone of the repo on a plugin install — [`CONTRIBUTING.md`](../CONTRIBUTING.md#development-setup) § Development setup). The kit checkout itself stays on `main`, clean. | you · `hooks/pre-push` refuses any push to `main` |
-| **3. PR** | Before opening it: `make -C context-db ci` in the worktree (the env-free validator + tests + compile checks — what CI runs, no env store needed; one unit: `make -C context-db verify-skill UNIT=skills/<name>`). Title = a Conventional Commit (it becomes the squash subject). Body starts with `Closes #N` (finishes the issue) or `Refs #N` (one step of it; the issue stays open). Labels: a type label + the area label. | `pr-open` skill · CI checks **`pr-title`** and **`pr-issue`** (`.github/scripts/check-pr-issue.sh`) |
+| **3. PR** | Before opening it: `git fetch origin main && make -C context-db ci` in the worktree (every gate CI runs — the review gate on the branch, the validator, a blank-store kit-verify, tests, parse checks, shellcheck, install smoke; a missing tool fails unless `ALLOW_SKIP=1`; one unit: `make -C context-db verify-skill UNIT=skills/<name>`). Title = a Conventional Commit (it becomes the squash subject). Body starts with `Closes #N` (finishes the issue) or `Refs #N` (one step of it; the issue stays open). Labels: a type label + the area label. | `pr-open` skill · CI checks **`pr-title`** and **`pr-issue`** (`.github/scripts/check-pr-issue.sh`) |
 | **4. Checks** | `kit-verify --no-env` on the bare checkout (the env-free validator), then `kit-verify` (frontmatter schema — § Skill frontmatter — and manifests) against a blank env store, the engine's unittest suite (`make -C context-db test`), the plugin manifests through `claude plugin validate --strict` where the CLI exists (`make plugin-validate`), `py_compile`, `bash -n`. Then **`install-smoke`** replays README.md's clone and plugin install blocks on a fresh runner, from this checkout, ending in kit-health (`make -C context-db install-smoke` locally, #98). | CI checks **`kit-verify`**, **`install-smoke (clone)`**, **`install-smoke (plugin)`** |
 | **5. Review** | Claude reviews the PR when it opens and again on every push (only what changed since its last review). See *Code review*. | `claude-review` workflow |
 | **6. Merge** | Squash only. `auto-merge.yml` merges as soon as the six checks (`kit-verify`, `pr-title`, `pr-issue`, `claude-review`, both `install-smoke` legs) are green, the review verdict on the head is `approve` and every thread is resolved; a PR that misses a gate waits for the owner. GitHub closes every `Closes` issue. | `auto-merge` workflow · owner as fallback |
@@ -145,7 +145,7 @@ lines, every `scripts/…` / `references/…` path the body cites exists, no `sk
 custom-field id, account id, ticket key, org host, tz literal — `context-db/bin/leak_shapes.py`) — and prints
 the checks it skipped (the env-store ones). Both scanners read the one allow-list `skills/kit-health/allow.txt`
 (`<path>:<match>` regexes for a dated example that must stay verbatim, never a value a skill reads); on a PR, CI's review gate runs the base branch's `review_gate.py` with the base branch's allow-list, so a new allow line takes effect from the next PR on, once a human merged it (#129). It passes on a bare `git clone` with no `.context/`, so it is the
-pre-PR step for a contributor and the first step of `ci.yml`. `make -C .claude/context-db ci` is the whole CI job.
+pre-PR step for a contributor and the first step of `ci.yml`. `make -C .claude/context-db ci` runs every gate the CI job runs (§ Where CI runs).
 
 A new native key is added to `NATIVE_KEYS` / `AGENT_KEYS` in `context-db/bin/kit_verify.py` **and** to this table,
 with the reason in the PR — never to a unit alone. `license` is added once the repository has one (a
@@ -207,11 +207,12 @@ with the migration notes a machine needs (§ Versioning).
 
 ## Where CI runs
 
-What `ci.yml` checks (all reproducible with `make -C .claude/context-db ci`): the env-free validator, kit-verify
+What `ci.yml` checks — `make -C .claude/context-db ci` runs the same gates (the dash selection is its `parse` target, shared
+with CI), and a gate whose tool is missing fails there unless `ALLOW_SKIP=1`; only the token-spending evals are CI-only: the env-free validator, kit-verify
 against a blank store, the unittest suite, the plugin manifests, `py_compile`, `bash -n`, `dash -n` for every
-`#!/bin/sh` script (setup.sh and sync.sh run under `sh`), `shellcheck -S warning`, the relative Markdown links
+`#!/bin/sh` script (setup.sh, sync.sh and sync-check.sh are `#!/bin/sh`: they run under `sh`), `shellcheck -S warning`, the relative Markdown links
 (`check_links.py`), the tier-0 review gate (`review_gate.py`), the eval suite's static check (`eval_check.py`, no
-tokens) and `kit-health --ci` (the leak scan on the blank store, no writes). Third-party actions are pinned by commit
+tokens), the README install smoke (`install_smoke.py`, clone and plugin) and `kit-health --ci` (the leak scan on the blank store, no writes). Third-party actions are pinned by commit
 SHA and bumped by Dependabot. `evals.yml` — `claude plugin eval` on the `CLAUDE_CODE_OAUTH_TOKEN` secret — runs only
 by hand (`workflow_dispatch`, inputs `skill` and `models`), never on a pull request, so no PR's code meets the token.
 
