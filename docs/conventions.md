@@ -3,10 +3,14 @@
 Six rules that let one kit run on any machine without a fork. The values they keep out of the kit live in the
 env store (`docs/env-facts.md`); the file map is `docs/layout.md`.
 
-- **Paths are relative to the workspace root.** Sessions run there, so docs say
-  `.claude/skills/pr-watch/pr-watch.sh`, never an absolute path. Scripts derive the root from
-  their own location (`$(dirname "$0")/../../..`, `Path(__file__).parents[3]`); env overrides
-  exist where a script had one before (`PR_REVIEW_HOME`, `SIGN_QUEUE_DIR`, `SIGN_QUEUE_ROOT`).
+- **Kit paths are `$BATON/…`, workspace paths are relative to the workspace root.** The kit lives in
+  `.claude/` on a clone and in Claude Code's plugin cache on a plugin install, so docs and unit bodies say
+  `$BATON/skills/pr-watch/pr-watch.sh`, never `.claude/…` and never an absolute path (`docs/packaging.md`
+  § Kit root). Sessions run in the workspace root, so its own files are plain relative paths
+  (`.context/reference/env/`). Scripts find the kit from their own location, never through `$BATON`, and
+  `.context/` through `kit_profile` (`context_root()`, `kit_profile.py context`) — the `pr-scan` / `pr-review`
+  scripts still derive it from their own location (the kit's parent directory), which holds on a clone only; env
+  overrides exist where a script had one before (`PR_REVIEW_HOME`, `SIGN_QUEUE_DIR`, `SIGN_QUEUE_ROOT`).
 - **Identity is `WORKSPACE_*`, from two sources, one reader.** On a plugin install Claude Code collects the five
   values through `userConfig` (`/plugin configure ai-baton`; the chat ids are `sensitive`, stored in
   secure storage, never in a JSON file) and a SessionStart hook re-exports them as `WORKSPACE_*` for Bash; on a
@@ -25,16 +29,18 @@ env store (`docs/env-facts.md`); the file map is `docs/layout.md`.
   in bulk: the `env-init` skill). A skill that needs a system the configuration lacks says "not
   applicable in this environment" and stops. `kit-health` scans every kit file for the generic
   shapes of such values and for every value this environment has configured.
-- **Personal state lives in `../.context/`**, never here: auto-memory in `.context/memory/`,
+- **Personal state lives in the workspace's `.context/`**, never in the kit: auto-memory in `.context/memory/`,
   review ledger and submitted-review digests in `.context/state/pr-review/`.
-- **Shared instructions live in `WORKSPACE.md`, personal ones in the root `CLAUDE.md`.** Claude
-  Code resolves `@path` imports relative to the importing file, so the one line
-  `@.claude/WORKSPACE.md` in your root `CLAUDE.md` pulls the shared body into every session.
+- **Shared instructions live in `WORKSPACE.md`, personal ones in the root `CLAUDE.md`.** The shared
+  body reaches every session by import or hook: on a clone, Claude Code resolves `@path` imports
+  relative to the importing file, so the one line `@.claude/WORKSPACE.md` in your root `CLAUDE.md`
+  pulls it in; on a plugin install the SessionStart hook injects it (`kit_profile.py workspace-rules`)
+  and the root `CLAUDE.md` carries no such line.
   Put a rule in `WORKSPACE.md` when every engineer on the team should follow it; put it in
   your preamble when it is about you (how to address you, your own tooling, your own habits).
   (`WORKSPACE.md` is deliberately not named `.claude/CLAUDE.md`: that path is itself a
   memory location Claude Code loads, and the file would be loaded twice. The kit's own `CLAUDE.md` there is
-  ≤ 600 B of contributor pointers, loaded into every workspace session — hence the cap.)
+  ≤ 600 B of contributor pointers, loaded into every workspace session of a clone — hence the cap.)
 - **Adopting the kit elsewhere** = filling an env store, not forking the skills: `setup.sh` creates a
   blank `.context/reference/env/`, `kb.py config-set` sets the switches, facts arrive as skills ask for
   them, `kit-health` proves the wiring (`docs/new-environment.md`). A shared prose layer for a team

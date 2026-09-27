@@ -26,7 +26,7 @@ git clone https://github.com/MdaaaaO/ai-baton.git .claude && sh .claude/setup.sh
 
 | You have | What breaks | What the kit adds |
 |---|---|---|
-| A `CLAUDE.md` in each repo | Rules drift from repo to repo. Nothing is shared across repos. | One `WORKSPACE.md` that every session imports |
+| A `CLAUDE.md` in each repo | Rules drift from repo to repo. Nothing is shared across repos. | One `WORKSPACE.md` that every session loads (a `CLAUDE.md` import on a clone, a SessionStart hook on a plugin) |
 | A skills plugin | Skills hardcode your org, channels and ids, or ask you for them every time | An env fact store: a fact is found once, then read everywhere |
 | Nothing | Each session starts cold and forgets what the last one learned | `.context/`, an indexed markdown DB, plus a session registry and handoff docs |
 
@@ -35,14 +35,16 @@ several machines or several people.
 
 ## How it works
 
-1. Your root `CLAUDE.md` imports `.claude/WORKSPACE.md` (the shared rules) and `.context/reference/environment.md`
+1. Every session loads `WORKSPACE.md` (the shared rules): a clone's root `CLAUDE.md` imports `.claude/WORKSPACE.md`,
+   a plugin's SessionStart hook injects it. The root `CLAUDE.md` also imports `.context/reference/environment.md`
    (your environment's prose).
 2. Only the skills' names and descriptions load into a session. A skill's body loads when it runs.
 3. A skill that needs a value, such as a channel id, reads it from the env store in `.context/reference/env/`. It
    discovers a missing value once and writes it back.
 4. What sessions learn goes into `.context/` as rows of a markdown DB with a generated index.
 5. Sessions register in a live registry and hand off through one context doc per initiative.
-6. Kit changes are PR-only. `make claude_sync` fast-forwards every machine to the merged `main`.
+6. Kit changes are PR-only. Each machine picks them up itself: a clone runs `make claude_sync` (its SessionEnd hook
+   does too) to fast-forward to the merged `main`, a plugin install updates to each release with `claude plugin update`.
 
 ## Install
 
@@ -90,7 +92,7 @@ This only ever fast-forwards `main`. [`docs/sync.md`](docs/sync.md) explains the
 | Needs a system (`systems.*`) | `sign-queue` · `signed-git-commits` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
 It also ships three agents (`triage`, `review-runner`, `auto-runner`) and the `context-db/` engine
-(`make -C .claude/context-db help`). [`docs/skills.md`](docs/skills.md) describes each item in one line.
+(`make -C $BATON/context-db help`). [`docs/skills.md`](docs/skills.md) describes each item in one line.
 
 ## Documentation
 

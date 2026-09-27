@@ -6,6 +6,10 @@ against it, and `userConfig` can carry identity (#116) — **and** the clone-int
 things that make it a *workspace* kit are conventions a plugin cannot install: the `.context/` DB beside the
 workspace, the root `CLAUDE.md` imports, the root `Makefile` include, the git hooks and the fast-forward sync.
 
+**Both install paths are supported**, and every page that says how the kit loads, where it lives or how it updates
+covers both: the kit is `$BATON` (§ Kit root), `WORKSPACE.md` arrives by import (clone) or hook (plugin) — § Installing
+— and each path has its own update flow (§ Updating).
+
 ## Layout map
 
 | in the repo | plugin path (`claude plugin install`) | clone path (`git clone … .claude`) |
@@ -33,8 +37,9 @@ current directory, stopping below `$HOME` (#3).
 
 ## Installing
 
-- **Clone path** (the whole workspace kit, today's complete experience): `README.md` § Install — one command for a
-  GitHub-only machine, the prompt in `docs/new-environment.md` for a corporate one.
+- **Clone path** (the kit as a git checkout in `<workspace root>/.claude/`, which `setup.sh` wires up in one go):
+  `README.md` § Install — one command for a GitHub-only machine, the prompt in `docs/new-environment.md` for a
+  corporate one. Choose it to contribute to the kit or to follow `main` merge by merge.
 - **Plugin path** (the skills and agents, from the repository as its own marketplace):
   ```sh
   claude plugin marketplace add <owner>/ai-baton          # the repo is the marketplace
@@ -73,6 +78,18 @@ warns when it is not recorded or differs from the recorded one — a machine tha
 and still has the `.claude/` clone, the import or the include; re-running `setup.sh` records the new mode. The
 `HEALTH-<env>.md` stamp records `install_mode`. Hints `setup.sh` prints name the kit as `.claude` on a clone and by
 its own path otherwise.
+
+## Updating
+
+| | clone | plugin |
+|---|---|---|
+| moves with | every merge to `main` | every release — Claude Code caches a plugin by its `version`, which only a release bumps (§ Version discipline) |
+| how | `make claude_sync` (or `sh .claude/sync.sh`), and the `SessionEnd` hook in `settings.json` runs it in the background; a fast-forward only (`docs/sync.md`) | `claude plugin marketplace update ai-baton-kit` (re-read the marketplace), then `claude plugin update ai-baton@ai-baton-kit`, then restart Claude Code — skills, agents and the SessionStart hook load at startup |
+| learning there is one | `sync-check.sh` at `session-register` warns when the kit is behind `origin/main` | the repository's GitHub Releases (the `release` workflow publishes one per tag); `/kit-health` warns when a newer release is out and prints the commands above |
+| afterwards | `/kit-health` when the PR says an environment needs a step | `/kit-health`: it re-stamps `HEALTH-<env>.md` with the new `kit_version`, and § 6 lists the units changed since the last stamp |
+
+A hand edit under the plugin cache is lost on the next update (`kit-health` § 1 warns about one); a kit change is a
+PR from a checkout on either path (`CONTRIBUTING.md`).
 
 ## Kit root — `$BATON` (#3)
 
