@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# shellcheck shell=dash  # run as `sh` everywhere (README, workspace.mk); dash has `local`
 # sync.sh — keep the .claude kit in step with origin, PR-only: the kit is PULLED (fast-forward of
 # `main`), never committed or pushed from here. Kit changes travel branch → PR → merge on GitHub;
 # a versioned pre-push hook (hooks/pre-push, installed via core.hooksPath by this script and

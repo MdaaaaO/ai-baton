@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# shellcheck shell=dash  # run as `sh` everywhere (README, workspace.mk); dash has `local`
 # setup.sh — make this Claude Code workspace usable on this machine / sandbox.
 # Idempotent: safe to run any number of times. Run it once per fresh clone or sandbox
 # (a sandbox recreate WIPES ~/.claude but keeps the host-mounted workspace tree).

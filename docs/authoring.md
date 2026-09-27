@@ -51,8 +51,8 @@ Also failed: a bare value with a ` #` in it (YAML cuts it there — quote it), a
 ## 3. Before the PR
 
 1. `make -C .claude/context-db verify-skill UNIT=skills/<name>` — the env-free validator (schema, caps, body,
-   cited paths, leak shapes, manifests), then `make -C .claude/context-db ci` (validator, tests, `py_compile`,
-   `bash -n`, plugin manifests where the `claude` CLI exists).
+   cited paths, leak shapes, manifests), then `make -C .claude/context-db ci` (every gate CI runs; `ALLOW_SKIP=1`
+   where shellcheck or the `claude` CLI is missing).
 2. **Bump**: a behaviour change bumps `metadata.version`, sets `metadata.updated`, and adds one line at the top of
    `docs/CHANGELOG.md` naming the unit and version. Wording-only edits bump nothing and the PR says so (`wording`
    label or `[skip-bump]` in its title or body). `make -C .claude/context-db review-gate BASE=origin/main` is the

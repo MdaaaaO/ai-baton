@@ -95,11 +95,16 @@ kit_health() {
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2 or argv[1] not in ("clone", "plugin"):
+    require_cli = "--require-cli" in argv[2:]  # `make ci` and CI: a missing CLI is a failure, never a silent pass
+    args = [x for x in argv[1:] if x != "--require-cli"]
+    if len(args) != 1 or args[0] not in ("clone", "plugin"):
         print(__doc__.split("\n\n")[0], file=sys.stderr)
         return 2
-    path = argv[1]
+    path = args[0]
     if path == "plugin" and not shutil.which("claude"):
+        if require_cli:
+            print("install_smoke plugin: FAILED — the `claude` CLI is not installed (npm i -g @anthropic-ai/claude-code)")
+            return 1
         print("install_smoke plugin: skipped — the `claude` CLI is not installed (npm i -g @anthropic-ai/claude-code)")
         return 0
     work = Path(tempfile.mkdtemp(prefix=f"kit-install-smoke-{path}."))
