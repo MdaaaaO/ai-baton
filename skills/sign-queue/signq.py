@@ -433,11 +433,36 @@ def _descendants(pid: int) -> List[int]:
     while frontier:
         nxt: List[int] = []
         for p in frontier:
-            r = subprocess.run(["pgrep", "-P", str(p)], capture_output=True, text=True)
-            nxt.extend(int(x) for x in r.stdout.split())
+            nxt.extend(_children(p))
         out.extend(nxt)
         frontier = nxt
     return out
+
+
+def _children(ppid: int) -> List[int]:
+    """Direct children of ppid: `pgrep -P` where it exists, else /proc's stat files (a minimal image
+    with no procps), else none — the caller still kills the root, so a missing tool never leaves the
+    job itself running."""
+    try:
+        r = subprocess.run(["pgrep", "-P", str(ppid)], capture_output=True, text=True, timeout=10)
+        return [int(x) for x in r.stdout.split()]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    kids: List[int] = []
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return kids
+    for d in proc.iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            stat = (d / "stat").read_text()
+            # field 4 is the ppid; the command name (field 2) may hold spaces, so split after its ')'
+            if int(stat.rsplit(")", 1)[1].split()[1]) == ppid:
+                kids.append(int(d.name))
+        except (OSError, ValueError, IndexError):
+            continue
+    return kids
 
 
 def _alive(pid: int) -> bool:
@@ -460,8 +485,9 @@ def _kill_tree(root: int, grace: float = 2.0) -> None:
     process GROUP that tries to read the tty gets SIGTTIN, not a prompt — a hang worse than the one
     this is guarding against. `root` itself may already be gone by the time this runs; killing a pid
     that no longer exists is not an error."""
-    tree = _descendants(root) + [root]
-    for pid in reversed(tree):
+    # deepest descendants first, the root last — children before the parent, as described above
+    tree = list(reversed(_descendants(root))) + [root]
+    for pid in tree:
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -469,7 +495,7 @@ def _kill_tree(root: int, grace: float = 2.0) -> None:
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline and any(_alive(pid) for pid in tree):
         time.sleep(0.1)
-    for pid in reversed(tree):
+    for pid in tree:
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
