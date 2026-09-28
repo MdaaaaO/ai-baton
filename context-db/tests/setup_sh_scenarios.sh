@@ -24,11 +24,11 @@ pass() { echo "  ok   $1"; }
 fail() { echo "  FAIL $1" >&2; fails=$((fails + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1"; fi; }
 
-# a kit copy without .git: setup.sh reads templates from it and skips the git-hooks step
+# a kit copy without .git: setup.sh reads templates from it and skips the git-hooks step. Built from git's own
+# tracked-file list (kit_copy_tracked, hermetic.sh) so an untracked file sitting in this checkout — a
+# node_modules/, a scratch file, a stray .context — never leaks into the fixture.
 KITCOPY="$WORK/kit"
-mkdir -p "$KITCOPY"
-(cd "$KIT" && find . -path ./.git -prune -o -type f -print | sed 's|^\./||' | while IFS= read -r f; do
-  mkdir -p "$KITCOPY/$(dirname "$f")"; cp "$KIT/$f" "$KITCOPY/$f"; done)
+kit_copy_tracked "$KIT" "$KITCOPY"
 
 # scenario N: a fresh workspace tree with its own HOME; prints the paths setup.sh derives
 scenario() {  # scenario <name> → sets WS (workspace root), HOME_DIR, MEM (harness memory dir), DUR (durable memory
