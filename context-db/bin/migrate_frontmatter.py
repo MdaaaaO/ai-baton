@@ -11,6 +11,12 @@ double-quoted strings, and a unit with `requires` carries a `compatibility:` lin
                                           facts: "slack.channel x,a.b"
                                         compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 
+Also quotes any OTHER top-level scalar (most commonly `description:`) whose bare value would not be a
+valid YAML plain scalar (frontmatter.plain_scalar_problem — a leading indicator character, ': ', ' #' or a
+trailing ':'): `description: …lands: the week file…` becomes `description: "…lands: the week file…"`,
+byte-for-byte the same content, just quoted. The one quoting function (frontmatter.quote) is shared with
+every other kit writer, so a value that needs quoting is quoted the same way everywhere.
+
 Everything else — the body, every other frontmatter key and its order, comments — is kept byte for byte.
 Idempotent: a migrated file is left alone (exit 0, "unchanged"). `--dry-run` prints what would change
 and writes nothing; `--check` is `--dry-run` with exit 3 when anything is pending (a CI gate).
@@ -33,8 +39,29 @@ def compatibility_for(requires: list[str]) -> str:
     return f'"Designed for Claude Code; needs {", ".join(requires)} (systems.*)"'
 
 
-def quote(v: str) -> str:
-    return '"' + fmt.unquote(v).replace('"', '\\"') + '"'
+quote = fmt.quote  # the one double-quoting function every kit writer shares (frontmatter.py); callers below
+# always pass an already-bare value (fmt.unquote(raw) or fmt.strip_comment(raw) on a value fmt.is_quoted_string
+# already ruled out)
+
+
+def quote_top_level_scalar(key: str, lines: list[str]) -> str | None:
+    """Quote `key`'s bare value in place when it would not be a valid YAML plain scalar
+    (frontmatter.plain_scalar_problem) — most commonly `description:`. Returns the change description, or None
+    when nothing changed (already quoted, a nested mapping with nothing to quote, or fine bare). `lines` is the
+    single-line entry from `migrate_text`'s `entries` — the same list object `top[key]` holds, so mutating it
+    here is picked up by every later step that reads `top` or `entries`."""
+    if len(lines) != 1:
+        return None  # a key that opens a nested mapping (`key:` alone) carries no scalar value to quote
+    m = fmt.KEY.match(lines[0])
+    if not m or m.group(2) is None:
+        return None
+    raw = m.group(2)
+    bare = fmt.strip_comment(raw)
+    if not bare or fmt.is_quoted_string(bare) or fmt.plain_scalar_problem(bare) is None:
+        return None
+    comment = raw[len(bare):]  # a trailing ` # …` is kept, after the quoted value, spacing untouched
+    lines[0] = f"{key}: {quote(bare)}{comment}"
+    return f"{key}: quoted"
 
 
 def migrate_text(text: str) -> tuple[str, list[str]]:
@@ -95,10 +122,18 @@ def migrate_text(text: str) -> tuple[str, list[str]]:
     if requires and "compatibility" not in top:
         top["compatibility"] = [f"compatibility: {compatibility_for(requires)}"]
         changes.append("compatibility: added")
+
+    # 5. any other top-level scalar (most commonly `description:`) that would not be a valid YAML plain scalar
+    for key, entry_lines in entries:
+        if key and key not in MOVED and key != "metadata":
+            change = quote_top_level_scalar(key, entry_lines)
+            if change:
+                changes.append(change)
+
     if not changes:
         return text, []
 
-    # 5. rebuild: identity keys first, metadata, then everything else in its original order
+    # 6. rebuild: identity keys first, metadata, then everything else in its original order
     out: list[str] = []
     for key in HEAD:
         if key in top:

@@ -20,7 +20,10 @@ Agent Skills spec's "Claude Code profile" (docs/contributing.md § Skill frontma
   - no `environments:` tag and no "(<name>) " description prefix: the kit never names an
     environment (retired 2026-09-25; which machine has which capability is its local env store),
   - description ≤ 60 whitespace-separated tokens and ≤ 400 B, all descriptions ≤ 9,500 B together —
-    every description loads into every session's prefix.
+    every description loads into every session's prefix,
+  - every unquoted scalar value is a valid YAML plain scalar (frontmatter.plain_scalar_problem — a leading
+    indicator character, ': ', ' #' or a trailing ':' would make a real YAML parser refuse the file even
+    though this module's own lenient parser reads it fine) — quote it instead.
 And the env store (`.context/reference/env/config.json`, see kb.py — one per machine, not in the
 kit) for every top-level key `environment-template/config.json` has, `systems.*` covering every
 flag a skill may `require` as booleans, a compiling one-group `tracker.key_regex`, and no rows left
@@ -491,11 +494,18 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there
         km = fmt.KEY.match(line) or fmt.SUBKEY.match(line)
         val = (km.group(2) or "").lstrip() if km else ""
-        if val and val[0] not in "\"'" and (val.startswith("#") or re.search(r"\s#", val)):
+        if not val or val[0] in "\"'":
+            continue  # empty (a nested mapping) or already quoted
+        if val.startswith("#") or re.search(r"\s#", val):
             kept = "" if val.startswith("#") else fmt.strip_comment(val)  # `key: #…` is null to YAML, not `#…`
             errors.append(f"{rel}: '{km.group(1)}:' contains a `#` comment — YAML cuts the value there "
                           f"(kept: {kept!r}); quote the whole value, or move the comment to its own `#` line "
                           "(the right fix for a true/false or integer key)")
+            continue
+        problem = fmt.plain_scalar_problem(val)
+        if problem:
+            errors.append(f"{rel}: '{km.group(1)}:' {problem} — a real YAML parser would refuse this file; "
+                          "quote the whole value (`migrate_frontmatter.py` does it for you)")
     for line in fm.pop("_unparsed", {}).values():
         errors.append(f"{rel}: frontmatter line not understood: {line.strip()!r} — `key: value` at column 0, "
                       "or a two-space-indented `sub: value` under `metadata:`")

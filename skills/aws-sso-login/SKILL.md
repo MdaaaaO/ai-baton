@@ -1,6 +1,6 @@
 ---
 name: aws-sso-login
-description: Get AWS access via the SSO device-code flow: starts `aws sso login --no-browser` in the background, hands the user the URL and code to approve, verifies, then kubectl/aws work. Use whenever aws/kubectl fails with "SSO session … expired or is otherwise invalid" or before any stage/prod AWS or EKS check.
+description: "Get AWS access via the SSO device-code flow: starts `aws sso login --no-browser` in the background, hands the user the URL and code to approve, verifies, then kubectl/aws work. Use whenever aws/kubectl fails with \"SSO session … expired or is otherwise invalid\" or before any stage/prod AWS or EKS check."
 compatibility: "Designed for Claude Code; needs aws_sso (systems.*)"
 metadata:
   version: "7"

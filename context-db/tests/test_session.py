@@ -152,7 +152,9 @@ class RegistrySafety(unittest.TestCase):
         r = run("session.py", "register", "--name", "t-nl", "--no-stats", "--working", "a\nstatus: ended", root=self.root)
         self.assertEqual(r.returncode, 0, r.stderr)
         doc = (self.root / "sessions" / "t-nl.md").read_text(encoding="utf-8")
-        self.assertIn("working_on: a status: ended\n", doc)
+        # the newline collapses to a space (one_line), and the result contains ': ' — quoted on write so the
+        # block stays valid YAML, and so `status:` here reads as text inside the quotes, never a real field
+        self.assertIn('working_on: "a status: ended"\n', doc)
         self.assertIn("status: active\n", doc)
 
     def test_a_body_rule_is_not_front_matter(self):

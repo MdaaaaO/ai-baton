@@ -1,6 +1,6 @@
 ---
 name: env-init
-description: Fill or refresh this machine's env fact store from the discovery manifests: run the named tool per missing or stale fact, verify, write back with provenance, and ask the user once for what no tool settles. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact.
+description: "Fill or refresh this machine's env fact store from the discovery manifests: run the named tool per missing or stale fact, verify, write back with provenance, and ask the user once for what no tool settles. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact."
 metadata:
   version: "7"
   updated: "2026-09-27"
