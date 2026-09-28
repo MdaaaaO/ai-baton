@@ -2,7 +2,7 @@
 name: session-register
 description: Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh; each heartbeat refreshes the row's stats line from the transcript. Invoke at the start of any session working an epic/feature, whenever responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree.
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -127,13 +127,16 @@ jobs · Slack drafts`
 make -C $BATON/context-db session-end NAME=<name> NEXT=$(python3 $BATON/context-db/bin/kit_profile.py scratch)/next.md
 ```
 Marks the row `ended`, stores the `NEXT` file as your `## Next session` hand-off prompt (its first line
-in the index's Ended table; `session-handoff` step 10 says what goes in it — an ended session **without**
-one is archived out of the index after `SESSION_ARCHIVE_NOPROMPT_HOURS` (48, never more than `ARCHIVE_DAYS`)
-— a crashed session is ended by `heartbeat.sh` without a prompt; `session-register` / `session-touch` /
-`session-end` move an archived file back from `sessions/archive/` before writing (a re-register reactivates it),
-so a resumed session refines its hand-off at any time — a lane that continues always leaves a prompt), writes the `## Session stats`
-block into your session file and appends the `_ledger.md` row (§ 2b). Before that, refresh the
-`## Open PRs` list in your session file (repo#n, current head, what each waits on) — your
+in the index's Ended table; `session-handoff` step 10 decides whether there is one to write — a session
+with nothing to hand over omits `NEXT` entirely, and `NEXT=none` withdraws a prompt already on file that
+has gone stale). An ended session **without** a prompt is archived out of the index after
+`SESSION_ARCHIVE_NOPROMPT_HOURS` (48, never more than `ARCHIVE_DAYS`) — that covers both a clean end with
+nothing left to do and a crash (`heartbeat.sh` ends a crashed session the same way, without a prompt);
+`session-register` / `session-touch` / `session-end` move an archived file back from `sessions/archive/`
+before writing (a re-register reactivates it), so a resumed session can still add a hand-off later — a
+lane that continues with follow-on work always leaves a prompt. `session-end` also writes the
+`## Session stats` block into your session file and appends the `_ledger.md` row (§ 2b). Before that,
+refresh the `## Open PRs` list in your session file (repo#n, current head, what each waits on) — your
 `Monitor`s stop with you, and that list is what the successor's startup step 4 re-arms from.
 Then do the rest of the `session-handoff` close-out (flush to the context doc, priorities, index).
 

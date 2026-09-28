@@ -236,6 +236,42 @@ class NoSilentLoss(unittest.TestCase):
         self.assertEqual(out.count("## Session stats"), 1, out)
         self.assertIn("## Session stats\n\nnew", out)
 
+    def test_empty_content_withdraws_a_stored_section(self):
+        # A closing session with nothing to hand over must be able to withdraw a stale next-session
+        # prompt, not just leave it un-updated — `_replace_section(..., content="")` drops the section
+        # entirely rather than writing an empty one a reader would still trip over.
+        spec = importlib.util.spec_from_file_location("session_withdraw", BIN / "session.py")
+        sys.path.insert(0, str(BIN))
+        with unittest.mock.patch.dict(os.environ, {"CONTEXT_ROOT": str(self.root)}):
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        body = "## Next session\n\nold prompt, now stale\n\n## Open PRs\n- o/r#1 abc — waits\n"
+        out = mod._replace_section(body, "## Next session", "")
+        self.assertNotIn("## Next session", out)
+        self.assertNotIn("old prompt, now stale", out)
+        self.assertIn("## Open PRs\n- o/r#1 abc — waits", out)
+        # withdrawing a section that was never there is a no-op, not an error
+        untouched = "## Open PRs\n- o/r#1 abc — waits\n"
+        self.assertEqual(mod._replace_section(untouched, "## Next session", ""), untouched)
+
+    def test_next_none_withdraws_a_stored_prompt_end_to_end(self):
+        # `--next none` (via `make session-end NEXT=none`) withdraws a stored next-session prompt
+        # instead of being read as a literal filename `none`.
+        run("session.py", "register", "--name", "t-next-none", "--no-stats", root=self.root)
+        next_file = self.root / "next.txt"
+        next_file.write_text("Register as t-next-none-2. Read the context doc first.\n", encoding="utf-8")
+        r = run("session.py", "touch", "--name", "t-next-none", "--no-stats", "--next", str(next_file), root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc_path = self.root / "sessions" / "t-next-none.md"
+        self.assertIn("## Next session\n\nRegister as t-next-none-2.", doc_path.read_text(encoding="utf-8"))
+        r = run("session.py", "end", "--name", "t-next-none", "--no-stats", "--next", "none", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        doc = doc_path.read_text(encoding="utf-8")
+        self.assertNotIn("## Next session", doc)
+        self.assertNotIn("Register as t-next-none-2.", doc)
+        self.assertIn("status: ended", doc)
+
     def test_a_non_string_tracker_regex_does_not_break_the_registry(self):
         import json as _json
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},
