@@ -140,7 +140,15 @@ A skill declares the facts it needs as `facts` under its `metadata:` frontmatter
 `context-db/bin/frontmatter.py` is the one parser, `frontmatter.py facts` lists every declared entry);
 `kit-verify` rejects an entry no manifest covers. A forked
 worker that hits a missing fact returns exactly `NEEDS <system>.<kind> <name>` and the main session
-resolves it as above. Refresh: `kb.py stale` (monthly in `kit-health`) lists the rows past their ttl with
+resolves it as above. **One spelling, never a colon after `NEEDS`** — a main session (or a script) tells the
+hand-back line apart from a worker's other, *named* `NEEDS <reason>` report lines (`NEEDS nothing`, `NEEDS
+datalake reauth`, `NEEDS fetch failed — …` — `skills/pr-review/reference/runner.md` defines that set and is
+checked first) by matching the whole line against `kb.NEEDS_HANDBACK` (`context-db/bin/kb.py` — the one place
+this pattern lives; cite the constant, never restate the regex): a hand-back always has a dotted
+`<system>.<kind>`, a named reason never does — `FACT_KEY` alone under-matches here (its dot group is
+zero-or-more), so the hand-back gets its own stricter pattern (one-or-more dots) rather than reusing it.
+`kit-verify` fails an agent body that spells the hand-back line (or any other `NEEDS` report line) with a
+colon, so the whole family stays one spelling. Refresh: `kb.py stale` (monthly in `kit-health`) lists the rows past their ttl with
 their `discover` command; a `user` row is never stale. The bulk paths — a new machine, `--refresh` of the
 stale rows, or the one fact a skill stopped on — are the `env-init` skill (`skills/env-init/SKILL.md`),
 which executes the plans and holds the "one batched user round" rule.

@@ -3,6 +3,7 @@ tracker-aware ticket shape, anchored allow-list, loader errors reported, a plain
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -262,6 +263,31 @@ class Seeds(unittest.TestCase):
                 kh.seed_wiring(r)
             self.assertTrue(any("not checked" in l for l in r.lines) and not any("not older" in l for l in r.lines))
 
+
+class PrReviewExampleUnchanged(unittest.TestCase):
+    """The kit's own `pr-review/config.example.json` is never the file a user edits — `setup.sh` seeds a copy
+    at `.context/state/pr-review/config.json` once and the skill reads that copy — so an edited example is a
+    no-op mistake that shows up as a kit diff; kit-health flags it like a leak."""
+
+    def test_the_kits_own_example_still_holds_its_placeholders(self):
+        kh = load_kit_health()
+        self.assertEqual(kh.pr_review_example_edited(), [])
+
+    def test_a_hand_edited_example_is_flagged_by_key(self):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "config.example.json"
+            p.write_text(json.dumps({"login": "a-real-login", "owner": "<org>"}), encoding="utf-8")
+            self.assertEqual(kh.pr_review_example_edited(p), ["login"])
+
+    def test_missing_or_unparseable_example_is_not_flagged(self):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "none.json"
+            self.assertEqual(kh.pr_review_example_edited(missing), [])
+            bad = Path(tmp) / "bad.json"
+            bad.write_text("{not json", encoding="utf-8")
+            self.assertEqual(kh.pr_review_example_edited(bad), [])
 
 
 class Verdict(unittest.TestCase):

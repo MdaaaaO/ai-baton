@@ -250,11 +250,21 @@ class ProjectDirContextRoot(unittest.TestCase):
 
 
 class BodyChecks(unittest.TestCase):
-    def check(self, body: str, unit_dir: Path | None = None) -> list[str]:
+    def check(self, body: str, unit_dir: Path | None = None, is_agent: bool = False) -> list[str]:
         errors: list[str] = []
         p = (unit_dir or FIX / "good-skill") / "SKILL.md"
-        kit_verify.check_body(p, p.relative_to(KIT), body, errors)
+        kit_verify.check_body(p, p.relative_to(KIT), body, errors, is_agent=is_agent)
         return errors
+
+    def test_agent_body_needs_colon_fails_but_skill_body_is_untouched(self):
+        # the fork hand-back line is `NEEDS <system>.<kind> <name>`, never a colon — a main session
+        # matching on one spelling misses the other. kit-verify only enforces this on an agent body.
+        line = "NEEDS: nothing | <one line>"
+        errors = self.check(line, is_agent=True)
+        self.assertTrue(any("NEEDS:" in e and "colon" in e for e in errors), errors)
+        self.assertEqual(self.check(line, is_agent=False), [])  # a skill body is not a fork hand-back contract
+        self.assertEqual(self.check("NEEDS nothing | <one line>", is_agent=True), [])  # the one spelling passes
+        self.assertEqual(self.check("NEEDS <system>.<kind> <name>", is_agent=True), [])
 
     def test_own_paths_globs_and_placeholders(self):
         self.assertEqual(self.check("run `scripts/hello.sh` and `scripts/*.sh` and `scripts/<x>.sh`"), [])

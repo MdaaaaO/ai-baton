@@ -2,8 +2,8 @@
 name: auto-runner
 description: "Sonnet worker for the trivial-PR auto-approve path (docs-only / dependency patch bumps that passed trivial-check.py): runs fetch-context.sh, checks the docs claims or the bump's release notes and lockfile, writes $CTX/auto.json, returns AUTO approve/fallback lines only. Any doubt is a fallback. Never posts; the main session decides."
 metadata:
-  version: "5"
-  updated: "2026-09-27"
+  version: "6"
+  updated: "2026-09-28"
   reviewed: "2026-09-24"
 model: sonnet
 effort: medium
@@ -46,5 +46,6 @@ Return exactly, and nothing else:
 ```
 AUTO: approve — <body>   |   AUTO: fallback — <one-line reason>
 CTX: <absolute path>
-NEEDS: nothing | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>` (kit-wide form, no colon)
+NEEDS nothing | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>` (kit-wide form, no colon —
+one spelling, docs/env-facts.md § Environment facts)
 ```

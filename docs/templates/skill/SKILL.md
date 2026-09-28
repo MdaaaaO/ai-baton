@@ -1,6 +1,6 @@
 ---
 name: my-skill
-description: <What it does, one clause>. Use when <the situations that should trigger it>. Not for <the near misses from the same domain that should not>.
+description: "<What it does, one clause>. Use when <the situations that should trigger it>. Not for <the near misses from the same domain that should not>."
 metadata:
   version: "1"
   updated: "<YYYY-MM-DD>"
@@ -17,8 +17,9 @@ user-invocable: true
 
 ## 1. Detect
 
-- <Capability tier only: `python3 $BATON/context-db/bin/kit_profile.py get systems.<flag>` — `False` →
-  print `my-skill: not applicable here (systems.<flag> is false)` and stop.>
+- <Capability tier only: `python3 $BATON/context-db/bin/kit_profile.py get systems.<flag>` — `false` →
+  print `my-skill: not applicable here (systems.<flag> is false)` and stop. (`kit_profile.py get` prints the
+  JSON literal `false`/`true`, never Python's `False`/`True`.)>
 - <Each fact the body reads: `python3 $BATON/context-db/bin/kb.py get <system>.<kind> <name>`. Missing →
   `kb.py discover <system>.<kind> <name>` prints the tool call and the verify clause; run it, verify, write back
   with `kb.py set … --from tool:<name>`. Inside a fork return exactly `NEEDS <system>.<kind> <name>` instead.>

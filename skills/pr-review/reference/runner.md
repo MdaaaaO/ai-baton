@@ -26,7 +26,7 @@ writes `not assessed` instead of trying.
 
 The runner works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`,
 `kb-traps.md`) — it should not spend turns on `gh api contents`, `git show` or CI logs. If a returned sheet
-shows it did (many `gh`/`git` calls in its transcript, or `NEEDS: fetch failed`), that is a bundle gap to
+shows it did (many `gh`/`git` calls in its transcript, or `NEEDS fetch failed`), that is a bundle gap to
 fix in the script, not a prompt to repeat.
 
 ## Prompt template
@@ -47,9 +47,9 @@ Extra context from the queue: <pr-scan row: prio, why-now, size, human reviews, 
 |---|---|
 | `REVIEW SHEET …` table | Print it verbatim as the 5a overview, then start the 5b loop from `$CTX/triage.json` |
 | `CTX: <path>` | Everything from here on reads `$CTX/triage.json` only — never `diff.patch`, `files.json`, `reviews.json`, `threads.json` |
-| `NEEDS: datalake reauth (#…)` | Ask the user to `/mcp` reauth, then spawn **one** follow-up runner: "re-verify findings #… in `$CTX`, rewrite their `evidence`, return the changed rows" |
-| `NEEDS: fetch failed — …` / `<other>` | Resolve it (usually a `gh` failure — a failed call is not an empty PR; a bundle gap → fix `fetch-context.sh`), re-spawn |
-| `NEEDS <system>.<kind> <name>` (no colon — the kit-wide forked-worker form) | `/env-init <system>.<kind> <name>` in this session (the user round happens here), then re-spawn |
+| `NEEDS datalake reauth (#…)` | Ask the user to `/mcp` reauth, then spawn **one** follow-up runner: "re-verify findings #… in `$CTX`, rewrite their `evidence`, return the changed rows" |
+| `NEEDS fetch failed — …` / `<other>` | Resolve it (usually a `gh` failure — a failed call is not an empty PR; a bundle gap → fix `fetch-context.sh`), re-spawn |
+| `NEEDS <system>.<kind> <name>` (the fact-shaped form — a dotted `<system>.<kind>`, never free text: the kit-wide forked-worker hand-back) | `/env-init <system>.<kind> <name>` in this session (the user round happens here), then re-spawn |
 | `IMPACT:` | Print with the overview; an undisclosed consumer change is walked like any finding, and the consumer map goes into the KB at step 8 |
 | `NOTE:` | Carry into the 5c body draft (human approval present → lighter touch; stacked base → say so) |
 
@@ -70,7 +70,7 @@ refuses sweep rows: "not in the user's review scope").
 Agent(subagent_type: "auto-runner", description: "auto-review <repo>#<pr>", prompt: "
 MODE: auto · CLASS: <docs|patch-bump> · REPO: <owner/repo> · PR: <n> · HEAD: <sha>
 Gate output: <the queue.json .auto object> — write it to $CTX/trivial.json first.
-Return the AUTO:/CTX:/NEEDS: lines only.")
+Return the AUTO:/CTX:/NEEDS lines only.")
 ```
 
 Main session on return — `shadow` mode: append `{"repo","pr","head","status":"shadow_approve"|"shadow_fallback","ts","reason"}`
@@ -80,7 +80,7 @@ on that head. `live` mode: on `approve`, write `$CTX/request.json` `{"event":"AP
 `submit-review.sh preview … --auto` then `submit … --confirm <digest> --auto` **without** an `AskUserQuestion` — the script
 itself re-runs `trivial-check.py --head <sha>` and refuses unless the gate still passes on that exact head and
 `auto_approve.mode == live`; it writes the `auto_approved` ledger row. Tell the user one line with the review link. On
-`fallback`, the PR stays in the queue as an ordinary row. `NEEDS:` lines are handled like any other runner.
+`fallback`, the PR stays in the queue as an ordinary row. `NEEDS` lines are handled like any other runner.
 
 ## `--local`
 
