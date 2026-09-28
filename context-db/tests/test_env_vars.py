@@ -77,12 +77,6 @@ SHELL_LOCAL_EXCLUDE = {
                   "name once; later ${SESSION_ID:+…}/${SESSION_ID:-…} just format the copy",
 }
 
-# Documented ahead of the script that will read them: an open PR adds the reads (pr-review's fetch-context.sh)
-# independently of this one. Whichever lands second must not have to touch docs/env-vars.md again, so the rows
-# are added now and these names are exempted from the no-stale-rows check until a read exists. Must be empty
-# by the next tagged release (v0.5.0) — say so, not by citing whichever issue happens to still be open when
-# that release ships. (PYYAML_VERSION started the same way; it landed and is not on this list any more.)
-PENDING = {"PR_REVIEW_FETCH_CONCURRENCY", "PR_REVIEW_FETCH_RETRY_DELAY"}
 
 DOC_ROW = re.compile(r"^\|\s*`([A-Z][A-Z0-9_]*)`\s*\|")
 DOC_HEADING = re.compile(r"^##\s+(.*)$")
@@ -124,9 +118,9 @@ class EnvVarDocs(unittest.TestCase):
     def test_no_stale_rows(self):
         names = set(self.found) | set(kit_profile.IDENTITY_KEYS)
         stale = [n for n, heading in sorted(self.documented.items())
-                 if not heading.startswith(VERSIONS_HEADING_PREFIX) and n not in PENDING and n not in names]
+                 if not heading.startswith(VERSIONS_HEADING_PREFIX) and n not in names]
         self.assertEqual(stale, [], f"docs/env-vars.md documents these but no tracked script reads them any "
-                                    f"more: {stale} — drop the row, or add the name to PENDING with a reason")
+                                    f"more: {stale} — drop the row")
 
     def test_platform_and_shell_local_names_carry_no_row(self):
         # a row that duplicates the allowlist/exclude-list is dead weight the reader has to reconcile by hand.
@@ -139,11 +133,6 @@ class EnvVarDocs(unittest.TestCase):
             self.assertNotIn(name, SHELL_LOCAL_EXCLUDE, f"{name} is shell-local (see SHELL_LOCAL_EXCLUDE) and "
                                                          "should carry no row")
 
-    def test_pending_list_names_are_actually_documented(self):
-        # PENDING exists to silence test_no_stale_rows for a row added ahead of its reader; a name on the list
-        # that is not even a row is just dead configuration
-        undocumented_pending = sorted(n for n in PENDING if n not in self.documented)
-        self.assertEqual(undocumented_pending, [], f"on PENDING but not documented: {undocumented_pending}")
 
 
 # ── config keys read through kit_profile.py get / profile.get(...) ──────────────────────────────────────────
@@ -247,12 +236,12 @@ def version_pin_uses() -> dict[str, set[str]]:
 class VersionsEnvParity(unittest.TestCase):
     def test_every_defined_pin_is_used_somewhere(self):
         used = version_pin_uses()
-        unused = sorted(pin for pin in versions_env_pins() if pin not in used and pin not in PENDING)
+        unused = sorted(pin for pin in versions_env_pins() if pin not in used)
         self.assertEqual(unused, [], f".github/versions.env defines these but nothing uses them: {unused}")
 
     def test_every_used_pin_is_defined(self):
         pins = versions_env_pins()
-        undefined = sorted(name for name in version_pin_uses() if name not in pins and name not in PENDING)
+        undefined = sorted(name for name in version_pin_uses() if name not in pins)
         self.assertEqual(undefined, [], f"referenced as a `*_VERSION` pin but not defined in "
                                         f".github/versions.env: {undefined}")
 
