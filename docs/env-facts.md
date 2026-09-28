@@ -61,8 +61,8 @@ lists the vocabulary.
 `github.owner_teams`, `slack.enabled`, `slack.domain`, `systems.*`, `tz_default`, `labels`,
 `self_assessment`, `diagrams` (pr-open's per-repo diagram overlays), `commits` (commit-subject style, `commit-style.md`), `datalake`, `cost` (cost-report's spend table,
 identity, phases — optional, absent = private mode), `datalake.kind` (warehouse vendor — optional, picks the
-`datalake-<vendor>` manifest), `mcp_tools` (MCP tool names that differ by vendor connector, e.g.
-`mcp_tools.datalake_probe` — optional, absent = no such probe here), `kit.install_mode` (`clone`|`plugin`|`dev-checkout` — written by `setup.sh`, never by
+`datalake-<vendor>` manifest), `datalake.mcp_tools` (MCP tool names that differ by vendor connector, e.g.
+`datalake.mcp_tools.probe` — optional, absent = no such probe here), `kit.install_mode` (`clone`|`plugin`|`dev-checkout` — written by `setup.sh`, never by
 hand; kit-health § 1 compares it with how the kit actually runs, #34), `leaks.markers` (optional: literal strings — a sandbox product's CLI or env-file path, a tenant or team name — that kit-health's leak scan adds to the configured values; for what no generic shape can know, #95), `kit.sandbox_markers` (optional: absolute
 paths or environment-variable names whose presence means this machine runs in a sandbox, so kit-health warns when
 `github.sandbox_token_prefix` is empty there; absent = no sandbox check, #94), plus `environment` (this

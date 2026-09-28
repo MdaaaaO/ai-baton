@@ -426,16 +426,35 @@ def _within_tolerance(key: str, have: str, want: str) -> bool:
     return abs(h - w) <= LOADING_BYTES_TOLERANCE * w
 
 
-def write_loading_table(values: dict[str, str]) -> None:
-    """Rewrite each marked span in docs/loading.md with the measured value — the fix for a drift finding is a
-    command, never a hand edit. Markers the doc lacks stay missing (the drift check still reports them)."""
+def write_loading_table(values: dict[str, str], *, force: bool = False) -> dict[str, str]:
+    """Rewrite a marked span in docs/loading.md only when the drift check would otherwise fail on it: a count
+    that differs, or a byte total outside LOADING_BYTES_TOLERANCE — the same test `check_loading_table_drift`
+    runs. A byte total within tolerance is left byte-identical, so a PR that only edits a skill body does not
+    also touch docs/loading.md and collide with a parallel one on the same lines. `force=True` (the CLI's
+    `--write --force`, for a deliberate refresh e.g. at release time) rewrites every marker regardless.
+    Markers the doc lacks stay missing (the drift check still reports them). Returns a note per marker whose
+    value differed from what's now measured (a marker that matches exactly has no entry) for the CLI to print alongside it."""
     text = LOADING_MD.read_text(encoding="utf-8")
-    new = LOADING_MARKER.sub(lambda m: f"<!-- kit-verify:{m.group(1)} -->{values.get(m.group(1), m.group(2))}"
-                                       f"<!-- /kit-verify:{m.group(1)} -->", text)
+    notes: dict[str, str] = {}
+
+    def repl(m: re.Match) -> str:
+        key, old = m.group(1), m.group(2)
+        want = values.get(key)
+        if want is None or old == want:
+            return m.group(0)
+        if not force and _within_tolerance(key, old, want):
+            pct = int(LOADING_BYTES_TOLERANCE * 100)
+            notes[key] = f"(doc {old}, within {pct}%, left as is)"
+            return m.group(0)
+        notes[key] = "(rewritten)"
+        return f"<!-- kit-verify:{key} -->{want}<!-- /kit-verify:{key} -->"
+
+    new = LOADING_MARKER.sub(repl, text)
     if new != text:
         tmp = LOADING_MD.with_name(LOADING_MD.name + ".tmp")
         tmp.write_text(new, encoding="utf-8")
         os.replace(tmp, LOADING_MD)
+    return notes
 
 
 def check_loading_table_drift(errors: list[str]) -> None:
@@ -569,6 +588,49 @@ HARDCODED_KIT_PATH = re.compile(r"(?<![~\w>*/.$-])\.claude/(?:context-db|skills/
                                 r"environment-template/)[\w./<>-]*")
 
 
+# A skill forked to a read-only agent (agents/<name>.md whose disallowedTools denies both Edit and Write —
+# `triage`, today) must never mutate state through Bash either: `sed -i`, a shell append or `make … index`
+# in its own body is the tool restriction defeated by another door (the very bug this check exists to
+# catch — a fork that wrote STATE/KB straight through Bash while its docs called it read-only). The write
+# belongs to whichever session applies the fork's return value, never a step the fork runs itself.
+FORK_WRITE_PATTERNS = (
+    (re.compile(r"\bsed\s+-i\b"), "sed -i"),
+    (re.compile(r'(?:^|[\s"\'])>>(?:[\s"\'$]|$)', re.M), ">>"),
+    (re.compile(r"\bmake\b[^\n]*\bindex\b"), "make … index"),
+)
+
+
+def read_only_fork_agents() -> set[str]:
+    """Agent names (agents/<name>.md) whose disallowedTools denies both Edit and Write."""
+    out: set[str] = set()
+    agents_dir = KIT / "agents"
+    if not agents_dir.is_dir():
+        return out
+    for p in sorted(agents_dir.glob("*.md")):
+        fm = fmt.parse(p.read_text(encoding="utf-8", errors="replace"))
+        if not fm:
+            continue
+        denied = set(fmt.parse_csv(fm.get("disallowedTools", "")))
+        if {"Edit", "Write"} <= denied:
+            out.add(fmt.unit_name(p))
+    return out
+
+
+def check_forked_write_leak(rel, fm, body: str, errors: list[str]) -> None:
+    """A skill whose `agent:` names a read-only fork (`read_only_fork_agents()`) must not carry a
+    state-mutating shell form in its own body — see FORK_WRITE_PATTERNS above."""
+    agent = fmt.unquote(fm.get("agent", ""))
+    if not agent or agent not in read_only_fork_agents():
+        return
+    for pat, label in FORK_WRITE_PATTERNS:
+        m = pat.search(body)
+        if m:
+            line = body.count("\n", 0, m.start()) + 1
+            errors.append(f"{rel}: body line {line} uses `{label}` but `agent: {agent}` denies Edit/Write — "
+                          "a read-only fork must not mutate state through Bash either; describe the write as "
+                          "something the main session applies, never a step the fork runs itself")
+
+
 STEP = re.compile(r"^(\d+)\.\s+(.*\S)")
 
 # The fork hand-back line is `NEEDS <system>.<kind> <name>` — never a colon (docs/env-facts.md § Environment
@@ -673,6 +735,8 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
         return 0
     body = parts[1] if parts else ""
     check_body(p, rel, body, errors, is_agent=is_agent)
+    if not is_agent:
+        check_forked_write_leak(rel, fm, body, errors)
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there
         km = fmt.KEY.match(line) or fmt.SUBKEY.match(line)
         val = (km.group(2) or "").lstrip() if km else ""
@@ -790,15 +854,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-git", action="store_true", help="skip the reviewed-vs-last-edit check (no git history to compare against)")
     ap.add_argument("--loading-table", action="store_true",
                     help="print the numbers docs/loading.md quotes (units, description bytes, bodies, body bytes) and exit")
-    ap.add_argument("--write", action="store_true", help="with --loading-table: rewrite the marked numbers in docs/loading.md")
+    ap.add_argument("--write", action="store_true",
+                    help="with --loading-table: rewrite a marked number in docs/loading.md, but only one the "
+                         "drift check would fail on (a count that differs, or a byte total outside tolerance)")
+    ap.add_argument("--force", action="store_true",
+                    help="with --loading-table --write: also rewrite markers within tolerance (a deliberate "
+                         "refresh, e.g. at release time)")
     ap.add_argument("units", nargs="*", type=Path, help="skill/agent files or dirs to verify (default: every unit; skips the kit-wide totals)")
     a = ap.parse_args(argv)
     if a.loading_table:
         values = loading_table_values()
+        notes = write_loading_table(values, force=a.force) if a.write else {}
         for key, val in values.items():
-            print(f"{key}: {val}")
-        if a.write:
-            write_loading_table(values)
+            note = notes.get(key)
+            print(f"{key}: {val}" + (f" {note}" if note else ""))
         return 0
     saved_kb_env = kb.ENV
     if a.no_env:

@@ -5,7 +5,7 @@ metadata:
   version: "23"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
-  facts: "systems.jira,systems.datalake,systems.slack,mcp_tools.datalake_probe"
+  facts: "systems.jira,systems.datalake,systems.slack,datalake.mcp_tools.probe"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
 ---
 

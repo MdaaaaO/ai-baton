@@ -22,7 +22,7 @@ main session runs one cheap `select 1` through the datalake SQL MCP. An auth
 error → ask the user to `/mcp` reauth **first**, then spawn — a runner that discovers the expired token
 mid-review burns its budget marking rows `unverified` and forces a second runner. Same probe for the BI
 tool's MCP when step 4b will be needed and `systems.datalake` is true: `python3
-$BATON/context-db/bin/kit_profile.py get mcp_tools.datalake_probe` names the one tool this environment's
+$BATON/context-db/bin/kit_profile.py get datalake.mcp_tools.probe` names the one tool this environment's
 connector exposes for a cheap listing call (never a query); unset or unavailable → say so in the prompt
 so the runner writes `not assessed` instead of trying.
 

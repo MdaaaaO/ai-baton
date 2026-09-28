@@ -550,14 +550,6 @@ class Discover(StoreCase):
         self.assertEqual(kb.validate_manifests(), [])
         self.assertIsNotNone(kb.find_fact("slack.channel", "eng-help"))
         self.assertIsNone(kb.find_fact("teletext.page", "100"))
-
-    def test_config_driven_report_sections_and_datalake_probe_have_manifests(self):
-        # self-assessment's report-block headings and pr-review's BI-tool probe are both env facts now —
-        # no vendor form question or MCP tool name hardcoded in a skill body — so each needs a discovery
-        # manifest entry a session can find via `kb.py discover`
-        self.assertIsNotNone(kb.find_fact("self_assessment.sections", ""))
-        self.assertIsNotNone(kb.find_fact("mcp_tools.datalake_probe", ""))
-        self.assertIn("mcp_tools", kb.OPTIONAL_CONFIG_KEYS)  # absent = no probe on this machine, not an error
         cfg = kb.load_config()
         plan = kb.discover_plan("slack.channel", "eng-help", cfg)
         self.assertIn("NOT APPLICABLE here — systems.slack is not true", plan)
@@ -569,6 +561,13 @@ class Discover(StoreCase):
         rc, out, _ = self.cli("discover", "--check")
         self.assertEqual(rc, 0)
         self.assertIn("OK —", out)
+
+    def test_config_driven_report_sections_and_datalake_probe_have_manifests(self):
+        # self-assessment's report-block headings and pr-review's BI-tool probe are both env facts now —
+        # no vendor form question or MCP tool name hardcoded in a skill body — so each needs a discovery
+        # manifest entry a session can find via `kb.py discover`
+        self.assertIsNotNone(kb.find_fact("self_assessment.sections", ""))
+        self.assertIsNotNone(kb.find_fact("datalake.mcp_tools.probe", ""))
 
 
 if __name__ == "__main__":

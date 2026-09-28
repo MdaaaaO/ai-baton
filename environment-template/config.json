@@ -64,11 +64,10 @@
   },
   "datalake": {
     "kind": "",
-    "_comment": "kind: warehouse vendor (snowflake | bigquery | …) — selects the datalake-<vendor> discovery manifest; empty when systems.datalake is false."
-  },
-  "mcp_tools": {
-    "_comment": "MCP tool names that differ by vendor connector, named here so a skill never hardcodes one vendor's tool. datalake_probe: the tool pr-review's step 4b calls for a cheap listing check on the BI/datalake connector (never a query); empty when systems.datalake is false or this environment has no such probe.",
-    "datalake_probe": ""
+    "_comment": "kind: warehouse vendor (snowflake | bigquery | …) — selects the datalake-<vendor> discovery manifest; empty when systems.datalake is false. mcp_tools.probe: the MCP tool pr-review's step 4b calls for a cheap listing check on the BI/datalake connector (never a query), named here so a skill never hardcodes one vendor's tool; empty when systems.datalake is false or this environment has no such probe.",
+    "mcp_tools": {
+      "probe": ""
+    }
   },
   "labels": {
     "shared": [

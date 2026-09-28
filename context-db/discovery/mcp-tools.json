@@ -1,9 +1,9 @@
 {
-  "system": "mcp_tools",
+  "system": "datalake",
   "requires": "datalake",
   "facts": [
     {
-      "key": "mcp_tools.datalake_probe",
+      "key": "datalake.mcp_tools.probe",
       "target": "config",
       "tool": "user",
       "args": {},

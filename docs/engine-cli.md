@@ -184,7 +184,7 @@ Stdlib only; never prints anything from settings.local.json (`identity-env` re-e
 
 ```text
 usage: kit_verify.py [-h] [--stale N] [--no-env] [--no-git] [--loading-table]
-                     [--write]
+                     [--write] [--force]
                      [units ...]
 
 Verify the kit itself — every skill and agent carries the versioning
@@ -203,8 +203,11 @@ options:
                    compare against)
   --loading-table  print the numbers docs/loading.md quotes (units,
                    description bytes, bodies, body bytes) and exit
-  --write          with --loading-table: rewrite the marked numbers in
-                   docs/loading.md
+  --write          with --loading-table: rewrite a marked number in
+                   docs/loading.md, but only one the drift check would fail on
+                   (a count that differs, or a byte total outside tolerance)
+  --force          with --loading-table --write: also rewrite markers within
+                   tolerance (a deliberate refresh, e.g. at release time)
 ```
 
 ## `review_gate.py`

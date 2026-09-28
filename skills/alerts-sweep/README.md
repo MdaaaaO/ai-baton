@@ -9,11 +9,17 @@ each message is classified against). All three come from the env store; a missin
 
 **Without it:** on a machine where either flag is false the fork returns one line — `alerts-sweep: not applicable
 here — airflow is false` (or `— slack is false`, whichever tripped) — and the loop does nothing else. It never
-acts on an alert itself anywhere.
+acts on an alert itself anywhere, and it never writes `STATE` or `KB` itself either — every state change comes
+back as a trailer, the exact `advance-state.py` command already filled in with real paths and values, so the
+main session (which never reads the skill body itself, only the fork's returned text) can run it verbatim. A
+KNOWN alert's recurrence line is untrusted Slack text, so it never sits on that command line — it rides a quoted
+heredoc's stdin instead, which the shell never expands.
 
 **Example:**
 
 > **user:** `/loop 20m /alerts-sweep`
 >
-> **claude (fork, every 20 min):** `NO-OP` — or, when something needs the main session: `2 new: <pattern> ×2
-> since <timestamp>; state advanced` and the main session decides what to do.
+> **claude (fork, every 20 min):** `NO-OP` when nothing at all was new — or, when something needs the main
+> session: `2 new: <pattern> ×2 since <timestamp>` plus a trailer line (`ADVANCE — run: python3
+> $BATON/skills/alerts-sweep/scripts/advance-state.py --state … --ts …`) the main session runs verbatim
+> before deciding what to do about the alerts.

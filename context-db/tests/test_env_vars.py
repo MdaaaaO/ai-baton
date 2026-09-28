@@ -75,6 +75,8 @@ SHELL_LOCAL_EXCLUDE = {
                "${TRK_URL:-…} is a display fallback for that local value",
     "SESSION_ID": "heartbeat.sh copies ${CLAUDE_CODE_SESSION_ID:-} (itself a platform variable) into this local "
                   "name once; later ${SESSION_ID:+…}/${SESSION_ID:-…} just format the copy",
+    "MIGRATED_DIR": "setup.sh sets it to `$CONTEXT/state/memory-migrated`; ${MIGRATED_DIR:?} only guards the "
+                    "backup prune against an empty path, never an external override",
 }
 
 
