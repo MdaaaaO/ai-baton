@@ -14,6 +14,19 @@ import kb  # noqa: E402
 GH_REASONS = {"completed", "not planned"}   # everything `gh issue close --reason` accepts, minus `duplicate`
 
 
+class NeedsHandback(unittest.TestCase):
+    """The fork hand-back line (`docs/env-facts.md` § Environment facts) is `NEEDS <system>.<kind>[ <name>]` —
+    at least one dot, so it never matches a runner's other, named `NEEDS <reason>` report lines."""
+
+    def test_a_fact_spec_matches(self):
+        self.assertTrue(kb.NEEDS_HANDBACK.match("NEEDS slack.channel ops-alerts"))
+        self.assertTrue(kb.NEEDS_HANDBACK.match("NEEDS tracker.transitions"))
+
+    def test_a_named_reason_does_not_match(self):
+        self.assertIsNone(kb.NEEDS_HANDBACK.match("NEEDS nothing"))
+        self.assertIsNone(kb.NEEDS_HANDBACK.match("NEEDS datalake reauth"))
+
+
 class CloseReasons(unittest.TestCase):
     def test_template_ships_gh_strings_under_the_skill_keys(self):
         tmpl = json.loads((KIT / "environment-template" / "config.json").read_text(encoding="utf-8"))

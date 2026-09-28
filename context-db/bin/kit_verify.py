@@ -25,7 +25,9 @@ Agent Skills spec's "Claude Code profile" (docs/contributing.md § Skill frontma
     90% of the total budget, naming the largest) — every description loads into every session's prefix,
   - every unquoted scalar value is a valid YAML plain scalar (frontmatter.plain_scalar_problem — a leading
     indicator character, ': ', ' #' or a trailing ':' would make a real YAML parser refuse the file even
-    though this module's own lenient parser reads it fine) — quote it instead.
+    though this module's own lenient parser reads it fine) — quote it instead,
+  - an agent's body never spells the fork hand-back line with a colon (`NEEDS:`) — the one spelling is
+    `NEEDS <system>.<kind> <name>` (docs/env-facts.md § Environment facts).
 And the env store (`.context/reference/env/config.json`, see kb.py — one per machine, not in the
 kit) for every top-level key `environment-template/config.json` has, `systems.*` covering every
 flag a skill may `require` as booleans, a compiling one-group `tracker.key_regex`, and no rows left
@@ -612,6 +614,11 @@ def check_forked_write_leak(rel, fm, body: str, errors: list[str]) -> None:
 
 STEP = re.compile(r"^(\d+)\.\s+(.*\S)")
 
+# The fork hand-back line is `NEEDS <system>.<kind> <name>` — never a colon (docs/env-facts.md § Environment
+# facts): a colon would give a forked worker two spellings for the same signal and a main session matching on
+# one form misses the other.
+NEEDS_COLON = re.compile(r"\bNEEDS:")
+
 
 def duplicated_steps(body: str) -> list[str]:
     """Top-level numbered lists that repeat a step number or a step's text (#19). A list runs until a heading or an
@@ -640,8 +647,14 @@ def duplicated_steps(body: str) -> list[str]:
     return out
 
 
-def check_body(p: Path, rel, body: str, errors: list[str]) -> None:
+def check_body(p: Path, rel, body: str, errors: list[str], is_agent: bool = False) -> None:
     """Environment-free checks on a unit's body: length, cited own paths exist, no fact-shaped literal."""
+    if is_agent:
+        for n, line in enumerate(body.split("\n"), 1):
+            if NEEDS_COLON.search(line):
+                errors.append(f"{rel}: body line {n} spells a `NEEDS:` report line with a colon — the fork "
+                              "hand-back form is `NEEDS <system>.<kind> <name>`, never a colon (one spelling, "
+                              "docs/env-facts.md § Environment facts)")
     n_lines = body.count("\n") + (1 if body and not body.endswith("\n") else 0)
     if n_lines > BODY_MAX_LINES:
         errors.append(f"{rel}: body is {n_lines} lines > {BODY_MAX_LINES} — move detail into references/ (loaded on demand)")
@@ -697,7 +710,7 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
         errors.append(f"{rel}: no frontmatter block")
         return 0
     body = parts[1] if parts else ""
-    check_body(p, rel, body, errors)
+    check_body(p, rel, body, errors, is_agent=is_agent)
     if not is_agent:
         check_forked_write_leak(rel, fm, body, errors)
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there

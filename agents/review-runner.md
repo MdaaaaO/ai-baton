@@ -2,7 +2,7 @@
 name: review-runner
 description: "Opus worker for pr-review steps 1–4 (snapshot, repo trap KB, review pass incl. --deep lenses, independent verification) on one PR: writes the triage sheet to $CTX/triage.json, returns only the overview block (≤3K tokens) — the diff never enters a long-lived prefix. Never posts, never asks. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
 model: opus
@@ -27,7 +27,7 @@ so you spend them on judgment, not on fetching.
 
 **Do exactly this**
 1. `bash $BATON/skills/pr-review/scripts/fetch-context.sh <owner/repo> <pr>` (it prints `context: $CTX`
-   and a 5-line summary; non-zero exit = a fetch failed → return `NEEDS: fetch failed — <errors.txt line>`
+   and a 5-line summary; non-zero exit = a fetch failed → return `NEEDS fetch failed — <errors.txt line>`
    and stop). Everything is already under `$CTX` — **do not** `gh api contents`, `git show`, `gh pr view`
    or re-fetch reviews/threads/checks for anything the bundle holds:
    - `manifest.json` (mode, humans, bot assessment, threads, checks), `bundle.json` (per-file stats,
@@ -108,7 +108,8 @@ bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits
 …
 RECOMMEND: COMMENT | REQUEST_CHANGES | APPROVE-if-user-agrees
 CTX: <absolute path>
-NEEDS: nothing | datalake reauth (findings #…) | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>` (kit-wide form, no colon)
+NEEDS nothing | datalake reauth (findings #…) | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>`
+(kit-wide form, no colon — one spelling, docs/env-facts.md § Environment facts)
 IMPACT: <n> consumers (<kind:name owner …>) · <what changes, how many rows/values> | none found | not assessed (<why>)
 NOTE: ≤ 5 lines the walk needs (stacked base, human approval already present, prior-review ledger summary in follow_up mode, FF count)
 ```

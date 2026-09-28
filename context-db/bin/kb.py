@@ -96,6 +96,13 @@ PROVENANCE = re.compile(r"^(user|tool:[\w.-]+|derived:[\w. /:-]+?)(?:\s+(\d{4}-\
 MANIFEST_DIR = KIT / "context-db" / "discovery"   # the kit's manifests; the store's `_discovery/` overlays them
 BUILTIN_TOOLS = ("cli", "roster", "settings", "derive", "user")
 FACT_KEY = re.compile(r"^[a-z][\w-]*(\.[\w:/@+-]+)*(?: \S+)?$")
+
+# The fork hand-back line for a missing env fact: `NEEDS <system>.<kind>[ <name>]` — at least one dot, so it
+# never matches a runner's other, named `NEEDS <reason>` report lines (`NEEDS nothing`, `NEEDS datalake reauth`,
+# `NEEDS fetch failed — …`, defined in skills/pr-review/reference/runner.md and checked first, before this
+# pattern). FACT_KEY alone under-matches here (its dot group is `*`, zero-or-more) — this is the one place a
+# session or a script tells the two apart; docs/env-facts.md cites this constant rather than restating it.
+NEEDS_HANDBACK = re.compile(r"^NEEDS [a-z][\w-]*(\.[\w:/@+-]+)+(?: \S+)?$")
 DEFAULT_TTL = 180  # days, for a tool-sourced row no manifest covers
 
 # Structural keys copied from an imported config.json into env/config.json (everything a script reads).
