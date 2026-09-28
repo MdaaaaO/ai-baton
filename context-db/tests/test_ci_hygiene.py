@@ -101,6 +101,19 @@ class PrTitleHygiene(unittest.TestCase):
         text = (WORKFLOWS / "pr-title.yml").read_text(encoding="utf-8")
         self.assertIn("concurrency:", text.split("\njobs:", 1)[0])
 
+    def test_versions_env_bootstrap_fallback_matches_the_pin(self):
+        # pr-title checks out the base sha, which predates .github/versions.env for any PR opened before it
+        # merged (a bootstrap gap, not a second place the pin can drift) — its `:=` fallback must equal the
+        # exact value versions.env pins, or the two diverge the day someone bumps one and not the other.
+        wf_text = (WORKFLOWS / "pr-title.yml").read_text(encoding="utf-8")
+        m = re.search(r'CONVENTIONAL_RELEASE_VERSION:=([^}]+)\}', wf_text)
+        self.assertIsNotNone(m, "pr-title.yml: no CONVENTIONAL_RELEASE_VERSION bootstrap fallback found")
+        env_text = (KIT / ".github" / "versions.env").read_text(encoding="utf-8")
+        pinned = re.search(r"(?m)^CONVENTIONAL_RELEASE_VERSION=(\S+)$", env_text)
+        self.assertIsNotNone(pinned, "no CONVENTIONAL_RELEASE_VERSION= line in versions.env")
+        self.assertEqual(m.group(1), pinned.group(1),
+                         "pr-title.yml's bootstrap fallback has drifted from .github/versions.env's pin")
+
 
 class EvalsHygiene(unittest.TestCase):
     TEXT = (WORKFLOWS / "evals.yml").read_text(encoding="utf-8")

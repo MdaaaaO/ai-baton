@@ -100,13 +100,17 @@ class ConventionalReleaseVersionPin(unittest.TestCase):
 
     @staticmethod
     def crel_for(version: str) -> str:
+        # `make test` (docs/contributing.md) itself runs as a make recipe, so this process may already carry
+        # MAKELEVEL/MAKEFLAGS from that outer make — strip them (as _env() above does for KitRelease) so the
+        # inner make below prints nothing but the target's own output, not an inherited "Entering directory".
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS"))}
         with tempfile.TemporaryDirectory() as tmp:
             kit = Path(tmp)
             (kit / ".github").mkdir()
             (kit / ".github" / "versions.env").write_text(f"CONVENTIONAL_RELEASE_VERSION={version}\n")
             r = subprocess.run([MAKE, "-f", str(KIT / "workspace.mk"), "-s",
                                 "--eval", "print-crel: ; @printf '%s' \"$(_CREL)\"", "print-crel", f"KIT={kit}"],
-                               capture_output=True, text=True, cwd=tmp, check=True)
+                               capture_output=True, text=True, cwd=tmp, env=env, check=True)
             return r.stdout
 
     def test_reads_the_exact_version_no_floating_range(self):
