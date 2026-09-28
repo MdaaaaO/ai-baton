@@ -2,10 +2,10 @@
 name: ticket-close
 description: "Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues): a final outcome comment (Delivered / Verified / Out-of-scope), the right transition or close reason (Done / Won't Do / Cancelled), the delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "7"
-  updated: "2026-09-27"
+  version: "8"
+  updated: "2026-09-28"
   reviewed: "2026-09-24"
-  facts: "tracker.kind,tracker.close_reasons"
+  facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
 user-invocable: true
 ---
 
@@ -40,11 +40,11 @@ kind X in this environment" and stop.
 ## Adapter — Jira (tracker.kind = jira)
 
 - Final comment via `tracker.mcp_tools.comment`.
-- **Transition + resolution** via `tracker.mcp_tools.transition` (check `getTransitionsForJiraIssue`
-  first — ids drift):
+- **Transition + resolution** via `tracker.mcp_tools.transition` (check the transitions actually
+  available first via `tracker.mcp_tools.transitions_list` — ids drift):
   - Shipped → **Done** (`tracker.transitions.done`).
-  - Won't Do → `tracker.transitions.wont_do`; if only Done is exposed, transition Done then
-    `editJiraIssue` `{"resolution":{"name":"Won't Do"}}` and retitle `(won't do — reason)`.
+  - Won't Do → `tracker.transitions.wont_do`; if only Done is exposed, transition Done then edit via
+    `tracker.mcp_tools.edit` with `{"resolution":{"name":"Won't Do"}}` and retitle `(won't do — reason)`.
   - Cancelled → `tracker.transitions.cancelled`.
 
 ## Adapter — GitHub issues (tracker.kind = github)
@@ -52,9 +52,10 @@ kind X in this environment" and stop.
 `gh` with the token per skill `gh-cli` (`github.sandbox_token_prefix`), in one of `tracker.repos`.
 
 - Final comment: `gh issue comment <n> -R <repo> --body-file <file>`.
-- **Close reason replaces the transition.** Resolve the value for the outcome key and **stop if the lookup
-  fails** — an empty `--reason` would close the issue as `completed` with no error:
-  `reason=$(python3 $BATON/context-db/bin/kit_profile.py get tracker.close_reasons.<done|wont_do|cancelled>) || { echo "close reason missing — run python3 $BATON/context-db/bin/kb.py migrate"; exit 1; }`
+- **Close reason replaces the transition.** Resolve the value for the outcome key with `get --nonempty`
+  and **stop if the lookup fails** — a plain `get` would let a configured-but-blank reason (`""`) through,
+  and an empty `--reason` would close the issue as `completed` with no error:
+  `reason=$(python3 $BATON/context-db/bin/kit_profile.py get --nonempty tracker.close_reasons.<done|wont_do|cancelled>) || { echo "close reason missing — run python3 $BATON/context-db/bin/kb.py migrate"; exit 1; }`
   then pass it **quoted**: `gh issue close <n> -R <repo> --reason "$reason"`. GitHub knows only two reasons, so
   `done` → `completed` and both `wont_do` and `cancelled` → `not planned` (the value has a space; `not_planned` is
   rejected by `gh`, and a store still carrying it is fixed by `kb.py migrate`). For `wont_do`, also retitle
