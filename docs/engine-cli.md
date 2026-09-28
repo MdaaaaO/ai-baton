@@ -297,17 +297,19 @@ create/update this session's entry (upsert; preserves the free-text body —
 `--note` fills only `## Notes`) touch refresh heartbeat + updated only — the
 <=12h keep-alive end mark the session ended; writes the `## Session stats`
 block into the body and (with --next FILE) the `## Next session` hand-off
-prompt, and appends one row to sessions/_ledger.md (the cross-session
-cost/activity ledger) stats print this session's stats (block) without
-touching the registry Every subcommand also refreshes the `stats:` field (one
-line: turns, context, tokens, rough spend, PRs/tickets/sign jobs/drafts — see
-session_stats.py) when the session's transcript is discoverable via
-$CLAUDE_CODE_SESSION_ID / --session-id; `--no-stats` skips it. Stats are
-derived from the transcript with zero model turns, so the live registry row is
-always current. The content root is kit_profile.context_root() (CONTEXT_ROOT,
-which the Makefile sets from CONTEXT, else docs/layout.md's "Content root"
-default). Empty CLI values are treated as "leave unchanged" so the Makefile
-can pass every flag unconditionally. Stdlib only.
+prompt — omit --next when the session has nothing to hand over, and pass
+--next none to withdraw a prompt already on file — and appends one row to
+sessions/_ledger.md (the cross-session cost/activity ledger) stats print this
+session's stats (block) without touching the registry Every subcommand also
+refreshes the `stats:` field (one line: turns, context, tokens, rough spend,
+PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's
+transcript is discoverable via $CLAUDE_CODE_SESSION_ID / --session-id; `--no-
+stats` skips it. Stats are derived from the transcript with zero model turns,
+so the live registry row is always current. The content root is
+kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets from
+CONTEXT, else docs/layout.md's "Content root" default). Empty CLI values are
+treated as "leave unchanged" so the Makefile can pass every flag
+unconditionally. Stdlib only.
 
 positional arguments:
   {register,touch,end,stats}

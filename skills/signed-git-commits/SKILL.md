@@ -3,8 +3,8 @@ name: signed-git-commits
 description: The why and the discipline behind signed/SSH commits where the machine that edits cannot sign or push: worktree-first branching, exact staging, message-to-file, rebase signing quirks, the gh-token prefix. The hand-off itself runs through `sign-queue`, never pasted git commands. Read when committing or pushing in a repo with a signed-commits ruleset (`systems.signed_commits`).
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "7"
-  updated: "2026-09-26"
+  version: "8"
+  updated: "2026-09-27"
   reviewed: "2026-09-24"
   requires: "signed_commits"
 user-invocable: true
@@ -60,6 +60,10 @@ corrupting the user's working tree or silently dropping files.
    commit B only picked up unrelated leftover scratch files. Fix: run
    `git diff --cached --stat` right before every commit and confirm it matches what
    you expect, every time — don't trust that staging state is what you last set it to.
+   The same rule applies to the `sign-queue` hand-off: always pass its `--files "<paths>"`
+   with the exact paths you already verified, never leave both `--files` and `--all` off —
+   that falls back to `add -A` on the host (flagged with a warning, but still not what you
+   verified). Pass `--all` only on the rare job that really should carry everything.
 3. **Write the commit message to a file, not an inline string.** Multi-paragraph
    messages explaining *why*, not just *what*, are the norm in these repos — an
    inline `-m` string is both unwieldy and easy to mis-paste. Write it to a file at an

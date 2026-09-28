@@ -259,7 +259,7 @@ session-touch:
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py touch --name $(call sq,NAME) --status $(call sq,STATUS) --working $(call sq,WORKING) --next $(call sq,NEXT) $(STATSFLAGS)
 
 session-end:
-	@test -n $(call sq,NAME) || { echo "usage: make session-end NAME=<session> [NEXT=<file with the next-session prompt>] [WORKING=]"; exit 2; }
+	@test -n $(call sq,NAME) || { echo "usage: make session-end NAME=<session> [NEXT=<file with the next-session prompt>|none] [WORKING=]"; exit 2; }
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py end --name $(call sq,NAME) --working $(call sq,WORKING) --next $(call sq,NEXT) $(STATSFLAGS)
 
 # make session-stats [SESSION_ID=<uuid>] — the stats block for the handoff (no registry write)

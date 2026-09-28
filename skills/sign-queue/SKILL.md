@@ -3,7 +3,7 @@ name: sign-queue
 description: Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains the queue with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners for the user to run. Inert where `systems.signed_commits` is false.
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "13"
+  version: "14"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
   requires: "signed_commits"
@@ -17,7 +17,7 @@ break on the user's terminal line wrap. So: sessions **enqueue**, the user **dra
 ## Session side — enqueue a job
 
 ```
-sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [--rebase] [--new-branch] [--files "<paths>"] [--onto <upstream-branch>:<old-base-sha>]
+sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [--rebase] [--new-branch] [--files "<paths>" | --all] [--onto <upstream-branch>:<old-base-sha>]
 ```
 
 - `topic` names the job (`key-123-p4`, `kb-round4`); `[A-Za-z0-9._-]` only.
@@ -41,9 +41,13 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
   the real upstream and the placeholder is dropped. Enqueue the upstream's job first (same drain is fine — jobs run
   in enqueue order); if that job fails, this one fails on the fetch and is parked, nothing is pushed on a stale base.
   Exclusive with `--rebase`.
-- `--files "a b"` to stage only those paths instead of `add -A` (when the worktree has unrelated noise).
-  Each path is single-quoted in the job: route dirs of some web frameworks contain `$param`, and the
-  unquoted form aborts at `set -u` ("param: unbound variable") before any git runs — re-enqueue is the fix.
+- **One staging rule, same as `signed-git-commits`: stage explicit paths, never a silent `add -A`.**
+  `--files "a b"` stages only those paths — the norm, especially in a worktree with unrelated noise. Each
+  path is single-quoted in the job: route dirs of some web frameworks contain `$param`, and the unquoted
+  form aborts at `set -u` ("param: unbound variable") before any git runs — re-enqueue is the fix.
+  `--all` stages with `git add -A` **on purpose** (mutually exclusive with `--files`) — pass it when you
+  mean to carry everything. Passing neither still falls back to `add -A` for a plain retry, but `enqueue.sh`
+  prints a warning either way: `-A` is never a silent default.
 - `--by <your session name>` (as ListAgents shows it) — **always pass it**: a failed job is routed back to its owner by this.
 - `--ticket <KEY>` / `--epic <KEY>` / `--pr <n>` / `--summary "<text>"` — the overview columns the user sees in `make sign`
   (added 2026-09-22, `signq.py`). All optional and auto-derived: ticket from the branch/topic, epic from the `.context/`
@@ -56,7 +60,8 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
   (`queued <topic>: <ticket> · epic <epic> · <repo> #<pr> · <subject>`) — repeat that line to the user, nothing more.
 - Before enqueuing: `git -C <wt> status --short` must show exactly the files the commit should carry;
   the message file must exist at an absolute path under `<workspace root>/.worktrees/`, e.g. `$PWD/.worktrees/KEY-123-commit-msg.txt` — OUTSIDE the
-  worktree, otherwise the default `add -A` commits the message file itself (enqueue.sh refuses that unless `--files` is given).
+  worktree, otherwise a fallback `add -A` (default or `--all`) would commit the message file itself; `enqueue.sh` refuses
+  that unless `--files` names the paths explicitly.
 - Then tell the user in one line: "queued `<topic>` — `make sign` when convenient." Do NOT paste
   git commands. Keep your `pr-watch` monitor armed; it reports the head move when the push lands.
 - Job files are plain sh under `.context/state/sign-queue/` (in the workspace, so a plugin update never deletes them); `python3 …/signq.py list`
