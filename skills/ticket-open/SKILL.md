@@ -1,10 +1,10 @@
 ---
 name: ticket-open
-description: Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues) — type/placement (active sprint, or labels + milestone), labels, epic/parent link, a lean opening comment (Goal + Plan + Links), and the matching .context/ context doc. The tracker analogue of pr-open. Invoke right before/after creating the ticket.
+description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues) — placement (sprint, or labels + milestone), labels, epic/parent link, a lean opening comment (Goal + Plan + Links + Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating the ticket."
 metadata:
-  version: "6"
+  version: "7"
   updated: "2026-09-27"
-  reviewed: "2026-09-24"
+  reviewed: "2026-09-27"
   facts: "tracker.kind"
 user-invocable: true
 ---
@@ -30,7 +30,13 @@ kind X in this environment" and stop — never improvise.
    **Goal** — one line: what this delivers and why
    **Plan** — 2–4 terse steps
    **Links** — epic/parent · related tickets · any existing PR (all clickable)
+   **Sizing:** `<model>`, <delegate|main session>. <one-line reason>
    ```
+   The Sizing line makes the model and delegation call once, from the table in `docs/delegation.md` §
+   Sizing, so `ticket-pickup` doesn't re-derive it later — it verifies this call and acts on it. Write it
+   with `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main session>" "<reason>"` so it
+   parses back the same way; it goes in the body, not a label (label sets differ per repo, the kit stays
+   repo-agnostic).
 4. **Context doc.** If this ticket is its own initiative, create the context doc
    (`make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=<key-slug>`); if it belongs to an existing
    epic, add it under that epic's context doc instead. Never cite the local `.context/` path on the
@@ -86,6 +92,7 @@ in terminal replies, bare `#162` (auto-linked) inside GitHub.
    Mention whoever must act with `@login` on one line.
 
 ## Not in scope
-Posting updates → `ticket-update`. Closing/transitioning → `ticket-close`. Opening the PR that
-delivers the ticket → `pr-open` (which also moves the ticket to In Review where the tracker has that
-state). Flushing the context doc → `session-handoff`.
+Verifying the Sizing line and launching the work → `ticket-pickup`. Posting updates → `ticket-update`.
+Closing/transitioning → `ticket-close`. Opening the PR that delivers the ticket → `pr-open` (which also
+moves the ticket to In Review where the tracker has that state). Flushing the context doc →
+`session-handoff`.

@@ -17,6 +17,11 @@ labels: []
 
 <!-- Every machine, or the `systems.*` flags it needs (a new flag, if any). Name any env-config key or migration step. -->
 
+## Sizing
+
+<!-- **Sizing:** `<haiku|sonnet|opus>`, <delegate|main session>. <one-line reason> — the table in
+     docs/delegation.md § Sizing. `ticket-pickup` verifies this against the default branch at pickup. -->
+
 ## Done when
 
 - [ ]

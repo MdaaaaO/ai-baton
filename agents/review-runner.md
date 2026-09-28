@@ -1,10 +1,10 @@
 ---
 name: review-runner
-description: "Opus worker running pr-review steps 1–4 (snapshot, repo trap KB, review pass incl. the --deep lenses, independent verification) for ONE PR: writes the triage sheet to $CTX/triage.json and returns only the overview block (≤3K tokens), so the diff never enters a long-lived prefix. Never posts, never asks the user. Trivial-PR --auto passes go to auto-runner."
+description: "Opus worker for pr-review steps 1–4 (snapshot, repo trap KB, review pass incl. --deep lenses, independent verification) on one PR: writes the triage sheet to $CTX/triage.json, returns only the overview block (≤3K tokens) — the diff never enters a long-lived prefix. Never posts, never asks. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "9"
+  version: "10"
   updated: "2026-09-27"
-  reviewed: "2026-09-24"
+  reviewed: "2026-09-27"
 model: opus
 effort: medium
 omitClaudeMd: true

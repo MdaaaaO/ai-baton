@@ -48,6 +48,7 @@ TOOLS = (
     "gen_index.py",
     "verify.py",
     "commit_style.py",
+    "sizing.py",
     "migrate_frontmatter.py",
     "check_links.py",
     "transcripts.py",

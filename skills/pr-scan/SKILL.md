@@ -1,10 +1,10 @@
 ---
 name: pr-scan
-description: "Sonnet-forked sweep building the user's PR review queue: direct and CODEOWNERS team requests, then open PRs in the configured repos, minus bots, drafts, stale and already-reviewed heads. Returns a ≤8-row table (review state, threads, bot verdict, trivial PRs flagged `A` with an `AUTO:` line) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
+description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row table (review state, threads, bot verdict, trivial PRs flagged `A`, `AUTO:` line) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-27"
-  reviewed: "2026-09-24"
+  reviewed: "2026-09-27"
   facts: "github.display_names"
 argument-hint: "[--days N] [--limit N] [--repo owner/name]"
 context: fork

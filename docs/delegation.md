@@ -30,6 +30,26 @@ An `Agent` call without `model` inherits the main session's model: the most expe
 
 When unsure, start with `sonnet` and escalate the one ticket that comes back uncertain.
 
+## The Sizing line — the call, written once, read at pickup
+
+The model and delegation call is made **once**, when the ticket is written, from the table above — not
+re-derived every time a session opens the ticket. `ticket-open` writes one line into the opening comment,
+anywhere in the body:
+
+```
+**Sizing:** `<model>`, <delegate|main session>. <one-line reason>
+```
+
+`<model>` is one of the table's three; the decision is exactly `delegate` or `main session`; the reason is
+free text on the same line — `context-db/bin/sizing.py format <model> "<decision>" "<reason>"` writes it,
+`sizing.py parse <file>` reads it back, so a hand-edited line never drifts from the shape a reader expects.
+
+**The pickup check** (`ticket-pickup`): read the line, then verify it still holds against the current
+default branch before honoring it — a cited symptom that no longer reproduces, or a Plan step the default
+branch already implements, narrows the plan or changes the call; nothing changed, the call stands. A ticket
+with no Sizing line (or a malformed one) is sized now, the same way `ticket-open` would have, and written
+back so the next pickup reads it directly.
+
 ## The worker brief
 
 A worker starts cold. The brief carries everything it needs, and the rules the main session learned the hard way:

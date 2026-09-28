@@ -500,6 +500,35 @@ options:
   --quiet, -q
 ```
 
+## `sizing.py`
+
+```text
+usage: sizing.py [-h] {parse,check,format,models} ...
+
+sizing.py — parse and format a ticket's Sizing line (docs/delegation.md § The Sizing line).
+
+`ticket-open` writes the line into the opening comment when a ticket is created; `ticket-pickup` reads it back
+when the ticket is picked up, verifies it still holds, and sizes a missing one. One line, anywhere in the body:
+
+  **Sizing:** `<model>`, <delegate|main session>. <one-line reason>
+
+`<model>` is one of MODELS (the table in `docs/delegation.md` § Sizing); the decision is exactly `delegate` or
+`main session`; the reason is free text on the same line.
+
+Usage:
+  sizing.py parse   <file|->                              → prints "model\tdecision\treason"
+                                                              exit 1 no Sizing line in the body, 2 malformed
+  sizing.py check   <file|->                              same exit codes; prints "ok · <model>, <decision>"
+  sizing.py format  <model> <delegate|main-session> "<reason>"   → the line text, exit 2 on a bad model/decision
+  sizing.py models                                         → the accepted models, one per line
+
+positional arguments:
+  {parse,check,format,models}
+
+options:
+  -h, --help            show this help message and exit
+```
+
 ## `migrate_frontmatter.py`
 
 ```text

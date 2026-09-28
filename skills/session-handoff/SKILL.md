@@ -1,10 +1,10 @@
 ---
 name: session-handoff
-description: "Flush durable knowledge before a session ends or a ticket/PR/epic step lands: the context doc, priorities, indexes, the session's stats (context doc, session file, cross-session ledger) and the paste-ready next-session prompt the successor starts from. Invoke when finishing a piece of work, before ending a session, or on \"wrap up / hand off / update context\"."
+description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-27"
-  reviewed: "2026-09-24"
+  reviewed: "2026-09-27"
 user-invocable: true
 ---
 
