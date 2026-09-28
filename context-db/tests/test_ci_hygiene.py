@@ -18,6 +18,27 @@ USES = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)", re.M)
 PINNED = re.compile(r"^[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
 
 
+def run_block(workflow_text: str, step_name: str) -> str:
+    """The dedented body of one `- name: <step_name>` step's `run: |` block — no YAML parser, just the same
+    marker-splitting the rest of this file already uses, so this test file stays dependency-free."""
+    marker = f"- name: {step_name}\n"
+    after = workflow_text[workflow_text.index(marker) + len(marker):]
+    body = after[after.index("run: |\n") + len("run: |\n"):]
+    indent = None
+    out = []
+    for line in body.splitlines():
+        if not line.strip():
+            out.append("")
+            continue
+        cur = len(line) - len(line.lstrip(" "))
+        if indent is None:
+            indent = cur
+        if cur < indent:
+            break
+        out.append(line[indent:])
+    return "\n".join(out)
+
+
 def workflows() -> list[Path]:
     return sorted(WORKFLOWS.glob("*.yml"))
 
@@ -172,16 +193,40 @@ class MacosLeg(unittest.TestCase):
         self.assertIn("needs.changed-paths.outputs.portability", job)
 
     def test_changed_paths_job_covers_the_scoped_globs(self):
-        # docs claim: sh scripts, their tests, skills/_lib — the three places a shell portability bug can hide
+        # docs claim: sh scripts, their tests, skills/_lib, hooks/, and ci.yml itself — every place a shell
+        # portability bug (or the legs' own routing logic) can hide
         job = self.TEXT.split("\n  changed-paths:\n", 1)[1].split("\n  macos:\n", 1)[0]
         self.assertIn(r"\.sh$", job)
         self.assertIn("context-db/tests/", job)
         self.assertIn("skills/_lib/", job)
+        self.assertIn(r"^hooks/", job)
+        self.assertIn(r"^\.github/workflows/ci\.yml$", job)
 
     def test_a_push_to_main_is_never_silently_skipped(self):
         # the path filter only bounds a PR's own iterating pushes; a merge to main always gets the full matrix
         job = self.TEXT.split("\n  changed-paths:\n", 1)[1].split("\n  macos:\n", 1)[0]
         self.assertIn('"$EVENT_NAME" != "pull_request"', job)
+
+    def test_shell_parse_steps_pick_the_interpreter_by_shebang(self):
+        # sh -n/dash -n reject bash syntax (`< <(...)`, arrays) outright — a bash-shebang script must be
+        # routed to `bash -n` (the macOS SYSTEM bash, 3.2) instead, never lumped in with the sh/dash scripts
+        job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
+        self.assertIn("head -1", job, "no shebang inspection in the macos job's shell-parse steps")
+        self.assertIn("*bash*", job, "no bash-shebang match in the macos job's shell-parse steps")
+        self.assertIn("bash -n", job)
+        self.assertIn("sh -n", job)
+
+    def test_shell_parse_steps_pass_against_the_real_repo_today(self):
+        # runs the two step scripts verbatim (extracted from ci.yml, not re-typed) against THIS checkout —
+        # proves the shebang routing actually clears every tracked .sh/hook today, not just in theory
+        for step_name in (
+            "Bash-shebang scripts parse under the macOS system bash (3.2)",
+            "sh/no-shebang scripts parse under sh (and dash, where installed)",
+        ):
+            script = run_block(self.TEXT, step_name)
+            self.assertTrue(script.strip(), f"could not extract the '{step_name}' step's script")
+            r = subprocess.run(["bash", "-c", script], cwd=KIT, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, f"{step_name}:\n{r.stdout}{r.stderr}")
 
 
 class ForcedSigningLeg(unittest.TestCase):

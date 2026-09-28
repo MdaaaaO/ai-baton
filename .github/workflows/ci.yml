@@ -198,7 +198,7 @@ jobs:
           fi
           changed="$(git diff --name-only "$PR_BASE" "$PR_HEAD")"
           echo "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '\.sh$|^context-db/tests/|^skills/_lib/'; then
+          if printf '%s\n' "$changed" | grep -Eq '\.sh$|^context-db/tests/|^skills/_lib/|^hooks/|^\.github/workflows/ci\.yml$'; then
             echo "portability=true" >> "$GITHUB_OUTPUT"
           else
             echo "portability=false" >> "$GITHUB_OUTPUT"
@@ -208,7 +208,7 @@ jobs:
   # PATH-manipulation tests on a Linux runner only — this is the real interpreter those fallbacks are for.
   # Gated by changed-paths above so an unrelated PR never pays for a macOS minute.
   macos:
-    name: macos (portable.sh, sh/dash parse)
+    name: macos (portable.sh, bash/sh/dash parse)
     needs: changed-paths
     if: needs.changed-paths.outputs.portability == 'true'
     runs-on: macos-latest
@@ -221,11 +221,29 @@ jobs:
           python3 -m pip install --quiet "PyYAML==$PYYAML_VERSION"
       - name: Engine tests on macOS
         run: make -C context-db test
-      - name: Shell scripts parse under macOS sh (and dash, where installed)
+      # Picked by shebang, like the Linux "Shell scripts parse" + "POSIX scripts parse under dash" steps
+      # together: a `#!/usr/bin/env bash` / `#!/bin/bash` script uses bash syntax (`< <(...)`, arrays) that
+      # `sh -n`/`dash -n` reject outright — it gets `bash -n` under the macOS SYSTEM bash (3.2, GPLv2-frozen;
+      # never Homebrew's), the real interpreter the portability work must keep parsing under. A `#!/bin/sh`
+      # script or one with no shebang (skills/_lib/portable.sh, sourced — see its own header) is the POSIX
+      # surface these legs exist to prove, so it gets `sh -n` and, where installed, `dash -n` too.
+      - name: Bash-shebang scripts parse under the macOS system bash (3.2)
+        run: |
+          rc=0
+          while IFS= read -r -d '' f; do
+            case "$(head -1 "$f")" in
+              '#!'*bash*) bash -n "$f" || { echo "::error file=$f::bash -n failed"; rc=1; } ;;
+            esac
+          done < <(git ls-files -z '*.sh' hooks/ ':!hooks/*.json')
+          exit $rc
+      - name: sh/no-shebang scripts parse under sh (and dash, where installed)
         run: |
           rc=0
           command -v dash >/dev/null 2>&1 || brew install dash >/dev/null 2>&1 || true
           while IFS= read -r -d '' f; do
+            case "$(head -1 "$f")" in
+              '#!'*bash*) continue ;;
+            esac
             sh -n "$f" || { echo "::error file=$f::sh -n failed"; rc=1; }
             if command -v dash >/dev/null 2>&1; then
               dash -n "$f" || { echo "::error file=$f::dash -n failed"; rc=1; }
