@@ -325,6 +325,16 @@ ISSUE_REF_SKIP = ("CHANGELOG.md", "context-db/tests/", "evals/")
 ISSUE_REF_SKIP_DIRS = {".git", ".worktrees", "__pycache__", "node_modules"}
 
 
+def kit_files(root: Path, skip_dirs: set[str]) -> list[Path]:
+    """Every file under `root`, sorted; a directory named in `skip_dirs` (`.git`, `.worktrees`, `node_modules`, …)
+    is pruned before the walk enters it, and a file so named (a worktree's `.git`) is left out too."""
+    out: list[Path] = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = [x for x in dirs if x not in skip_dirs]
+        out += [Path(d) / f for f in files if f not in skip_dirs]
+    return sorted(out)
+
+
 def issue_ref_ceiling(kit: Path = KIT) -> int:
     """The highest `issues/<n>` the release CHANGELOG links, plus the margin; 0 when there is no CHANGELOG."""
     p = kit / "CHANGELOG.md"
@@ -340,10 +350,10 @@ def check_issue_refs(errors: list[str], kit: Path = KIT) -> None:
     ceiling = issue_ref_ceiling(kit)
     if not ceiling:
         return
-    for p in sorted(kit.rglob("*")):
+    for p in kit_files(kit, ISSUE_REF_SKIP_DIRS):
         rel = p.relative_to(kit).as_posix()
-        if (not p.is_file() or ISSUE_REF_SKIP_DIRS & set(p.relative_to(kit).parts)
-                or (p.suffix not in ISSUE_REF_SUFFIXES and p.name != "Makefile") or rel.startswith(ISSUE_REF_SKIP)):
+        if (not p.is_file() or (p.suffix not in ISSUE_REF_SUFFIXES and p.name != "Makefile")
+                or rel.startswith(ISSUE_REF_SKIP)):
             continue
         for n, line in enumerate(p.read_text(encoding="utf-8", errors="replace").split("\n"), 1):
             for m in ISSUE_REF.finditer(re.sub(r"`[^`]*`", "", line)):
