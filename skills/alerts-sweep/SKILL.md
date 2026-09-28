@@ -3,7 +3,7 @@ name: alerts-sweep
 description: "Sonnet-forked sweep of the airflow-alerts Slack channel: reads all new messages (paginated), classifies each against the pattern KB, returns a state-advance trailer the main session applies, NO-OP when nothing was read, or `NEEDS <system>.<kind> <name>` for a missing fact. Arm with `/loop 20m /alerts-sweep`; never writes."
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-28"
   reviewed: "2026-09-28"
   requires: "airflow,slack"
@@ -47,7 +47,8 @@ through the trailer in Return value, which the main session applies.
    - **DIGEST/INFO** — routine digest, success notice, or bot chatter with no failure.
    - **NEW** — anything else (a DAG/task pair not in the KB, or a known pair with a different error).
 4. For each KNOWN alert, keep the one recurrence-log line the main session will append to `KB`
-   (`- <YYYY-MM-DD> <slack ts> <dag>/<task> — <KB entry title>`) — do not append it yourself; see step 5.
+   (`- <YYYY-MM-DD> <slack ts> <dag>/<task> — <KB entry title>`, collapsed to one line — no bare newline
+   inside it) — do not append it yourself; see step 5.
 5. Return (Return value) — the trailer line already carries the exact command, fully resolved; this fork
    never runs it itself.
 
@@ -65,26 +66,41 @@ through the trailer in Return value, which the main session applies.
   `NO-OP` and nothing else — a re-arm 20 minutes later reads the same `LAST_TS`, so there is truly nothing
   for the main session to apply.
 - Otherwise at least one message was read, so `NEWEST_TS` is set (and `STATE`/`KB` are the paths step 0
-  resolved) — return one of the two shapes below, always ending in a **self-executing** trailer line: the
-  fork writes the real, already-resolved values into it — `STATE`, `KB`, `NEWEST_TS`, each `--recurrence`
-  line — never the literal word `STATE`/`KB`/`NEWEST_TS` and never an angle-bracket placeholder, because
-  `context: fork` means only this fork ever reads the rest of this file; the main session sees nothing but
-  the returned text, so the whole instruction has to travel inside it:
+  resolved) — return one of the two shapes below, always ending in a **self-executing** trailer: the fork
+  writes the real, already-resolved values into it — never the literal word `STATE`/`KB`/`NEWEST_TS` and
+  never an angle-bracket placeholder, because `context: fork` means only this fork ever reads the rest of
+  this file; the main session sees nothing but the returned text, so the whole instruction has to travel
+  inside it. `STATE`/`KB` are single-quoted in the command (`advance-state.py` refuses a path containing a
+  `'` or a newline); a KNOWN recurrence line is untrusted Slack text, so it never sits on the command line
+  itself — a `$`, a backtick or a `"` there would be expanded by the shell that runs it. It goes on its own
+  line inside a quoted heredoc instead (`<<'DELIM'` — quoting the delimiter turns off every shell expansion
+  inside it, unlike single quotes around the line itself, which still depend on the text never containing
+  one):
   ```
-  ADVANCE — run: python3 $BATON/skills/alerts-sweep/scripts/advance-state.py --state <STATE> --kb <KB> --ts <NEWEST_TS> [--recurrence "<line>" ...] --reindex
+  ADVANCE — run: python3 $BATON/skills/alerts-sweep/scripts/advance-state.py --state '<STATE>' --kb '<KB>' --ts <NEWEST_TS> --reindex
+  ```
+  with no `--recurrence-stdin` at all when no KNOWN alert was found — the whole trailer is that one line.
+  With at least one KNOWN alert, append ` --recurrence-stdin <<'ALERTS_SWEEP_<NEWEST_TS, its `.` removed>'`,
+  then one `- …` line per recurrence entry from step 4 (each already collapsed to one line, always starting
+  with `- ` — the delimiter never does, so an entry can never be mistaken for it), then the bare delimiter
+  line to close it:
+  ```
+  ADVANCE — run: python3 $BATON/skills/alerts-sweep/scripts/advance-state.py --state '<STATE>' --kb '<KB>' --ts <NEWEST_TS> --reindex --recurrence-stdin <<'ALERTS_SWEEP_<NEWEST_TS, no dot>'
+  - <one recurrence line>
+  ALERTS_SWEEP_<NEWEST_TS, no dot>
   ```
   (shown with placeholders here only to name the shape; what you return has real values in every slot.)
-  - **No NEW alert** (only KNOWN / HUMAN-RESOLVED / DIGEST): the whole return IS that line, nothing else —
-    the main session runs it and moves on; it never re-reads the thread or spends a turn on it.
+  - **No NEW alert** (only KNOWN / HUMAN-RESOLVED / DIGEST): the whole return IS the trailer above, nothing
+    else — the main session runs it and moves on; it never re-reads the thread or spends a turn on it.
   - **At least one NEW alert**: ≤12 lines, one block per NEW alert (max 3; say `+N more` beyond that), then
-    the same trailer line:
+    the same trailer:
     ```
     NEW <slack ts> <dag>/<task> — <error signature, ≤15 words>
       log: <link if in the alert> · thread: <no replies | N replies, last by <name>>
       nearest KB: <entry title | none> · next: <one suggested step for the main session>
     ```
-  The main session runs the trailer line verbatim — a fixed, few-second command (both writes plus the
-  engine's index rebuild), not a turn spent reasoning about the channel.
+  The main session runs the trailer verbatim, heredoc included, as one shell command — a fixed, few-second
+  action (both writes plus the engine's index rebuild), not a turn spent reasoning about the channel.
 
 Do not investigate beyond reading (no datalake queries, no Airflow logs beyond the link text, no drafts,
 no Slack posts). The main session follows the on-call doc's process for NEW alerts: confirm with an

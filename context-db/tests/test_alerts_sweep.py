@@ -4,6 +4,10 @@ fork wrote `STATE`/`KB` straight through Bash (`sed -i`, an append, `make … in
 never stopped a Bash command doing the same thing by another door. The fix moves every write into
 `skills/alerts-sweep/scripts/advance-state.py`, a script only the MAIN session runs, and teaches
 kit_verify.py to flag a skill forked to a read-only agent whose own body still carries one of those forms.
+The trailer that invokes the script is a real shell command the main session runs verbatim, so a KNOWN
+alert's recurrence line (untrusted Slack text) never sits on that command line — `--recurrence-stdin` reads
+it from a quoted heredoc instead, which the shell never expands; `--state`/`--kb` are single-quoted and the
+script refuses a path containing the one character that could break out of that.
 Stdlib unittest, no network. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import os
@@ -116,11 +120,23 @@ class SelfExecutingTrailer(unittest.TestCase):
         self.assertIn("--ts", rv)
         self.assertIn("--reindex", rv)
 
-    def test_advance_state_is_named_exactly_once_and_inside_return_value(self):
+    def test_advance_state_is_named_only_inside_return_value(self):
         body = skill_body()
-        self.assertEqual(body.count("advance-state.py"), 1, "the script should be named once, in the trailer")
         before_return_value = body.split("## Return value", 1)[0]
         self.assertNotIn("advance-state.py", before_return_value)
+
+    def test_recurrence_lines_ride_a_quoted_heredoc_not_the_command_line(self):
+        # untrusted Slack text on the command line itself (`--recurrence "<line>"`) is the injection this
+        # trailer must avoid — a $, backtick or " in the alert would be expanded by the shell that runs it
+        rv = skill_body().split("## Return value", 1)[1]
+        self.assertNotIn("--recurrence \"", rv)
+        self.assertIn("--recurrence-stdin", rv)
+        self.assertIn("<<'ALERTS_SWEEP_", rv)  # a quoted delimiter — the shell expands nothing inside it
+
+    def test_paths_are_single_quoted_in_the_trailer(self):
+        rv = skill_body().split("## Return value", 1)[1]
+        self.assertIn("--state '<STATE>'", rv)
+        self.assertIn("--kb '<KB>'", rv)
 
 
 def load_advance_state():
@@ -170,6 +186,24 @@ class AdvanceStatePureFunctions(unittest.TestCase):
     def test_append_recurrences_with_no_lines_is_a_no_op(self):
         self.assertEqual(self.mod.append_recurrences_text("# KB\n", []), "# KB\n")
 
+    def test_parse_recurrence_stdin_empty_is_no_entries(self):
+        self.assertEqual(self.mod.parse_recurrence_stdin(""), [])
+        self.assertEqual(self.mod.parse_recurrence_stdin("\n"), [])
+
+    def test_parse_recurrence_stdin_reads_one_entry_per_line(self):
+        self.assertEqual(self.mod.parse_recurrence_stdin("- one\n- two\n"), ["- one", "- two"])
+        self.assertEqual(self.mod.parse_recurrence_stdin("- one"), ["- one"])  # no trailing newline
+
+    def test_parse_recurrence_stdin_rejects_a_line_without_the_dash_prefix(self):
+        with self.assertRaises(ValueError):
+            self.mod.parse_recurrence_stdin("- one\nnot an entry\n")
+        with self.assertRaises(ValueError):
+            self.mod.parse_recurrence_stdin("ALERTS_SWEEP_123\n")  # a stray delimiter line
+
+    def test_safe_rel_rejects_a_single_quote_or_a_newline(self):
+        self.assertIsNone(self.mod.safe_rel(".context/a'b.md"))
+        self.assertIsNone(self.mod.safe_rel(".context/a\nb.md"))
+
 
 class AdvanceStateCLI(unittest.TestCase):
     """The script end to end: two atomic file writes, path safety, and (opt-in) the index rebuild —
@@ -181,8 +215,9 @@ class AdvanceStateCLI(unittest.TestCase):
         (d / "state.md").write_text('---\nupdated: "2020-01-01"\n---\n\n**Last swept through:** ts `100.100`\n', encoding="utf-8")
         (d / "kb.md").write_text("# Pattern KB\n", encoding="utf-8")
 
-    def run_script(self, tmp: Path, *args: str):
-        return subprocess.run([sys.executable, str(ADVANCE_STATE), "--root", str(tmp), *args], capture_output=True, text=True)
+    def run_script(self, tmp: Path, *args: str, stdin: str | None = None):
+        return subprocess.run([sys.executable, str(ADVANCE_STATE), "--root", str(tmp), *args],
+                               input=stdin, capture_output=True, text=True)
 
     def test_advances_state_and_appends_kb_lines(self):
         with tempfile.TemporaryDirectory() as t:
@@ -190,7 +225,7 @@ class AdvanceStateCLI(unittest.TestCase):
             self.seed(tmp)
             line = "- 2026-09-28 100.200 some_dag/some_task — an entry"
             p = self.run_script(tmp, "--state", ".context/oncall/state.md", "--kb", ".context/oncall/kb.md",
-                                 "--ts", "999.500", "--recurrence", line)
+                                 "--ts", "999.500", "--recurrence-stdin", stdin=line + "\n")
             self.assertEqual(p.returncode, 0, p.stderr)
             state_text = (tmp / ".context/oncall/state.md").read_text()
             self.assertIn("ts `999.500`", state_text)
@@ -207,6 +242,57 @@ class AdvanceStateCLI(unittest.TestCase):
             p = self.run_script(tmp, "--state", ".context/oncall/state.md", "--kb", ".context/oncall/kb.md", "--ts", "1")
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertEqual((tmp / ".context/oncall/kb.md").read_text(), before)
+
+    def test_empty_recurrence_stdin_leaves_kb_untouched(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            self.seed(tmp)
+            before = (tmp / ".context/oncall/kb.md").read_text()
+            p = self.run_script(tmp, "--state", ".context/oncall/state.md", "--kb", ".context/oncall/kb.md",
+                                 "--ts", "1", "--recurrence-stdin", stdin="")
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual((tmp / ".context/oncall/kb.md").read_text(), before)
+
+    def test_a_stdin_line_without_the_dash_prefix_is_rejected_and_nothing_written(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            self.seed(tmp)
+            before_state = (tmp / ".context/oncall/state.md").read_text()
+            before_kb = (tmp / ".context/oncall/kb.md").read_text()
+            p = self.run_script(tmp, "--state", ".context/oncall/state.md", "--kb", ".context/oncall/kb.md",
+                                 "--ts", "1", "--recurrence-stdin", stdin="- a real entry\nnot an entry\n")
+            self.assertEqual(p.returncode, 2)
+            self.assertEqual((tmp / ".context/oncall/state.md").read_text(), before_state)
+            self.assertEqual((tmp / ".context/oncall/kb.md").read_text(), before_kb)
+
+    def test_a_path_containing_a_single_quote_is_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            self.seed(tmp)
+            before = (tmp / ".context/oncall/state.md").read_text()
+            p = self.run_script(tmp, "--state", ".context/oncall/it's.md", "--kb", ".context/oncall/kb.md", "--ts", "1")
+            self.assertEqual(p.returncode, 2)
+            self.assertEqual((tmp / ".context/oncall/state.md").read_text(), before)
+
+    def test_shell_metacharacters_in_a_recurrence_line_reach_the_kb_literally(self):
+        # the real attack this trailer design defeats: a KNOWN alert's line rendered on the ACTUAL shell
+        # command line the main session runs (never as a Python subprocess arg list) must not let a
+        # `$(...)`, a backtick, a `"` or a `'` do anything but sit there as text
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            self.seed(tmp)
+            canary = tmp / "canary"
+            evil = f"- 2026-09-28 100.2 dag/task — $(touch {canary}) ` and \" and '"
+            cmd = (
+                f"{sys.executable!r} {str(ADVANCE_STATE)!r} --root {str(tmp)!r} "
+                f"--state '.context/oncall/state.md' --kb '.context/oncall/kb.md' --ts 1 "
+                f"--recurrence-stdin <<'ALERTS_SWEEP_1'\n{evil}\nALERTS_SWEEP_1"
+            )
+            p = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertFalse(canary.exists(), "a shell metacharacter in the alert text ran a command")
+            kb_text = (tmp / ".context/oncall/kb.md").read_text()
+            self.assertIn(evil, kb_text)
 
     def test_rejects_a_dotdot_path(self):
         with tempfile.TemporaryDirectory() as t:

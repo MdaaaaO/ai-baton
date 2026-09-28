@@ -11,7 +11,8 @@ each message is classified against). All three come from the env store; a missin
 here` — and the loop does nothing else. It never acts on an alert itself anywhere, and it never writes `STATE` or
 `KB` itself either — every state change comes back as a trailer, the exact `advance-state.py` command already
 filled in with real paths and values, so the main session (which never reads the skill body itself, only the
-fork's returned text) can run it verbatim.
+fork's returned text) can run it verbatim. A KNOWN alert's recurrence line is untrusted Slack text, so it never
+sits on that command line — it rides a quoted heredoc's stdin instead, which the shell never expands.
 
 **Example:**
 

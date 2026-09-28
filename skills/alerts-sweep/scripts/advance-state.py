@@ -13,15 +13,25 @@ stays one mechanical command, never a hand-edit:
 Stdlib only, no `sed` — so the GNU/BSD `-i` divide (GNU allows `-i pattern`, BSD/macOS requires `-i ''`)
 never comes up.
 
-Usage: python3 advance-state.py --state <path> --kb <path> --ts <ts> [--recurrence <line> ...]
+Usage: python3 advance-state.py --state <path> --kb <path> --ts <ts> [--recurrence-stdin]
                                  [--root <dir>] [--reindex]
 
-`--state`/`--kb` must be relative paths under `.context/` with no `..` segment — the same guard
-alerts-sweep/SKILL.md step 0 applies before a path ever reaches the fork; this script re-checks it rather
-than trust a caller. `--root` is the directory the two paths resolve against (the workspace root in real
-use; a temp dir in tests). `--reindex` rebuilds the engine's document index afterward (the Makefile's
-`index` target, scoped to `--root`'s own store — never the live one unless `--root` names it), the one
-remaining step the pre-fix version ran inline; a test omits it to check the two writes alone.
+`--state`/`--kb` must be relative paths under `.context/` with no `..` segment, and contain neither a `'`
+nor a newline — the same guard alerts-sweep/SKILL.md step 0 applies before a path ever reaches the fork,
+plus the quote check the single-quoted `--state '<path>'` / `--kb '<path>'` the trailer emits depends on;
+this script re-checks all of it rather than trust a caller. `--root` is the directory the two paths
+resolve against (the workspace root in real use; a temp dir in tests). `--reindex` rebuilds the engine's
+document index afterward (the Makefile's `index` target, scoped to `--root`'s own store — never the live
+one unless `--root` names it), the one remaining step the pre-fix version ran inline; a test omits it to
+check the two writes alone.
+
+`--recurrence-stdin` reads zero or more KB recurrence-log lines from stdin instead of the command line: a
+KNOWN alert's line is untrusted Slack text, and the trailer that invokes this script is a real shell
+command the main session runs verbatim — a `$`, a backtick or a `"` in a `--recurrence <line>` argument
+would have been expanded by that shell. Reading them from stdin (a quoted heredoc on the caller's side)
+sidesteps command-line expansion entirely. Every line must start with `- ` (one entry per line, already
+collapsed — no bare newline inside one); empty stdin means no entries; anything else exits 2 before either
+file is opened for writing.
 """
 from __future__ import annotations
 import argparse
@@ -44,11 +54,33 @@ TS_RE = re.compile(r"^[0-9]+(\.[0-9]+)?$")  # a Slack ts: seconds.microseconds, 
 
 
 def safe_rel(raw: str) -> Path | None:
-    """None unless `raw` is a relative path under `.context/` with no `..` segment."""
+    """None unless `raw` is a relative path under `.context/` with no `..` segment, and contains neither a
+    `'` nor a newline — the trailer emits `--state '<path>'` / `--kb '<path>'` single-quoted, and either
+    character would end that quoting early (a newline the same way a `'` does: the shell reads the next
+    line as more of the same command)."""
+    if "'" in raw or "\n" in raw:
+        return None
     p = Path(raw)
     if p.is_absolute() or ".." in p.parts or p.parts[:1] != (".context",):
         return None
     return p
+
+
+def parse_recurrence_stdin(raw: str) -> list[str]:
+    """Zero or more KB recurrence-log lines from `--recurrence-stdin`'s input. Empty stdin (nothing, or a
+    single trailing newline) is zero entries. Every other line must start with `- ` — the one shape step 4
+    ever produces, and
+    the one shape the heredoc's own closing delimiter (`ALERTS_SWEEP_...`) never has, so a real entry can
+    never be mistaken for it. Raises ValueError(bad line) otherwise; the caller turns that into exit 2
+    before either file is opened for writing."""
+    text = raw[:-1] if raw.endswith("\n") else raw
+    if text == "":
+        return []
+    lines = text.split("\n")
+    for ln in lines:
+        if not ln.startswith("- "):
+            raise ValueError(ln)
+    return lines
 
 
 def advance_state_text(text: str, ts: str, today: str) -> str:
@@ -85,7 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--state", required=True)
     ap.add_argument("--kb", required=True)
     ap.add_argument("--ts", required=True)
-    ap.add_argument("--recurrence", action="append", default=[], help="one KB recurrence-log line; repeatable")
+    ap.add_argument("--recurrence-stdin", action="store_true",
+                     help="read zero or more KB recurrence-log lines from stdin, one '- ...' per line")
     ap.add_argument("--root", default=".", help="the two paths resolve against this directory (default: cwd)")
     ap.add_argument("--reindex", action="store_true", help="also rebuild the engine's index for --root's store")
     a = ap.parse_args(argv)
@@ -97,8 +130,18 @@ def main(argv: list[str] | None = None) -> int:
 
     state_rel, kb_rel = safe_rel(a.state), safe_rel(a.kb)
     if state_rel is None or kb_rel is None:
-        print("advance-state.py: --state/--kb must be relative paths under .context/ with no '..' segment", file=sys.stderr)
+        print("advance-state.py: --state/--kb must be relative paths under .context/ with no '..' segment, "
+              "and neither may contain a single quote or a newline", file=sys.stderr)
         return 2
+
+    recurrences: list[str] = []
+    if a.recurrence_stdin:
+        try:
+            recurrences = parse_recurrence_stdin(sys.stdin.read())
+        except ValueError as bad_line:
+            print(f"advance-state.py: --recurrence-stdin line {str(bad_line)!r} does not start with '- '",
+                  file=sys.stderr)
+            return 2
 
     root = Path(a.root)
     state_path, kb_path = root / state_rel, root / kb_rel
@@ -109,9 +152,9 @@ def main(argv: list[str] | None = None) -> int:
     new_state = advance_state_text(state_path.read_text(encoding="utf-8"), a.ts, date.today().isoformat())
     fsutil.atomic_write(str(state_path), new_state)
 
-    if a.recurrence:
+    if recurrences:
         kb_text = kb_path.read_text(encoding="utf-8") if kb_path.is_file() else ""
-        fsutil.atomic_write(str(kb_path), append_recurrences_text(kb_text, a.recurrence))
+        fsutil.atomic_write(str(kb_path), append_recurrences_text(kb_text, recurrences))
 
     if a.reindex:
         env = dict(os.environ, CONTEXT_ROOT=str((root / ".context").resolve()))
