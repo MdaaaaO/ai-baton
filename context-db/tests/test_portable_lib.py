@@ -5,6 +5,8 @@
 with no backup suffix) are gone from the scripts that used to carry them. Stdlib unittest, no
 network. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import atexit
+import re
 import os
 import shutil
 import subprocess
@@ -17,12 +19,27 @@ LIB = KIT / "skills" / "_lib" / "portable.sh"
 SH = shutil.which("sh") or "/bin/sh"
 
 
+_MADE: list = []
+
+
+@atexit.register
+def _cleanup_fake_paths() -> None:
+    # every fake PATH dir this module made is removed when the run ends — a symlink per executable on
+    # the host PATH adds up fast (a WSL host lists thousands under /mnt/c), and a run that leaked one
+    # dir per call exhausted /tmp's inodes and failed unrelated tests
+    for d in _MADE:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def path_without(*names) -> str:
     """A PATH of symlinks to every executable on this host's PATH except `names` (e.g. no `flock`,
-    no `setsid`) — the same technique test_sync_sh.py uses to exercise sync.sh's own mkdir fallback."""
+    no `setsid`) — the same technique test_sync_sh.py uses to exercise sync.sh's own mkdir fallback.
+    Windows-drive mounts on WSL (`/mnt/<letter>/…`) are skipped: nothing under test lives there. The
+    dir is removed at exit (_cleanup_fake_paths)."""
     d = Path(tempfile.mkdtemp(prefix="kit-portable-nobin-"))
+    _MADE.append(d)
     for p in os.environ.get("PATH", "").split(os.pathsep):
-        if not os.path.isdir(p):
+        if not os.path.isdir(p) or re.match(r"^/mnt/[a-z]/", p + "/"):
             continue
         for e in os.listdir(p):
             if e in names or (d / e).exists():
@@ -214,3 +231,24 @@ class ScriptsNoLongerCarryGnuOnlyConstructs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakePathsAreCleanedUp(unittest.TestCase):
+    """path_without() makes a dir of symlinks per call; a run must leave none behind (a leak exhausted
+    /tmp's inodes on a WSL host whose PATH lists thousands of Windows executables)."""
+
+    def test_a_run_leaves_no_fake_path_dirs(self):
+        import sys
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {k: v for k, v in os.environ.items() if k != "CONTEXT_ROOT"}
+            env["TMPDIR"] = tmp  # the child builds its own throw-away store under this TMPDIR
+            r = subprocess.run([sys.executable, "-m", "unittest", "context-db.tests.test_portable_lib.WithLock"],
+                               cwd=str(KIT), env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+            left = [n for n in os.listdir(tmp) if n.startswith("kit-portable-nobin-")]
+            self.assertEqual(left, [], f"fake PATH dirs left behind: {left}")
+
+    def test_wsl_windows_drives_are_not_linked(self):
+        d = Path(path_without())
+        self.assertFalse(any(os.path.realpath(e).startswith("/mnt/") and re.match(r"^/mnt/[a-z]/", os.path.realpath(e))
+                             for e in d.iterdir()), "a /mnt/<drive> executable was linked into the fake PATH")
