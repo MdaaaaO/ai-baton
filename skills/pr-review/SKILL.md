@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "22"
+  version: "23"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack"
@@ -86,9 +86,10 @@ Read, in this order, only the slices you need (`grep -n '^## ' file` first):
    the bundle's `head/<path>` when the PR touched the file, else one live exception (§ Contract):
    `gh api contents … ?ref=<head>` — and the conventions in `.context/repos/<repo>.md`.
 4. Open tickets the PR touches — keys matched by `tracker.key_regex` in the title/body: with
-   `tracker.kind == jira` and `systems.jira`, `getJiraIssue`; with `tracker.kind == github`, the linked
-   GitHub issue (`gh issue view`); plus any open `<KEY>` bug on the same column/vocabulary (grep
-   `.context/INDEX.md` for the model/column name).
+   `tracker.kind == jira` and `systems.jira`, the tool named by `tracker.mcp_tools.search` (JQL
+   `key = <KEY>`, one call); with `tracker.kind == github`, the linked GitHub issue (`gh issue view`);
+   plus any open `<KEY>` bug on the same column/vocabulary (grep `.context/INDEX.md` for the
+   model/column name).
 
 ## 3. Review pass *(runner)*
 
