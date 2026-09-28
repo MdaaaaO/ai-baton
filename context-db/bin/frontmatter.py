@@ -23,7 +23,9 @@ No YAML library (stdlib only), so the dialect is deliberately small: `key: value
 one nested mapping level (`key:` with nothing after it, then two-space-indented `sub: value` lines), and
 `#` comments outside quotes. Values are returned RAW (quotes kept) so a checker can see how they were
 written; `unquote()` gives the plain string, `parse_csv()` the entries of a comma list (it also reads
-the pre-2026-09-26 `[a, b]` form so a half-migrated tree still parses).
+the pre-2026-09-26 `[a, b]` form so a half-migrated tree still parses). `plain_scalar_problem()` says why
+a bare value would not be a valid YAML plain scalar (a real parser would refuse it even though this lenient
+one reads it fine); `quote()` is the one double-quoting function every writer uses when it applies.
 
 CLI (used by the env-init skill):  python3 frontmatter.py facts   → every declared `facts` entry, sorted, unique
                                    python3 frontmatter.py <file>  → the parsed frontmatter as JSON
@@ -65,12 +67,32 @@ def split(text: str) -> tuple[list[str], str] | None:
     return None  # unterminated block
 
 
+def _closing_quote(v: str, q: str) -> int:
+    """Index of the closing `q` (`"` or `'`) that ends a quoted value starting at v[0], honoring the one escape
+    each quote style uses inside a value this module's own `quote()` ever writes: `\\"` / `\\\\` inside a
+    double-quoted value, `''` (a doubled quote) inside a single-quoted one. -1 when it never closes. A naive
+    `v.find(q, 1)` stops at the first escaped quote instead — the value `"…with \\"SSO session\\"…"` was cut
+    there, dropping everything after."""
+    i, n = 1, len(v)
+    while i < n:
+        c = v[i]
+        if q == '"' and c == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if c == q:
+            if q == "'" and i + 1 < n and v[i + 1] == "'":
+                i += 2  # `''` inside a single-quoted value is one literal quote, not the close
+                continue
+            return i
+        i += 1
+    return -1
+
+
 def strip_comment(v: str) -> str:
     """Drop a trailing ` # comment` that is outside quotes."""
     v = v.strip()
     if v and v[0] in "\"'":
-        q = v[0]
-        end = v.find(q, 1)
+        end = _closing_quote(v, v[0])
         return v if end < 0 else v[:end + 1]
     m = re.search(r"\s+#", v)
     return v[:m.start()].rstrip() if m else v
@@ -158,18 +180,80 @@ def load(path: Path) -> Frontmatter | None:
 
 
 def unquote(v) -> str:
-    """The plain string behind a raw value: matching surrounding quotes removed, else as is."""
+    """The plain string behind a raw value: matching surrounding quotes removed, else as is. The inverse of
+    `quote()` for a double-quoted value: `\\"` and `\\\\` are unescaped back to `"` and `\\` — the only two
+    escapes `quote()` ever writes — so a value round-tripped through quote()/unquote() (or written by hand
+    the same way) reads identically to a real YAML parser, not just "the quotes come off"."""
     if not isinstance(v, str):
         return ""
     v = v.strip()
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-        return v[1:-1]
+        inner = v[1:-1]
+        return re.sub(r'\\(["\\])', r"\1", inner) if v[0] == '"' else inner.replace("''", "'")  # YAML's one single-quote escape
     return v
 
 
 def is_quoted_string(v) -> bool:
-    """True when the raw value is written as a double-quoted string — the spec's `metadata` is string→string."""
+    """True when the raw value is written as a double-quoted string — the spec's `metadata` is string→string,
+    so a hand-written single-quoted or bare metadata value must still be canonicalized to double quotes."""
     return isinstance(v, str) and len(v) >= 2 and v[0] == '"' and v[-1] == '"'
+
+
+def is_quoted(v) -> bool:
+    """True when the raw value already starts with a quote character, either style (`"` or `'`) — "already
+    quoted, leave it alone" for a top-level scalar (unlike `is_quoted_string`, which only counts the spec's
+    required double-quoted form for `metadata:`). The one check kit_verify.py and migrate_frontmatter.py both
+    use so a valid single-quoted value (`description: 'Demo: skill'`) is recognized as quoted in both places,
+    not flagged and rewritten by one of them."""
+    return isinstance(v, str) and bool(v) and v[0] in "\"'"
+
+
+# The plain-scalar shapes that actually recur in kit values and would make a REAL YAML parser (the ctx-store
+# backend, PyYAML) refuse the file, even though this module's lenient line parser reads them fine: a
+# description or a session field written as free text often contains one of these by accident. `[` and `{`
+# are not here: a value that opens and closes one (`arguments: [repo, pr, event]`) is a deliberate YAML flow
+# collection — valid as is, and this module's own `parse_csv` reads that exact legacy form — so those two are
+# checked separately, only when the bracket is never closed (FLOW_OPEN below). `#` and `,` are always
+# indicators wherever they lead (a comment start, a flow-context separator); `-`, `?` and `:` are indicators
+# only in the specific shape YAML restricts (LEADING_WITH_SPACE below) — `-5` or `-quiet` is a fine plain
+# scalar, `- ` (or a bare `-`) is a sequence-entry indicator.
+PLAIN_SCALAR_INDICATORS = "]}&*!|>'\"%@`#,"
+FLOW_OPEN = {"[": "]", "{": "}"}  # opens a flow sequence / mapping; fine when the value is a balanced one
+LEADING_WITH_SPACE = "-?:"  # `- `, `? `, `: ` (or the bare character alone) are indicators; `-x`/`:x` are not
+
+
+def plain_scalar_problem(v: str) -> str | None:
+    """Why the bare (unquoted) value `v` would not be a valid YAML plain scalar, or None when it is fine
+    unquoted — INCLUDING when it is not a plain scalar at all but a valid flow collection (`[a, b]`, `{a: b}`).
+    Stdlib substitute for a real YAML parser: an unbalanced or plain indicator character, a leading `-`/`?`/`:`
+    followed by a space (or alone), ': ' (read as a nested mapping), ' #' (read as a comment, wherever it
+    falls) and a trailing ':' (read as an empty mapping). Covers a leading '#' and a ' #' anywhere so a caller
+    never has to remember to check those separately (kit_verify.py still reports its own richer message for
+    them — with the exact text YAML would keep — before it ever reaches this function; harmless overlap)."""
+    if not v:
+        return None
+    close = FLOW_OPEN.get(v[0])
+    if close is not None:
+        return None if v.rstrip().endswith(close) else f"starts with '{v[0]}' with no matching '{close}'"
+    if v[0] in LEADING_WITH_SPACE and (len(v) == 1 or v[1] == " "):
+        return f"starts with '{v[0]}' followed by a space (or alone), a YAML indicator sequence"
+    if v[0] in PLAIN_SCALAR_INDICATORS:
+        return f"starts with '{v[0]}', a YAML indicator character"
+    if ": " in v:
+        return "contains ': ', which YAML reads as a nested mapping"
+    if re.search(r"\s#", v):
+        return "contains ' #', which YAML reads as a comment"
+    if v.rstrip().endswith(":"):
+        return "ends with ':', which YAML reads as an empty mapping"
+    return None
+
+
+def quote(v: str) -> str:
+    """`v` (a bare, unquoted value) as a double-quoted YAML scalar: backslashes escaped before quotes (so an
+    already-escaped quote is never double-escaped), wrapped in double quotes. The one quoting function every
+    kit writer uses (migrate_frontmatter.py, session.py) so a value that needs quoting is quoted the same way
+    everywhere."""
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def parse_csv(v) -> list[str]:
