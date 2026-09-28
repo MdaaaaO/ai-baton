@@ -15,8 +15,10 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
 BIN = HERE.parent / "bin"
 sys.path.insert(0, str(BIN))
+sys.path.insert(0, str(HERE.parent))
 import kb  # noqa: E402
 import kit_profile  # noqa: E402
+from tests import hermetic_env  # noqa: E402
 
 
 class Kb(unittest.TestCase):
@@ -79,8 +81,9 @@ class Grep(unittest.TestCase):
                          "read_user_profile", "LEGACY_PROFILES", "RETIRED_KEYS", "## profile", '"profile"', "per-profile", "Profile names",
                          "profile row", "which profile", "profile or", "profiles share", "profiles must", "profiles reach", "profile/session",
                          "the profile", "any profile", "profile <", "(no profile", "no leftover", ".claude/profiles/", "SSO profile", "for that profile", "profiles.yml")
-        out = subprocess.run(["git", "grep", "-i", "-n", "profile", "--", "*.py", "*.sh", "*.md", ".gitignore", "*.json", "Makefile", "*.mk"],
-                             cwd=KIT, capture_output=True, text=True).stdout
+        with tempfile.TemporaryDirectory() as tmp:
+            out = subprocess.run(["git", "grep", "-i", "-n", "profile", "--", "*.py", "*.sh", "*.md", ".gitignore", "*.json", "Makefile", "*.mk"],
+                                 cwd=KIT, capture_output=True, text=True, env=hermetic_env(tmp)).stdout
         bad = []
         for line in out.splitlines():
             path, _n, text = line.split(":", 2)

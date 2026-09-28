@@ -14,11 +14,13 @@ from pathlib import Path
 BIN = Path(__file__).resolve().parents[1] / "bin"
 KIT = BIN.parents[1]
 sys.path.insert(0, str(BIN))
+sys.path.insert(0, str(BIN.parent))
 
 import kb  # noqa: E402
 import kit_profile  # noqa: E402
 import kit_verify  # noqa: E402
 import personal  # noqa: E402
+from tests import hermetic_env  # noqa: E402
 
 LOGIN = "octo-tester"  # a placeholder identity for the fake gh below, never a real login
 FAKE_GH = f'''#!/bin/sh
@@ -101,8 +103,8 @@ class Pure(unittest.TestCase):
                               (".claude", "git@github.com:acme/kit.git")):
                 d = root / name
                 d.mkdir()
-                subprocess.run(["git", "-C", str(d), "init", "-q"], check=True)
-                subprocess.run(["git", "-C", str(d), "remote", "add", "origin", url], check=True)
+                subprocess.run(["git", "-C", str(d), "init", "-q"], check=True, env=hermetic_env(root))
+                subprocess.run(["git", "-C", str(d), "remote", "add", "origin", url], check=True, env=hermetic_env(root))
             (root / "plain").mkdir()  # not a repo
             self.assertEqual(personal.workspace_repos(root), ["acme/site.io", "acme/widgets"])
             self.assertEqual(personal.workspace_repos(root / "missing"), [])
@@ -184,8 +186,9 @@ class Cli(unittest.TestCase):
     def test_workspace_clones_beat_gh_repo_list(self):
         d = self.ws / "widgets"
         d.mkdir()
-        subprocess.run(["git", "-C", str(d), "init", "-q"], check=True)
-        subprocess.run(["git", "-C", str(d), "remote", "add", "origin", "git@github.com:acme/widgets.git"], check=True)
+        subprocess.run(["git", "-C", str(d), "init", "-q"], check=True, env=hermetic_env(self.root))
+        subprocess.run(["git", "-C", str(d), "remote", "add", "origin", "git@github.com:acme/widgets.git"],
+                       check=True, env=hermetic_env(self.root))
         r = self.run_personal(FAKE_GH)
         self.assertEqual(r.returncode, 0, r.stderr)
         cfg = json.loads((self.store / "config.json").read_text(encoding="utf-8"))

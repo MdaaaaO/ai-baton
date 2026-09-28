@@ -120,16 +120,16 @@ class HostileValues(unittest.TestCase):
             ctx = tmp / "ws" / ".context"
             ctx.mkdir(parents=True)
             origin, wt = tmp / "origin.git", tmp / "ws" / "re'po $(touch PWNED-wt)"
-            subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-            subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True)
+            git_env = _env(tmp, ctx)  # the baseline; the full env below layers the ssh-signing config on top
+            subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, env=git_env)
+            subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True, env=git_env)
             key = tmp / "key"
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
             cfg = {"user.name": "t", "user.email": "t@example.invalid", "gpg.format": "ssh",
                    "user.signingkey": str(key), "remote.origin.url": str(origin)}
-            env = {k: v for k, v in os.environ.items() if not k.startswith(("SIGN_QUEUE_", "GIT_"))}
-            env.update(GIT_CONFIG_COUNT=str(len(cfg)), CONTEXT_ROOT=str(ctx), HOME=str(tmp),
-                       **{f"GIT_CONFIG_KEY_{i}": k for i, k in enumerate(cfg)},
-                       **{f"GIT_CONFIG_VALUE_{i}": v for i, v in enumerate(cfg.values())})
+            env = {**git_env, "GIT_CONFIG_COUNT": str(len(cfg)),
+                   **{f"GIT_CONFIG_KEY_{i}": k for i, k in enumerate(cfg)},
+                   **{f"GIT_CONFIG_VALUE_{i}": v for i, v in enumerate(cfg.values())}}
             git = ["git", "-C", str(wt)]
             (wt / "seed").write_text("s\n")
             subprocess.run([*git, "add", "seed"], check=True, env=env)

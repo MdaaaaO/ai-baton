@@ -26,6 +26,10 @@ import tempfile
 from pathlib import Path
 
 KIT = Path(__file__).resolve().parents[2]
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+from tests import hermetic_env  # noqa: E402
+
 LOGIN = "smoke-user"
 GH_STUB = f"""#!/bin/sh
 case "$*" in
@@ -113,23 +117,23 @@ def main(argv: list[str]) -> int:
         stub.mkdir(parents=True)
         (stub / "gh").write_text(GH_STUB)
         (stub / "gh").chmod(0o755)
+        git_env = hermetic_env(home)  # every git call below ignores this host's own commit.gpgsign / gpg.format
         for repo in ("smoke-repo-one", "smoke-repo-two"):  # clones of the user's repos, as --personal expects to find them
-            subprocess.run(["git", "init", "-q", str(ws / repo)], check=True)
-            subprocess.run(["git", "-C", str(ws / repo), "remote", "add", "origin", f"https://github.com/{LOGIN}/{repo}.git"], check=True)
+            subprocess.run(["git", "init", "-q", str(ws / repo)], check=True, env=git_env)
+            subprocess.run(["git", "-C", str(ws / repo), "remote", "add", "origin", f"https://github.com/{LOGIN}/{repo}.git"],
+                           check=True, env=git_env)
         # the kit under test as a clean git source (committed HEAD, as CI checks it out)
         src = work / "kit-src"
-        subprocess.run(["git", "clone", "-q", str(KIT), str(src)], check=True)
-        subprocess.run(["git", "-C", str(src), "checkout", "-q", "-B", "main"], check=True)  # a clone lands on main
+        subprocess.run(["git", "clone", "-q", str(KIT), str(src)], check=True, env=git_env)
+        subprocess.run(["git", "-C", str(src), "checkout", "-q", "-B", "main"], check=True, env=git_env)  # a clone lands on main
         lines, swaps = translate(path, readme_block(path))
         print(f"== install smoke: {path} path, README block replayed ({len(lines)} commands)")
         for s in swaps:
             print(f"   swap: {s}")
         script = PRELUDE + "\n".join(lines) + "\n"
-        env = {k: v for k, v in os.environ.items()
+        env = {k: v for k, v in git_env.items()
                if not k.startswith(("CLAUDE_", "WORKSPACE_", "BATON", "CONTEXT_ROOT", "GH_", "GITHUB_TOKEN"))}
-        env.update(HOME=str(home), PATH=f"{stub}{os.pathsep}{os.environ['PATH']}", KIT_SRC=str(src),
-                   GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t",
-                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t")
+        env.update(PATH=f"{stub}{os.pathsep}{os.environ['PATH']}", KIT_SRC=str(src))
         # errors="replace": the block trims display lines with `cut -c`, which counts bytes and can split a UTF-8 character
         r = subprocess.run(["bash", "-c", script], cwd=home, env=env, capture_output=True, text=True, errors="replace", timeout=600)
         print("\n".join("   | " + l for l in (r.stdout + r.stderr).rstrip().splitlines()[-40:]))

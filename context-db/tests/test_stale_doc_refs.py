@@ -5,16 +5,23 @@ through silently). Stdlib unittest, reads only the tracked working tree. Run: ma
 from __future__ import annotations
 import re
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
+sys.path.insert(0, str(HERE.parent))
+from tests import hermetic_env  # noqa: E402
+
 CLAUDE_SECTION = re.compile(r"CLAUDE\.md`?\s*§")
 
 
 def tracked(*patterns: str) -> list[Path]:
-    r = subprocess.run(["git", "-C", str(KIT), "ls-files", *patterns], capture_output=True, text=True, check=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        r = subprocess.run(["git", "-C", str(KIT), "ls-files", *patterns], capture_output=True, text=True,
+                           check=True, env=hermetic_env(tmp))
     return [KIT / p for p in r.stdout.splitlines() if p]
 
 

@@ -15,8 +15,10 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
 BIN = HERE.parent / "bin"
 sys.path.insert(0, str(BIN))
+sys.path.insert(0, str(HERE.parent))
 
 import kit_verify  # noqa: E402
+from tests import hermetic_env  # noqa: E402
 
 FIX = HERE / "fixtures" / "skills"
 LEAK = "C0" + "AB12CD3EF"  # the leaky fixture's Slack-shaped id, assembled so no scanner reads this file as a leak
@@ -385,14 +387,15 @@ class ReviewedFreshness(unittest.TestCase):
 
     def repo(self, tmp: str, rel: str = "skill.md", content: str = "x") -> Path:
         kit = Path(tmp)
+        git_env = hermetic_env(kit)  # every git call below ignores the host's own commit.gpgsign / gpg.format
         for args in (["init", "-q"], ["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"]):
-            subprocess.run(["git", *args], cwd=kit, check=True, capture_output=True)
+            subprocess.run(["git", *args], cwd=kit, check=True, capture_output=True, env=git_env)
         p = kit / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
-        subprocess.run(["git", "add", rel], cwd=kit, check=True, capture_output=True)
-        env = {**os.environ, "GIT_AUTHOR_DATE": "2026-09-20T12:00:00", "GIT_COMMITTER_DATE": "2026-09-20T12:00:00"}
-        subprocess.run(["git", "commit", "-q", "-m", "x"], cwd=kit, check=True, capture_output=True, env=env)
+        subprocess.run(["git", "add", rel], cwd=kit, check=True, capture_output=True, env=git_env)
+        commit_env = {**git_env, "GIT_AUTHOR_DATE": "2026-09-20T12:00:00", "GIT_COMMITTER_DATE": "2026-09-20T12:00:00"}
+        subprocess.run(["git", "commit", "-q", "-m", "x"], cwd=kit, check=True, capture_output=True, env=commit_env)
         return kit
 
     def test_reviewed_before_the_last_commit_warns(self):
