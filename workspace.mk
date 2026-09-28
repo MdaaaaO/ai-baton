@@ -26,11 +26,13 @@ _SIGNQ = python3 "$(KIT)/skills/sign-queue/signq.py"
 JOB ?=
 V   ?=
 
+# the owner's entry points move jobs a pre-workspace-queue kit left under the kit dir first (a no-op once done);
+# signq.py itself never migrates as a side effect
 sign:
-	@$(_SIGNQ) run $(if $(V),-v,)
+	@$(_SIGNQ) migrate-legacy -q && $(_SIGNQ) run $(if $(V),-v,)
 
 sign_list:
-	@$(_SIGNQ) list
+	@$(_SIGNQ) migrate-legacy -q && $(_SIGNQ) list
 
 sign_show sign_log sign_retry sign_drop:
 	@test -n "$(JOB)" || { echo "usage: make $@ JOB=<index|topic>  (see make sign_list)"; exit 1; }

@@ -1,5 +1,5 @@
 """review_gate.py / review_evidence.py: the tier-0 gate and the tier-1 evidence, on a throw-away git repo — leak
-shapes on added lines only (a pre-existing leak is not a finding, the allow-list holds), version/updated/CHANGELOG bumps
+shapes on added lines only (a pre-existing leak is not a finding, the allow-list holds), version/updated bumps
 for changed, new and removed units, the wording-only exemption, README edits not counting, the pre-flags (swallowed
 errors, vocabulary in a unit without the capability), rules read from the base. Fact-shaped literals are assembled at
 run time. Stdlib unittest. Run: make -C .claude/context-db test."""
@@ -48,7 +48,7 @@ def sh(cwd: Path, *args: str) -> str:
 
 
 class Repo:
-    """A tiny kit-shaped repo: main with one unit and a CHANGELOG, a branch with the change under test."""
+    """A tiny kit-shaped repo: main with one unit, a branch with the change under test."""
 
     def __init__(self, tmp: str):
         self.root = Path(tmp) / "kit"
@@ -59,7 +59,6 @@ class Repo:
         self.write("skills/demo/SKILL.md", UNIT.format(v="1", u="2026-09-01", req="", body=""))
         self.write("skills/demo/README.md", "# demo\n")
         self.write("skills/kit-health/allow.txt", "docs/allowed.md:" + LEAK + "$\n")  # assembled: no scanner reads this file as a leak
-        self.write("docs/CHANGELOG.md", "# Kit changelog\n\n- 2026-09-01 · demo v1 (#1) — born.\n")
         self.write("docs/REVIEW.md", "# Rules v1\n")
         self.write("agents/tri.md", "---\nname: tri\ndescription: x\nmetadata:\n  version: \"2\"\n  updated: \"2026-09-01\"\n  reviewed: \"2026-09-01\"\n---\nbody\n")
         self.commit("base")
@@ -206,19 +205,17 @@ class Tree(unittest.TestCase):
 
 
 class Bumps(unittest.TestCase):
-    def test_changed_unit_needs_version_updated_and_changelog(self):
+    def test_changed_unit_needs_version_and_updated_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             r = Repo(tmp)
             r.write("skills/demo/SKILL.md", UNIT.format(v="1", u="2026-09-01", req="", body="2. Do more.\n"))
             r.commit("no bump")
             f = r.gate()
-            self.assertEqual(len(f), 2, f)
+            self.assertEqual(len(f), 1, f)  # no CHANGELOG line is asked for: the release log is generated
             self.assertIn("skills/demo/SKILL.md:1 — files of `demo` changed but `metadata.version` is 1 (base 1)", f[0])
-            self.assertIn("docs/CHANGELOG.md:1 — `demo` changed but no added CHANGELOG line names it", f[1])
             self.assertTrue(all(fx.endswith("(docs/contributing.md § Versioning)") for fx in f))
             self.assertEqual(r.gate(skip_bump=True), [])  # the wording-only claim
             r.write("skills/demo/SKILL.md", UNIT.format(v="2", u="2026-09-01", req="", body="2. Do more.\n"))  # same-day updated is fine
-            r.write("docs/CHANGELOG.md", "# Kit changelog\n\n- 2026-09-02 · demo v2 (#2) — more.\n- 2026-09-01 · demo v1 (#1) — born.\n")
             r.commit("bumped")
             self.assertEqual(r.gate(), [])
             r.write("skills/demo/SKILL.md", UNIT.format(v="3", u="2026-08-01", req="", body="2. Do more.\n"))  # updated went backwards
@@ -246,13 +243,11 @@ class Bumps(unittest.TestCase):
             r = Repo(tmp)
             r.write("skills/newbie/SKILL.md", UNIT.format(v="1", u="2026-09-02", req="", body="").replace("name: demo", "name: newbie"))
             r.rm("agents/tri.md")
-            r.commit("new + removed, no changelog")
-            f = r.gate()
-            self.assertTrue(any("new unit `newbie` has no CHANGELOG line" in fx for fx in f), f)
-            self.assertTrue(any("`tri` is removed but no added CHANGELOG line" in fx for fx in f), f)
-            r.write("docs/CHANGELOG.md", "# Kit changelog\n\n- 2026-09-02 · newbie v1 (new) · tri (removed) (#3).\n- 2026-09-01 · demo v1 (#1) — born.\n")
-            r.commit("changelog")
-            self.assertEqual(r.gate(), [])
+            r.commit("new + removed")
+            self.assertEqual(r.gate(), [])  # a versioned new unit and a removal need nothing more
+            r.write("skills/newbie/SKILL.md", UNIT.format(v="x", u="2026-09-02", req="", body="").replace("name: demo", "name: newbie"))
+            r.commit("unversioned")
+            self.assertTrue(any("new unit without an integer `metadata.version`" in fx for fx in r.gate()))
 
     def test_cli_exit_status_and_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -261,7 +256,7 @@ class Bumps(unittest.TestCase):
             r.commit("no bump")
             p = subprocess.run([sys.executable, str(BIN / "review_gate.py"), "--base", "main"], cwd=r.root, capture_output=True, text=True)
             self.assertEqual(p.returncode, 1)
-            self.assertIn("review-gate: FAIL — 1 changed file(s), 1 unit(s) [demo], 2 finding(s)", p.stdout)
+            self.assertIn("review-gate: FAIL — 1 changed file(s), 1 unit(s) [demo], 1 finding(s)", p.stdout)
             p = subprocess.run([sys.executable, str(BIN / "review_gate.py"), "--base", "main", "--skip-bump", "--json"], cwd=r.root, capture_output=True, text=True)
             self.assertEqual((p.returncode, json.loads(p.stdout)), (0, []))
 
@@ -273,7 +268,6 @@ class Evidence(unittest.TestCase):
             body = "2. Query Jira for the sprint; `gh api x 2>/dev/null || true`.\n3. Post to the tracker.\n"
             r.write("skills/demo/SKILL.md", UNIT.format(v="2", u="2026-09-02", req="  requires: \"slack\"\n", body=body))
             r.write("skills/demo/run.py", "try:\n    x = 1\nexcept Exception: pass\ntry:\n    y = 2\nexcept:\n    y = 0\n")
-            r.write("docs/CHANGELOG.md", "# Kit changelog\n\n- 2026-09-02 · demo v2 (#2).\n- 2026-09-01 · demo v1 (#1) — born.\n")
             r.write("docs/REVIEW.md", "# Rules v2 — the PR tries to rewrite them\n")
             r.commit("pr")
             ev = r.ev()
@@ -298,7 +292,7 @@ class Evidence(unittest.TestCase):
             r.write("skills/demo/SKILL.md", UNIT.format(v="1", u="2026-09-01", req="", body="2. more\n"))
             r.commit("no bump")
             ev = r.ev()
-            self.assertEqual(len(ev["tier0"]), 2)
+            self.assertEqual(len(ev["tier0"]), 1)  # the version bump; no CHANGELOG line is required
             self.assertIn("**FAILED** — the PR is red until these are fixed; do not repeat them as findings", evidence.render(ev, "x"))
 
     def test_cli_writes_evidence_and_rules(self):
@@ -343,7 +337,6 @@ class UpdatedInUtc(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             r = Repo(tmp)
             r.write("skills/demo/SKILL.md", UNIT.format(v="2", u=(today + timedelta(days=1)).isoformat(), req="", body=""))
-            r.write("docs/CHANGELOG.md", "# Kit changelog\n\n- x · demo v2 (#2).\n- 2026-09-01 · demo v1 (#1) — born.\n")
             r.commit("a UTC+14 author's today")
             self.assertEqual(r.gate(), [])
             r.write("skills/demo/SKILL.md", UNIT.format(v="2", u=(today + timedelta(days=2)).isoformat(), req="", body=""))

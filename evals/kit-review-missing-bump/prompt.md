@@ -8,8 +8,7 @@ below. Tier 0 already ran and FAILED:
 
 ```
 [STOP] skills/notion-page-review/SKILL.md:1 — files of `notion-page-review` changed but `metadata.version` is 4 (base 4); bump it, or mark the PR wording-only (`wording` label / `[skip-bump]`) (CONTRIBUTING § Versioning)
-[STOP] docs/CHANGELOG.md:1 — `notion-page-review` changed but no added CHANGELOG line names it (CONTRIBUTING § Versioning)
-review-gate: FAIL — 1 changed file(s), 1 unit(s) [notion-page-review], 2 finding(s)
+review-gate: FAIL — 1 changed file(s), 1 unit(s) [notion-page-review], 1 finding(s)
 ```
 
 Reply with each of YOUR findings on one line in the fixed shape `[STOP|WARN|NIT] path:line — claim (rule)`, then the

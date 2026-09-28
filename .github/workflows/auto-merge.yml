@@ -3,10 +3,17 @@
 # Runs after `ci`, `pr-title` or `claude-review` completes on a PR head (`workflow_run`, so it is always the
 # copy on main that runs, never the PR's). It merges when ALL of these hold for the PR whose head is that sha:
 #   - open, not a draft, from a branch of this repo, based on main;
+#   - it changes nothing under .github/ (a PR's own workflows run with its copy and its token, so a workflow
+#     edit could forge the approval below; CODEOWNERS asks the owner to review those, and the PAT merge
+#     would satisfy that by itself) and none of the files that judge a PR — the gate, its leak shapes, the
+#     evidence script, the allow-list and the review rules (#129: CI runs the base copies, so such a change
+#     judges every LATER PR); such a PR waits for the owner, who merges by hand;
 #   - every check in REQUIRED completed with success on the head (a skipped claude-review — release PRs,
 #     no token — is not success: those PRs wait for the owner);
 #   - the latest review by REVIEWER is APPROVED and was submitted for this exact head (claude-review.yml
-#     turns the reviewer's `Verdict:` line into that review; a push after it means no verdict yet);
+#     turns the reviewer's `Verdict:` line into that review; a push after it means no verdict yet), and it
+#     names the run that posted it — a claude-review.yml run of a pull_request event on this head (REVIEWER
+#     is the shared Actions identity: the run binding is what makes the approval that workflow's);
 #   - zero unresolved review threads (docs/contributing.md § Code review: threads are not optional);
 #   - GitHub reports the PR mergeable.
 # Anything else is a notice, never a failure: the PR simply waits — for the next event or the owner.
@@ -28,6 +35,7 @@ permissions:
   contents: read
   pull-requests: read
   checks: read  # commits/<sha>/check-runs answers 403 without it
+  actions: read  # actions/runs/<id>: the run that posted the approval
 
 concurrency:
   group: auto-merge-${{ github.event.workflow_run.head_sha }}
@@ -75,6 +83,17 @@ jobs:
           [ "$(wc -l <<< "$prs")" -eq 1 ] || skip "more than one open PR has this head ($(tr '\n' ' ' <<< "$prs"))"
           pr=$prs
 
+          # Every path, both sides of a rename (a move out of .github/ is a workflow edit too).
+          files=$(gh api --paginate "repos/$REPO/pulls/$pr/files?per_page=100" \
+                    --jq '.[] | .filename, (.previous_filename // empty)') \
+            || skip "could not list the files of PR #$pr"
+          [ -n "$files" ] || skip "PR #$pr lists no files"
+          ! grep -q '^\.github/' <<< "$files" \
+            || skip "PR #$pr changes .github/ — a workflow edit needs the owner's review; the owner merges it by hand"
+          judges='^(context-db/bin/(review_gate|leak_shapes|review_evidence)\.py|skills/kit-health/allow\.txt|docs/REVIEW\.md)$'
+          ! grep -qE "$judges" <<< "$files" \
+            || skip "PR #$pr changes what judges PRs ($(grep -E "$judges" <<< "$files" | tr '\n' ' ')) — the owner reviews and merges it by hand"
+
           runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
                    --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion)"') \
             || skip "could not list the check runs"
@@ -88,12 +107,20 @@ jobs:
           done
 
           review=$(gh api --paginate "repos/$REPO/pulls/$pr/reviews?per_page=100" \
-                     --jq '.[] | select(.user.login == env.REVIEWER) | "\(.submitted_at)\t\(.commit_id)\t\(.state)"' \
+                     --jq '.[] | select(.user.login == env.REVIEWER)
+                           | "\(.submitted_at)\t\(.commit_id)\t\(.state)\t\(((.body // "") | capture("claude-review run (?<id>[0-9]+)") | .id) // "")"' \
                    | sort | tail -1) || skip "could not list the reviews"
           [ -n "$review" ] || skip "no review by $REVIEWER yet"
           [ "$(cut -f2 <<< "$review")" = "$SHA" ] || skip "the latest $REVIEWER review is for another head"
           state=$(cut -f3 <<< "$review")
           [ "$state" = APPROVED ] || skip "the latest $REVIEWER review is $state — waiting for the owner"
+          run_id=$(cut -f4 <<< "$review")
+          [ -n "$run_id" ] || skip "the latest $REVIEWER review names no claude-review run"
+          run=$(gh api "repos/$REPO/actions/runs/$run_id" \
+                  --jq '"\(.path)\t\(.event)\t\(.head_sha)\t\(.head_repository.full_name)"') \
+            || skip "could not read run $run_id named by the approval"
+          [ "$run" = "$(printf '%s\t%s\t%s\t%s' .github/workflows/claude-review.yml pull_request "$SHA" "$REPO")" ] \
+            || skip "the approval names run $run_id, which is not claude-review.yml on this head ($(tr '\t' ' ' <<< "$run"))"
 
           threads=$(gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){
                       pullRequest(number:$n){reviewThreads(first:100){totalCount nodes{isResolved}}}}}' \
@@ -112,7 +139,7 @@ jobs:
           done
           [ "${mergeable% *}" = true ] || skip "PR #$pr is not mergeable ($mergeable)"
 
-          echo "auto-merge: PR #$pr — checks green, $REVIEWER approved this head, no open threads, mergeable"
+          echo "auto-merge: PR #$pr — no .github/ change, checks green, claude-review run $run_id approved this head, no open threads, mergeable"
           out pr "$pr"
           out go true
 

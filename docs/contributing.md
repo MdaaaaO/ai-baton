@@ -18,7 +18,7 @@ statement, not a second source of truth for it.
 
 ## From issue to merge
 
-Every change is traceable both ways: **issue → PR → squash commit → CHANGELOG line**, and back.
+Every change is traceable both ways: **issue → PR → squash commit → release-log line**, and back.
 
 ```
  issue #N ─────────► branch + PR ──────────► review ─────────────► squash-merge ─────► make claude_sync
@@ -49,8 +49,9 @@ revert`, lower-case description, no trailing period, ≤ 72 characters. The scop
 
 ## Versioning
 
-A skill or agent whose **behaviour** changes bumps `metadata.version`, sets `metadata.updated`, and gets one
-line at the top of [`docs/CHANGELOG.md`](CHANGELOG.md). Wording-only edits bump nothing. `kit-verify`
+A skill or agent whose **behaviour** changes bumps `metadata.version` and sets `metadata.updated`. What changed is the
+PR's squash commit, which the generated release log (root `CHANGELOG.md`) lists; what a machine must do after the sync
+is the PR template's § Machines, plus a `BREAKING CHANGE:` footer when every machine must act. Wording-only edits bump nothing. `kit-verify`
 enforces the fields (§ Skill frontmatter); the reviewer checks the bump. A `description:` is a trigger, not the procedure: ≤ 60 words and
 ≤ 400 B per unit, ≤ 9,500 B across the kit (`kit-verify` counts whitespace-separated tokens, so a `/` or
 `—` standing alone counts as a word) — it loads into every session whether or not the unit runs.
@@ -101,8 +102,8 @@ Claude Code loads every `skills/*/SKILL.md` and `claude plugin eval` runs every 
 
 **Before the PR.** `make -C .claude/context-db verify-skill UNIT=skills/<name>` — the env-free validator (schema,
 description caps, body cap, cited paths exist, no fact-shaped literal, no cross-skill path, manifests cover the
-facts) — then `make -C .claude/context-db ci`. A behaviour change bumps `metadata.version` and adds a
-`docs/CHANGELOG.md` line (§ Versioning); the authoring checklist is `docs/authoring.md`; what loads when, `docs/loading.md`.
+facts) — then `make -C .claude/context-db ci`. A behaviour change bumps `metadata.version` and `metadata.updated`
+(§ Versioning); the authoring checklist is `docs/authoring.md`; what loads when, `docs/loading.md`.
 
 **One rule for contributors:** you must understand what you submit, whoever or whatever wrote it.
 
@@ -204,9 +205,9 @@ tags that commit `vX.Y.Z` and publishes a GitHub Release with the section as not
   stamp records it as `kit_version`. A sync between the merge and the tag job shows the release
   commit against the previous tag (the 0.2.0 commit as `v0.1.0+5`); the next sync shows `v0.2.0`. That is expected, not a bug.
 
-Two changelogs, two jobs: the root `CHANGELOG.md` is the **release log** (generated, one line per PR);
-[`docs/CHANGELOG.md`](CHANGELOG.md) stays the hand-written **behaviour log** per skill/agent version,
-with the migration notes a machine needs (§ Versioning).
+One changelog: the root `CHANGELOG.md`, the **release log**, generated from the squash commits (one line per PR). A unit's
+version is its `metadata.version`; a step a machine must take is a `BREAKING CHANGE:` footer, which the release notes carry
+(§ Versioning). The hand-written per-unit changelog (`docs/CHANGELOG.md`) is retired; its history is in git.
 
 ## Labels
 
@@ -241,12 +242,14 @@ parallel reviews never race on one shared Claude Code install.
 ## Testing
 
 The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C .claude/context-db test` (discovery, < 10 s,
-no install; a clone without an env store gets a throw-away blank one) — and CI runs it on every PR. `make test
-T=test_kb` runs one file (`tests/test_kb.py`) instead of the full discovery — useful while iterating on one module.
-`make test` is the only supported entry point: a bare `python3 -m unittest discover -s context-db/tests -t
-context-db` sets up none of the isolation the bullets below describe, and — on a machine whose own `.context/`
-already has an env store — reads it, because nothing points it elsewhere; a test that leans on that only by
-accident then passes here and fails on someone else's machine or in CI (which always starts store-less). It covers `kb.py`
+no install) — and CI runs it on every PR. `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
+discovery — useful while iterating on one module. The suite always runs on a **throw-away env store**, never this
+machine's `.context/`: `make test` builds a blank one under the temp dir as CI does (`kb.py init --blank`, environment
+`ci`), whatever `CONTEXT` or `CONTEXT_ROOT` says and wherever it runs from — a kit worktree resolves the workspace's
+live store (`docs/layout.md` § Content root). The test package enforces it: a bare `python3 -m unittest discover -s
+context-db/tests -t .` without `CONTEXT_ROOT` gets its own blank store (removed at exit), and a `CONTEXT_ROOT` outside
+the temp dir, the store beside the kit, or a store naming an environment other than `ci` stops the run before any
+test loads. It covers `kb.py`
 (the store: set/get/rm, renamed kinds, provenance and stale rows, config, migrate), `kit_verify.py` (frontmatter
 schema, env-store checks, `--stale`, `--no-env`), `gen_index.py` / `verify.py` / `new.sh` on a throw-away
 `CONTEXT_ROOT`, `gen_sessions.py`, `commit_style.py`, `eval_check.py` (on a throw-away kit), `session_stats.py` + `transcripts.py` on a synthetic
@@ -258,9 +261,9 @@ and `pr-open/diagram-plan.py`, and the `pr-issue` parser (`.github/scripts/check
 - **A new engine module gets a test module**; a shared helper (`frontmatter.py`, `transcripts.py`, `leak_shapes.py`)
   is the only copy — a second parser or reader is a review finding.
 - **A test never reads the machine's store.** It points `kit_profile.ENV_DIR` / `kb.ENV` at a throw-away blank one
-  (clearing the `lru_cache`s) or passes its own `CONTEXT_ROOT` to every subprocess — `make test` hands the suite this
-  machine's `.context/` when one exists. Tests are stdlib only, need no network and no `gh`, and may run inside a
-  Claude session (`CLAUDE_CODE_SESSION_ID` is set there — tests that depend on it clear it). Fixture files live under `tests/fixtures/` (the leak scan skips
+  (clearing the `lru_cache`s) or passes its own `CONTEXT_ROOT` to every subprocess; one that drops `CONTEXT_ROOT` to
+  test the resolver either only resolves the path or runs a kit copy in a temp dir. Tests are stdlib only, need no
+  network and no `gh`, and may run inside a Claude session (`CLAUDE_CODE_SESSION_ID` is set there — tests that depend on it clear it). Fixture files live under `tests/fixtures/` (the leak scan skips
   that directory); a fact-shaped literal a test needs is assembled at run time.
 
 ## Code review
@@ -269,7 +272,7 @@ Three tiers, one rule book — [`docs/REVIEW.md`](REVIEW.md):
 
 - **Tier 0 — `ci.yml`, no model, fails the PR.** `review_gate.py` scans every line the PR *adds* for the shared
   leak shapes plus e-mail, home-path and token shapes, and requires a higher `metadata.version`, an `updated` on or
-  after the base's (and no later than tomorrow in UTC) and a new `docs/CHANGELOG.md` line for every skill or agent with a changed file (README edits
+  after the base's (and no later than tomorrow in UTC) for every skill or agent with a changed file (README edits
   do not count). A wording-only PR says so with the `wording` label or `[skip-bump]` in its title or body; the
   reviewer may question the claim. Run it yourself: `make -C .claude/context-db review-gate` (`BASE=`, `SKIP_BUMP=1`).
   The rest of tier 0 was already there: kit-verify (frontmatter, description budget, referenced scripts, plugin
@@ -307,6 +310,14 @@ Three tiers, one rule book — [`docs/REVIEW.md`](REVIEW.md):
   and the owner merges that PR by hand. Everything else in the PR's copy is live, which is why the rules are read
   from the base branch (`.review/RULES.md`) and why the server-side gate on `.github/workflows/**` is the
   `main` ruleset's code-owner review (`.github/CODEOWNERS` assigns that path to the maintainer).
+  **Trust model (#122).** `github-actions[bot]` is the identity of every workflow, not only this one, so
+  `auto-merge.yml` accepts its approval only when the review names the run that posted it (`claude-review run
+  <id>`) and that run is `claude-review.yml` on a `pull_request` event for this head. What could forge it is PR
+  code running with `pull-requests: write`, so none does: a PR that changes anything under `.github/`, or a file that
+  judges PRs (`review_gate.py`, `leak_shapes.py`, `review_evidence.py`, `allow.txt`, `docs/REVIEW.md`), is never
+  auto-merged (its own workflow copies are live; the merge token is the owner's PAT, which would satisfy the
+  code-owner review by itself), and the review job keeps no credentials in its checkout and runs the evidence
+  script from the base branch (`test_ci_hygiene.py` § ApprovalTrust holds both).
   **Its threads are not optional** either: a PR is merged only when every
   review thread is answered and resolved — fixed on the branch (the default), or deferred to a `review-followup`
   issue cited in the thread. Never resolve a thread without a reply that names the commit or the issue.

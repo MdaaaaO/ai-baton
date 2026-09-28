@@ -38,11 +38,11 @@
 #   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
 #   make -C .claude/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
 #   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
-#   make -C .claude/context-db test [T=test_kb] [ISOLATED=1]  # the engine's stdlib unittest suite (context-db/tests/); T= runs one file
+#   make -C .claude/context-db test [T=test_kb]          # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file
 #   make -C .claude/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
 #   make -C .claude/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
 #   make -C .claude/context-db sync-check                # warn when .claude/ is ahead of origin or the last sync errored
-#   make -C .claude/context-db kit-health [STALE=90]     # full kit audit for this machine (the kit-health skill's script)
+#   make -C .claude/context-db kit-health [STALE=90] [KIT_HEALTH_ARGS=…]  # full kit audit of the store CONTEXT names (the kit-health skill's script)
 #   make -C .claude/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
 #
 # Content root: CONTEXT overrides the default described in docs/layout.md's "Content root" paragraph.
@@ -52,8 +52,7 @@
 
 ENGINE  := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BIN     := $(ENGINE)bin
-# kit_profile.py context = CONTEXT_ROOT, else the first of ../../.context, ../../../.context that exists
-# (so the engine also works from a kit worktree under <root>/.worktrees/<name>/).
+# CONTEXT defaults to `kit_profile.py context` — the engine's one content-root resolver (docs/layout.md).
 PY      := python3
 # Evaluated once, not per reference. No inline comment here: make keeps the blanks before a `#`
 # in the value, and `.context  ` is not the store.
@@ -100,8 +99,10 @@ kb:
 sync-check:
 	@sh $(ENGINE)../sync-check.sh || true
 
+# make kit-health [STALE=90] [CONTEXT=<store>] [KIT_HEALTH_ARGS="--quiet …"]  — the audit reads the store CONTEXT names
+# (CONTEXT_ROOT for the script and every child it runs) and writes nothing to it unless KIT_HEALTH_ARGS carries --stamp.
 kit-health:
-	@$(PY) $(ENGINE)../skills/kit-health/kit-health.py --stale $(or $(STALE),90)
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(ENGINE)../skills/kit-health/kit-health.py --stale $(or $(STALE),90) $(KIT_HEALTH_ARGS)
 
 # make engine-cli-doc  — docs/engine-cli.md, generated from `make help` + every engine tool's --help;
 # tests/test_engine_cli_doc.py fails CI when the committed doc drifts from this output.
@@ -123,19 +124,15 @@ index:
 verify:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) verify.py
 
-# make test [T=test_kb] [ISOLATED=1]  — the engine's stdlib unittest suite (context-db/tests/). A clone without an
-# env store (a contributor's checkout, `make ci` before setup) gets a throw-away blank one, so the suite never
-# needs this machine's .context/ — a store that DOES exist (this machine's real one) is handed to the suite as-is;
-# every test is written to isolate itself from it (docs/contributing.md § Testing), never to read it. T=<module>
-# runs one file (tests/test_kb.py) instead of the full discovery. ISOLATED=1 always runs on a throw-away blank
-# store, never the workspace's own: ci.yml's decoy gate (#95) seeds the sibling .context/ with markers and fails
-# if one reaches the output. A bare `python3 -m unittest` (skipping this target) sets none of this up — it is
-# not a supported entry point (docs/contributing.md § Testing).
+# make test [T=test_kb]  — the engine's stdlib unittest suite (context-db/tests/), ALWAYS on a throw-away blank store
+# built as CI builds it (`kb.py init --blank`, environment "ci"): never this machine's .context/, whatever CONTEXT,
+# CONTEXT_ROOT or the directory it runs from (a kit worktree resolves the workspace's live store). The suite refuses a
+# CONTEXT_ROOT outside the temp dir (tests/__init__.py), so a test can never write a real store. T=<module> runs one
+# file (tests/test_kb.py) instead of the full discovery. ISOLATED=1, the old opt-in, is accepted and changes nothing.
 test:
-	@ctx="$(CONTEXT)"; tmp=""; if [ -n "$(ISOLATED)" ] || [ ! -f "$$ctx/reference/env/config.json" ]; then \
-	  tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; ctx="$$tmp/.context"; CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py init --blank >/dev/null; \
-	  echo "test: $(if $(ISOLATED),ISOLATED=1,no env store at $(CONTEXT)) — using a throw-away blank one"; fi; \
-	cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" $(PY) -m unittest $(if $(T),tests.$(T),discover -s tests -t .) -v
+	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; ctx="$$tmp/.context"; \
+	  CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py init --blank >/dev/null && CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py config-set environment ci >/dev/null && \
+	  cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" $(PY) -m unittest $(if $(T),tests.$(T),discover -s tests -t .) -v
 
 # make kit-verify [STALE=90]  — every skill/agent carries the versioning frontmatter
 kit-verify:
@@ -220,7 +217,7 @@ plugin-validate:
 	  else echo "plugin validate: FAILED — no \`claude\` CLI on this machine (npm i -g @anthropic-ai/claude-code, or ALLOW_SKIP=1)"; exit 1; fi
 
 # Tier 0 and tier 1 of the review (docs/REVIEW.md): the gate fails on a leak shape in an added line or a changed
-# unit without version/CHANGELOG bump (SKIP_BUMP=1 for a wording-only change); the evidence file is what the CI
+# unit without a version/updated bump (SKIP_BUMP=1 for a wording-only change); the evidence file is what the CI
 # reviewer reads (.review/ is git-ignored).
 BASE ?= origin/main
 review-gate:
@@ -262,7 +259,7 @@ session-touch:
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py touch --name $(call sq,NAME) --status $(call sq,STATUS) --working $(call sq,WORKING) --next $(call sq,NEXT) $(STATSFLAGS)
 
 session-end:
-	@test -n $(call sq,NAME) || { echo "usage: make session-end NAME=<session> [NEXT=<file with the next-session prompt>] [WORKING=]"; exit 2; }
+	@test -n $(call sq,NAME) || { echo "usage: make session-end NAME=<session> [NEXT=<file with the next-session prompt>|none] [WORKING=]"; exit 2; }
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py end --name $(call sq,NAME) --working $(call sq,WORKING) --next $(call sq,NEXT) $(STATSFLAGS)
 
 # make session-stats [SESSION_ID=<uuid>] — the stats block for the handoff (no registry write)

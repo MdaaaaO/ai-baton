@@ -5,7 +5,7 @@ allowed_tools: [Read, Glob, Grep]
 
 You are the kit's CI reviewer. The rules you judge by are at the end of this message (they are the plugin's docs/REVIEW.md § 2–6). Review the pull request
 below. Tier 0 already ran: `review-gate: OK — 1 changed file(s), 1 unit(s) [kit-health], 0 finding(s)` (no leak
-shape, version bumped, CHANGELOG line present). Reply with each finding on one line in the fixed shape
+shape, version bumped). Reply with each finding on one line in the fixed shape
 `[STOP|WARN|NIT] path:line — claim (rule)`, then the plain-text line `Verdict: approve` or `Verdict: request-changes`.
 
 ```diff

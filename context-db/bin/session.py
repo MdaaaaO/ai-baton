@@ -12,7 +12,8 @@ Subcommands (each regenerates SESSION_INDEX.md):
   register  create/update this session's entry (upsert; preserves the free-text body — `--note` fills only `## Notes`)
   touch     refresh heartbeat + updated only — the <=12h keep-alive
   end       mark the session ended; writes the `## Session stats` block into the body and
-            (with --next FILE) the `## Next session` hand-off prompt, and
+            (with --next FILE) the `## Next session` hand-off prompt — omit --next when the session has
+            nothing to hand over, and pass --next none to withdraw a prompt already on file — and
             appends one row to sessions/_ledger.md (the cross-session cost/activity ledger)
   stats     print this session's stats (block) without touching the registry
 
@@ -21,8 +22,8 @@ spend, PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's
 discoverable via $CLAUDE_CODE_SESSION_ID / --session-id; `--no-stats` skips it. Stats are
 derived from the transcript with zero model turns, so the live registry row is always current.
 
-The content root is CONTEXT_ROOT (set by the Makefile from CONTEXT, default the
-sibling ../../.context of the engine dir). Empty CLI values are treated as "leave
+The content root is kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets
+from CONTEXT, else docs/layout.md's "Content root" default). Empty CLI values are treated as "leave
 unchanged" so the Makefile can pass every flag unconditionally. Stdlib only.
 """
 from __future__ import annotations
@@ -49,11 +50,7 @@ def local_str(iso_utc: str) -> str:
         return iso_utc
     return t.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p %Z")
 
-# Content root: the Makefile passes CONTEXT_ROOT; fall back to the sibling .context/
-# of the engine dir (../../.context relative to this bin/) for a direct invocation.
-CTX = os.environ.get("CONTEXT_ROOT") or os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".context")
-)
+CTX = str(profile.context_root())  # the one content-root resolver
 SESS_DIR = os.path.join(CTX, "sessions")
 
 # Frontmatter fields, in emit order.
@@ -91,6 +88,34 @@ def today() -> str:
 
 # A session name is a file stem under sessions/ (#132): `--name ../INDEX` must not write outside it.
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+# The naming convention for a NEW registration (owner decision 2026-09-27): `<lane>-<topic>[-n]` — lower-case
+# kebab-case, at least two parts, at most 32 characters; the lane is the repo or area, the topic what the session
+# owns, `-2`/`-3` a successor on the same lane. Names registered before the convention keep working.
+CONVENTION_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)+$")
+CONVENTION_MAX = 32
+
+
+def check_convention(name: str) -> None:
+    if not CONVENTION_RE.match(name) or len(name) > CONVENTION_MAX:
+        sys.exit(f"session.py: {name!r} does not follow the session naming convention `<lane>-<topic>[-n]` — lower-case "
+                 f"kebab-case, at least two parts, at most {CONVENTION_MAX} characters (e.g. `kit-hardening`, "
+                 f"`kit-216-changelog`, `kit-weekly-2`); a successor on the same lane adds -2, -3")
+
+
+def record_name(name: str) -> None:
+    """Remember this session's registry name in its own scratch dir, so `kit_profile.py session-name` / `footer`
+    can say which session wrote a PR or a comment. Per session (`CLAUDE_CODE_SESSION_ID` keys the scratch dir);
+    a failure only costs the footer its session part, so it is reported, never fatal. Only a name that follows the
+    convention is recorded: the footer is public, and a grandfathered name was never chosen to be (it gets the bare
+    footer until the lane re-registers under a conforming name)."""
+    if not CONVENTION_RE.match(name) or len(name) > CONVENTION_MAX:
+        return
+    try:
+        (profile.scratch() / "session-name").write_text(name + "\n", encoding="utf-8")
+    except (OSError, profile.ScratchError) as e:
+        print(f"session.py: could not record the session name for the PR footer ({e})", file=sys.stderr)
 
 
 def check_name(name: str) -> str:
@@ -190,7 +215,11 @@ def _replace_section(body: str, heading: str, content: str) -> str:
     """Replace (or append) a `## heading` section in the free-text body. Headings inside a fenced block (a pasted
     prompt that shows `## …`) are text, not sections: neither the heading nor the section end is matched there. Fences
     count only when they balance: stored free text with an odd number of ``` lines is read as before, fence-blind, so one
-    stray fence can never hide the heading and turn a replace into a duplicate section."""
+    stray fence can never hide the heading and turn a replace into a duplicate section.
+
+    An empty `content` withdraws the section instead of leaving an empty one behind: an existing section is dropped
+    entirely, and a missing one is left absent (a no-op) — used to clear a stored next-session prompt that has gone
+    stale (`--next none`) rather than writing a blank one the reader would still trip over."""
     lines = body.rstrip("\n").split("\n")
     track = sum(1 for ln in lines if ln.lstrip().startswith("```")) % 2 == 0
     out, i, replaced, fence = [], 0, False, False
@@ -199,7 +228,8 @@ def _replace_section(body: str, heading: str, content: str) -> str:
             fence = not fence
         if not fence and lines[i].strip() == heading:
             replaced = True
-            out += [heading, "", content, ""]
+            if content:
+                out += [heading, "", content, ""]
             i += 1
             inner = False
             while i < len(lines) and (inner or not lines[i].startswith("## ")):
@@ -208,7 +238,7 @@ def _replace_section(body: str, heading: str, content: str) -> str:
                 i += 1
             continue
         out.append(lines[i]); i += 1
-    if not replaced:
+    if not replaced and content:
         out += ["", heading, "", content]
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -241,7 +271,8 @@ def _ledger_append(meta: dict, st) -> None:
 def cmd_register(a) -> None:
     path = restore_from_archive(a.name)  # a successor re-registering a swept name continues that doc, not a new one
     meta, body = read_doc(path)
-    if meta is None:
+    if meta is None:  # a new registration: the name must follow the convention (existing ones are grandfathered)
+        check_convention(a.name)
         meta, body = {}, DEFAULT_BODY.format(name=a.name)
     meta["session"] = a.name
     if a.ref:    meta["ref"] = a.ref
@@ -257,6 +288,7 @@ def cmd_register(a) -> None:
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
     write_doc(path, meta, body)
+    record_name(a.name)
     print(f"registered {os.path.relpath(path, CTX)}")
 
 
@@ -276,14 +308,21 @@ def cmd_touch(a) -> None:
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
     write_doc(path, meta, body)
-    print(f"touched {os.path.relpath(path, CTX)} @ {local_str(meta['heartbeat'])}")
+    record_name(meta["session"])
+    tail = " (+ next-session prompt)" if nxt else (" (next-session prompt withdrawn)" if nxt is not None else "")
+    print(f"touched {os.path.relpath(path, CTX)} @ {local_str(meta['heartbeat'])}" + tail)
 
 
 def _next_prompt(a) -> str | None:
-    """Contents of --next FILE: the paste-ready prompt for the successor session."""
+    """Contents of --next FILE: the paste-ready prompt for the successor session. `--next` left unset means
+    "leave whatever is stored alone" (None); the literal value `none` withdraws a stored prompt instead of
+    reading a file (returns "") — for a session that ends with nothing to hand over, or to clear an earlier
+    prompt that turned out wrong or went stale."""
     f = getattr(a, "next", "") or ""
     if not f:
         return None
+    if f.strip().lower() == "none":
+        return ""
     with open(f, encoding="utf-8") as fh:
         txt = fh.read().strip("\n")
     if not txt:
@@ -308,7 +347,8 @@ def cmd_end(a) -> None:
         if nxt is not None or a.working is not None:
             meta["updated"] = today()
             write_doc(path, meta, body)
-            print(f"updated hand-off fields in {os.path.relpath(path, CTX)}")
+            print(f"updated hand-off fields in {os.path.relpath(path, CTX)}"
+                  + (" (next-session prompt withdrawn)" if nxt == "" else ""))
         return
     meta["status"] = "ended"
     meta["heartbeat"] = now_iso()
@@ -321,8 +361,9 @@ def cmd_end(a) -> None:
     write_doc(path, meta, body)
     if st is not None:
         _ledger_append(meta, st)  # after the doc: a failed doc write must not leave a ledger row for an un-ended session
+    tail = " (+ next-session prompt)" if nxt else (" (next-session prompt withdrawn)" if nxt is not None else "")
     print(f"ended {os.path.relpath(path, CTX)}" + (" (+ stats block, ledger row)" if st is not None else " (no transcript found — no stats)")
-          + (" (+ next-session prompt)" if nxt is not None else ""))
+          + tail)
 
 
 def cmd_stats(a) -> None:
@@ -354,7 +395,8 @@ def main() -> int:
         sp.add_argument("--working", default=None)   # None = unchanged; "" allowed to clear
         sp.add_argument("--resp", default="")
         sp.add_argument("--note", default="", help="text for the body's `## Notes` section (replaces that section only)")
-        sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session (written to '## Next session')")
+        sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session "
+                        "(written to '## Next session'); 'none' withdraws a stored prompt instead")
     a = p.parse_args()
     # Empty --working means "leave unchanged" (so a bare keep-alive touch never
     # wipes the current focus). The other optional fields already use truthiness.

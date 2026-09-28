@@ -78,6 +78,13 @@ DEFAULT_NAME = "local"
 # together with the adapter.
 TRACKER_KINDS = ("jira", "github", "none")
 
+# The `.context/` domains the engine itself owns, in every environment — the one list `verify.py` (and kit-health's
+# leak scan, through it) reads; the environment adds its own under the store's `domains` key (`domains()`). Besides
+# the folders WORKSPACE.md names: `on-call` (`new.sh TYPE=oncall` writes there), `kit-health` (kit-health.py's
+# HEALTH stamp) and `onboarding` (the master checklist the content README describes).
+CORE_DOMAINS = ("reference", "repos", "meetings", "1on1", "self-assessment", "pr-reviews", "onboarding", "archive",
+                "kit-health", "on-call")
+
 # How the kit is installed (#34) and what follows from it — the one table every mode-dependent hint reads.
 #   clone        — the workspace's `.claude/` (a git checkout, or a copy without git that sync.sh skips)
 #   plugin       — a Claude Code plugin install: no git checkout, `.claude-plugin/plugin.json` (the plugin cache)
@@ -141,7 +148,10 @@ def recorded_install_mode() -> str:
 
 
 def context_root() -> Path:
-    """`CONTEXT_ROOT`, else the `.context/` beside the kit — also found from a kit worktree
+    """The engine's ONE content-root resolver: every script (kb, session, gen_index, gen_sessions, verify, new.sh via
+    `kit_profile.py context`, the Makefile's CONTEXT) asks this function and keeps no copy of its own. The order is
+    documented once, in docs/layout.md's "Content root" paragraph.
+    `CONTEXT_ROOT`, else the `.context/` beside the kit — also found from a kit worktree
     (`<root>/.worktrees/<name>/`), where the sibling is two levels up. On the plugin path the kit sits in
     Claude Code's plugin cache: `CLAUDE_PROJECT_DIR` (hooks get it, and the SessionStart hook re-exports it), else
     the nearest env store above the current directory — the Bash tool starts in the project dir but is not handed
@@ -603,6 +613,25 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
     return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
 
 
+FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+
+
+def session_name() -> str:
+    """The registry name of the running session (`session-register` writes it to the session's scratch dir), or ""."""
+    try:
+        p = scratch() / "session-name"
+        return p.read_text(encoding="utf-8").strip() if p.is_file() else ""
+    except (OSError, ScratchError):
+        return ""
+
+
+def footer() -> str:
+    """The attribution line with the session that wrote the text: `… · session `<name>``; without a registered
+    session, the bare line."""
+    n = session_name()
+    return f"{FOOTER} · session `{n}`" if n else FOOTER
+
+
 NEEDS_ARG = {"template": "<type>", "identity-source": "<WORKSPACE_* variable>", "get": "<dotted.config.key>"}
 
 
@@ -640,6 +669,15 @@ def main(argv: list[str]) -> int:
         except ScratchError as e:
             print(f"kit_profile: {e}", file=sys.stderr)
             return 2
+    elif cmd == "session-name":
+        # the registry name this session registered under (session-register records it), exit 1 when none
+        n = session_name()
+        if not n:
+            return 1
+        print(n)
+    elif cmd == "footer":
+        # the last line of every PR body and PR comment a session posts on its OWN PRs (pr-open, pr-watch)
+        print(footer())
     elif cmd == "identity-env":
         # for a SessionStart hook / shell callers: eval "$(python3 kit_profile.py identity-env)" — prints an export line per
         # identity value set through plugin userConfig, nothing otherwise (settings.local.json is never echoed)

@@ -80,7 +80,7 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
 ## Rules (always on)
 
 **Communication**
-- Never append a "Sent using Claude"/AI-attribution footer to anything sent on the user's behalf.
+- No AI footer on chat sent for the user; own PRs + PR comments end with `kit_profile.py footer`.
 - Asks/status pings default to 1–3 plain sentences — link + one clause + who must act, no bold
   field-label templates; point to where detail already lives, never restate it. Reserve
   headers/bullets/tables for messages that genuinely bundle several items.
@@ -105,7 +105,7 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
   (`type(scope): description`, tracker key inside, ≤72 chars) unless the repo overrides it;
   `commit_style.py resolve|check|title` decides; never infer it from the log, never add a marker to
   someone else's repo. Spec: `docs/commit-style.md`.
-- A kit behaviour change bumps its `metadata.version` and adds a `docs/CHANGELOG.md` line.
+- A kit behaviour change bumps its `metadata.version` and `metadata.updated`.
 - Never resolve a PR review thread waiting on a named third party — the open thread is the merge gate.
 
 **Verification**
