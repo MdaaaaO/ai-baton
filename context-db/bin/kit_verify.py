@@ -33,7 +33,7 @@ kit) for every top-level key `environment-template/config.json` has, `systems.*`
 flag a skill may `require` as booleans, a compiling one-group `tracker.key_regex`, and no rows left
 under a renamed kind (`kb.py migrate` moves them).
   - the body: warns past `BODY_WARN_LINES` (130, docs/authoring.md's target) and errors past `BODY_MAX_LINES`
-    (300) — a unit named in `BODY_LINES_ALLOW` with a reason is exempt from both — every `scripts/…` /
+    (300) — a unit named in `BODY_LINES_ALLOW` with a reason skips the warning, never the cap — every `scripts/…` /
     `references/…` / `$BATON/skills/<name>/…` path it cites exists, and no generic environment-fact shape
     (Slack id, custom-field id, account id, ticket key, org host, tz literal — `leak_shapes.py`, shared with
     kit-health) in the file.
@@ -587,12 +587,12 @@ def audit_facts_read(rel, body: str, declared: set[str], errors: list[str]) -> N
 
 
 BODY_WARN_LINES = 130  # docs/authoring.md's target for a body — past this, warn to move detail into references/
-BODY_MAX_LINES = 300  # the hard cap — errors past this unless the unit is named in BODY_LINES_ALLOW below
+BODY_MAX_LINES = 300  # the hard cap — errors past this for every unit, allow-listed or not
 
 # A unit whose body legitimately needs to stay past BODY_WARN_LINES because the long form IS the procedure, not
 # reference material a step loads on demand — `fmt.unit_name(p)` (a skill's directory, an agent's file stem) to
-# its reason. Exempts the unit from both the warn and the BODY_MAX_LINES error; it does not raise a numeric cap,
-# so a body that grows without bound still needs a fresh reason, not just a bigger number.
+# its reason. Exempts the unit from the BODY_WARN_LINES warning only: BODY_MAX_LINES still applies, so an
+# allow-listed body cannot grow without bound.
 BODY_LINES_ALLOW = {
     "pr-review": "the per-finding walk (Post / Deep dive / Body only / Skip), the repo trap KB and the "
                  "verification steps are the one walkthrough a reviewer follows top to bottom, not reference "
@@ -708,9 +708,9 @@ def check_body(p: Path, rel, body: str, errors: list[str], is_agent: bool = Fals
                               "docs/env-facts.md § Environment facts)")
     n_lines = body.count("\n") + (1 if body and not body.endswith("\n") else 0)
     allow_reason = BODY_LINES_ALLOW.get(fmt.unit_name(p))
-    if allow_reason is None and n_lines > BODY_MAX_LINES:
+    if n_lines > BODY_MAX_LINES:
         errors.append(f"{rel}: body is {n_lines} lines > {BODY_MAX_LINES} — move detail into references/ (loaded on "
-                      "demand), or name the unit in BODY_LINES_ALLOW (kit_verify.py) with a reason")
+                      f"demand); BODY_LINES_ALLOW only silences the {BODY_WARN_LINES}-line warning, not this cap")
     elif allow_reason is None and n_lines > BODY_WARN_LINES:
         warn.append(f"{rel}: body is {n_lines} lines > {BODY_WARN_LINES} (docs/authoring.md's target) — move detail "
                     "into references/ (loaded on demand), or name the unit in BODY_LINES_ALLOW (kit_verify.py) "

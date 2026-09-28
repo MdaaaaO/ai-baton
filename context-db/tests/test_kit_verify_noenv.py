@@ -319,7 +319,7 @@ class BodyChecks(unittest.TestCase):
         errors, warn = self.check_warn("x\n" * 130)
         self.assertEqual(warn, [])
 
-    def test_body_lines_allow_exempts_the_named_unit_from_warn_and_error(self):
+    def test_body_lines_allow_skips_the_warning_but_never_the_cap(self):
         with tempfile.TemporaryDirectory() as tmp:
             for name, over in (("pr-review", True), ("self-assessment", True), ("some-other-skill", False)):
                 unit_dir = Path(tmp) / name
@@ -328,12 +328,17 @@ class BodyChecks(unittest.TestCase):
                 p.write_text("body\n", encoding="utf-8")  # leak_shapes reads this file directly; irrelevant here
                 errors: list[str] = []
                 warn: list[str] = []
-                kit_verify.check_body(p, p, "x\n" * (kit_verify.BODY_MAX_LINES + 50), errors, warn=warn)
+                # between the two thresholds: an allow-listed unit is silent, any other unit warns
+                kit_verify.check_body(p, p, "x\n" * (kit_verify.BODY_WARN_LINES + 20), errors, warn=warn)
+                self.assertEqual(errors, [], name)
                 if over:
-                    self.assertEqual(errors, [], name)
                     self.assertEqual(warn, [], name)
                 else:
-                    self.assertTrue(any(f"lines > {kit_verify.BODY_MAX_LINES}" in e for e in errors), (name, errors))
+                    self.assertTrue(any(f"lines > {kit_verify.BODY_WARN_LINES}" in w for w in warn), (name, warn))
+                # past the cap: every unit errors, allow-listed or not
+                errors, warn = [], []
+                kit_verify.check_body(p, p, "x\n" * (kit_verify.BODY_MAX_LINES + 50), errors, warn=warn)
+                self.assertTrue(any(f"lines > {kit_verify.BODY_MAX_LINES}" in e for e in errors), (name, errors))
 
     def test_shape_scan_uses_the_shared_list_and_skip_rule(self):
         import leak_shapes
