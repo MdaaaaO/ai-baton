@@ -62,6 +62,22 @@ class ThisKit(unittest.TestCase):
             self.assertGreaterEqual(sum(n.values()), eval_check.MIN_CASES, skill)
             self.assertGreaterEqual(min(n.values()), eval_check.MIN_EACH, skill)
 
+    def test_every_skill_has_a_trigger_suite(self):
+        # #186: 21 of 24 skills shipped with no trigger suite at all, so a description edit that broke a skill's
+        # trigger went unnoticed by anyone. This pins that every skill listed under skills/ now has one, meeting the
+        # same >= MIN_CASES / >= MIN_EACH bar as the suites eval-check already knew about (not just a handful of them).
+        # (A description without a "Use when" phrase is a separate, pre-existing gap in most of these same skills —
+        # left as the note it already was; folding it into this pin would fail on unrelated wording, not on #186.)
+        errors, notes, suites = eval_check.check(KIT)
+        self.assertEqual(errors, [], errors)
+        self.assertFalse(any(n.startswith("no trigger suite yet") for n in notes), notes)
+        skills = eval_check.skill_names(KIT)
+        self.assertEqual(sorted(suites), skills)
+        for skill in skills:
+            n = suites[skill]
+            self.assertGreaterEqual(sum(n.values()), eval_check.MIN_CASES, skill)
+            self.assertGreaterEqual(min(n.values()), eval_check.MIN_EACH, skill)
+
     def test_the_manifest_names_the_eval_dir(self):
         manifest = json.loads((KIT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["experimental"]["evals"], "evals")
