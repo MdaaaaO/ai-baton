@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import frontmatter as fmt  # noqa: E402
+from fsutil import atomic_write  # noqa: E402  — same dir; a unit's SKILL.md/agent file is rewritten atomically
 
 KIT = fmt.KIT
 MOVED = fmt.KIT_META_KEYS                              # top-level → metadata, in this order
@@ -155,7 +156,7 @@ def migrate_file(p: Path, write: bool) -> list[str]:
     text = p.read_text(encoding="utf-8")
     new, changes = migrate_text(text)
     if changes and write:
-        p.write_text(new, encoding="utf-8")
+        atomic_write(p, new)
     return changes
 
 
