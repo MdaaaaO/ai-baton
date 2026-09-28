@@ -189,8 +189,10 @@ def read_doc(path: str):
 
 def quoted_value(v) -> str:
     """`one_line(v)`, double-quoted when the bare value would not be a valid YAML plain scalar
-    (frontmatter.plain_scalar_problem) — every field here goes through this on write, so a `: ` in free text
-    (working_on, responsibilities) never produces a frontmatter block a real YAML parser refuses."""
+    (frontmatter.plain_scalar_problem — covers a `: `, a leading `#` or a ` #` anywhere, a leading indicator
+    character) — every field here goes through this on write, so free text (working_on, responsibilities,
+    e.g. "fix the PR review comments") that happens to mention an issue reference never produces a
+    frontmatter block a real YAML parser refuses or truncates."""
     s = one_line(v)
     return frontmatter.quote(s) if s and frontmatter.plain_scalar_problem(s) else s
 

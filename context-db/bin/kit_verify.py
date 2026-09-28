@@ -658,8 +658,8 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there
         km = fmt.KEY.match(line) or fmt.SUBKEY.match(line)
         val = (km.group(2) or "").lstrip() if km else ""
-        if not val or val[0] in "\"'":
-            continue  # empty (a nested mapping) or already quoted
+        if not val or fmt.is_quoted(val):
+            continue  # empty (a nested mapping) or already quoted (either style — frontmatter.is_quoted)
         if val.startswith("#") or re.search(r"\s#", val):
             kept = "" if val.startswith("#") else fmt.strip_comment(val)  # `key: #…` is null to YAML, not `#…`
             errors.append(f"{rel}: '{km.group(1)}:' contains a `#` comment — YAML cuts the value there "

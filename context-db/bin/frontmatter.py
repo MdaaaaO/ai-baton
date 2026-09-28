@@ -194,8 +194,18 @@ def unquote(v) -> str:
 
 
 def is_quoted_string(v) -> bool:
-    """True when the raw value is written as a double-quoted string — the spec's `metadata` is string→string."""
+    """True when the raw value is written as a double-quoted string — the spec's `metadata` is string→string,
+    so a hand-written single-quoted or bare metadata value must still be canonicalized to double quotes."""
     return isinstance(v, str) and len(v) >= 2 and v[0] == '"' and v[-1] == '"'
+
+
+def is_quoted(v) -> bool:
+    """True when the raw value already starts with a quote character, either style (`"` or `'`) — "already
+    quoted, leave it alone" for a top-level scalar (unlike `is_quoted_string`, which only counts the spec's
+    required double-quoted form for `metadata:`). The one check kit_verify.py and migrate_frontmatter.py both
+    use so a valid single-quoted value (`description: 'Demo: skill'`) is recognized as quoted in both places,
+    not flagged and rewritten by one of them."""
+    return isinstance(v, str) and bool(v) and v[0] in "\"'"
 
 
 # The plain-scalar shapes that actually recur in kit values and would make a REAL YAML parser (the ctx-store
@@ -203,28 +213,36 @@ def is_quoted_string(v) -> bool:
 # description or a session field written as free text often contains one of these by accident. `[` and `{`
 # are not here: a value that opens and closes one (`arguments: [repo, pr, event]`) is a deliberate YAML flow
 # collection — valid as is, and this module's own `parse_csv` reads that exact legacy form — so those two are
-# checked separately, only when the bracket is never closed (FLOW_OPEN below).
-PLAIN_SCALAR_INDICATORS = "]}&*!|>'\"%@`"
+# checked separately, only when the bracket is never closed (FLOW_OPEN below). `#` and `,` are always
+# indicators wherever they lead (a comment start, a flow-context separator); `-`, `?` and `:` are indicators
+# only in the specific shape YAML restricts (LEADING_WITH_SPACE below) — `-5` or `-quiet` is a fine plain
+# scalar, `- ` (or a bare `-`) is a sequence-entry indicator.
+PLAIN_SCALAR_INDICATORS = "]}&*!|>'\"%@`#,"
 FLOW_OPEN = {"[": "]", "{": "}"}  # opens a flow sequence / mapping; fine when the value is a balanced one
+LEADING_WITH_SPACE = "-?:"  # `- `, `? `, `: ` (or the bare character alone) are indicators; `-x`/`:x` are not
 
 
 def plain_scalar_problem(v: str) -> str | None:
     """Why the bare (unquoted) value `v` would not be a valid YAML plain scalar, or None when it is fine
     unquoted — INCLUDING when it is not a plain scalar at all but a valid flow collection (`[a, b]`, `{a: b}`).
-    Stdlib substitute for a real YAML parser: an unbalanced or plain indicator character, ': ' (read as a
-    nested mapping) and a trailing ':' (read as an empty mapping). A ' #' comment is the caller's job —
-    cutting it off needs the value that YAML would keep, which differs by call site (kit_verify.py already
-    reports it with the kept text; a writer just needs to know quoting is required, so it may also call this
-    after checking for '#' itself)."""
+    Stdlib substitute for a real YAML parser: an unbalanced or plain indicator character, a leading `-`/`?`/`:`
+    followed by a space (or alone), ': ' (read as a nested mapping), ' #' (read as a comment, wherever it
+    falls) and a trailing ':' (read as an empty mapping). Covers a leading '#' and a ' #' anywhere so a caller
+    never has to remember to check those separately (kit_verify.py still reports its own richer message for
+    them — with the exact text YAML would keep — before it ever reaches this function; harmless overlap)."""
     if not v:
         return None
     close = FLOW_OPEN.get(v[0])
     if close is not None:
         return None if v.rstrip().endswith(close) else f"starts with '{v[0]}' with no matching '{close}'"
+    if v[0] in LEADING_WITH_SPACE and (len(v) == 1 or v[1] == " "):
+        return f"starts with '{v[0]}' followed by a space (or alone), a YAML indicator sequence"
     if v[0] in PLAIN_SCALAR_INDICATORS:
         return f"starts with '{v[0]}', a YAML indicator character"
     if ": " in v:
         return "contains ': ', which YAML reads as a nested mapping"
+    if re.search(r"\s#", v):
+        return "contains ' #', which YAML reads as a comment"
     if v.rstrip().endswith(":"):
         return "ends with ':', which YAML reads as an empty mapping"
     return None

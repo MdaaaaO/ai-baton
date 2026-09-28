@@ -64,25 +64,34 @@ class RealYamlCrossCheck(unittest.TestCase):
             theirs = yaml.safe_load(frontmatter_block(p)).get("description", "")
             self.assertEqual(ours, theirs, p)
 
-    def test_session_registry_frontmatter_round_trips_a_colon_space_value(self):
+    def test_session_registry_frontmatter_round_trips_tricky_values(self):
         """session.py writes one frontmatter block per active session (working_on / responsibilities free
         text) — read only by the kit's own parser today; a stricter reader (the ctx-store backend) needs it
-        to be real YAML too, exactly like a skill's description."""
+        to be real YAML too, exactly like a skill's description. Each of these shapes breaks (or nearly
+        breaks) a real YAML parser when written bare: a nested-mapping colon, an issue reference (' #'), a
+        sequence-entry dash, a flow separator, and free text that is itself already quoted."""
+        cases = [
+            "lands: the week file plus the report block",
+            "fix PR #261 review",
+            "- x looks like a sequence entry",
+            ",x looks like a flow separator",
+            "'quoted: text'",
+        ]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             env = {k: v for k, v in os.environ.items() if k not in ("WORKSPACE_TZ", "CLAUDE_CODE_SESSION_ID")}
             env["CONTEXT_ROOT"] = str(root)
-            value = "lands: the week file plus the report block"
-            r = subprocess.run([sys.executable, str(BIN / "session.py"), "register", "--name", "t-yaml-cross-check",
-                               "--no-stats", "--working", value], env=env, cwd=BIN, capture_output=True, text=True)
-            self.assertEqual(r.returncode, 0, r.stderr)
-            doc_path = root / "sessions" / "t-yaml-cross-check.md"
-            block = frontmatter_block(doc_path)
-            try:
-                doc = yaml.safe_load(block)
-            except yaml.YAMLError as e:
-                self.fail(f"session registry frontmatter is not valid YAML — {e}\n{block}")
-            self.assertEqual(doc["working_on"], value)
+            for i, value in enumerate(cases):
+                name = f"t-yaml-cross-check-{i}"
+                r = subprocess.run([sys.executable, str(BIN / "session.py"), "register", "--name", name,
+                                   "--no-stats", "--working", value], env=env, cwd=BIN, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                block = frontmatter_block(root / "sessions" / f"{name}.md")
+                try:
+                    doc = yaml.safe_load(block)
+                except yaml.YAMLError as e:
+                    self.fail(f"{value!r}: session registry frontmatter is not valid YAML — {e}\n{block}")
+                self.assertEqual(doc["working_on"], value, value)
 
 
 if __name__ == "__main__":

@@ -40,17 +40,22 @@ def compatibility_for(requires: list[str]) -> str:
     return f'"Designed for Claude Code; needs {", ".join(requires)} (systems.*)"'
 
 
-quote = fmt.quote  # the one double-quoting function every kit writer shares (frontmatter.py); callers below
-# always pass an already-bare value (fmt.unquote(raw) or fmt.strip_comment(raw) on a value fmt.is_quoted_string
-# already ruled out)
+def quote(v: str) -> str:
+    """`frontmatter.quote()` of the BARE value behind `v` — `v` is unquoted first (either quote style, via
+    `frontmatter.unquote`), so quoting is idempotent no matter what a caller passes in: an already-quoted
+    metadata value written by hand (`version: '5'`) is re-derived to its content ("5") and requoted ("5" →
+    `"5"`), never wrapped a second time ('5' → `"'5'"`, the bug an earlier `quote = fmt.quote` alias had)."""
+    return fmt.quote(fmt.unquote(v))
 
 
 def quote_top_level_scalar(key: str, lines: list[str]) -> str | None:
     """Quote `key`'s bare value in place when it would not be a valid YAML plain scalar
     (frontmatter.plain_scalar_problem) — most commonly `description:`. Returns the change description, or None
-    when nothing changed (already quoted, a nested mapping with nothing to quote, or fine bare). `lines` is the
-    single-line entry from `migrate_text`'s `entries` — the same list object `top[key]` holds, so mutating it
-    here is picked up by every later step that reads `top` or `entries`."""
+    when nothing changed (already quoted EITHER style — frontmatter.is_quoted, since unlike `metadata:` a
+    top-level scalar has no double-quote-only requirement to enforce — a nested mapping with nothing to
+    quote, or fine bare). `lines` is the single-line entry from `migrate_text`'s `entries` — the same list
+    object `top[key]` holds, so mutating it here is picked up by every later step that reads `top` or
+    `entries`."""
     if len(lines) != 1:
         return None  # a key that opens a nested mapping (`key:` alone) carries no scalar value to quote
     m = fmt.KEY.match(lines[0])
@@ -58,7 +63,7 @@ def quote_top_level_scalar(key: str, lines: list[str]) -> str | None:
         return None
     raw = m.group(2)
     bare = fmt.strip_comment(raw)
-    if not bare or fmt.is_quoted_string(bare) or fmt.plain_scalar_problem(bare) is None:
+    if not bare or fmt.is_quoted(bare) or fmt.plain_scalar_problem(bare) is None:
         return None
     comment = raw[len(bare):]  # a trailing ` # …` is kept, after the quoted value, spacing untouched
     lines[0] = f"{key}: {quote(bare)}{comment}"
