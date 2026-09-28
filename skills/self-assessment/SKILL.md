@@ -135,7 +135,8 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      step 1's Monday, never `` $(date +%Y) ``** (today's year is wrong for a January run composing last
      December or ISO W01; a silently-wrong year reads as "no history found", not an error). E.g. with
      `MON=<step 1's Monday YYYY-MM-DD>` and a window of Sep 7–13:
-     `` grep -rEn "$(date -d "$MON" +%Y)-09-(0[7-9]|1[0-3])" <dirs> `` (adjust month/day to the window).
+     `` grep -rEn "${MON%%-*}-09-(0[7-9]|1[0-3])" <dirs> `` (`${MON%%-*}` is the year portably — no
+     `date -d`, GNU-only and absent on BSD/macOS `date`; adjust month/day to the window).
      **Exclude** generated files
      (`INDEX.md`, `SESSION_INDEX.md`) and `sessions/*.md` (live "responsibilities", not dated work);
      **dedupe** hits by (date + headline). Keep only docs inside `self_assessment.scope`.

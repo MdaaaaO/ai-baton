@@ -185,6 +185,20 @@ class PlaceholderCheck(unittest.TestCase):
         problems = LEDGER.check_html(self.page([self.card("<one sentence describing the win>")]))
         self.assertTrue(any("placeholder" in p for p in problems), problems)
 
+    def test_every_real_template_hint_is_still_flagged(self):
+        # the narrowed regex from the previous round missed these — `…`, capitals, digits, an
+        # apostrophe and a dot all fall outside `[a-z ,/:-]`. Broadened back to `<[^<>]+>` with
+        # exclusions only for the specific allowed shapes (generic type / comparison / HTML tag).
+        for bullet in (
+            "<one sentence…>",
+            "<Evidence link>",
+            "<step 1's Monday>",
+            "<1-2 sentences>",
+            "<saved index.html>",
+        ):
+            problems = LEDGER.check_html(self.page([self.card(bullet)]))
+            self.assertTrue(any("placeholder" in p for p in problems), (bullet, problems))
+
     def test_ellipsis_placeholder_is_flagged(self):
         problems = LEDGER.check_html(self.page([self.card("shipped the thing …")]))
         self.assertTrue(any("placeholder" in p for p in problems), problems)

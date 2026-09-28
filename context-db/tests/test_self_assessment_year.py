@@ -41,12 +41,15 @@ class DateGrepIsYearAgnostic(unittest.TestCase):
     def test_the_date_grep_example_derives_the_year_from_the_window_not_today(self):
         # `$(date +%Y)` alone is TODAY's year — wrong in January for a window in last December or W01
         # (a silently wrong year reads as "no history", not an error). The example must derive the year
-        # from step 1's own window (its Monday), e.g. `date -d "$MON" +%Y`, never bare `date +%Y`.
+        # from step 1's own window (its Monday, `MON=YYYY-MM-DD`) portably — `${MON%%-*}`, never
+        # `date -d` (GNU-only; BSD/macOS `date` rejects `-d`, so the substitution comes out empty and
+        # `grep` reads the pattern as an option — the same "no history" failure this fixes).
         text = (KIT / "skills" / "self-assessment" / "SKILL.md").read_text(encoding="utf-8")
         # the actual grep command must not run `$(date +%Y)` (today's year) — the prose may still
         # name that shape once to say "never do this"
         self.assertNotIn('grep -rEn "$(date +%Y)', text, "the grep command derives the year from today, not the window")
-        self.assertRegex(text, r"date -d [\"']?\$\w+[\"']? \+%Y", "should derive the year from a window variable")
+        self.assertNotIn('grep -rEn "$(date -d', text, "date -d is GNU-only (absent on BSD/macOS date)")
+        self.assertRegex(text, r"\$\{MON%%-\*\}", "should derive the year portably from the MON window variable")
         self.assertIn("step 1's Monday", text)
 
 

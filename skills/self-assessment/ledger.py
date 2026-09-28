@@ -36,14 +36,37 @@ TEMPLATE = HERE / "ledger-template.html"
 DATA_RE = re.compile(r'(<script id="data" type="application/json">)(.*?)(</script>)', re.S)
 FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 LOCAL_PATH_RE = re.compile(r"(?<![\w/])\.context/|\.worktrees/|/Users/|/home/", re.I)
-# A template placeholder that leaked into a composed week file: an angle-bracket hint (`<one sentence…>`),
-# a literal ellipsis, or an unfilled `TBD`/`TODO` marker — none of these belong in a published card. The
-# angle-bracket shape is deliberately narrow — lowercase prose holding a space or a colon — so it never
-# fires on legitimate bullet content that happens to use `<`/`>` (`Option<T>`, `p99 < 200ms and > 50ms`,
-# a bullet quoting `</script>`).
-PLACEHOLDER_RE = re.compile(r"<[a-z](?=[a-z ,/:-]*[ :])[a-z ,/:-]{2,}>|^\s*…\s*$|\s…\s*$|\bTBD\b|\bTODO\b")
-# a template token; prose may still use "…" mid-sentence
+# A template placeholder that leaked into a composed week file: an angle-bracket hint (`<one sentence…>`,
+# `<Evidence link>`, `<step 1's Monday>`), a literal ellipsis, or an unfilled `TBD`/`TODO` marker — none of
+# these belong in a published card. `PLACEHOLDER_TAIL_RE` covers the non-bracket shapes; the angle-bracket
+# shape is broad (`<[^<>]+>`, so it catches any hint) with three narrow exclusions checked in
+# `_is_angle_placeholder` — a generic type directly after an identifier (`Option<T>`), a bare `<`/`>` with
+# whitespace on both sides (a comparison, `p99 < 200ms and > 50ms`), and a real HTML tag with no spaces
+# (`</script>`, `<br>`). `check_html` only ever runs this on the cards a build just composed (`new_ids`),
+# never a previously published one.
+PLACEHOLDER_TAIL_RE = re.compile(r"^\s*…\s*$|\s…\s*$|\bTBD\b|\bTODO\b")  # prose may still use "…" mid-sentence
+ANGLE_RE = re.compile(r"<[^<>]+>")
+COMPARISON_ANGLE_RE = re.compile(r"(?<=\s)[<>](?=\s)")  # a bare </> flanked by whitespace: a comparison
+GENERIC_TYPE_RE = re.compile(r"\w<[\w, ]+>")  # `Option<T>`, `List<int, str>` — a generic type, not a hint
+HTML_TAG_RE = re.compile(r"\A</?[a-z]+>\Z")  # `</script>`, `<br>` — a real tag, not a hint
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)  # a scaffold's instructional comment, never bullet text
+
+
+def _is_angle_placeholder(text: str) -> bool:
+    masked = COMPARISON_ANGLE_RE.sub(" ", text)
+    for m in ANGLE_RE.finditer(masked):
+        span = m.group(0)
+        if HTML_TAG_RE.match(span):
+            continue
+        start = m.start()
+        if start > 0 and re.match(r"\w", masked[start - 1]) and GENERIC_TYPE_RE.match(masked, start - 1):
+            continue
+        return True
+    return False
+
+
+def is_placeholder(text: str) -> bool:
+    return bool(PLACEHOLDER_TAIL_RE.search(text)) or _is_angle_placeholder(text)
 
 
 def frontmatter(text: str) -> dict[str, str]:
@@ -258,7 +281,7 @@ def check_html(html: str, new_ids: set[tuple[int, str]] | None = None) -> list[s
             for b in s["bullets"]:
                 if LOCAL_PATH_RE.search(b):
                     problems.append(f"{c['id']}: local path in a bullet — {b[:60]}…")
-                if check_placeholders and PLACEHOLDER_RE.search(b):
+                if check_placeholders and is_placeholder(b):
                     problems.append(f"{c['id']}: placeholder text in a bullet — {b[:60]}…")
     if "{{" in html:
         problems.append("unfilled {{placeholder}} left in the page")
