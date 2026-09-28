@@ -3,9 +3,9 @@ name: notion-page-review
 description: "Reviews a Notion page tree (page, sub-pages, every comment thread) against the user's position, walks each proposed comment (Comment, Update wording, Skip, batches of 4), posts only approved ones as thread replies or inline comments. Invoke when the user asks to \"go through\", \"catch up on\" or \"comment on\" a Notion page."
 compatibility: "Designed for Claude Code; needs notion (systems.*)"
 metadata:
-  version: "8"
-  updated: "2026-09-27"
-  reviewed: "2026-09-27"
+  version: "9"
+  updated: "2026-09-28"
+  reviewed: "2026-09-28"
   requires: "notion"
   facts: "systems.slack"
 user-invocable: true
@@ -22,7 +22,9 @@ every single comment's wording before it goes out, (3) comments land where peopl
 1. `notion-fetch` the root page with `include_discussions: true`; list every child `<mention-page>` /
    sub-page and fetch each one the same way. Pages with no `discussion-urls` spans have no threads yet.
 2. `notion-get-comments` on every page with `include_all_blocks: true` → the thread map:
-   `discussion://<page>/<block>/<discussion>` → who said what, when, resolved or not.
+   `discussion://<page>/<block>/<discussion>` → who said what, when. **Open threads only** — Notion's
+   API has no way to retrieve a resolved discussion and no flag to ask for one, so a thread already
+   resolved before this fetch is invisible to it, not merely hidden.
 3. Record per page: sections, anchors (exact phrases), and every thread with its full id. Keep these
    ids in a scratch file (`$(python3 $BATON/context-db/bin/kit_profile.py scratch)/<page>-threads.md`) — you will need them after a compaction.
 4. Pull the user's side from `.context/` (INDEX.md → the initiative's context doc, the last 1:1 / team
