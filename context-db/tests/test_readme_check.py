@@ -10,7 +10,7 @@ spec = importlib.util.spec_from_file_location("readme_check", KIT / "skills" / "
 rc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rc)
 
-BADGE = "[![CI](https://example.invalid/ci.svg)](https://example.invalid/ci)"
+BADGE = "[![CI](https://img.shields.io/badge/ci-pass-brightgreen)](https://example.invalid/ci)"
 GOOD = "\n".join([
     "# tool", "", "**One line on what it is.**", "",
     BADGE, BADGE, BADGE, "",
@@ -79,6 +79,36 @@ class Readme(unittest.TestCase):
             "```sh", "pip install tool", "```", "",
         ])
         self.assertEqual(rc.parse(text)["badges"], 3)
+
+    def test_logo_and_hero_gif_are_not_counted_as_badges(self):
+        # SKILL.md § 2 row 1 allows a logo or a hero screenshot/GIF under the title; neither is a badge,
+        # so a compliant README with both plus 6 real badges must still land in the "want 3-6" band.
+        text = "\n".join([
+            "# tool", "",
+            "![Logo](assets/logo.png)", "",
+            "**One line on what it is.**", "",
+            "![Demo](assets/hero.gif)", "",
+            BADGE, BADGE, BADGE, BADGE, BADGE, BADGE, "",
+            "It does a thing.", "",
+            "```sh", "pip install tool", "```", "",
+        ])
+        stats = rc.parse(text)
+        self.assertEqual(stats["badges"], 6)
+        self.assertEqual(results(text)["badges"], "ok")
+
+    def test_inline_logo_in_intro_is_not_counted_as_pitch(self):
+        # a logo/screenshot is not prose either: an intro line built entirely around one contributes
+        # no pitch words (it's exempt, the same as a badge line, not a prose line to count) — but real
+        # prose sharing a line with an inline image is not lost along with it.
+        lone_image = "\n".join(["# tool", "", "![Logo](assets/logo.png)", "", "```sh", "pip install tool", "```", ""])
+        self.assertEqual(rc.parse(lone_image)["pitch_words"], 0)
+
+        mixed = "\n".join([
+            "# tool", "",
+            "It turns a thing into another thing for the reader ![Logo](assets/logo.png) who needs it now.", "",
+            "```sh", "pip install tool", "```", "",
+        ])
+        self.assertGreaterEqual(rc.parse(mixed)["pitch_words"], 10)
 
     def test_heading_indented_inside_a_details_block_starts_a_section(self):
         # a `## ` heading indented (as authors commonly do inside <details>) used to be invisible to
