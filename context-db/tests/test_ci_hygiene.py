@@ -293,7 +293,9 @@ class MermaidDepsPinned(unittest.TestCase):
         self.assertEqual(pkg["dependencies"], root_deps)
 
     def test_skill_md_no_longer_tells_readers_to_npm_i_unpinned(self):
-        text = (self.PR_OPEN / "SKILL.md").read_text(encoding="utf-8")
+        # the body and its reference files together — the validate-before-publishing step lives in reference/
+        files = [self.PR_OPEN / "SKILL.md", *sorted((self.PR_OPEN / "reference").glob("*.md"))]
+        text = "\n".join(f.read_text(encoding="utf-8") for f in files)
         self.assertNotIn("npm i --no-audit --no-fund mermaid@11 jsdom dompurify", text)
         self.assertIn("npm ci", text)
 

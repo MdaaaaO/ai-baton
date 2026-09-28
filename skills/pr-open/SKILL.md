@@ -55,52 +55,21 @@ only where the environment has Slack (`systems.slack`); everything else holds in
       labels match.
    3. Apply with `gh api -X POST repos/<o>/<r>/issues/<n>/labels -f 'labels[]=…'` and re-read the PR to verify.
    4. If the repo has no name for an axis that applies, **create a best-practice label** — never ship the PR
-      unlabelled and never wait for someone to name one (owner decision, 2026-09-18: "the pr-open skill should
-      attempt to always apply reasonable tags following the repo or best practices"). Rules: (a) reuse the
-      repo's own vocabulary first (read the label list *and* the labels on the last ~30 human PRs — `gh api
-      'repos/<o>/<r>/pulls?state=all&per_page=40' -q '.[] | [.labels[].name]'`); a repo whose convention is
-      area-only stays area-only; (b) if nothing fits, create a short kebab-case name with a one-line
-      description via `gh api -X POST repos/<o>/<r>/labels -f name=… -f color=… -f description=…` — directly
-      in repos the user's org/team owns; in another team's repo apply the closest existing name and propose
-      the new one in the review request instead; (c) record the new name in the env config's `labels.repos.<repo>`
-      so the next session reuses it; (d) say in the terminal summary which labels were applied and which
-      were created.
+      unlabelled and never wait for someone to name one. Reuse order, where to create it, and recording the
+      new name for next time: `reference/labels.md`.
    Dependabot's `dependencies` / `python` / `github_actions` are automatic — never add them by hand.
-   (An environment's per-repo map belongs in its env config → `labels.repos`; the prose per repo in `.context/reference/environment.md`.)
 4. **Watch**: arm `/pr-watch` on the head sha (`$BATON/skills/pr-watch/pr-watch.sh <o/r> <n> <head>`).
 5. **Tracker**: comment the PR link on the ticket (`ticket-update`). Where `tracker.kind` is `jira` and the
    PR is the ticket's deliverable, move it to *In Review* (`tracker.transitions.in_review`). Where it is
    `github`, the `Closes #<n>` in the body is the link; add the issue's in-review label if the repo uses one.
 6. **Slack review request — as a DRAFT, never sent — only when `systems.slack` is true.** When it is false,
    skip the step and say so in one line ("no Slack in this environment — reviewer request on GitHub is the ask").
-   Channel = `slack.repo_channels.<owner/repo>` (the env fact `slack.review-venue <owner/repo>`, a channel
-   handle; its id via `slack.channels.<name>` = `slack.channel <name>`). No entry → `/env-init slack.review-venue
-   <owner/repo>`: the `slack` manifest lists the user's channels (`slack_list_user_channels` — a draft only lands
-   where the user is a member); **the pick is this skill's call** — the channel where the repo's code owners read
-   review asks (a `#help-<team>` / `#<repo>` channel whose name or purpose names the repo or the owning team),
-   confirmed with the user in one question only when several fit — written back as the handle with `--from
-   tool:slack_list_user_channels` (`--from user` for a pick the user made), plus the `slack.channel <handle>` row
-   for its id if that is missing too. Never type a channel id from memory. Create the draft through the
-   `slack-draft` skill (`slack_send_message_draft`); the user
-   reviews and sends it themselves. Shape (§ Rules → Communication; owner decision 2026-09-24, the exact
-   form the owner sends by hand): **one sentence** —
-   ```
-   One `<team>` review please on [<r>/pull/<n>](https://github.com/<o>/<r>/pull/<n>), `<scope>` only. cc <@reviewer> <@reviewer>
-   ```
-   No emoji opener (`:pray:` retired 2026-09-24 — "it looks ugly"), no ticket key, no "what it does" clause,
-   no CI/bot status — the PR carries all of that; the ask names only the approval needed (the code-owner
-   team), the link and the touched scope, and cc's the people who can give it. The MCP tool takes standard
-   markdown and stores it as the mrkdwn link `<url|label>`; the mrkdwn form typed directly is stored
-   identically (verified 2026-09-10, self-DM round-trip), so either works, but never a bare URL and never
-   `repo#n`. Several PRs going up together: "Two reviews please:" + one `[<r>/pull/<n>](url), \`<scope>\`
-   only` bullet per PR. No "Sent using Claude" footer. If a draft for the same channel is already pending
-   (the user has not sent it), **update that draft** instead of adding a second one — say so in your
-   terminal summary. **Related asks ride the same thread, not DMs** (owner, 2026-09-24): a follow-up for a
-   dependent PR (e.g. a bot flag-sync PR that needs a re-approval) is a DRAFT *thread reply* under the
-   review ask, cc'ing the one person who can act — never separate DMs to the reviewers. Afterwards the
-   draft follows `slack-draft`: before re-drafting or reporting it "pending", read the channel to confirm
-   whether the user sent it and in what form. Routing nuances beyond the one-channel map (split code-owner
-   paths, team-internal PRs) live in `.context/reference/environment.md` / `slack._repo_channels_note`.
+   Channel = `slack.repo_channels.<owner/repo>` (the env fact `slack.review-venue <owner/repo>`); no entry →
+   `/env-init slack.review-venue <owner/repo>` (**the pick is this skill's call** — never type a channel id
+   from memory). Create the draft through the `slack-draft` skill (`slack_send_message_draft`); the user
+   reviews and sends it themselves. **A draft already pending for the same channel gets updated, never
+   duplicated.** The exact one-sentence shape, the no-emoji/no-ticket-key/no-CI-status rule, and
+   thread-vs-DM routing for related asks: `reference/slack-review-request.md`.
 7. **Tell the user** in one line: PR link + labels + where the ask went ("review-request draft is in
    #<channel>" or "reviewers requested: …").
 
@@ -143,100 +112,30 @@ without reading the diff — and nothing that the PR does not raise.
    otherwise one line says why not ("no routing change — no flow diagram"). `SKIP` → one line under
    `## Diagrams` ("Docs-only, no diagram." / "Config-only, no diagram.") and no block.
 3. Paste the marker as the last line of the `## Diagrams` section (HTML comment, invisible on GitHub).
-4. Validate every Mermaid block (below), then create/update the PR.
+4. Validate every Mermaid block (`reference/diagrams.md` § Rules that hold for every block), then create/update the PR.
 5. **On every later push** run `diagram-plan.py --pr <o/r> <n> --check` — `OK` / `DRIFT <old> → <new>` / `NO
    MARKER` / `MALFORMED MARKER <line>` (a hand-edited marker that no longer parses — fix the line, don't
    just redraw), each of the last three exit 3. On drift, redraw in the same turn as the code (a new route
    file, a dropped RPC, a model added to the PR). The `pr-watch` head-move event is the reminder.
 
-**Exit codes** (`diagram-plan.py`, also in `--help`): `0` success (a plan printed, or `--check` found the
-marker current) · `1` a `gh`/`git` call failed · `2` bad usage (no changed files, or `--check` without
-`--pr`) · `3` `--check` found drift, no marker, or a marker present but malformed. The facet-weighting
-thresholds (a facet under 12 changed lines never earns a block; a secondary facet needs ≥ 25 % of the
-dominant's weight) are defaults — override per run with `--trivial-lines` / `--secondary-share`.
-
-**Facet → question matrix.** The one copy is the script: `python3 $BATON/skills/pr-open/diagram-plan.py --explain`
-prints every facet with its globs (first match wins; the env-config overlay before the defaults) and the WHERE /
-WHAT / RUNS answer each facet raises, `—` where a question is not raised, `only when …` where it is conditional.
-Read it there when a plan surprises you; never copy it into this file (it drifted here before).
-
-Intent overlays: **bugfix** → RUNS only (one sequence of the failing path, fixed step in a `rect`); **refactor** →
-WHERE as before → after, no flow. Composition: the dominant facet (most changed lines) answers first; a
-secondary facet fills a question the dominant does not raise only when it carries ≥ 25 % of the dominant's
-weight; a facet under 12 changed lines never earns a block. Three or more substantive facets → the note says
-"one PR = one concern": draw the dominant one and name the rest in prose, or split the PR. Repo path
-conventions that the core globs cannot know (a pipeline under `assets/…`, DDL that is really event schema,
-route modules that are UI) go into the env config — `diagrams.repos.<owner/repo>.facets.<facet>: [globs]` and
-`.ignore: [globs]`, read by the script before its defaults — never into this file.
-
-**Rules that hold for every block**
-- **GitHub renders ```` ```mermaid ```` natively** on PR bodies and comments — no images, nothing to upload.
-  Jira does **not**: a ticket gets the PR link, never the diagram source.
-- **Validate before publishing.** A syntax error renders as a red box for every reviewer. Parse every block
-  with the mermaid library: `node $BATON/skills/pr-open/mermaid-check.mjs <body.md>…` from a scratchpad dir
-  after copying `$BATON/skills/pr-open/package.json` and `package-lock.json` there and running
-  `npm ci --no-audit --no-fund` (pinned versions, not the day's latest — Dependabot bumps the lockfile;
-  prints `OK (<type>)` / `FAIL <error>` per
-  block; handles CRLF-terminated fences; exits 1 on any failure, or on a file with zero mermaid blocks unless
-  `--allow-none` is passed — a docs/config-only push has none on purpose) — or, if that is impossible, re-read against these traps: a `;` inside sequence
-  text **terminates the statement** (use `—`/`,` or parentheses); one message per line; quote node labels with
-  `(`, `)`, `/`, `$`, `·`; `<br/>` for line breaks; edge labels `A -- text --> B` / `A -. text .-> B`.
-- **Honest labels.** Tag nodes `(existing)` / `(this PR)` / `(follow-up <key>)`; highlight the changed nodes
-  (`classDef new fill:#e6f4ea,stroke:#1e7e34` + `class a,b new`). A diagram that implies a handler, store or
-  column exists when it does not is a false claim on a permanent record (`WORKSPACE.md` § Verification). A
-  delta table's *before* column comes from the base branch (`git show <base>:<file>`, the schema yml, or the
-  warehouse), not from memory.
-- **Right-sized.** ≤ ~15 nodes / ≤ ~25 sequence steps per block, ≤ ~20 rows per table; more means the PR is
-  probably too big. Ticket/PR ids inside Mermaid labels stay bare (labels cannot carry links) — link them in
-  the prose.
-- **Keep them current** — step 5 above; the marker is what makes drift detectable.
+Exit codes, the facet → question matrix (and its intent overlays / composition rules), and the rules
+that hold for every block (native Mermaid rendering, validate-before-publishing, honest labels,
+right-sizing, keeping them current): `reference/diagrams.md`.
 
 ## Commit style — Conventional Commits by default, the repo may override
 
-Owner decision, 2026-09-25: "by default we want to follow conventional commits if the repo doesn't override it"
-(core rule, `WORKSPACE.md` § Rules → Workflow & scope; spec `$BATON/docs/commit-style.md`). The resolver is
-`python3 $BATON/context-db/bin/commit_style.py` — repo marker (`<repo>/.claude/commit-style`: `conventional` |
-`ticket-key` | `free`, or a commitlint config → conventional) → env config `commits.repos.<owner/repo>` →
-`commits.default` → `conventional`. Never decide the style by reading the repo's recent log: a repo that drifted
-is not a repo that overrode.
-
-- **Conventional**: `<type>(<scope>)!: <description>` — types `feat fix docs chore refactor test ci build perf
-  style revert`, lowercase scope (the component: `dbt`, `dag`, `<service>`, `kit`), `!` for a breaking change,
-  lowercase imperative description, ≤ 72 chars, no trailing period. **The tracker key goes inside the
-  description** (`feat(dbt): KEY-123 add the fact table`), never as the prefix — the key is text in the title
-  (§ Links) and a link in the body.
-- **PR title = the squash-commit subject.** Under squash merging the title becomes the commit on `main`, so it
-  passes the same check (`commit_style.py title`). The type maps to the type label (step 3): `feat` →
-  `enhancement`, `fix` → `bug`, `docs` → `documentation`; other types take no type label unless the repo has one.
-- **Gates**: the kit repo's `hooks/commit-msg` (installed with `pre-push` via `core.hooksPath`), `sign-queue`'s
-  `enqueue.sh` (refuses a message file that fails the check), and step 0 above for direct commits. Bypass only
-  deliberately (`KIT_SKIP_COMMIT_STYLE=1` / `SIGN_QUEUE_SKIP_STYLE=1`) and say so.
-- **Overrides are the repo's call, not the session's**: a repo that wants `ticket-key` (`KEY-123: description`)
-  or `free` says so in its own marker file or in the env config's `commits.repos` (set by the user as one object — `kb.py
-  config-set commits '{"default":"conventional","repos":{"<owner/repo>":"ticket-key"}}'` — a dotted key
-  would break on a repo name with a dot). Never add a marker to someone else's repo.
+Owner decision, 2026-09-25: by default follow Conventional Commits unless the repo overrides it (core rule,
+`WORKSPACE.md` § Rules → Workflow & scope; spec `$BATON/docs/commit-style.md`). The resolver
+(`python3 $BATON/context-db/bin/commit_style.py`) checks the repo's own marker file first, then the env
+config, then the kit default — never the repo's recent log. Type/scope grammar, the PR-title-is-the-squash-subject
+rule, the gates that enforce it and how a repo overrides it: `reference/commit-style.md`.
 
 ## Links — every ticket reference is clickable, everywhere
 
-Owner decision, 2026-09-10: "all tickets … whenever referenced should be clickable links" (core rule,
-`WORKSPACE.md` § Rules → Communication). Applies to every surface this checklist touches — PR body, Slack
-draft, tracker comment, and the terminal line to the user. Render every key with `tracker.url_template`
-(`{key}` = the match of `tracker.key_regex`; for `tracker.kind: github`, `{key}` is the issue number and
-`{repo}` its `owner/repo`):
-
-| Surface | Ticket | PR |
-|---|---|---|
-| PR body / GitHub comment (markdown) | `jira`: `[<KEY>](<url_template>)` · `github`: `#<n>` (autolinks same-repo), `owner/repo#<n>` cross-repo | `#<n>` same-repo or `[<r>#<n>](url)` cross-repo |
-| Slack draft (markdown → mrkdwn) | `[<KEY>](<url_template>)` | `[<r>/pull/<n>](https://github.com/<o>/<r>/pull/<n>)` |
-| Jira comment (markdown) | `[<KEY>](<url_template>)` (bare keys autolink only in the same site — link anyway) | full URL, Jira autolinks it |
-| Terminal message to the user | `[<KEY>](<url_template>)` / `[#<n>](<url_template>)` | `[#<n>](https://github.com/<o>/<r>/pull/<n>)` |
-
-Never a bare key in prose on any of these, and never a bare URL (it unfurls and eats a line in Slack).
-PR *titles* are the one exception (GitHub titles cannot carry links; keep the key there as text so
-search finds it).
-
-Don't DM individuals for reviews (§ Rules → Don't pester people); one ask in the right venue is the ask.
-A follow-up nudge is the user's decision, not the session's.
+Owner decision, 2026-09-10: every ticket/PR reference, on every surface this checklist touches, is a
+clickable link, never a bare key or a bare URL (core rule, `WORKSPACE.md` § Rules → Communication) — the
+per-surface rendering table: `reference/links.md`. Don't DM individuals for reviews (§ Rules → Don't
+pester people); one ask in the right venue is the ask, a follow-up nudge is the user's decision.
 
 ## Not in scope
 Merging, re-requesting the bot after pushes, thread handling — those are `/pr-watch` + the repo's

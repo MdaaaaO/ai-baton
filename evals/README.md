@@ -17,7 +17,7 @@ contains it, e.g. `'(?<![\w-])<skill>(?![\w-])'` (`min: 1` for a positive, `min:
 `arm: both` so it is scored), and `criteria.md`, an `llm` grader on the outcome. `docs/templates/evals/` holds one of
 each — copy here, rename to `<skill>-<case>`, fill the `<…>` marks (the scaffold sits under `docs/` so the runner never
 scores a placeholder). No case carries a real id, host, person or organisation — placeholders only (`acme/widgets`,
-`ABC-123`, `#42`). Suites so far: `pr-open`, `ticket-update`, `session-handoff`, `session-retro`; `kit-review-*` are the reviewer's
+`ABC-123`, `#42`). Every skill now has a trigger suite; `kit-review-*` are the reviewer's
 proof cases (`docs/REVIEW.md`), not a trigger suite.
 
 | run | what | tokens |

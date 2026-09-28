@@ -2,7 +2,7 @@
 name: self-assessment
 description: "Composes the user's weekly self-assessment for a past ISO week or range from `.context/` and the systems of record, never live sessions: the week file plus the report block and ledger card the env config asks for, back-filled where `.context/` lacks coverage. Invoke as \"self-assessment for last week\" or \"for W37\"."
 metadata:
-  version: "15"
+  version: "16"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "self_assessment.ledger,self_assessment.ledger_url,self_assessment.sections"
@@ -22,10 +22,8 @@ lives in `.context/self-assessment/README.md` — **step 0: if it exists, read i
 otherwise use the default scope from `self_assessment.scope` and continue** (`setup.sh` seeds the
 charter from `$BATON/context-db/_templates/self-assessment-charter.md` on a fresh environment, but a
 session must not block on it being there). **The default** without a charter: compose the week file
-in the fixed section order the scaffold template already carries (`make -C $BATON/context-db new
-TYPE=self-assessment` → `_templates/self-assessment.md` — Scope/Sources, Shipped, Collaboration &
-reviews, Impact, Learnings, Next week, Blockers/risks, an optional Landed-just-after tail, and the
-report block only where `self_assessment.report` is `lattice`); "work" is whatever
+in the scaffold template's own section order (`make -C $BATON/context-db new TYPE=self-assessment` →
+`_templates/self-assessment.md`); "work" is whatever
 `self_assessment.scope` names — quote it at the top of the method per § Config-driven; there is no
 initiatives model or contribution protocol to honour without the charter, so skip step 6's
 initiatives gap-fill and inbox contribution rules. This skill *sequences the sourcing* and states the
@@ -72,57 +70,14 @@ it); `report_url` is the form the ledger links to (optional). A store without th
    carry-overs, and the charter README for the fixed section list.
 3. **Source sweep — the authoritative path (no live sessions needed):**
    - **GitHub** — only if `github` is in `self_assessment.sources`. **Three sweeps, not one**
-     (prefix with `github.sandbox_token_prefix` when set). Scope: org-wide `--owner=<github.org>`; when
-     `tracker.kind == github`, restrict to the repos in `tracker.repos` (one call per repo) and also
-     sweep issues opened/closed/commented there (`gh search issues`) — they are the tracker.
-     **`gh search prs --json` does not expose `mergedAt`** (its JSON fields are `assignees, author,
-     authorAssociation, body, closedAt, commentsCount, createdAt, id, isDraft, isLocked, isPullRequest,
-     labels, number, repository, state, title, updatedAt, url` — verify with `gh search prs --help` /
-     `gh pr list --help` before trusting this on a new `gh` version); use `gh pr list` per repo instead,
-     which does.
-     - **shipped** (per repo in `tracker.repos`, tracker-restricted scope):
-       `gh pr list -R <owner>/<repo> --state merged --search "merged:<Mon>..<Sun>" --author
-       $WORKSPACE_GITHUB_LOGIN --json number,title,mergedAt,url --limit 100`. Org-wide scope (no
-       `tracker.repos` restriction) has no per-repo `-R` to hang off, so fall back to `gh search prs
-       --author=$WORKSPACE_GITHUB_LOGIN --owner=<github.org> --merged --merged-at <Mon>..<Sun> --json
-       repository,number,title,state,createdAt,closedAt,url --limit 100` — `--merged` +
-       `--merged-at` are input filters `gh search prs` does support; `closedAt` stands in for
-       `mergedAt` (equal for a merged PR in practice).
-     - **reviews given:** `gh search prs --reviewed-by=$WORKSPACE_GITHUB_LOGIN --owner=<github.org>
-       --updated ">=<Mon>" --created "<=<Sun>" --json repository,number,title,url,updatedAt --limit 500` (add `--repo <r>`
-       per repo instead of `--owner` in tracker-restricted scope) — `--updated` is a **pre-filter
-       only** (the PR's *last* update, not when the review was given): a `--merged-at`/closed-date
-       bound here would drop a review given in-window on a PR still open or merged the following
-       week, so the update bound is one-sided (`>=<Mon>`); `--created "<=<Sun>"` is the lossless upper bound (an
-       item created after Sunday cannot carry an in-window review or comment) that stops the net widening as
-       the week ages — a range or back-fill run would otherwise hit the cap. Then per PR
-       pull `/reviews` **and** `/comments` with pagination (30/page hides verdicts) and **keep only
-       reviews whose own `submitted_at` falls inside `<Mon>..<Sun>`** — that per-review filter is the
-       actual window, not the search query. The author sweep alone silently drops the whole
-       *Collaboration & reviews* section.
-     - **collab comments:** `gh search prs --commenter=$WORKSPACE_GITHUB_LOGIN --owner=<github.org>
-       --updated ">=<Mon>" --created "<=<Sun>" --json repository,number,title,url,updatedAt --limit 500` (swap `--owner`
-       for `--repo <r>` per repo in tracker-restricted scope) — again a pre-filter, since a PR touched
-       after Sunday would otherwise be dropped by a two-sided `--updated <Mon>..<Sun>` bound; then pull
-       each PR's `/comments` and **keep only comments whose own `created_at` falls inside
-       `<Mon>..<Sun>`** (a PR can carry comments from many weeks). Same shape for issue comments:
-       `gh search issues --commenter=$WORKSPACE_GITHUB_LOGIN --owner=<github.org> --updated ">=<Mon>" --created "<=<Sun>"
-       --json repository,number,title,url,updatedAt --limit 500`, then per-issue `/comments` filtered
-       the same way.
-     - **issues opened/closed/commented** (tracker-restricted scope): `gh search issues
-       --author=$WORKSPACE_GITHUB_LOGIN --repo <r> --updated ">=<Mon>" --created "<=<Sun>" --json
-       repository,number,title,url,state,createdAt,closedAt --limit 500` per repo — pre-filter only;
-       **keep only issues whose `createdAt` (opened) or `closedAt` (closed) falls inside
-       `<Mon>..<Sun>`**. The "commented" leg is the `gh search issues --commenter` sweep above — run it with
-       `--repo <r>` per repo in tracker-restricted scope, exactly like the PR sweep — so an issue opened weeks
-       earlier and commented on in-window is caught there, not here. The one-sided sweeps carry `--limit 500` (`gh search` caps at 1000): a result
-       count equal to the limit means the sweep was truncated — raise it or split by repo, never
-       report from a capped list.
-     - Filter every result to the window: `gh pr list`'s per-repo merged-PR query is already
-       window-scoped by `--search "merged:…"` and needs no further filtering; every `--updated
-       ">=<Mon>"` sweep above is a pre-filter only — the real window comes from the client-side
-       per-item/per-comment/per-review timestamp check described with each sweep, never from the
-       search query alone.
+     (prefix with `github.sandbox_token_prefix` when set): shipped (merged PRs, `gh pr list`/`gh search
+     prs`), reviews given (`--reviewed-by`, then per-PR `/reviews` filtered to the window) and collab
+     comments (`--commenter`, then per-PR/-issue `/comments` filtered to the window) — plus, when
+     `tracker.kind == github`, issues opened/closed/commented in `tracker.repos`. Every sweep is a
+     **pre-filter only**: the real window is a client-side check of each item's/comment's/review's own
+     timestamp, never the search query alone, and `gh search prs --json` has no `mergedAt` field. Exact
+     commands, the org-wide vs. tracker-restricted scoping, and the truncation check (`--limit 500` hit
+     = re-run split by repo): `reference/github-sweep.md`.
    - **Jira** — only if `jira` is in `self_assessment.sources` (and `systems.jira`). Atlassian MCP JQL on
      `tracker.site`: `project = <tracker.project> AND (assignee was currentUser() OR reporter = currentUser())
      AND updated >= <Mon> AND updated <= <Sun>` — use created/resolved/transition dates, not just current
@@ -202,63 +157,17 @@ it); `report_url` is the form the ledger links to (optional). A store without th
     `text/html` + `text/plain` so links survive the paste; tick list in the viewer's browser), and skipping the
     card is the failure this step exists to prevent.
     1. `python3 $BATON/context-db/bin/kit_profile.py get self_assessment.ledger_url`.
-    2. **URL set** → `Artifact read` with that `url` and `path: index.html` (saves the live page locally), then
-       `python3 $BATON/skills/self-assessment/ledger.py build --page <saved index.html> --week <the week file
-       step 5 wrote> [--week …] --out <scratch>/ledger.html`. It replaces the card
-       with the same id (a re-run updates in place), appends a new one, sorts by week and refreshes the masthead
-       count + date range. Republish **with `url`** = the configured URL and the same `file_path` — publishing
-       without `url` creates a duplicate page.
-    3. **URL empty** (first run on this machine) → `ledger.py build --init --week <every week file in the domain> --out
-       <scratch>/ledger.html --title "Update Ledger" --eyebrow "<team · user>" [--report-url <self_assessment.report_url>]`
-       (template `ledger-template.html` next to the script), publish it as a new private Artifact (icon
-       `calendar`), then `python3 $BATON/context-db/bin/kb.py config-set self_assessment.ledger_url <url>` so
-       no later run creates a second page. The store is local — every environment gets its own ledger.
-    4. `ledger.py check <html>` runs inside `build` (unique ids, ≥3 sections per card, no local paths in
-       bullets, no unfilled placeholders); on a hit nothing is written to `--out` (the page lands in
-       `<out>.rejected` for inspection) and the build exits non-zero — fix the week file, not the page.
-    5. The card's `tag` derives from the week file's frontmatter: the sprint from the title, `composed <date>,
-       week in progress — re-check after the Monday re-run` while `status: active`, `back-filled <date>` when
-       `provenance: back-fill` is set (§ Back-fill mode). The final reply **links the ledger
-       page and still pastes the block** — the page is the archive, the block is what the user pastes today.
+    2. **URL set or empty** → build/republish/validate the page and derive the card's `tag`; the four
+       sub-steps, exact commands and the reject-on-check-failure rule: `reference/ledger.md`.
 
 ## Back-fill mode — compose a week the context DB never saw
 
-For weeks before the kit existed, weeks worked from another machine, or any window where step 3's
-`.context/` date-grep returns nothing, the systems of record are the **only** source. The week file is
-still the charter's fixed format; what changes is provenance and honesty about it.
-
-- **Trigger:** `--backfill` given, or zero `.context/` hits for the window (then say "switching to back-fill
-  mode" in the reply and in the method block). A range (`W29..W33`) runs oldest → newest as usual.
-- **Sources (each gated by `self_assessment.sources` / `systems.*` exactly as in step 3):**
-  - GitHub — the three sweeps (authored / reviewed-by / commenter) **plus** commits in the window
-    (`gh search commits --author=$WORKSPACE_GITHUB_LOGIN --author-date=<Mon>..<Sun>`) and issue comments
-    (`gh search issues --commenter=…`); PR bodies and review comments are the narrative you would otherwise
-    have taken from the context doc — read them, don't just count them.
-  - Tracker — the step-3 query **plus** the comments the user authored in the window: tracker query languages
-    filter on comment *text*, not comment *author*, so read each hit's comment thread and keep the user's
-    comments dated inside the window — the ticket's own closing comment is the measurement of record (step 4
-    tie-breaks apply unchanged).
-  - Chat (`systems.slack`) — the chat connector's search for the user's **own** messages in the window (one day
-    of margin either side, threads included): the ownership rulings, unblocks and decisions no ticket records →
-    *Collaboration* and *Learnings* leads only, never *Shipped*.
-  - Calendar / meeting titles (`meetings` source; the calendar connector when attached) — attendance is a
-    lead for *Collaboration*; an outcome needs a note or a ticket comment to be stated as fact.
-  - Warehouse — only to **verify** a number that a ticket or PR claims, never to discover work.
-- **Write it honestly.** The method block names the mode, lists which sources were available and which
-  were not ("no chat in this environment", "calendar not attached"). *Learnings* opens with
-  "reconstructed from systems of record; no contemporaneous notes" — a back-filled week can state what
-  shipped and what was said, not what the user felt or intended, so the fourth report section stays to
-  one plain sentence unless a 1:1 note or a message in the window supports more.
-- **Every claim keeps its evidence link** (PR, ticket, message permalink) in the week file; the report block
-  keeps tracker keys and PR links only, as always.
-- **Seeding `.context/` is optional and asked once per run**, after the last week of the range: one
-  `AskUserQuestion` offering to gap-fill `initiatives/<slug>.md` arcs from the back-filled weeks (yes →
-  step 6 for each; no → leave the initiatives untouched, the week files alone are the record). Never seed
-  initiative context docs (`TYPE=epic`) from a back-fill — those belong to the sessions that do the work.
-- Steps 5–10 run unchanged, with one frontmatter addition: the week file carries **`provenance: back-fill`**
-  (that key, not prose, is what tags the ledger card `back-filled <date>`). Then `status: archived` for a
-  completed week, index row, drops, `make index && verify`, the report block, and — where the ledger is on —
-  the card.
+**Trigger:** `--backfill` given, or step 3's `.context/` date-grep returns zero hits for the window (then
+say "switching to back-fill mode" in the reply and in the method block; a range runs oldest → newest as
+usual). The systems of record become the **only** source, the week file stays the charter's fixed format,
+and the week file carries **`provenance: back-fill`** in its frontmatter (steps 5–10 otherwise unchanged).
+Per-source substitutes (GitHub commits, tracker comment-text search, chat, calendar, warehouse
+verification-only) and the honesty/evidence-link rules: `reference/backfill.md`.
 
 ## Write-ownership (from the charter — don't clobber a concurrent composer)
 

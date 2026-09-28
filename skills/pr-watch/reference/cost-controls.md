@@ -1,0 +1,34 @@
+# Cost controls (2026-09-22)
+
+The shell polling is free; what costs is every line emitted and every Monitor expiry (~$0.30 each at a
+~120k prefix). Three knobs, on top of the one-process-per-session form in `SKILL.md`:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `PR_WATCH_SELF` | `$WORKSPACE_GITHUB_LOGIN` (else `gh api user`) | events by that login are dropped as your own |
+| `PR_WATCH_SYNC` | `1` | `0` disables the auto `update-branch` (reference/auto-sync.md) |
+| `PR_WATCH_SYNC_COOLDOWN` | `3600` | minimum seconds between two syncs of the same PR |
+| `PR_WATCH_KNOWN_RED` | unset | extended regex; mutes a `CHECK NOT GREEN` whose failure annotations all match a cause you already know about |
+| `PR_WATCH_REPLAY` | unset | `1` re-emits the current bot verdict / `CHECK NOT GREEN` on start; by default a re-arm on a head the state dir already knows is silent about what it already reported |
+
+- **`CHECK NOT GREEN` fires at most once per head** (reset on `HEAD MOVED`) and only once the suite has
+  settled — no check run still `queued`/`in_progress` — listing every failing check at that moment.
+  Before 2026-09-22 it re-fired whenever the *set* of failing names changed, i.e. once per check that
+  finished red — ~10 wake-ups for one cause. The rollup mixes check runs with legacy commit statuses (a
+  required status context an external CI posts); both count toward pending and toward red — a status
+  context carries no `status`/`conclusion` field of its own, only a `state`, which the watcher maps to
+  the same tri-state a check run's `conclusion` uses.
+- **`PR_WATCH_KNOWN_RED=<extended-regex>`** — when the red is a known, external cause, pass a regex over
+  the *failure annotations*. Before emitting, the watcher fetches `check-runs/<id>/annotations` for every
+  failing check run; it suppresses the line (stderr note only) **only if** each failing run has at least
+  one `failure` annotation and *all* of them match. A failing check with zero annotations is unexplained →
+  the line is emitted. So the regex must cover the generic wrappers too, e.g.
+  `PR_WATCH_KNOWN_RED='<package-name>|Process completed with exit code'` mutes a known missing-export
+  failure while a PR failing for another reason still reports. Drop the variable once the cause is fixed.
+- **Silent re-arm.** The per-PR state dir (`${TMPDIR:-/tmp}/pr-watch-<owner>-<repo>-<pr>/`) survives the
+  process, so a watcher re-armed on a head it already reported emits nothing until something changes —
+  before 2026-09-22 every re-arm replayed the `BOT REVIEW` line for an unchanged head (one wasted wake-up per
+  PR per re-arm; a third of one night's burn in the incident behind the park rule in `SKILL.md`). A different
+  head, a missing state dir, or `PR_WATCH_REPLAY=1` restores the replay. The dir is shared by every session
+  on the same machine: a successor taking over a PR inherits the silence and reads the current verdict from the
+  predecessor's `## Open PRs` list instead.
