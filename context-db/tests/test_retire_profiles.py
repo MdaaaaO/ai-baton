@@ -83,7 +83,7 @@ class Grep(unittest.TestCase):
                          "the profile", "any profile", "profile <", "(no profile", "no leftover", ".claude/profiles/", "SSO profile", "for that profile", "profiles.yml")
         with tempfile.TemporaryDirectory() as tmp:
             out = subprocess.run(["git", "grep", "-i", "-n", "profile", "--", "*.py", "*.sh", "*.md", ".gitignore", "*.json", "Makefile", "*.mk"],
-                                 cwd=KIT, capture_output=True, text=True, env=hermetic_env(tmp)).stdout
+                                 cwd=KIT, capture_output=True, text=True, env=hermetic_env(tmp, trust=KIT)).stdout
         bad = []
         for line in out.splitlines():
             path, _n, text = line.split(":", 2)

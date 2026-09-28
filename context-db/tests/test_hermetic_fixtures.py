@@ -20,6 +20,7 @@ from tests.test_sign_queue_home import _seed_repo  # noqa: E402
 # the module, not ReviewedFreshness itself: importing that TestCase subclass by name here would make unittest's
 # module scanner discover (and re-run) its own tests a second time under this module.
 from tests import test_kit_verify_noenv  # noqa: E402
+from tests import hermetic_env  # noqa: E402
 
 
 def _hostile_home(tmp: Path) -> Path:
@@ -99,7 +100,24 @@ class SetupShScenariosIgnoreTheHostHome(unittest.TestCase):
         self.assertNotIn("FAIL", r.stdout + r.stderr)
 
 
-_HERMETIC_FUNCS = ("hermetic_env", "_env")
+class HermeticEnvTrustParameter(unittest.TestCase):
+    """#288 review: disabling the global git config to keep a fixture hermetic also drops a host's own
+    `safe.directory` entries, so a read-only git call against a REAL checkout (test_stale_doc_refs.py,
+    test_retire_profiles.py — never a throw-away fixture) needs that checkout trusted explicitly, or it fails
+    with "detected dubious ownership" on a checkout owned by another user."""
+
+    def test_trust_adds_a_safe_directory_entry(self):
+        env = hermetic_env("/tmp/wherever", trust="/some/kit/checkout")
+        self.assertEqual(env["GIT_CONFIG_COUNT"], "1")
+        self.assertEqual(env["GIT_CONFIG_KEY_0"], "safe.directory")
+        self.assertEqual(env["GIT_CONFIG_VALUE_0"], "/some/kit/checkout")
+
+    def test_no_trust_means_no_safe_directory_override(self):
+        env = hermetic_env("/tmp/wherever")
+        self.assertNotIn("GIT_CONFIG_COUNT", env)
+        self.assertNotIn("GIT_CONFIG_KEY_0", env)
+
+
 _ALLOWLIST_MARKER = "hermetic-exempt:"
 
 
@@ -112,33 +130,52 @@ def _target_key(node: ast.AST) -> str | None:
     return None
 
 
-def _is_hermetic_call(node: ast.AST) -> bool:
-    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _HERMETIC_FUNCS
+def _calls_hermetic_env(node: ast.AST) -> bool:
+    """True when somewhere under `node` there is a call to hermetic_env() by name."""
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "hermetic_env"
+               for n in ast.walk(node))
 
 
-def _is_hermetic_expr(node: ast.AST, hermetic: set[str]) -> bool:
-    """`node` is (or is built from) a call to hermetic_env()/a file's own _env(): the call itself, a name or
-    `self.attr` already known hermetic, or a dict literal that `**`-spreads one of those as its base."""
-    if _is_hermetic_call(node):
+def _trusted_funcs(tree: ast.Module) -> tuple[str, ...]:
+    """The function names this file's calls may use as a hermetic env source: hermetic_env() always: a local
+    `_env` only if ITS OWN BODY calls hermetic_env() — trusting the name alone would let a fixture's `_env` that
+    never actually isolates anything (no hermetic_env() call in it) pass the guard by coincidence of naming."""
+    trusted = ["hermetic_env"]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_env" and _calls_hermetic_env(node):
+            trusted.append("_env")
+            break
+    return tuple(trusted)
+
+
+def _is_hermetic_call(node: ast.AST, trusted_funcs: tuple[str, ...]) -> bool:
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in trusted_funcs
+
+
+def _is_hermetic_expr(node: ast.AST, hermetic: set[str], trusted_funcs: tuple[str, ...]) -> bool:
+    """`node` is (or is built from) a call to hermetic_env()/a file's own _env() that itself calls hermetic_env():
+    the call itself, a name or `self.attr` already known hermetic, or a dict literal that `**`-spreads one of
+    those as its base."""
+    if _is_hermetic_call(node, trusted_funcs):
         return True
     key = _target_key(node)
     if key is not None and key in hermetic:
         return True
     if isinstance(node, ast.Dict):
-        return any(k is None and _is_hermetic_expr(v, hermetic) for k, v in zip(node.keys, node.values))
+        return any(k is None and _is_hermetic_expr(v, hermetic, trusted_funcs) for k, v in zip(node.keys, node.values))
     return False
 
 
-def _collect_hermetic_names(tree: ast.Module) -> set[str]:
+def _collect_hermetic_names(tree: ast.Module, trusted_funcs: tuple[str, ...]) -> set[str]:
     """Every single-target assignment in `tree` (name or `self.attr`) that is fixed-point-reachable from a call
-    to hermetic_env()/_env() — a direct assignment, or a dict merged from one two or more hops away."""
+    to one of `trusted_funcs` — a direct assignment, or a dict merged from one two or more hops away."""
     names: set[str] = set()
     assigns = [n for n in ast.walk(tree) if isinstance(n, ast.Assign) and len(n.targets) == 1]
     for _ in range(len(assigns) + 1):  # a later assignment may build on one found only in a previous pass
         added = False
         for n in assigns:
             key = _target_key(n.targets[0])
-            if key and key not in names and _is_hermetic_expr(n.value, names):
+            if key and key not in names and _is_hermetic_expr(n.value, names, trusted_funcs):
                 names.add(key)
                 added = True
         if not added:
@@ -179,7 +216,8 @@ def _git_subprocess_problems(path: Path) -> list[str]:
     src = path.read_text(encoding="utf-8")
     tree = ast.parse(src, filename=str(path))
     lines = src.splitlines()
-    hermetic = _collect_hermetic_names(tree)
+    trusted_funcs = _trusted_funcs(tree)
+    hermetic = _collect_hermetic_names(tree, trusted_funcs)
     list_assigns = _list_literal_assigns(tree)
     problems = []
     for node in ast.walk(tree):
@@ -193,7 +231,7 @@ def _git_subprocess_problems(path: Path) -> list[str]:
         if not _argv_is_git(node.args[0], list_assigns):
             continue
         env_kw = next((kw for kw in node.keywords if kw.arg == "env"), None)
-        if env_kw is not None and _is_hermetic_expr(env_kw.value, hermetic):
+        if env_kw is not None and _is_hermetic_expr(env_kw.value, hermetic, trusted_funcs):
             continue
         start, end = node.lineno, getattr(node, "end_lineno", node.lineno)
         if _ALLOWLIST_MARKER in "\n".join(lines[start - 1:end]):
@@ -205,15 +243,53 @@ def _git_subprocess_problems(path: Path) -> list[str]:
 class NoUnhermeticGitCallsGuard(unittest.TestCase):
     """Static guard against reintroducing the bug this file regression-tests: every subprocess.run / check_output
     / Popen in context-db/tests/*.py whose argv starts with "git" must pass env= built from hermetic_env() —
-    directly, through a file's own `_env()` wrapper, or a dict merged from one (`{**hermetic_base, ...}`) — never
-    a bare dict(os.environ) copy or no env= at all. A call that genuinely needs the host's own git config (there
-    are none today) can be allowlisted with a `# hermetic-exempt: <reason>` comment on its own source line(s)."""
+    directly, through a file's own `_env()` wrapper (trusted only when ITS OWN BODY calls hermetic_env() — the
+    name alone earns nothing), or a dict merged from one (`{**hermetic_base, ...}`) — never a bare dict(os.environ)
+    copy or no env= at all. A call that genuinely needs the host's own git config (there are none today) can be
+    allowlisted with a `# hermetic-exempt: <reason>` comment on its own source line(s)."""
 
     def test_every_git_subprocess_call_uses_a_hermetic_env(self):
         problems = []
         for path in sorted(HERE.glob("*.py")):
             problems.extend(_git_subprocess_problems(path))
         self.assertEqual(problems, [], "\n" + "\n".join(problems))
+
+
+class GuardDoesNotTrustAnEnvWrapperByNameAlone(unittest.TestCase):
+    """#288 review: a fixture that defines its own `_env()` but never actually calls hermetic_env() inside it
+    must still be flagged — trusting the name `_env` alone would let a look-alike wrapper (built straight from
+    dict(os.environ), the exact shape this whole file exists to catch) pass the guard by coincidence."""
+
+    def test_a_env_wrapper_that_never_calls_hermetic_env_is_flagged(self):
+        src = (
+            "import subprocess\n\n"
+            "def _env(home):\n"  # looks like the real thing, but never calls hermetic_env()
+            "    return {'HOME': str(home)}\n\n"
+            "def seed(repo):\n"
+            "    subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=_env(repo))\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test_scratch_env.py"
+            path.write_text(src, encoding="utf-8")
+            problems = _git_subprocess_problems(path)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(f"{path.name}:", problems[0])
+
+    def test_a_env_wrapper_that_does_call_hermetic_env_is_trusted(self):
+        src = (
+            "import subprocess\n\n"
+            "def hermetic_env(tmp):\n"  # stands in for the real tests.hermetic_env, imported in every real file
+            "    return {'HOME': str(tmp)}\n\n"
+            "def _env(home):\n"
+            "    return hermetic_env(home)\n\n"
+            "def seed(repo):\n"
+            "    subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=_env(repo))\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test_scratch_env.py"
+            path.write_text(src, encoding="utf-8")
+            problems = _git_subprocess_problems(path)
+        self.assertEqual(problems, [], problems)
 
 
 if __name__ == "__main__":

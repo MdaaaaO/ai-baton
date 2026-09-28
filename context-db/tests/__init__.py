@@ -35,18 +35,27 @@ for _k in [k for k in os.environ if k in SESSION_VARS or k.startswith(SESSION_PR
     del os.environ[_k]
 
 
-def hermetic_env(tmp) -> dict:
+def hermetic_env(tmp, trust=None) -> dict:
     """A subprocess env for a test that spawns git, sh or make against a throw-away fixture: `tmp` becomes both
     HOME and TMPDIR (no inherited .gitconfig, no real scratch dir), the global and system git config are both
     disabled so a host's commit.gpgsign / gpg.format can never reach the fixture, GIT_TERMINAL_PROMPT is off so a
     missing credential never hangs the suite, author/committer are fixed placeholders, and CONTEXT_ROOT /
     SIGN_QUEUE_DIR default under the same tmp dir (a caller that needs a specific store or queue overrides them
-    afterward). Build every fixture's git/sh/make subprocess env from this, never from a bare dict(os.environ)."""
+    afterward). Build every fixture's git/sh/make subprocess env from this, never from a bare dict(os.environ).
+
+    `trust`: for a read-only git call against a REAL checkout (this kit's own working tree, not a throw-away
+    fixture) — disabling the global config above also drops a host's own `safe.directory` entries, so a checkout
+    owned by another user (common for a mounted or root-owned clone) fails with "detected dubious ownership"
+    without one. Pass the checkout's path and it is trusted via GIT_CONFIG_COUNT/KEY/VALUE, which applies
+    regardless of GIT_CONFIG_GLOBAL/NOSYSTEM."""
     tmp = str(tmp)
-    return dict(os.environ, HOME=tmp, TMPDIR=tmp, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
-                GIT_TERMINAL_PROMPT="0", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
-                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid",
-                CONTEXT_ROOT=os.path.join(tmp, "store"), SIGN_QUEUE_DIR=os.path.join(tmp, "q"))
+    env = dict(os.environ, HOME=tmp, TMPDIR=tmp, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+               GIT_TERMINAL_PROMPT="0", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid",
+               CONTEXT_ROOT=os.path.join(tmp, "store"), SIGN_QUEUE_DIR=os.path.join(tmp, "q"))
+    if trust is not None:
+        env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="safe.directory", GIT_CONFIG_VALUE_0=str(trust))
+    return env
 
 
 def store_problem(ctx: str) -> str:

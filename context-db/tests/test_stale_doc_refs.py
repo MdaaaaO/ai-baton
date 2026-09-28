@@ -21,7 +21,7 @@ CLAUDE_SECTION = re.compile(r"CLAUDE\.md`?\s*§")
 def tracked(*patterns: str) -> list[Path]:
     with tempfile.TemporaryDirectory() as tmp:
         r = subprocess.run(["git", "-C", str(KIT), "ls-files", *patterns], capture_output=True, text=True,
-                           check=True, env=hermetic_env(tmp))
+                           check=True, env=hermetic_env(tmp, trust=KIT))
     return [KIT / p for p in r.stdout.splitlines() if p]
 
 
