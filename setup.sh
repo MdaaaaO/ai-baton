@@ -251,7 +251,10 @@ elif [ -d "$HARNESS_MEM" ]; then
     n_pruned=$((n_backups - 3))
     prunelist="$(mktemp "$CONTEXT/.memory-prune.XXXXXX")"
     (cd "$MIGRATED_DIR" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | sort) > "$prunelist"
-    head -n "$n_pruned" "$prunelist" | while IFS= read -r d; do rm -rf "$MIGRATED_DIR/$d"; done
+    # only a name the backup step writes (YYYYMMDD-HHMMSS[-n]) is ever pruned; ${…:?} stops an empty var from reaching /
+    head -n "$n_pruned" "$prunelist" | while IFS= read -r d; do
+      case "$d" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]*) rm -rf "${MIGRATED_DIR:?}/${d:?}" ;; esac
+    done
     rm -f "$prunelist"
   fi
   echo "  memory: migrated real dir -> durable ($n_src files verified, $n_new new, $n_kept already durable, $n_conflict conflicting), replaced with symlink; pre-migration dir kept at $BACKUP"
