@@ -45,4 +45,7 @@ env store (`docs/env-facts.md`); the file map is `docs/layout.md`.
 - **Adopting the kit elsewhere** = filling an env store, not forking the skills: `setup.sh` creates a
   blank `.context/reference/env/`, `kb.py config-set` sets the switches, facts arrive as skills ask for
   them, `kit-health` proves the wiring (`docs/new-environment.md`). A shared prose layer for a team
-  is a team plugin. `pr-review/config.example.json` is the one per-user file still edited by hand.
+  is a team plugin. `.context/state/pr-review/config.json` — `setup.sh` seeds it once from
+  `pr-review/config.example.json` and never overwrites it — is the one per-user file still edited by hand;
+  the example itself is a kit file, so editing it changes nothing on this machine (`kit-health` § 4 flags an
+  edited example).

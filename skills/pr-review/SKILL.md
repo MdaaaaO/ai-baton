@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "20"
+  version: "22"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack"
@@ -32,8 +32,8 @@ enter its prefix — everything read there is re-billed on every later tick. The
 
 | Steps | Runs in | What enters the main prefix |
 |---|---|---|
-| 1–4 snapshot · KB · review pass · verification | **`review-runner` child** — `Agent(subagent_type: "review-runner")`, Opus `effort: medium`, ≤ 60 turns, no CLAUDE.md (`$BATON/agents/review-runner.md`; prompt + return contract in `reference/runner.md`). It works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`, `kb-traps.md`) — no `gh api contents`, `git show` or CI-log polling | its return only: the 5a overview + `CTX:` / `NEEDS:` / `NOTE:` lines (≤ 3K tokens) |
-| `--auto` trivial-PR pass | **`auto-runner` child** — Sonnet, ≤ 15 turns (`$BATON/agents/auto-runner.md`) | `AUTO:` / `CTX:` / `NEEDS:` lines |
+| 1–4 snapshot · KB · review pass · verification | **`review-runner` child** — `Agent(subagent_type: "review-runner")`, Opus `effort: medium`, ≤ 60 turns, no CLAUDE.md (`$BATON/agents/review-runner.md`; prompt + return contract in `reference/runner.md`). It works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`, `kb-traps.md`) plus the few named exceptions in § Contract | its return only: the 5a overview + `CTX:` / `NEEDS` / `NOTE:` lines (≤ 3K tokens) |
+| `--auto` trivial-PR pass | **`auto-runner` child** — Sonnet, ≤ 15 turns (`$BATON/agents/auto-runner.md`) | `AUTO:` / `CTX:` / `NEEDS` lines |
 | 5 walk · 6 post · 7 replies | **main session** — AskUserQuestion needs the user; the post carries their login | `$CTX/triage.json`, `request.json` / `replies.json`, the script previews |
 | 5b deep dives | one-question `opus` `Agent` spawned from the main session | its ≤ 10-line answer |
 | 8 KB write-back | main session, sourced from `triage.json` `evidence` + the walk decisions | the KB's `## Known traps` slice |
@@ -43,6 +43,15 @@ itself; if a walk question needs them, that is a deep dive (a child reads them).
 three lenses **inside** the runner (it has `Agent`), so the main session sees one return either way.
 `--local` runs steps 1–4 in-session — only for a session that exists for this one review and ends
 after it, never in the `pr-scan` monitor session.
+
+### Contract: bundle vs. live reads
+
+The runner reads only the bundle — never `git show`, never CI-log polling, no `gh api` call the bundle
+already answers. Four reads are live because the bundle cannot hold them, each capped to what its step names:
+a repo's own `CLAUDE.md`/`AGENTS.md` review rules when the PR did not touch that file (step 2.3, else it's
+the bundle's own `head/<path>`); a base blob for a path the PR did not touch (step 4); one named file in an
+external repo when a convention claim needs settling (`agents/review-runner.md` step 4); and a repo-wide
+`ref()`/`exposures` search at the head ref for stakeholder impact (step 4b).
 
 ## 0. Coordinate (repos other sessions also work) *(main session)*
 
@@ -73,9 +82,9 @@ Read, in this order, only the slices you need (`grep -n '^## ' file` first):
    compounding KB** — every past review paid to verify these; check each applicable trap explicitly
    and record the result (hit / not applicable) for the triage sheet.
 2. `.context/pr-reviews/README.md` § "Review workflow" and, for `dbt/models/**`, § "Architecture pass".
-3. The repo's own review rules: its `CLAUDE.md` / `AGENTS.md` review and "PR requirements" sections
-   (live via `gh api contents … ?ref=<head>`, the checkout may be stale) and the conventions in
-   `.context/repos/<repo>.md`.
+3. The repo's own review rules: its `CLAUDE.md` / `AGENTS.md` review and "PR requirements" sections —
+   the bundle's `head/<path>` when the PR touched the file, else one live exception (§ Contract):
+   `gh api contents … ?ref=<head>` — and the conventions in `.context/repos/<repo>.md`.
 4. Open tickets the PR touches — keys matched by `tracker.key_regex` in the title/body: with
    `tracker.kind == jira` and `systems.jira`, `getJiraIssue`; with `tracker.kind == github`, the linked
    GitHub issue (`gh issue view`); plus any open `<KEY>` bug on the same column/vocabulary (grep
