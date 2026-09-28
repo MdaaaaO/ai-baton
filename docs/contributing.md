@@ -163,8 +163,9 @@ the checks it skipped (the env-store ones). Both scanners read the one allow-lis
 pre-PR step for a contributor and the first step of `ci.yml`. `make -C $BATON/context-db ci` runs every gate the CI job runs (§ Where CI runs).
 
 A new native key is added to `NATIVE_KEYS` / `AGENT_KEYS` in `context-db/bin/kit_verify.py` **and** to this table,
-with the reason in the PR — never to a unit alone. `license` is added once the repository has one (a
-spec-strict reader requires it to match the repo licence exactly).
+with the reason in the PR — never to a unit alone. The repository is MIT-licensed (`LICENSE`, linked from
+`README.md` § License); `license: MIT` on a unit is accepted but not required (a spec-strict reader requires it
+to match the repo licence exactly, so set it only when you mean that reader to see it).
 
 ## Secrets
 

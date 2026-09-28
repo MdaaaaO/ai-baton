@@ -19,7 +19,7 @@ bookkeeping goes under `metadata:` as **double-quoted strings** (`migrate_frontm
 | `metadata.requires` | capability tier | comma-separated `systems.*` flags from `kb.SYSTEMS` (`jira slack notion datalake airflow dbt aws_sso incident_io lattice signed_commits`) — the only gate a unit carries |
 | `compatibility` | with `requires` | `"Designed for Claude Code; needs <flag>[, <flag>] (systems.*)"` — names every required flag, ≤ 500 chars |
 | `metadata.facts` | when the body reads a fact | comma-separated `<system>.<kind>[ <name>]` or `<config.key>` entries, each covered by a manifest in `context-db/discovery/` (a fact without one fails); a `systems.<flag>` entry needs no manifest, only a real flag. Every `kit_profile.py get` / `kb.py get` in the body must be declared here, or `kit-verify` fails |
-| `license` `allowed-tools` | spec | accepted; `license` is added once the repo has one |
+| `license` `allowed-tools` | spec | accepted; the repo is MIT-licensed (`LICENSE`), so a unit may set `license: MIT` — none does yet |
 | `user-invocable` | Claude Code | `true` offers `/name`; absent = auto-trigger only |
 | `argument-hint` `arguments` | Claude Code | the `/name` argument line (`<owner/repo> <pr>`) and the named positionals the body reads as `$repo` |
 | `context` `agent` `model` `effort` `background` | Claude Code, forked skills | `context: fork` runs the body in a subagent; `agent:` names the `agents/*.md` it runs under; `model:` / `effort:` pin the tier it is priced for; `background: false` when the main session waits for its result |
