@@ -2,7 +2,7 @@
 name: pr-review
 description: Review someone else's PR as the user: snapshot, repo trap KB, Opus review-runner pass, verified claims, walk each finding with the user (Post, Deep dive, Body only, Skip), post ONE review after approval, reply in threads, write learnings back; trivial PRs (pr-scan `A`) take the Sonnet auto-approve path. For PRs pr-scan surfaces or the user names; never the user's own.
 metadata:
-  version: "16"
+  version: "17"
   updated: "2026-09-27"
   reviewed: "2026-09-26"
   facts: "systems.jira,systems.datalake,systems.slack"
@@ -228,7 +228,7 @@ line outside a hunk) and preview again. The body gets no footer (config `footer`
 2. `## Session log` line in the same file: `- <date> — #<pr> <author> <title> — <event>, <n>
    inline, <hits> traps hit, KB +<n>` (newest first).
 3. Self-assessment drop: append one evidence-linked bullet to
-   `.context/self-assessment/inbox/2026-Wnn--pr-reviews.md` (PR link, author, notable findings, outcome).
+   `.context/self-assessment/inbox/YYYY-Wnn--pr-reviews.md` (PR link, author, notable findings, outcome).
 4. `make -C $BATON/context-db index`; `session-touch` if this session is registered.
 5. If a fast follow needs a ticket, offer `ticket-open` (with the environment's backlog convention for architecture findings, where `environment.md` § Rules names one);
    never assign it to anyone.

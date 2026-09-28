@@ -34,7 +34,7 @@ Rate each finding **STOP / WARN / NIT**:
 | Only WARN/NIT, or questions | `COMMENT` (default) | the user |
 | Nothing blocking, the user read it and is satisfied | `APPROVE` | the user — never inferred |
 | Already approved by a human and we only add nits | `COMMENT`, or skip entirely | the user |
-| Trivial PR (docs-only / dependency patch bump) **the user was asked to review** (direct request or a team in `auto_approve.owner_teams`; never a repo-sweep row) that passed `trivial-check.py` and the Sonnet `auto-runner` pass with zero findings | `APPROVE` on the user's behalf without a walk (mode `live`); mode `shadow` only logs "would approve" | owner's standing decision 2026-09-19 (shadow until 2026-09-26) — the one exception to "never inferred" |
+| Trivial PR (docs-only / dependency patch bump) **the user was asked to review** (direct request or a team in `auto_approve.owner_teams`; never a repo-sweep row) that passed `trivial-check.py` and the Sonnet `auto-runner` pass with zero findings | `APPROVE` on the user's behalf without a walk (mode `live`); mode `shadow` only logs "would approve" | owner's standing decision 2026-09-19 (shadow until the review date in `auto_approve.shadow_review_due`) — the one exception to "never inferred" |
 
 The skill never chooses APPROVE or REQUEST_CHANGES on its own; the recommendation is one line in the triage sheet.
 

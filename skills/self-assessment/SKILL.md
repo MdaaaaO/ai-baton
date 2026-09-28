@@ -2,7 +2,7 @@
 name: self-assessment
 description: Compose the user's weekly self-assessment for a PAST ISO week or range from `.context/` and the systems of record, never live sessions: the week file plus the report block and ledger card the env config asks for, back-filled from the systems of record where `.context/` has no coverage. Invoke as "self-assessment for last week" or "for W37".
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
   facts: "self_assessment.ledger,self_assessment.ledger_url"
@@ -43,7 +43,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
 ## Arguments
 
 - **Which week(s).** Default: the last **completed** ISO week (if today is W38 Monday, that's W37).
-  Accept an explicit `2026-Wnn`, "last week", or a range "last 3 weeks" / `W35..W37`. For a range,
+  Accept an explicit `YYYY-Wnn`, "last week", or a range "last 3 weeks" / `W35..W37`. For a range,
   run the checklist once per week, **oldest → newest** (later weeks reference earlier carry-overs).
 - Weeks are **ISO** (Mon 00:00 → Sun 23:59 **UTC**), named by ISO week number.
 - **`--backfill`** (or "back-fill", "there is no context for that week"): compose from the systems of record alone —
@@ -68,7 +68,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
    - **Required output shape for cross-boundary hits.** The sweeps *will* surface items just outside
      the window (a tracker query bounded on `updated` catches next-week resolutions). Put them in a labelled
      **"Landed just after (W_n+1_)"** tail section — never silently merged into the week, never dropped.
-2. **Read the previous week's file** (`weeks/2026-W{nn-1}.md`) for the exact format and any
+2. **Read the previous week's file** (`weeks/YYYY-W{nn-1}.md`) for the exact format and any
    carry-overs, and the charter README for the fixed section list.
 3. **Source sweep — the authoritative path (no live sessions needed):**
    - **GitHub** — only if `github` is in `self_assessment.sources`. **Three sweeps, not one**
@@ -131,8 +131,9 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      guardrail (`make -C $BATON/context-db verify` warns past 30KB), a live doc keeps only the newest tail;
      **recent-but-not-newest history — including a just-finished week after a trim — lives in
      `archive/<slug>-log.md`** (newest-first). Archive↔live pairs share the slug
-     (`archive/<slug>-log.md` ↔ `<domain>/<slug>.md`). Date-grep both:
-     `grep -rEn '2026-09-(0[7-9]|1[0-3])' <dirs>` (adjust the range). **Exclude** generated files
+     (`archive/<slug>-log.md` ↔ `<domain>/<slug>.md`). Date-grep both, built from step 1's Mon–Sun window
+     (e.g. a window of Sep 7–13 is `` grep -rEn "$(date +%Y)-09-(0[7-9]|1[0-3])" <dirs> `` — `date` supplies
+     the year so the example never goes stale; adjust the month/day range to the window). **Exclude** generated files
      (`INDEX.md`, `SESSION_INDEX.md`) and `sessions/*.md` (live "responsibilities", not dated work);
      **dedupe** hits by (date + headline). Keep only docs inside `self_assessment.scope`.
    - **meetings / 1on1** — only if `meetings` / `1on1` are in `self_assessment.sources` (separate
@@ -145,7 +146,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      `on-call/` monitor docs (+archive); **pr-reviews/README.md** + per-repo files (any environment).
    - **Datalake** — only if `datalake` is in `self_assessment.sources` and `systems.datalake`
      (the datalake's SQL MCP): verify any row-count / dollar-impact claim before it goes in.
-   - *Optional bonus:* existing `inbox/2026-Wnn--*.md` drops are **leads for the *Collaboration* and
+   - *Optional bonus:* existing `inbox/YYYY-Wnn--*.md` drops are **leads for the *Collaboration* and
      *Learnings* sections only** — their real value is narrative/political context no system of record
      holds (an ownership ruling, who unblocked what); they are **never** a source for *Shipped* (that
      needs a tracker key / PR). Verify anything factual against the SoR, never copy blind. (Peer-pinging
@@ -161,8 +162,8 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      "guardrail is ~7× the worst observed" line pins which of two worst-case digits is right (0.1 / 6.8 ≈ 0.0146%).
    - **If nothing arbitrates, drop the contested digit** rather than pick one — a vaguer true
      statement beats a precise wrong one.
-5. **Compose `weeks/2026-Wnn.md`** in the charter's fixed format
-   (`make -C $BATON/context-db new TYPE=self-assessment DOMAIN=self-assessment SLUG=2026-Wnn` if the file is
+5. **Compose `weeks/YYYY-Wnn.md`** in the charter's fixed format
+   (`make -C $BATON/context-db new TYPE=self-assessment DOMAIN=self-assessment SLUG=YYYY-Wnn` if the file is
    new — it always scaffolds into `weeks/`, creating that folder the first time — else edit). Set **`status: archived`** in the
    frontmatter once the week is reconciled — a completed week is a closed record and this self-exempts it from
    the 30KB verify guardrail. A mid-week compose stays `status: active` and says **"week in progress — re-run
@@ -262,5 +263,5 @@ another session's `inbox/` drop.
 
 ## Not in scope
 Contributing a drop *to* a week (any session does that at the end of significant work — see README
-§ Contribution protocol, write only your own `inbox/2026-Wnn--<initiative>.md`). Flushing an initiative's
+§ Contribution protocol, write only your own `inbox/YYYY-Wnn--<initiative>.md`). Flushing an initiative's
 own context doc → `session-handoff`.
