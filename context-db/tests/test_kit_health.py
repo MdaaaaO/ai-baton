@@ -525,9 +525,6 @@ class SandboxMarkers(unittest.TestCase):
             self.assertFalse(kh.sandbox_detected(["KIT_TEST_UNSET", ""]))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class NoTraceback(unittest.TestCase):
     """kit-health degrades to a RED finding, always leaves its report, and exits with the verdict."""
 
@@ -585,3 +582,6 @@ class NoTraceback(unittest.TestCase):
         self.assertIn("--stale DAYS", p.stdout)
         self.assertIn("metadata.reviewed", p.stdout)
         self.assertIn("exit 0 GREEN", p.stdout)
+
+if __name__ == "__main__":
+    unittest.main()
