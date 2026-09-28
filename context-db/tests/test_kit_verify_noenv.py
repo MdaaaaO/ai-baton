@@ -456,6 +456,19 @@ class LoadingTable(unittest.TestCase):
     def marked(self, values: dict[str, str]) -> str:
         return "".join(f"<!-- kit-verify:{k} -->{v}<!-- /kit-verify:{k} -->\n" for k, v in values.items())
 
+    def write_and_read(self, text: str, values: dict[str, str], **kw) -> tuple[str, dict[str, str]]:
+        """Write `text` as docs/loading.md, run `write_loading_table(values, **kw)` against it, and return the
+        file's contents afterwards plus the notes the call returned."""
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = kit_verify.LOADING_MD
+            kit_verify.LOADING_MD = Path(tmp) / "loading.md"
+            kit_verify.LOADING_MD.write_text(text, encoding="utf-8")
+            try:
+                notes = kit_verify.write_loading_table(values, **kw)
+                return kit_verify.LOADING_MD.read_text(encoding="utf-8"), notes
+            finally:
+                kit_verify.LOADING_MD = saved
+
     def test_matching_markers_pass(self):
         want = kit_verify.loading_table_values()
         errors = self.with_doc(self.marked(want), kit_verify.check_loading_table_drift)
@@ -482,6 +495,70 @@ class LoadingTable(unittest.TestCase):
             kit_verify.write_loading_table(kit_verify.loading_table_values())
             kit_verify.check_loading_table_drift(errors)
         self.assertEqual(self.with_doc("intro\n" + self.marked(stale), fix_then_check), [])
+
+    def test_write_leaves_an_in_tolerance_byte_total_untouched(self):
+        # a byte total drifting inside LOADING_BYTES_TOLERANCE must not touch the doc, or every PR that edits
+        # a skill body rewrites the same lines and collides with a parallel one on docs/loading.md.
+        n = kit_verify.loading_numbers()
+        near = dict(kit_verify.loading_table_values({**n, "body_bytes": int(n["body_bytes"] * 1.03)}))
+        doc = self.marked(near)
+        out, notes = self.write_and_read(doc, kit_verify.loading_table_values())
+        self.assertEqual(out, doc)
+        self.assertIn("within 5%, left as is", notes.get("body-bytes", ""))
+
+    def test_write_rewrites_an_out_of_tolerance_byte_total(self):
+        n = kit_verify.loading_numbers()
+        far = dict(kit_verify.loading_table_values({**n, "body_bytes": int(n["body_bytes"] * 1.2)}))
+        doc = self.marked(far)
+        out, notes = self.write_and_read(doc, kit_verify.loading_table_values())
+        self.assertNotEqual(out, doc)
+        self.assertEqual(notes.get("body-bytes"), "(rewritten)")
+        errors: list[str] = []
+        saved = kit_verify.LOADING_MD
+        with tempfile.TemporaryDirectory() as tmp:
+            kit_verify.LOADING_MD = Path(tmp) / "loading.md"
+            kit_verify.LOADING_MD.write_text(out, encoding="utf-8")
+            try:
+                kit_verify.check_loading_table_drift(errors)
+            finally:
+                kit_verify.LOADING_MD = saved
+        self.assertEqual(errors, [])
+
+    def test_write_always_rewrites_a_count_mismatch(self):
+        n = kit_verify.loading_numbers()
+        stale = dict(kit_verify.loading_table_values({**n, "units": n["units"] - 1}))
+        doc = self.marked(stale)
+        out, notes = self.write_and_read(doc, kit_verify.loading_table_values())
+        self.assertNotEqual(out, doc)
+        self.assertEqual(notes.get("units"), "(rewritten)")
+
+    def test_force_rewrites_an_in_tolerance_byte_total_too(self):
+        n = kit_verify.loading_numbers()
+        near = dict(kit_verify.loading_table_values({**n, "body_bytes": int(n["body_bytes"] * 1.03)}))
+        doc = self.marked(near)
+        out, notes = self.write_and_read(doc, kit_verify.loading_table_values(), force=True)
+        self.assertNotEqual(out, doc)
+        self.assertEqual(notes.get("body-bytes"), "(rewritten)")
+
+    def test_write_cli_reports_left_as_is_for_in_tolerance_drift(self):
+        # in-process (not the `run()` subprocess helper): a subprocess re-imports kit_verify fresh and would
+        # read the kit's real docs/loading.md, not this test's temp file
+        n = kit_verify.loading_numbers()
+        near = dict(kit_verify.loading_table_values({**n, "body_bytes": int(n["body_bytes"] * 1.03)}))
+        doc = self.marked(near)
+        saved = kit_verify.LOADING_MD
+        with tempfile.TemporaryDirectory() as tmp:
+            kit_verify.LOADING_MD = Path(tmp) / "loading.md"
+            kit_verify.LOADING_MD.write_text(doc, encoding="utf-8")
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = kit_verify.main(["--loading-table", "--write"])
+                self.assertEqual(rc, 0)
+                self.assertIn("within 5%, left as is", buf.getvalue())
+                self.assertEqual(kit_verify.LOADING_MD.read_text(encoding="utf-8"), doc)
+            finally:
+                kit_verify.LOADING_MD = saved
 
     def test_missing_markers_are_each_reported(self):
         errors = self.with_doc("no markers here\n", kit_verify.check_loading_table_drift)

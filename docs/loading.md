@@ -3,8 +3,10 @@
 Every later turn re-reads the prefix (`WORKSPACE.md` § Cost & context hygiene): cached at ~0.1× input, but an edit
 to an always-on file re-bills it in full for every open session. The kit therefore sorts every file into one of three
 layers, and the always-on layer is the one lever the budgets guard. Numbers below were measured on 2026-09-27
-against the kit at that date; re-measure as § How to measure says (`kit_verify.py --loading-table --write` rewrites the marked numbers). The `<!-- kit-verify:<key> -->` spans are
-machine-checked — `kit-verify` fails the PR when one drifts from what `--loading-table` computes.
+against the kit at that date; re-measure as § How to measure says (`kit_verify.py --loading-table --write` rewrites
+a marker only when it would otherwise fail the drift check — a count that differs, or a byte total outside the
+5% tolerance; add `--force` to refresh every marker regardless, e.g. at release time). The `<!-- kit-verify:<key> -->`
+spans are machine-checked — `kit-verify` fails the PR when one drifts from what `--loading-table` computes.
 
 ## Layer 1 — always on (every session, every turn)
 

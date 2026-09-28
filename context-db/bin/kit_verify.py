@@ -424,16 +424,35 @@ def _within_tolerance(key: str, have: str, want: str) -> bool:
     return abs(h - w) <= LOADING_BYTES_TOLERANCE * w
 
 
-def write_loading_table(values: dict[str, str]) -> None:
-    """Rewrite each marked span in docs/loading.md with the measured value — the fix for a drift finding is a
-    command, never a hand edit. Markers the doc lacks stay missing (the drift check still reports them)."""
+def write_loading_table(values: dict[str, str], *, force: bool = False) -> dict[str, str]:
+    """Rewrite a marked span in docs/loading.md only when the drift check would otherwise fail on it: a count
+    that differs, or a byte total outside LOADING_BYTES_TOLERANCE — the same test `check_loading_table_drift`
+    runs. A byte total within tolerance is left byte-identical, so a PR that only edits a skill body does not
+    also touch docs/loading.md and collide with a parallel one on the same lines. `force=True` (the CLI's
+    `--write --force`, for a deliberate refresh e.g. at release time) rewrites every marker regardless.
+    Markers the doc lacks stay missing (the drift check still reports them). Returns a note per marker whose
+    value differed from what's now measured — "" for an exact match — for the CLI to print alongside it."""
     text = LOADING_MD.read_text(encoding="utf-8")
-    new = LOADING_MARKER.sub(lambda m: f"<!-- kit-verify:{m.group(1)} -->{values.get(m.group(1), m.group(2))}"
-                                       f"<!-- /kit-verify:{m.group(1)} -->", text)
+    notes: dict[str, str] = {}
+
+    def repl(m: re.Match) -> str:
+        key, old = m.group(1), m.group(2)
+        want = values.get(key)
+        if want is None or old == want:
+            return m.group(0)
+        if not force and _within_tolerance(key, old, want):
+            pct = int(LOADING_BYTES_TOLERANCE * 100)
+            notes[key] = f"(doc {old}, within {pct}%, left as is)"
+            return m.group(0)
+        notes[key] = "(rewritten)"
+        return f"<!-- kit-verify:{key} -->{want}<!-- /kit-verify:{key} -->"
+
+    new = LOADING_MARKER.sub(repl, text)
     if new != text:
         tmp = LOADING_MD.with_name(LOADING_MD.name + ".tmp")
         tmp.write_text(new, encoding="utf-8")
         os.replace(tmp, LOADING_MD)
+    return notes
 
 
 def check_loading_table_drift(errors: list[str]) -> None:
@@ -768,15 +787,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-git", action="store_true", help="skip the reviewed-vs-last-edit check (no git history to compare against)")
     ap.add_argument("--loading-table", action="store_true",
                     help="print the numbers docs/loading.md quotes (units, description bytes, bodies, body bytes) and exit")
-    ap.add_argument("--write", action="store_true", help="with --loading-table: rewrite the marked numbers in docs/loading.md")
+    ap.add_argument("--write", action="store_true",
+                    help="with --loading-table: rewrite a marked number in docs/loading.md, but only one the "
+                         "drift check would fail on (a count that differs, or a byte total outside tolerance)")
+    ap.add_argument("--force", action="store_true",
+                    help="with --loading-table --write: also rewrite markers within tolerance (a deliberate "
+                         "refresh, e.g. at release time)")
     ap.add_argument("units", nargs="*", type=Path, help="skill/agent files or dirs to verify (default: every unit; skips the kit-wide totals)")
     a = ap.parse_args(argv)
     if a.loading_table:
         values = loading_table_values()
+        notes = write_loading_table(values, force=a.force) if a.write else {}
         for key, val in values.items():
-            print(f"{key}: {val}")
-        if a.write:
-            write_loading_table(values)
+            note = notes.get(key)
+            print(f"{key}: {val}" + (f" {note}" if note else ""))
         return 0
     saved_kb_env = kb.ENV
     if a.no_env:
