@@ -42,7 +42,21 @@ if [ -n "$bot" ]; then echo "pr-watch: bot mode — polling $bot Assessment + CI
 else echo "pr-watch: no-bot mode (github.review_bot empty) — gating on CI + human review only" >&2; fi
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" identity-env)"  # WORKSPACE_* from plugin userConfig, if set
-me=${PR_WATCH_SELF:-${WORKSPACE_GITHUB_LOGIN:-$(gh api user --jq .login 2>/dev/null || echo unknown)}}
+# Identity must be known: with it wrong (or falling back to a placeholder), the filters below that drop
+# "own" comments/reviews never match, and every reply this session posted comes back as a NEW event forever.
+if [ -n "${PR_WATCH_SELF:-}" ]; then
+  me=$PR_WATCH_SELF
+elif [ -n "${WORKSPACE_GITHUB_LOGIN:-}" ]; then
+  me=$WORKSPACE_GITHUB_LOGIN
+else
+  meerr=$(mktemp)
+  me=$(gh api user --jq .login 2>"$meerr"); mrc=$?
+  if [ $mrc -ne 0 ] || [ -z "$me" ]; then
+    echo "ERROR $1 startup: cannot resolve this session's GitHub identity ($(head -1 "$meerr" | tr -d '\r')) — set PR_WATCH_SELF or WORKSPACE_GITHUB_LOGIN"
+    rm -f "$meerr"; exit 2
+  fi
+  rm -f "$meerr"
+fi
 sync=${PR_WATCH_SYNC:-1}; sync_cool=${PR_WATCH_SYNC_COOLDOWN:-3600}; known_red=${PR_WATCH_KNOWN_RED:-}
 usage() { echo "usage: pr-watch.sh <owner/repo> <pr_number> <head_sha_prefix> [<pr_number> <head_sha_prefix> ...]" >&2; exit 2; }
 repo=$1; [ -z "$repo" ] && usage; shift
@@ -106,7 +120,13 @@ while true; do
               echo "ERROR $repo#$pr $(head -1 "$D/.aerr" | tr -d '\r')"; rm -f "$D/.aerr"
             else
               rm -f "$D/.aerr"
-              appr=$(printf '%s' "$araw" | jq -s --arg bot "$bot" '[.[] | .[] | select(.state=="APPROVED" and .user.login!=$bot)] | length')  # gh api --jq has no --arg (gh-cli skill)
+              # Neither the configured review bot's own approval nor the auto-merge workflow's approving identity
+              # (github-actions[bot], the review named by auto-merge.yml's REVIEWER — a different login than
+              # github.review_bot when the bot posts its Assessment under its own account) counts as the human
+              # approval that would make a push dismiss something worth keeping: without this exclusion a PR
+              # approved only by one of those two never gets synced while it sits BEHIND, and auto-merge — which
+              # requires a clean, non-BEHIND head — never runs.
+              appr=$(printf '%s' "$araw" | jq -s --arg bot "$bot" '[.[] | .[] | select(.state=="APPROVED" and .user.login!=$bot and .user.login!="github-actions[bot]")] | length')  # gh api --jq has no --arg (gh-cli skill)
               if [ "${appr:-0}" -gt 0 ] 2>/dev/null; then
                 if [ "$(getv appr_seen)" != "$cur" ]; then echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing (a push would dismiss the approval where dismiss_stale_reviews is on): merge now, or update-branch and ask for re-approval"; putv appr_seen "$cur"; fi
               else
@@ -137,8 +157,21 @@ while true; do
       rm -f "$verr"
     fi
     # Checks: one line per head, only once nothing is still running, listing every failing check.
+    # statusCheckRollup mixes two node shapes: a CheckRun (status/conclusion/name) and a legacy commit status,
+    # a StatusContext (state/context only — no status or conclusion field at all). Reading status/conclusion off
+    # every node without telling them apart drops every StatusContext silently: it never counts as pending and
+    # never counts as bad, so a PR whose only red signal is an external CI status (a required status context)
+    # gets reported green. Map state to the same tri-state conclusion/status pair a CheckRun carries instead.
     if [ -n "$cur" ] && [ "$(getv notgreen)" != "$cur" ]; then
-      roll=$(gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq '.statusCheckRollup[] | "\(.status // "")\t\(.conclusion // "")\t\(.name // .context // "")"' 2>/dev/null)
+      roll=$(gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq '
+        .statusCheckRollup[] |
+        if .__typename == "StatusContext" then
+          (if (.state=="PENDING" or .state=="EXPECTED") then "IN_PROGRESS" else "COMPLETED" end) as $status |
+          (if .state=="SUCCESS" then "SUCCESS" elif (.state=="PENDING" or .state=="EXPECTED") then "" else "FAILURE" end) as $concl |
+          "\($status)\t\($concl)\t\(.context // "")"
+        else
+          "\(.status // "")\t\(.conclusion // "")\t\(.name // "")"
+        end' 2>/dev/null)
       pend=$(printf '%s\n' "$roll" | awk -F'\t' '$1=="QUEUED"||$1=="IN_PROGRESS"||$1=="PENDING"||$1=="WAITING"||$1=="REQUESTED"' | grep -c . )
       bad=$(printf '%s\n' "$roll" | awk -F'\t' '$1=="COMPLETED" && $2!="" && $2!="SUCCESS" && $2!="SKIPPED" && $2!="NEUTRAL" {print $3": "$2}' | sort -u | tr '\n' ';')
       if [ -n "$bad" ] && [ "$pend" = 0 ]; then
@@ -159,30 +192,51 @@ while true; do
       fi
     fi
     new=""
-    # review comments: skip own, skip bot in-thread replies
-    for rec in $(gh api --paginate "repos/$repo/pulls/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(if .in_reply_to_id then "reply" else "top" end)"' 2>/dev/null); do
-      id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; kind=${rest##*:}
-      grep -qxF "$id" "$D/seen_c" && continue; echo "$id" >>"$D/seen_c"
-      [ -z "$init" ] && continue
-      [ "$login" = "$me" ] && continue
-      [ "$login" = "$bot" ] && [ "$kind" = "reply" ] && continue
-      new="$new; review comment $id by $login ($kind)"
-    done
-    for rec in $(gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state)"' 2>/dev/null); do
-      id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; state=${rest##*:}
-      grep -qxF "$id" "$D/seen_r" && continue; echo "$id" >>"$D/seen_r"
-      [ -z "$init" ] && continue
-      [ "$login" = "$me" ] && continue
-      [ "$login" = "$bot" ] && continue      # bot verdicts are reported via the Assessment line
-      new="$new; review $state by $login"
-    done
-    for rec in $(gh api --paginate "repos/$repo/issues/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login)"' 2>/dev/null); do
-      id=${rec%%:*}; login=${rec##*:}
-      grep -qxF "$id" "$D/seen_i" && continue; echo "$id" >>"$D/seen_i"
-      [ -z "$init" ] && continue
-      [ "$login" = "$me" ] && continue
-      new="$new; issue comment $id by $login"
-    done
+    # review comments: skip own, skip bot in-thread replies. A failed page (rate limit, a transient 5xx) must
+    # never read the same as "no new comments" — that silently drops whatever page failed, possibly for good
+    # (the ids on it are never retried once the state dir has moved past them); report it and skip this listing
+    # for the cycle instead.
+    cerr=$(mktemp)
+    craw=$(gh api --paginate "repos/$repo/pulls/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(if .in_reply_to_id then "reply" else "top" end)"' 2>"$cerr"); crc=$?
+    if [ $crc -ne 0 ]; then echo "ERROR $repo#$pr $(head -1 "$cerr" | tr -d '\r')"
+    else
+      for rec in $craw; do
+        id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; kind=${rest##*:}
+        grep -qxF "$id" "$D/seen_c" && continue; echo "$id" >>"$D/seen_c"
+        [ -z "$init" ] && continue
+        [ "$login" = "$me" ] && continue
+        [ "$login" = "$bot" ] && [ "$kind" = "reply" ] && continue
+        new="$new; review comment $id by $login ($kind)"
+      done
+    fi
+    rm -f "$cerr"
+    rerr=$(mktemp)
+    rraw=$(gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state)"' 2>"$rerr"); rrc=$?
+    if [ $rrc -ne 0 ]; then echo "ERROR $repo#$pr $(head -1 "$rerr" | tr -d '\r')"
+    else
+      for rec in $rraw; do
+        id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; state=${rest##*:}
+        grep -qxF "$id" "$D/seen_r" && continue; echo "$id" >>"$D/seen_r"
+        [ -z "$init" ] && continue
+        [ "$login" = "$me" ] && continue
+        [ "$login" = "$bot" ] && continue      # bot verdicts are reported via the Assessment line
+        new="$new; review $state by $login"
+      done
+    fi
+    rm -f "$rerr"
+    icerr=$(mktemp)
+    iraw=$(gh api --paginate "repos/$repo/issues/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login)"' 2>"$icerr"); icrc=$?
+    if [ $icrc -ne 0 ]; then echo "ERROR $repo#$pr $(head -1 "$icerr" | tr -d '\r')"
+    else
+      for rec in $iraw; do
+        id=${rec%%:*}; login=${rec##*:}
+        grep -qxF "$id" "$D/seen_i" && continue; echo "$id" >>"$D/seen_i"
+        [ -z "$init" ] && continue
+        [ "$login" = "$me" ] && continue
+        new="$new; issue comment $id by $login"
+      done
+    fi
+    rm -f "$icerr"
     [ -n "$new" ] && echo "PR $pr NEW:${new#;}"
     st=$(gh pr view "$pr" --repo "$repo" --json state --jq .state 2>/dev/null)
     [ "$st" = "MERGED" ] && { echo "PR $pr MERGED"; continue; }

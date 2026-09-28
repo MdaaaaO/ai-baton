@@ -2,13 +2,17 @@
 # pr-merge.sh <owner/repo> <pr> — run the merge gates (bot review + approval + 0 open threads) and squash-merge when they hold.
 #   phase 1: wait for the review bot's Assessment on the CURRENT head (review object, via bot-verdict.sh) — skipped
 #     entirely when github.review_bot is empty (no-bot mode gates on CI + human review only; one line at start says which)
-#   phase 2: if BEHIND, update-branch (with expected_head_sha), force a full bot review on the merge head (draft
-#     toggle) when in bot mode, wait again
+#   phase 2: if BEHIND, update-branch (with expected_head_sha), force a full bot review on the merge head by
+#     removing and re-adding the bot as a requested reviewer when in bot mode, wait again
 #   phase 3: squash-merge once state is CLEAN, reviewDecision APPROVED, 0 unresolved threads
 # Every gh listing is paginated (per_page=100 + --paginate, reviewThreads cursor-looped): a PR with >30 reviews
 # or >100 threads otherwise hides the newest verdict / an open thread and the wait never ends.
 # Every gh/graphql call below checks its own exit status: a failed query is an ERROR line (to stdout — the
-# Monitor reads stdout), never read as "no verdict yet" / "0 open threads". Exit 0 = merge attempted.
+# Monitor reads stdout), never read as "no verdict yet" / "0 open threads".
+# Exit 0 = the squash-merge call succeeded AND the PR's merged_at came back set (confirmed merged).
+# Exit 1 = a gate failed, the merge call itself failed, or merged_at was still unset after a call that reported
+#   success (verify by hand — never read exit 0 elsewhere as "merged", only this script's own exit 0).
+# Exit 3 = gave up: CLEAN + APPROVED never held within the deadline (a bot verdict wait or the final poll loop).
 set -u
 R=$1; PR=$2
 KIT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -30,7 +34,11 @@ head_of(){ gh pr view "$PR" --repo "$R" --json headRefOid -q '.headRefOid[0:9]' 
 head_full(){ gh pr view "$PR" --repo "$R" --json headRefOid -q '.headRefOid' 2>"$ERRF"; }   # update-branch needs the FULL sha, not the 9-char display prefix
 merge_state(){ gh pr view "$PR" --repo "$R" --json mergeStateStatus -q .mergeStateStatus 2>"$ERRF"; }
 verdict_on(){ PR_WATCH_BOT_LOGIN=$bot bash "$KIT/skills/pr-watch/bot-verdict.sh" "$R" "$PR" "$1" 2>"$ERRF"; }
-force_review(){ gh pr ready "$PR" --repo "$R" --undo >/dev/null 2>&1; sleep 5; gh pr ready "$PR" --repo "$R" >/dev/null 2>&1; }
+# Remove then re-add the bot as a requested reviewer — a plain re-request is a no-op on a merge-commit head
+# (GitHub thinks it already asked). This replaced flipping the PR to draft and back (`gh pr ready --undo` then
+# `gh pr ready`): that toggle is visible to every other reviewer and cancels any `ready_for_review`-triggered
+# run for the few seconds the PR sits in draft, for no benefit pr-merge.sh needs.
+force_review(){ gh api -X DELETE "repos/$R/pulls/$PR/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$ERRF"; gh api -X POST "repos/$R/pulls/$PR/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$ERRF"; }
 # reviewThreads, cursor-paginated (a PR with >100 threads otherwise hides an open one on page 2 forever).
 open_threads(){
   local o=${R%/*} r=${R#*/} cursor="" total=0 resp rc
@@ -88,7 +96,7 @@ H=$(head_of); [ -n "$H" ] || { err_line; exit 1; }
 if [ -n "$bot" ]; then echo "pr-merge: bot mode — gating on $bot Assessment + CI + human review"
 else echo "pr-merge: no-bot mode (github.review_bot empty) — gating on CI + human review only"; fi
 echo "phase 1: head $H"
-if [ -n "$bot" ]; then wait_verdict "$H" || exit 1; fi
+if [ -n "$bot" ]; then wait_verdict "$H"; wvrc=$?; [ $wvrc -eq 0 ] || { [ $wvrc -eq 3 ] && exit 3; exit 1; }; fi
 ot=$(open_threads); [ $? -eq 0 ] || { err_line; exit 1; }
 [ "$ot" = "0" ] || { echo "open threads after verdict — resolve them, then rerun"; exit 1; }
 st=$(merge_state); [ -n "$st" ] || { err_line; exit 1; }
@@ -98,7 +106,7 @@ if [ "$st" = "BEHIND" ]; then
   sleep 30
   H=$(head_of); [ -n "$H" ] || { err_line; exit 1; }
   echo "phase 2: updated to $H"
-  if [ -n "$bot" ]; then echo "forcing review"; force_review; wait_verdict "$H" || exit 1; fi
+  if [ -n "$bot" ]; then echo "forcing review"; force_review; wait_verdict "$H"; wvrc=$?; [ $wvrc -eq 0 ] || { [ $wvrc -eq 3 ] && exit 3; exit 1; }; fi
   ot=$(open_threads); [ $? -eq 0 ] || { err_line; exit 1; }
   [ "$ot" = "0" ] || { echo "open threads on $H — resolve, then rerun"; exit 1; }
 fi
@@ -115,9 +123,18 @@ EOF_RESP
     rd=$(review_gate_on_head) && [ -n "$rd" ] || { err_line; exit 1; }
   fi
   case "$st $rd" in
-    "CLEAN APPROVED") gh pr merge "$PR" --repo "$R" --squash 2>&1 | tail -1; echo "MERGE ATTEMPTED on $H"; exit 0;;
+    "CLEAN APPROVED")
+      # `gh pr merge`'s own exit status, not the exit status of the `tail` that used to trail it in a pipe —
+      # that piped form reported "MERGE ATTEMPTED" (and exit 0) whether or not the merge actually went through.
+      merr=$(gh pr merge "$PR" --repo "$R" --squash 2>&1); mrc=$?
+      if [ $mrc -ne 0 ]; then echo "MERGE FAILED on $H: $(printf '%s' "$merr" | tail -1)"; exit 1; fi
+      ma=$(gh api "repos/$R/pulls/$PR" --jq '.merged_at' 2>"$ERRF")
+      if [ -n "$ma" ] && [ "$ma" != "null" ]; then echo "MERGED on $H"; exit 0
+      else err_line; echo "gh pr merge reported success but merged_at is still unset on $H — verify by hand"; exit 1
+      fi
+      ;;
     "BLOCKED APPROVED"|"UNSTABLE APPROVED"|"UNKNOWN APPROVED") sleep 60;;   # required checks still running
     "BEHIND APPROVED") echo "BEHIND again (main moved) — rerun"; exit 1;;
     *) echo "state '$st' decision '$rd' — needs a human (approval missing or checks red; NONE = no required review and no approval on this head)"; exit 1;;
   esac
-done; echo "TIMEOUT waiting for CLEAN"; exit 1
+done; echo "gave up: not CLEAN/APPROVED within the deadline"; exit 3
