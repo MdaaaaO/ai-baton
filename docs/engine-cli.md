@@ -183,6 +183,7 @@ Stdlib only; never prints anything from settings.local.json (`identity-env` re-e
 
 ```text
 usage: kit_verify.py [-h] [--stale N] [--no-env] [--no-git] [--loading-table]
+                     [--write]
                      [units ...]
 
 Verify the kit itself — every skill and agent carries the versioning
@@ -201,6 +202,8 @@ options:
                    compare against)
   --loading-table  print the numbers docs/loading.md quotes (units,
                    description bytes, bodies, body bytes) and exit
+  --write          with --loading-table: rewrite the marked numbers in
+                   docs/loading.md
 ```
 
 ## `review_gate.py`

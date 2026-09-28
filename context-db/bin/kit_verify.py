@@ -46,6 +46,7 @@ Run via `make -C $BATON/context-db kit-verify`. Stdlib only.
 from __future__ import annotations
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -420,6 +421,18 @@ def _within_tolerance(key: str, have: str, want: str) -> bool:
     return abs(h - w) <= LOADING_BYTES_TOLERANCE * w
 
 
+def write_loading_table(values: dict[str, str]) -> None:
+    """Rewrite each marked span in docs/loading.md with the measured value — the fix for a drift finding is a
+    command, never a hand edit. Markers the doc lacks stay missing (the drift check still reports them)."""
+    text = LOADING_MD.read_text(encoding="utf-8")
+    new = LOADING_MARKER.sub(lambda m: f"<!-- kit-verify:{m.group(1)} -->{values.get(m.group(1), m.group(2))}"
+                                       f"<!-- /kit-verify:{m.group(1)} -->", text)
+    if new != text:
+        tmp = LOADING_MD.with_name(LOADING_MD.name + ".tmp")
+        tmp.write_text(new, encoding="utf-8")
+        os.replace(tmp, LOADING_MD)
+
+
 def check_loading_table_drift(errors: list[str]) -> None:
     """docs/loading.md quotes these numbers in prose; `<!-- kit-verify:<key> --><!-- /kit-verify:<key> -->` marks
     the exact span so a later PR's description or a new skill's body cannot leave it stale — the same
@@ -432,10 +445,10 @@ def check_loading_table_drift(errors: list[str]) -> None:
     for key, want in loading_table_values().items():
         if key not in have:
             errors.append(f"docs/loading.md: no <!-- kit-verify:{key} --> marker — add one around the number and "
-                          "re-run `kit_verify.py --loading-table`")
+                          "re-run `kit_verify.py --loading-table --write`")
         elif have[key] != want and not _within_tolerance(key, have[key], want):
             errors.append(f"docs/loading.md: <!-- kit-verify:{key} --> says {have[key]!r}, kit-verify now computes "
-                          f"{want!r} — re-measure (`kit_verify.py --loading-table`) and update the doc")
+                          f"{want!r} — run `kit_verify.py --loading-table --write`")
 
 
 def check_always_on_budget(errors: list[str]) -> None:
@@ -473,7 +486,7 @@ def check_description(rel, fm, errors: list[str]) -> int:
 # A description is what loads into every session's prefix; a reader (human or the trigger evals) must be able
 # to tell WHEN a unit fires from it alone. Warn only for now — about a third of the units predate this rule
 # and a wording pass on every one of them is a separate, editorial piece of work; the next release
-# turns this into a failure (docs/authoring.md).
+# turns this into a failure (docs/authoring.md § the frontmatter table says so).
 FIRST_PERSON = re.compile(r"\b(I|I'm|I've|my|our|myself)\b")
 
 
@@ -745,11 +758,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-git", action="store_true", help="skip the reviewed-vs-last-edit check (no git history to compare against)")
     ap.add_argument("--loading-table", action="store_true",
                     help="print the numbers docs/loading.md quotes (units, description bytes, bodies, body bytes) and exit")
+    ap.add_argument("--write", action="store_true", help="with --loading-table: rewrite the marked numbers in docs/loading.md")
     ap.add_argument("units", nargs="*", type=Path, help="skill/agent files or dirs to verify (default: every unit; skips the kit-wide totals)")
     a = ap.parse_args(argv)
     if a.loading_table:
-        for key, val in loading_table_values().items():
+        values = loading_table_values()
+        for key, val in values.items():
             print(f"{key}: {val}")
+        if a.write:
+            write_loading_table(values)
         return 0
     saved_kb_env = kb.ENV
     if a.no_env:
