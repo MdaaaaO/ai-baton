@@ -317,9 +317,10 @@ class StagingRuleIsExplicit(unittest.TestCase):
 class RunJobTimeout(unittest.TestCase):
     """A job script that hangs (a stuck `git push`/network call inside "sh <job>") used to block
     `run_job` forever; it must now be killed after SIGN_QUEUE_JOB_TIMEOUT and reported as a timeout
-    instead of holding the drain open indefinitely."""
+    instead of holding the drain open indefinitely — including when the hang is a GRANDCHILD (a job
+    that shells out, and that in turn hangs), not just the job's own top-level "sh <job>" process."""
 
-    def test_a_hung_job_is_killed_not_left_to_hang(self):
+    def test_a_hung_grandchild_is_killed_and_the_reader_returns(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             ctx = tmp / "ws" / ".context"
@@ -328,7 +329,15 @@ class RunJobTimeout(unittest.TestCase):
             with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(ctx)}, clear=True):
                 sq = load_signq()
             job_path = tmp / "20260101T000000Z-topic-t.sh"
-            job_path.write_text('# META {"topic": "t"}\nsleep 5\necho "pushed deadbeefdeadbeef G subject"\n')
+            # `sh -c "sleep 999; :" &` forks a real grandchild (the trailing `:` stops the nested
+            # shell from exec-replacing itself with `sleep`, the usual tail-call optimisation) —
+            # `sleep 999` sits two process levels below the job's own "sh <job>", the shape a job
+            # that shells out to git/gh and THAT hangs would actually have.
+            job_path.write_text(
+                '# META {"topic": "t"}\n'
+                'sh -c "sleep 999; :" &\n'
+                'wait\n'
+                'echo "pushed deadbeefdeadbeef G subject"\n')
             j = sq.Job(job_path)
             os.environ["SIGN_QUEUE_JOB_TIMEOUT"] = "1"
             try:
@@ -339,9 +348,28 @@ class RunJobTimeout(unittest.TestCase):
                 elapsed = time.monotonic() - start
             finally:
                 os.environ.pop("SIGN_QUEUE_JOB_TIMEOUT", None)
-            self.assertLess(elapsed, 4, "run_job did not return until the job's own 5s sleep finished — no timeout enforced")
+            self.assertLess(elapsed, 6, "run_job did not return until the grandchild's own 999s sleep "
+                                        "finished — the timeout did not reach the whole process tree")
             self.assertNotEqual(result["status"], "pushed")
             self.assertIn("timed out after 1s", buf.getvalue())
+
+    def test_run_job_never_starts_a_new_session_or_process_group(self):
+        # a job may need the controlling terminal for ssh-keygen -Y sign / ssh to prompt for a
+        # passphrase; start_new_session (or any setpgrp/preexec_fn=os.setsid) would take that tty
+        # away and turn a passphrase prompt into a silent SIGTTIN hang instead — worse than the bug
+        # this file fixes. This greps the actual Popen call, not just behaviour, so a future edit
+        # that re-adds either one fails here even before it can change run_job's observable timing.
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Path(tmp) / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
+            with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(ctx)}, clear=True):
+                sq = load_signq()
+        import inspect
+        src = inspect.getsource(sq.run_job)
+        self.assertNotIn("start_new_session", src)
+        self.assertNotIn("process_group", src)
+        self.assertNotIn("preexec_fn", src)
 
 
 if __name__ == "__main__":

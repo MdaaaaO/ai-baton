@@ -101,6 +101,42 @@ class WithLock(unittest.TestCase):
             p.wait(timeout=10)
             self.assertFalse(Path(f"{lock}.d").exists(), "TERM must still run the release trap")
 
+    @staticmethod
+    def _dead_pid() -> int:
+        p = subprocess.Popen(["true"])
+        p.wait()
+        return p.pid
+
+    def test_mkdir_fallback_reclaims_a_dead_owners_lock(self):
+        # same shape and wording as sync.sh's own take_lockdir: a lock dir stamped with a pid that is
+        # no longer running (on this host) is stale, not busy, and is taken over — never left to wedge
+        # every later caller forever just because the process that made it never got to clean up.
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = Path(tmp) / ".x.lock"
+            lockdir = Path(f"{lock}.d")
+            lockdir.mkdir()
+            hostname = subprocess.run(["hostname"], capture_output=True, text=True).stdout.strip()
+            (lockdir / "owner").write_text(f"{self._dead_pid()} {hostname}\n")
+            # rc=0 (not just the dir vanishing) is what proves it was reclaimed and re-taken, not just
+            # deleted-and-abandoned; the EXIT trap releases it again the moment this one-liner ends,
+            # so checking the dir's existence afterwards would not tell reclaim and no-op apart.
+            r = run_sh(f'with_lock "{lock}"; echo "rc=$?"', path=path_without("flock"))
+            self.assertIn("rc=0", r.stdout, r.stderr)
+            self.assertIn("removed a stale lock", r.stderr)
+
+    def test_mkdir_fallback_never_reclaims_a_live_owners_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = Path(tmp) / ".x.lock"
+            lockdir = Path(f"{lock}.d")
+            lockdir.mkdir()
+            hostname = subprocess.run(["hostname"], capture_output=True, text=True).stdout.strip()
+            (lockdir / "owner").write_text(f"{os.getpid()} {hostname}\n")
+            r = run_sh(f'with_lock "{lock}"; echo "rc=$?"', path=path_without("flock"))
+            self.assertIn("rc=1", r.stdout, r.stderr)
+            self.assertNotIn("removed a stale lock", r.stderr)
+            self.assertEqual((lockdir / "owner").read_text(), f"{os.getpid()} {hostname}\n",
+                             "a live owner's lock must be left alone, not overwritten")
+
 
 class Detach(unittest.TestCase):
     def _detach_gets_its_own_process_group(self, path: str | None):

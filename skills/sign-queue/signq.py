@@ -35,6 +35,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -422,6 +423,59 @@ SIG = {"G": "signed ✓", "U": "signed, untrusted key", "B": "BAD signature", "N
        "X": "expired sig", "Y": "expired key", "R": "revoked key"}
 
 
+def _descendants(pid: int) -> List[int]:
+    """Every process descended from pid, BFS one generation at a time — `pgrep -P <ppid>` is the
+    portable way to ask (POSIX-ish; ships with Linux's procps and with macOS out of the box), unlike
+    walking /proc (Linux-only, absent on macOS/BSD). A `pgrep` that finds nothing exits non-zero with
+    empty stdout, same as "no children" — never treated as an error here."""
+    out: List[int] = []
+    frontier = [pid]
+    while frontier:
+        nxt: List[int] = []
+        for p in frontier:
+            r = subprocess.run(["pgrep", "-P", str(p)], capture_output=True, text=True)
+            nxt.extend(int(x) for x in r.stdout.split())
+        out.extend(nxt)
+        frontier = nxt
+    return out
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _kill_tree(root: int, grace: float = 2.0) -> None:
+    """SIGTERM, then (after `grace` seconds) SIGKILL, every process descended from `root` — a job's
+    `sh <job>` and everything it forked (git, gh, a hung `sleep` two levels down) — children before
+    the parent each pass, so a parent never disappears out from under a child pgrep might otherwise
+    still need to place in the tree. Runs in the caller's own session and process group throughout
+    (never `start_new_session` / `setpgrp` on the job's Popen): a job may need the controlling
+    terminal for `ssh-keygen -Y sign` / `ssh` to prompt for a passphrase on /dev/tty, and a background
+    process GROUP that tries to read the tty gets SIGTTIN, not a prompt — a hang worse than the one
+    this is guarding against. `root` itself may already be gone by the time this runs; killing a pid
+    that no longer exists is not an error."""
+    tree = _descendants(root) + [root]
+    for pid in reversed(tree):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline and any(_alive(pid) for pid in tree):
+        time.sleep(0.1)
+    for pid in reversed(tree):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def run_job(j: Job, verbose: bool, dry: bool) -> Dict[str, str]:
     LOGS.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
@@ -434,25 +488,21 @@ def run_job(j: Job, verbose: bool, dry: bool) -> Dict[str, str]:
     start = _dt.datetime.now()
     # A job script chains git fetch/rebase/push (and sometimes gh); none of that has its own
     # timeout once it is inside "sh <job>". A hung remote or a credential prompt would otherwise
-    # block this read loop forever. JOB_TIMEOUT bounds the whole job. `sh <job>` may itself fork
-    # (git, gh): killing only that top process leaves a grandchild running with the same stdout
-    # pipe held open, so the read below would never see EOF — start_new_session=True puts the
-    # whole tree in its own process group and the Timer signals that group, not just the one pid.
+    # block this read loop forever. JOB_TIMEOUT bounds the whole job; _kill_tree takes down the
+    # job's whole process tree (not just "sh <job>" itself — a grandchild left running would keep
+    # the stdout pipe's write end open and the read below would never see EOF).
     JOB_TIMEOUT = int(os.environ.get("SIGN_QUEUE_JOB_TIMEOUT", "300"))
     timed_out = threading.Event()
 
-    def _kill_group(pid: int) -> None:
+    def _on_timeout(pid: int) -> None:
         timed_out.set()
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass  # already gone
+        _kill_tree(pid)
 
     with j.log.open("a") as log:
         log.write(f"\n===== {now_z()} run {j.name}\n")
         p = subprocess.Popen(["sh", str(j.path)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, env=env, bufsize=1, stdin=subprocess.DEVNULL, start_new_session=True)
-        timer = threading.Timer(JOB_TIMEOUT, _kill_group, args=(p.pid,))
+                             text=True, env=env, bufsize=1, stdin=subprocess.DEVNULL)
+        timer = threading.Timer(JOB_TIMEOUT, _on_timeout, args=(p.pid,))
         timer.start()
         tail: List[str] = []
         try:
@@ -479,6 +529,8 @@ def run_job(j: Job, verbose: bool, dry: bool) -> Dict[str, str]:
             rc = p.wait()
         finally:
             timer.cancel()
+            if p.stdout is not None:
+                p.stdout.close()  # the tree is dead (or never existed): release the pipe, not just let it leak
         if timed_out.is_set():
             log.write(f"===== timed out after {JOB_TIMEOUT}s, killed\n")
         else:

@@ -1,4 +1,4 @@
-# shellcheck shell=dash  # sourced by both /bin/sh (sync.sh) and bash scripts — POSIX only, no bashisms
+# shellcheck shell=dash  # sourced by pr-scan.sh, pr-watch.sh, heartbeat.sh (all bash) — POSIX only, no bashisms
 # skills/_lib/portable.sh — POSIX-shell helpers so a kit script behaves the same on GNU/Linux and
 # on macOS/BSD (bash 3.2, BSD `date`/`sed`/`awk`, no `flock` or `setsid` on PATH). Not a skill — no
 # SKILL.md, nothing here is invoked directly — source it: `. "$KIT/skills/_lib/portable.sh"`.
@@ -8,10 +8,12 @@
 #   epoch_to_iso <epoch seconds>        -> ISO-8601 UTC (`%Y-%m-%dT%H:%M:%SZ`) on stdout
 #   with_lock <lock-path>               -> 0 = locked (proceed), 1 = another instance holds it;
 #                                          `flock` (fd 9) where it exists, else an atomic `mkdir`
-#                                          released by EXIT/INT/TERM traps this call installs (INT/TERM
-#                                          also `exit`, so the signal still ends the process) — a
-#                                          caller that needs its own traps too must compose them after
-#                                          calling with_lock, not before
+#                                          stamped with the owner's pid+host (sync.sh's own approach:
+#                                          a dead owner's lock is reclaimed, a live one's never is)
+#                                          and released by EXIT/INT/TERM traps this call installs
+#                                          (INT/TERM also `exit`, so the signal still ends the
+#                                          process) — a caller that needs its own traps too must
+#                                          compose them after calling with_lock, not before
 #   detach <log-file> <cmd> [args…]     -> run <cmd> in the background, detached from this shell's
 #                                          process group and controlling terminal (so a supervisor
 #                                          that kills "the process group" after a timeout does not
@@ -33,8 +35,17 @@ epoch_to_iso() {
 
 # with_lock <path> — non-blocking. On a host with `flock`, opens <path> on fd 9 and flocks it (held
 # for the life of this process, released when it exits — no trap needed there). Without `flock`
-# (macOS without coreutils), takes an atomic `mkdir "<path>.d"` instead and installs an EXIT/INT/TERM
-# trap to remove it, so a normal exit or a signal never leaves the next run permanently locked out.
+# (macOS without coreutils), takes an atomic `mkdir "<path>.d"` instead, stamping `<pid> <host>` into
+# `<path>.d/owner` — sync.sh's own `take_lockdir` shape. A lock dir already there is stale, and
+# reclaimed, only when its owner pid was recorded on THIS host (never guessed at across hosts sharing
+# the path over a network mount) and `kill -0` says it is gone; a live owner's lock is never touched.
+# Reclaiming is itself serialised by a second mkdir lock (`<path>.d.break`), re-checking the owner
+# under it, so two callers that both saw the same dead owner can never both remove-and-retake it (the
+# second would delete the first's fresh lock) — same race sync.sh closes the same way. "with_lock:
+# removed a stale lock …" goes to stderr when this happens. The winning lock (fresh or reclaimed) is
+# released by EXIT/INT/TERM traps this call installs (INT/TERM also `exit`, so the signal still ends
+# the process — a trap that only cleans up and returns would leave the caller running, unkillable by
+# ^C/kill, with its lock already gone under it).
 with_lock() {
   if command -v flock >/dev/null 2>&1; then
     exec 9>"$1"
@@ -42,10 +53,34 @@ with_lock() {
     return $?
   fi
   _portable_lockdir="$1.d"
-  mkdir "$_portable_lockdir" 2>/dev/null || return 1
-  # EXIT alone releases it on a normal return; INT/TERM must also `exit` (a trap that only cleans up
-  # and returns does NOT end the script — the caller would keep running, unkillable by ^C/kill, with
-  # its lock already gone under it) so the signal still ends the process the way its default did.
+  if mkdir "$_portable_lockdir" 2>/dev/null; then
+    _portable_own=1
+  else
+    _portable_own=""
+    _portable_owner_line=$(cat "$_portable_lockdir/owner" 2>/dev/null)
+    _portable_opid=${_portable_owner_line%% *}
+    _portable_ohost=${_portable_owner_line#* }
+    case "$_portable_opid" in '' | *[!0-9]*) _portable_opid="" ;; esac
+    if [ -n "$_portable_opid" ] && [ "$_portable_ohost" = "$(hostname 2>/dev/null)" ] \
+       && ! kill -0 "$_portable_opid" 2>/dev/null; then
+      # a dead owner on this host: reclaim it, but only after a second lock serialises the
+      # break-and-retake and a re-check under it still sees the SAME dead owner (not a fresh
+      # one another caller already took in the gap since the check above)
+      if mkdir "$_portable_lockdir.break" 2>/dev/null; then
+        if [ "$(cat "$_portable_lockdir/owner" 2>/dev/null)" = "$_portable_owner_line" ]; then
+          rm -rf "$_portable_lockdir"
+          if mkdir "$_portable_lockdir" 2>/dev/null; then
+            _portable_own=1
+            echo "with_lock: removed a stale lock ($_portable_lockdir, owner pid $_portable_opid is gone)" >&2
+          fi
+        fi
+        rmdir "$_portable_lockdir.break" 2>/dev/null
+      fi
+    fi
+  fi
+  [ -n "$_portable_own" ] || return 1
+  printf '%s %s\n' "$$" "$(hostname 2>/dev/null)" > "$_portable_lockdir/owner"
+  # EXIT alone releases it on a normal return; INT/TERM must also `exit` (see the block comment above).
   trap 'rm -rf "$_portable_lockdir"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
