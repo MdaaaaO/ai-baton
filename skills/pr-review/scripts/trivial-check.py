@@ -7,13 +7,15 @@ Reads .context/state/pr-review/config.json `auto_approve` (PR_REVIEW_HOME overri
 `reasons` lists every failed gate (empty when eligible). Exit 0 always unless the API fails — then
 {"eligible": false, "error": true, "reasons": [...]} and exit 1 (callers must treat error=true as NOT eligible).
 `--head SHA` refuses (reason "head moved") when the live head differs — submit-review.sh --auto passes the reviewed head.
-`--head` with an empty or non-40-hex value (an unset shell variable in the caller) exits 2: it never disarms the check.
+`--head SHA` / `--head=SHA` with an empty or non-40-hex value (an unset shell variable in the caller), a
+repeated --head, or any other `--` flag exits 2: nothing disarms the check or is dropped silently.
 Never posts anything. A PR is eligible only if EVERY gate passes:
   - the user is a requested reviewer (login in requested_reviewers, or a requested team in auto_approve.owner_teams) — repo-sweep PRs never qualify
   - open, not draft, base == default branch (no stacked PRs), author != login, no human CHANGES_REQUESTED, 0 unresolved review threads
   - no file matches an exclude glob; files <= max_files; non-lock lines <= max_lines
   - class docs: every file is a docs path (md/rst/txt outside manifests, docs/**); agent instructions
-    (SKILL.md, agents/**, WORKSPACE.md, CLAUDE.md, AGENTS.md) are behaviour, never docs, whatever the config says
+    (SKILL.md, skills/*/reference/**,
+    agents/**, commands/**, WORKSPACE.md, CLAUDE.md, AGENTS.md) are behaviour, never docs, whatever the config says
   - class patch-bump: every file is a manifest/lockfile; every changed line in a non-lock manifest is
     the same line with only a version literal changed, and that line has the dependency-pin shape of
     its manifest's ecosystem (DEP_SHAPES — a changed date, IP or section number is not a bump); every
@@ -133,7 +135,7 @@ DEP_SHAPES = [
     ("package.json", re.compile(r'^\s*"(?P<name>(?:@[a-z0-9._-]+/)?[a-z0-9._-]+)"\s*:\s*"[\^~]?§"\s*,?\s*$'), True),
     ("go.mod", re.compile(r"^\s*(?:require\s+)?(?P<name>[a-z0-9.-]+\.[a-z]+/[A-Za-z0-9._/~-]+)\s+§(?:\s*//\s*indirect)?\s*$")),
     ("Dockerfile", re.compile(r"^\s*FROM\s+(?:--platform=\S+\s+)?(?P<name>[a-z0-9][a-z0-9./_-]*):§(?:\s+AS\s+[A-Za-z0-9_.-]+)?\s*$", re.I)),
-    ("Dockerfile", re.compile(r"^\s*(?:ARG|ENV)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*_VERSION)=([\"']?)§\2\s*$", re.I)),
+    ("Dockerfile", re.compile(r"^\s*(?:ARG|ENV)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*_VERSION)=([\"']?)§\2\s*$", re.I), True),
     (".pre-commit-config.yaml", re.compile(r"^\s*rev:\s*([\"']?)§\1\s*(?:#[^§]*)?$")),
     ("packages.yml", re.compile(r"^\s*version:\s*([\"']?)§\1\s*(?:#[^§]*)?$")),
     (".tool-versions", re.compile(r"^\s*" + _N + r"\s+§\s*$")),
@@ -141,10 +143,12 @@ DEP_SHAPES = [
     ("Cargo.toml", re.compile(r"^\s*" + _N + r"\s*=\s*\{\s*version\s*=\s*\"[\^~=]?§\"[^§]*\}\s*$")),
     (".python-version", re.compile(r"^\s*§\s*$")),
 ]
-# keys that a `key = "version"` shape (third field True) also matches but that name the project itself
-# or its runtime, not a dependency
+# keys that a `key = "version"` / `ARG X_VERSION=` shape (third field True) also matches but that name the
+# project itself, its release or its runtime, not a dependency
 NOT_DEPS = {"version", "requires-python", "python", "python_version", "target-version", "rust-version",
-            "edition", "minversion", "node", "npm"}
+            "edition", "minversion", "node", "npm", "current_version", "__version__", "project_version",
+            "app_version", "release_version", "image_version", "build_version", "service_version",
+            "package_version", "version_info"}
 
 def dep_name(path, line):
     """The dependency a manifest line pins ("?" when the shape carries no name), or None when the line
@@ -163,25 +167,34 @@ def dep_name(path, line):
 
 # Agent instructions look like Markdown but change behaviour: never "docs", whatever docs_globs says.
 AGENT_DOCS = ["SKILL.md", "**/SKILL.md", "agents/**", "**/agents/**", "WORKSPACE.md", "**/WORKSPACE.md",
-              "CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "**/AGENTS.md"]
+              "CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "**/AGENTS.md", "skills/*/reference/**",
+              "**/skills/*/reference/**", "commands/**", "**/commands/**", ".claude/commands/**", "**/.claude/commands/**"]
 
 def is_docs_path(path, aa):
     return (glob_any(path, aa.get("docs_globs", [])) and not glob_any(path, aa.get("docs_exclude_globs", []) + AGENT_DOCS)
             and not glob_any(path, aa.get("manifest_globs", [])) and not glob_any(path, aa.get("lock_globs", [])))
 
-def head_arg(argv):
-    """Pop `--head SHA` from argv; SystemExit(2) when it is given without a full 40-hex sha."""
-    if "--head" not in argv: return None
-    i = argv.index("--head"); val = argv[i+1] if i+1 < len(argv) else ""; del argv[i:i+2]
-    if not re.fullmatch(r"[0-9a-f]{40}", val):
-        print(f"error: --head needs the full 40-char sha, got {val!r}", file=sys.stderr); sys.exit(2)
-    if "--head" in argv:
+def parse_args(argv):
+    """Return (positional, head). `--head SHA` and `--head=SHA` both need the full 40-hex sha; an empty,
+    short or repeated --head, or any other `--` flag, exits 2 — nothing is dropped silently."""
+    pos = []; heads = []; i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--head":
+            heads.append(argv[i+1] if i+1 < len(argv) else ""); i += 2; continue
+        if a.startswith("--head="):
+            heads.append(a[len("--head="):]); i += 1; continue
+        if a.startswith("--"):
+            print(f"error: unknown flag {a!r}", file=sys.stderr); sys.exit(2)
+        pos.append(a); i += 1
+    if len(heads) > 1:
         print("error: --head given twice", file=sys.stderr); sys.exit(2)
-    return val
+    if heads and not re.fullmatch(r"[0-9a-f]{40}", heads[0]):
+        print(f"error: --head needs the full 40-char sha, got {heads[0]!r}", file=sys.stderr); sys.exit(2)
+    return pos, (heads[0] if heads else None)
 
 def main():
-    argv = sys.argv[1:]; want_head = head_arg(argv)
-    args = [a for a in argv if not a.startswith("--")]
+    args, want_head = parse_args(sys.argv[1:])
     if len(args) != 2: print(__doc__); sys.exit(2)
     repo, pr = args[0], args[1]; o, r = repo.split("/")
     res = {"repo": repo, "pr": int(pr), "eligible": False, "class": None, "reasons": [], "packages": []}

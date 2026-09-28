@@ -138,6 +138,36 @@ class TrivialCheck(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, (ok, r.stderr))
                 self.assertIn("auto_approve.mode=off", r.stdout)
 
+    def test_reference_and_command_files_are_never_docs(self):
+        example = json.loads((KIT / "pr-review" / "config.example.json").read_text(encoding="utf-8"))["auto_approve"]
+        for path in ("skills/pr-review/reference/scope.md", "kit/skills/x/reference/deep/a.md",
+                     ".claude/commands/ship.md", "commands/review.md", "plugin/commands/x.md"):
+            self.assertFalse(self.tc.is_docs_path(path, example), path)
+
+    def test_own_version_keys_are_not_dependency_pins(self):
+        d = self.tc.dep_name
+        for path, line in (("pyproject.toml", 'current_version = "1.2.3"'), ("pyproject.toml", '__version__ = "1.2.3"'),
+                           ("pyproject.toml", 'project_version = "1.2.3"'), ("Dockerfile", "ARG APP_VERSION=1.2.3"),
+                           ("Dockerfile", "ENV PROJECT_VERSION=1.2.3"), ("Dockerfile", "ARG RELEASE_VERSION=1.2.3"),
+                           ("Dockerfile.prod", 'ARG IMAGE_VERSION="1.2.3"'), ("Dockerfile", "ARG CURRENT_VERSION=1.2.3")):
+            self.assertIsNone(d(path, line), (path, line))
+        self.assertEqual(d("Dockerfile", "ARG RUFF_VERSION=0.4.1"), "RUFF_VERSION")  # a tool pin still is one
+
+    def test_head_equals_form_and_unknown_flags(self):
+        script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
+        sha = "cd" * 20
+        with tempfile.TemporaryDirectory() as ctx:
+            env = dict(os.environ, PR_REVIEW_HOME=self.tmp.name, CONTEXT_ROOT=ctx)
+            run = lambda *a: subprocess.run([sys.executable, str(script), *a], capture_output=True, text=True, env=env)
+            for bad in (["o/r", "1", "--head="], ["o/r", "1", "--head=" + sha[:12]], ["o/r", "1", f"--head={sha}", "--head", sha],
+                        ["o/r", "1", "--dry-run"], ["--skip-ci", "o/r", "1"]):
+                r = run(*bad)
+                self.assertEqual(r.returncode, 2, (bad, r.stdout, r.stderr))
+                self.assertNotIn('"eligible"', r.stdout, bad)
+            r = run("o/r", "1", f"--head={sha}")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("auto_approve.mode=off", r.stdout)
+
     def test_agent_instructions_are_never_docs(self):
         example = json.loads((KIT / "pr-review" / "config.example.json").read_text(encoding="utf-8"))["auto_approve"]
         legacy = {"docs_globs": example["docs_globs"]}  # a config seeded before the exclusions existed
