@@ -351,8 +351,8 @@ Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
 
 Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
-`context-db/ctx-store/` (idempotent; a store file the user changed is a finding, never overwritten, unless
-`--replace`), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
+`context-db/ctx-store/` (idempotent; a store file whose content differs from the kit's — a user's edit, or a schema
+the kit has since changed; ctx cannot tell them apart — is kept and reported, exit 5, unless `--replace`), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
 is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
@@ -386,7 +386,7 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
   python3 ctx_adapter.py hook <name>      # one of the hooks above; hook JSON on stdin
 
 Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
-4 not adopted (`adopt --check`). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
+4 not adopted (`adopt --check`) · 5 adopted, but a store file differs from the kit's (kept; `adopt --replace`). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
 
 positional arguments:
   {version,where,install,adopt,mcp,mcp-json,ctx,hook}

@@ -1142,7 +1142,7 @@ def ctx_store(r: Report) -> None:
                               f"`{adapter} install && {adapter} adopt`")
     elif rc == 4:
         r.add(WARN, "engine", f"store not adopted: `.context/` is not a ctx store, so the hooks neither validate nor route "
-                              f"writes through ctx — `{adapter} adopt` (once; it never overwrites)")
+                              f"writes through ctx — `{adapter} adopt` (`ctx init`; a store file you changed is kept)")
     elif rc == 3:
         found = [ln[len("finding: "):] for ln in out.splitlines() if ln.startswith("finding: ")]
         r.add(WARN, "engine", f"ctx validate: {len(found)} finding(s) in the store — fix each with the ctx tools:\n```\n"

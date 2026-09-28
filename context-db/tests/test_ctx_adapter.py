@@ -486,8 +486,9 @@ class Adopt(Base):
         mine = '{"frontmatter": {"title": {"required": true}}}\n'  # the user changed a schema: a finding, kept
         (self.root / ".ctx" / "types" / "log.json").write_text(mine, encoding="utf-8")
         r = self.adapter("adopt", **env)
-        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)  # not 3: that code is validation findings
         self.assertIn("adopt --replace", r.stdout)
+        self.assertIn("adopt: ok", r.stdout)  # validate and adopt still ran
         self.assertEqual((self.root / ".ctx" / "types" / "log.json").read_text(encoding="utf-8"), mine)
         self.assertEqual(self.adapter("adopt", "--replace", **env).returncode, 0)
         self.assertEqual((self.root / ".ctx" / "types" / "log.json").read_text(encoding="utf-8"),
