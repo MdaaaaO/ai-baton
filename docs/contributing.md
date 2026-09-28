@@ -63,7 +63,9 @@ A skill is `skills/<name>/SKILL.md` (+ files beside it); an agent is one file `a
 **Floor tier — every skill.** `name` + `description` and a body that **runs on any machine or stops with one
 line** (`<skill>: not applicable here — <why>`). The description is the trigger, not the procedure:
 `<what>. Use when <the situations>. Not for <the near misses>.` — near-miss exclusions are part of it, and every
-skill ships ≥ 10 trigger cases with negatives from the same domain (`evals/<skill>-<case>/`, `claude plugin eval`). Nothing in a
+**new or changed** skill ships ≥ 10 trigger cases with negatives from the same domain (`evals/<skill>-<case>/`,
+`claude plugin eval`). Most existing skills predate the suite and have none yet: `eval_check.py` notes a skill
+without one rather than failing the PR, until `--require-all` flips that to a gate (§ Where CI runs). Nothing in a
 body belongs to one machine, person or workplace: no ids, hosts, org / team / channel names, no people, no
 anecdotes — `kit-verify --no-env` rejects fact-shaped literals, the reviewer judges meaning. A step only a
 specific machine can perform (sign a commit, reach a host) becomes a **handoff artefact the user runs** — the
@@ -91,7 +93,7 @@ lines as the target, 500 the hard cap; `reference.md` / `references/` — ration
 on demand; `scripts/` — stdlib Python or POSIX shell; `README.md` — capability tier. Evals live **outside** the
 skill in `evals/<skill>-<case>/` (`prompt.md` + `graders/*.md`, the format `claude plugin eval` runs and
 `claude plugin eval init --bare` scaffolds; `evals/results/` is the runner's output and is not committed), so the
-installed skill stays lean. `make -C .claude/context-db eval-check` is the token-free gate on every PR (each suite
+installed skill stays lean. `make -C $BATON/context-db eval-check` is the token-free gate on every PR (each suite
 ≥ 10 cases, both kinds, every case loads); the token-spending run is `make … eval SKILL=<name>` or the manual `evals`
 workflow (`evals/README.md`). `docs/templates/skill/` (SKILL.md + README.md) and `docs/templates/evals/` are the
 scaffold: copy both, rename, fill the `<…>` marks. They live under `docs/`, not under `skills/` or `evals/`, because
@@ -100,9 +102,9 @@ Claude Code loads every `skills/*/SKILL.md` and `claude plugin eval` runs every 
 **Frontmatter.** The Agent Skills spec keys plus the allow-listed Claude Code keys, each with its reason —
 § Skill frontmatter; a new native key needs a PR justification.
 
-**Before the PR.** `make -C .claude/context-db verify-skill UNIT=skills/<name>` — the env-free validator (schema,
+**Before the PR.** `make -C $BATON/context-db verify-skill UNIT=skills/<name>` — the env-free validator (schema,
 description caps, body cap, cited paths exist, no fact-shaped literal, no cross-skill path, manifests cover the
-facts) — then `make -C .claude/context-db ci`. A behaviour change bumps `metadata.version` and `metadata.updated`
+facts) — then `make -C $BATON/context-db ci`. A behaviour change bumps `metadata.version` and `metadata.updated`
 (§ Versioning); the authoring checklist is `docs/authoring.md`; what loads when, `docs/loading.md`.
 
 **One rule for contributors:** you must understand what you submit, whoever or whatever wrote it.
@@ -148,7 +150,7 @@ pre-2026-09-26 unit under `metadata:` and adds `compatibility` (idempotent).
 | `background` | Claude Code | whether a forked skill may run in the background (pr-event-brief must not: the main session waits for its ACTION) |
 | `tools` `disallowedTools` `color` `omitClaudeMd` `maxTurns` | Claude Code, **agents only** | the agent's tool roster (or, where the roster must include MCP connectors whose ids differ per install, the tools it must not have — #94), its colour in the UI, dropping the CLAUDE.md prefix for cheap workers, and its turn cap |
 
-**The env-free validator.** `make -C .claude/context-db verify-skill [UNIT=skills/<name>]` (= `kit_verify.py
+**The env-free validator.** `make -C $BATON/context-db verify-skill [UNIT=skills/<name>]` (= `kit_verify.py
 --no-env`) runs everything that needs no environment — the schema above, `name` = directory, the description caps,
 `metadata.requires` ∈ the capability flags, every `metadata.facts` entry has a discovery manifest, no bare scalar
 that YAML would cut at a `#` comment, no frontmatter key repeated at one level, no numbered list that repeats a
@@ -158,7 +160,7 @@ lines, every `scripts/…` / `references/…` path the body cites exists, no `sk
 custom-field id, account id, ticket key, org host, tz literal — `context-db/bin/leak_shapes.py`) — and prints
 the checks it skipped (the env-store ones). Both scanners read the one allow-list `skills/kit-health/allow.txt`
 (`<path>:<match>` regexes for a dated example that must stay verbatim, never a value a skill reads); on a PR, CI's review gate runs the base branch's `review_gate.py` with the base branch's allow-list, so a new allow line takes effect from the next PR on, once a human merged it (#129). It passes on a bare `git clone` with no `.context/`, so it is the
-pre-PR step for a contributor and the first step of `ci.yml`. `make -C .claude/context-db ci` runs every gate the CI job runs (§ Where CI runs).
+pre-PR step for a contributor and the first step of `ci.yml`. `make -C $BATON/context-db ci` runs every gate the CI job runs (§ Where CI runs).
 
 A new native key is added to `NATIVE_KEYS` / `AGENT_KEYS` in `context-db/bin/kit_verify.py` **and** to this table,
 with the reason in the PR — never to a unit alone. `license` is added once the repository has one (a
@@ -215,12 +217,13 @@ version is its `metadata.version`; a step a machine must take is a `BREAKING CHA
 |---|---|
 | type | `enhancement` (feat) · `bug` (fix) · `documentation` (docs) |
 | area — exactly one | `area:skills` (skills/, agents/) · `area:engine` (context-db/, pr-review/, sign-queue/) · `area:sync` (sync.sh, setup.sh, hooks/, workspace.mk, settings) · `area:docs` (README, WORKSPACE.md, docs/) · `area:ci` (.github/) |
+| wording | `wording` — a wording-only PR; `ci.yml`'s `SKIP_BUMP` treats it (or `[skip-bump]` in the title or body) as skipping the version-bump check |
 | follow-up | `review-followup` — a review finding deferred out of a PR |
 | release | `release` — the `chore(release): X.Y.Z` PR, on its own (`make kit_release` applies it) |
 
 ## Where CI runs
 
-What `ci.yml` checks — `make -C .claude/context-db ci` runs the same gates (the dash selection is its `parse` target, shared
+What `ci.yml` checks — `make -C $BATON/context-db ci` runs the same gates (the dash selection is its `parse` target, shared
 with CI), and a gate whose tool is missing fails there unless `ALLOW_SKIP=1`; only the token-spending evals are CI-only: the env-free validator, kit-verify
 against a blank store, the unittest suite, the plugin manifests, `py_compile`, `bash -n`, `dash -n` for every
 `#!/bin/sh` script (setup.sh, sync.sh and sync-check.sh are `#!/bin/sh`: they run under `sh`), `shellcheck -S warning`, the relative Markdown links
@@ -241,7 +244,7 @@ parallel reviews never race on one shared Claude Code install.
 
 ## Testing
 
-The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C .claude/context-db test` (discovery, < 10 s,
+The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C $BATON/context-db test` (discovery, < 10 s,
 no install) — and CI runs it on every PR. `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
 discovery — useful while iterating on one module. The suite always runs on a **throw-away env store**, never this
 machine's `.context/`: `make test` builds a blank one under the temp dir as CI does (`kb.py init --blank`, environment
@@ -274,7 +277,7 @@ Three tiers, one rule book — [`docs/REVIEW.md`](REVIEW.md):
   leak shapes plus e-mail, home-path and token shapes, and requires a higher `metadata.version`, an `updated` on or
   after the base's (and no later than tomorrow in UTC) for every skill or agent with a changed file (README edits
   do not count). A wording-only PR says so with the `wording` label or `[skip-bump]` in its title or body; the
-  reviewer may question the claim. Run it yourself: `make -C .claude/context-db review-gate` (`BASE=`, `SKIP_BUMP=1`).
+  reviewer may question the claim. Run it yourself: `make -C $BATON/context-db review-gate` (`BASE=`, `SKIP_BUMP=1`).
   The rest of tier 0 was already there: kit-verify (frontmatter, description budget, referenced scripts, plugin
   manifests), the unittest suite, `py_compile`, `bash -n`.
 - **Tier 1 — evidence.** `review_evidence.py` writes `.review/evidence.md` for the reviewer: the changed units with

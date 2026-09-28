@@ -28,7 +28,7 @@ never in a live session.
 ## Fixed week-file format
 
 One file per ISO week, `weeks/2026-Wnn.md`, in this section order (see
-`.claude/context-db/_templates/self-assessment.md` for the scaffold `make -C .claude/context-db new
+`$BATON/context-db/_templates/self-assessment.md` for the scaffold `make -C $BATON/context-db new
 TYPE=self-assessment` produces):
 
 - **Scope / Sources** — `self_assessment.scope` quoted verbatim, then which `self_assessment.sources`

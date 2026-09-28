@@ -50,20 +50,20 @@ Also failed: a bare value with a ` #` in it (YAML cuts it there — quote it), a
 
 ## 3. Before the PR
 
-1. `make -C .claude/context-db verify-skill UNIT=skills/<name>` — the env-free validator (schema, caps, body,
-   cited paths, leak shapes, manifests), then `make -C .claude/context-db ci` (every gate CI runs; `ALLOW_SKIP=1`
+1. `make -C $BATON/context-db verify-skill UNIT=skills/<name>` — the env-free validator (schema, caps, body,
+   cited paths, leak shapes, manifests), then `make -C $BATON/context-db ci` (every gate CI runs; `ALLOW_SKIP=1`
    where shellcheck or the `claude` CLI is missing).
 2. **Bump**: a behaviour change bumps `metadata.version` and sets `metadata.updated`; what a machine must do after the
    sync goes in the PR's § Machines (the release log is generated from the squash commit). Wording-only edits bump nothing and the PR says so (`wording`
-   label or `[skip-bump]` in its title or body). `make -C .claude/context-db review-gate BASE=origin/main` is the
+   label or `[skip-bump]` in its title or body). `make -C $BATON/context-db review-gate BASE=origin/main` is the
    tier-0 gate CI runs: leak and PII shapes on every added line, and the bump per changed unit (`docs/REVIEW.md` § 1).
 3. **Tests**: a script beside the skill or an engine change gets a stdlib `unittest` in `context-db/tests/`
-   (`make -C .claude/context-db test`); a fix adds the regression test; a fact-shaped literal a test needs is
+   (`make -C $BATON/context-db test`); a fix adds the regression test; a fact-shaped literal a test needs is
    assembled at run time, never written out.
 4. **Evals**: ≥ 10 trigger cases per skill, ≥ 3 positives and ≥ 3 same-domain near misses, in `evals/<name>-<case>/`
    (`prompt.md` + `graders/*.md`, the `claude plugin eval` format; `evals/results/` is ignored) — `evals/README.md`.
-   `make -C .claude/context-db eval-check` checks the suite without tokens (part of `make ci`); a changed
-   `description:` cites a green `make -C .claude/context-db eval SKILL=<name>` or `evals` workflow run in the PR.
+   `make -C $BATON/context-db eval-check` checks the suite without tokens (part of `make ci`); a changed
+   `description:` cites a green `make -C $BATON/context-db eval SKILL=<name>` or `evals` workflow run in the PR.
 5. A new native frontmatter key goes into `NATIVE_KEYS` / `AGENT_KEYS` in `kit_verify.py` **and** the table in
    `docs/contributing.md` § Skill frontmatter, with the reason in the PR.
 6. Open the PR with the `pr-open` skill: Conventional Commit title, `Closes #N` / `Refs #N`, type + area labels;

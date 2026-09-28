@@ -15,16 +15,16 @@ Work units are PRs opened/merged (`work-prs`, GitHub search by the user's login)
 `tracker.query resolved_by_me` through the tracker tool and saves a TSV — see SKILL.md). Every report opens with a **Basis** block: billed vs estimated, price
 table, which work sources were reachable, control present or not, the rules applied.
 
-Subcommands
-  mode                                  print the resolved mode + basis as JSON
-  sql [--since D] [--until D]           org mode: print the own-rows daily query and the control query
-  ingest --rows F [--control-rows F] [--out daily.json] [--control-out control.json]
-                                        normalise query results (JSON array of row objects, any case)
-  collect-private [--since D] [--until D] [--csv F] [--out daily.json]
-  work-prs [--since D] [--until D] [--out prs.tsv]
-  work-tickets [--since D] [--until D] [--out tickets.tsv]   (tracker.kind == github only)
-  report --daily daily.json [--control control.json] [--prs prs.tsv] [--tickets tickets.tsv]
-         [--phase NAME=START..END]... [--view rolling7|weekly|phases|all] [--out report.md] [--json out.json]
+Subcommands — exact flags are `cost_report.py <cmd> --help`; this list is names + shape only, so it
+cannot drift the way a hand-kept flag list does:
+  mode                 print the resolved mode + basis as JSON
+  sql                  org mode: print the own-rows daily query and the control query
+  propose-columns      org mode: DESCRIBE-result column names → a role mapping (score + alternatives)
+  ingest               normalise query results (JSON array of row objects, any case) into daily/control JSON
+  collect-private      local transcripts (+ optional CSV) → daily JSON, estimated at list price
+  work-prs             GitHub search: PRs opened/merged by the user → a TSV
+  work-tickets         tracker.kind == github only: tickets closed by the user → a TSV
+  report               daily (+ control, prs, tickets) → the Basis-first Markdown/JSON report
 
 Rules baked in: per-day rates use WEEKDAYS only (ISO 1–5);
 work data is CAPPED at the last spend day; a phase list may name an excluded changeover day
@@ -50,6 +50,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 KIT = HERE.parent.parent
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
+import fsutil  # noqa: E402  (atomic_write — the engine's torn-write-free JSON writer)
 import kit_profile as profile  # noqa: E402
 import session_stats  # noqa: E402  (price_for, DEFAULT_PRICES)
 import transcripts  # noqa: E402  (the shared transcript reader)
@@ -187,7 +188,8 @@ def propose_columns(names: list[str]) -> dict[str, dict]:
 
 
 def cmd_propose_columns(a) -> int:
-    rows = json.load(open(a.describe))
+    with open(a.describe, encoding="utf-8") as fh:
+        rows = json.load(fh)
     rows = rows if isinstance(rows, list) else rows.get("rows", [])
     if not all(isinstance(r, dict) for r in rows):
         print("DESCRIBE result rows are not objects (a connector that returns arrays) — re-save as row objects with a name/column_name field", file=sys.stderr)
@@ -266,8 +268,10 @@ GROUP BY 1 ORDER BY 1;"""
     return 0
 
 
-def _lower_keys(rows: list[dict]) -> list[dict]:
-    return [{str(k).lower(): v for k, v in r.items()} for r in rows]
+def _lower_keys(rows: list) -> list[dict]:
+    """Lower-case every row's keys; a row that is not an object (a null, a bare string) becomes {} so the
+    caller's missing-column check skips and counts it."""
+    return [{str(k).lower(): v for k, v in r.items()} if isinstance(r, dict) else {} for r in rows]
 
 
 def _num(v) -> float:
@@ -285,20 +289,36 @@ def _day(v) -> str:
 
 
 def cmd_ingest(a) -> int:
-    rows = _lower_keys(json.load(open(a.rows)))
-    daily = [{"d": _day(r["d"]), "model": str(r.get("model") or ""), "usd": _num(r.get("usd")), "inp": _num(r.get("inp")),
-              "cached": _num(r.get("cached")), "cwrite": _num(r.get("cwrite")), "outp": _num(r.get("outp")), "billed": True}
-             for r in rows]
-    json.dump(daily, open(a.out, "w"), indent=0)
-    print(f"{len(daily)} daily rows → {a.out} ({min(r['d'] for r in daily)} .. {max(r['d'] for r in daily)})" if daily else "0 rows")
+    """Query results are the warehouse's, not the kit's: a role the caller renamed, dropped, or a row a
+    different shape entirely (a header row, a null) is skipped and counted, never a KeyError that
+    discards every other row in the file."""
+    with open(a.rows, encoding="utf-8") as fh:
+        rows = _lower_keys(json.load(fh))
+    daily = []
+    skipped = 0
+    for r in rows:
+        if not r.get("d"):
+            skipped += 1
+            continue
+        daily.append({"d": _day(r["d"]), "model": str(r.get("model") or ""), "usd": _num(r.get("usd")), "inp": _num(r.get("inp")),
+                       "cached": _num(r.get("cached")), "cwrite": _num(r.get("cwrite")), "outp": _num(r.get("outp")), "billed": True})
+    fsutil.atomic_write(a.out, json.dumps(daily, indent=0))
+    msg = f"{len(daily)} daily rows → {a.out} ({min(r['d'] for r in daily)} .. {max(r['d'] for r in daily)})" if daily else "0 rows"
+    print(msg + (f"; {skipped} row(s) skipped (no date column)" if skipped else ""))
     if a.control_rows:
-        crow = _lower_keys(json.load(open(a.control_rows)))
-        ctl = [{"wk": str(r["wk"]), "users": int(_num(r.get("users"))), "user_days": int(_num(r.get("user_days"))),
-                "usd": _num(r.get("usd")), "inp": _num(r.get("inp")), "cached": _num(r.get("cached")),
-                "cwrite": _num(r.get("cwrite")), "outp": _num(r.get("outp")), "cheap_outp": _num(r.get("cheap_outp"))}
-               for r in crow]
-        json.dump(ctl, open(a.control_out, "w"), indent=0)
-        print(f"{len(ctl)} control weeks → {a.control_out}")
+        with open(a.control_rows, encoding="utf-8") as fh:
+            crow = _lower_keys(json.load(fh))
+        ctl = []
+        cskipped = 0
+        for r in crow:
+            if not r.get("wk"):
+                cskipped += 1
+                continue
+            ctl.append({"wk": str(r["wk"]), "users": int(_num(r.get("users"))), "user_days": int(_num(r.get("user_days"))),
+                        "usd": _num(r.get("usd")), "inp": _num(r.get("inp")), "cached": _num(r.get("cached")),
+                        "cwrite": _num(r.get("cwrite")), "outp": _num(r.get("outp")), "cheap_outp": _num(r.get("cheap_outp"))})
+        fsutil.atomic_write(a.control_out, json.dumps(ctl, indent=0))
+        print(f"{len(ctl)} control weeks → {a.control_out}" + (f"; {cskipped} row(s) skipped (no week column)" if cskipped else ""))
     return 0
 
 
@@ -396,7 +416,7 @@ def cmd_collect_private(a) -> int:
         rows.sort(key=lambda r: (r["d"], r["model"]))
         src["csv"] = {"path": a.csv, "rows": len(csv_rows), "days": len(covered),
                       "billed": all(r.get("billed") for r in csv_rows)}
-    json.dump({"rows": rows, "source": src}, open(a.out, "w"), indent=0)
+    fsutil.atomic_write(a.out, json.dumps({"rows": rows, "source": src}, indent=0))
     span = f"{rows[0]['d']} .. {rows[-1]['d']}" if rows else "empty"
     print(f"{len(rows)} daily×model rows → {a.out} ({span}); {stats['requests']} API requests in {stats['files']} transcripts"
           + (f"; CSV {src['csv']['rows']} rows over {src['csv']['days']} days" if a.csv else ""))
@@ -429,12 +449,21 @@ def _months(since: str, until: str):
         cur = nxt
 
 
+def _pr_row(repo: str, number: int, created_raw: str, closed_raw: str, state: str, merged: bool, zone: ZoneInfo) -> list:
+    """One `work-prs` TSV row, GitHub's UTC `createdAt`/`closedAt` turned into the owner's calendar day —
+    the same `zone` `collect_private` buckets transcript spend by, so a PR merged near local midnight lands
+    on the day its spend does, not on whatever day UTC happened to be showing."""
+    closed = _local_day(closed_raw, zone) if closed_raw and not closed_raw.startswith("0001") else ""  # gh emits year 0001 for "never"
+    return [repo, number, _local_day(created_raw, zone), closed if merged else "", closed, state]
+
+
 def cmd_work_prs(a) -> int:
     m = resolve_mode()
     login = m["github_login"]
     if not login:
         raise SystemExit("WORKSPACE_GITHUB_LOGIN is not set (`/plugin configure ai-baton` github_login or settings.local.json env) — needed for author:<login>")
     since, until = a.since or _default_since(), a.until or date.today().isoformat()
+    zone, _zl = _owner_zone()
     scopes = []
     if m["github_org"]:
         scopes.append(f"org:{m['github_org']}")
@@ -464,18 +493,20 @@ def cmd_work_prs(a) -> int:
                     continue
                 seen.add(key)
                 state = r.get("state", "")
-                closed_raw = r.get("closedAt") or ""
-                closed = _day(closed_raw) if closed_raw and not closed_raw.startswith("0001") else ""  # gh emits year 0001 for "never"
-                merged = ""
-                if state == "merged" or (state == "closed" and key in merged_set):
-                    merged = closed  # a merged PR's closedAt is its merge time
-                rows.append([key[0], r["number"], _day(r["createdAt"]), merged, closed, state])
+                merged = state == "merged" or (state == "closed" and key in merged_set)  # a merged PR's closedAt is its merge time
+                rows.append(_pr_row(key[0], r["number"], r["createdAt"], r.get("closedAt") or "", state, merged, zone))
     with open(a.out, "w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t")
         w.writerow(["repo", "number", "created", "merged", "closed", "state"])
         w.writerows(sorted(rows, key=lambda x: x[2]))
     print(f"{len(rows)} PRs → {a.out} (since {since})")
     return 0
+
+
+def _ticket_row(repo: str, number: int, created_raw: str, closed_raw: str, labels: list[str], zone: ZoneInfo) -> list:
+    """One `work-tickets` TSV row, same local-day conversion as `_pr_row` (and `collect_private`'s spend
+    days) for GitHub's UTC `createdAt`/`closedAt`."""
+    return [f"{repo}#{number}", _local_day(created_raw, zone), _local_day(closed_raw, zone), ",".join(labels), ""]
 
 
 def cmd_work_tickets(a) -> int:
@@ -491,6 +522,7 @@ def cmd_work_tickets(a) -> int:
     if not repos:
         raise SystemExit("tracker.repos is empty — no repo to count closed issues in (a missing config is not 0 tickets)")
     since, until = a.since or _default_since(), a.until or date.today().isoformat()
+    zone, _zl = _owner_zone()
     rows = []
     for repo in repos:
         out = _gh(["search", "issues", f"repo:{repo}", f"assignee:{login}", "is:issue", f"closed:{since}..{until}",
@@ -499,8 +531,7 @@ def cmd_work_tickets(a) -> int:
         if len(hits) >= 1000:
             raise SystemExit(f"search cap hit for {repo} (1000 rows) — ticket counts would be truncated; pass --since")
         for r in hits:
-            rows.append([f"{repo}#{r['number']}", _day(r["createdAt"]), _day(r["closedAt"]),
-                         ",".join(l["name"] for l in r.get("labels", [])), ""])
+            rows.append(_ticket_row(repo, r["number"], r["createdAt"], r["closedAt"], [l["name"] for l in r.get("labels", [])], zone))
     with open(a.out, "w", newline="") as fh:
         w = csv.writer(fh, delimiter="\t")
         w.writerow(["key", "created", "resolved", "type", "parent"])
@@ -588,7 +619,8 @@ class Bucket:
 
 
 def load_daily(path: str) -> tuple[list[dict], dict]:
-    o = json.load(open(path))
+    with open(path, encoding="utf-8") as fh:
+        o = json.load(fh)
     if isinstance(o, dict):
         return o.get("rows", []), o.get("source", {})
     return o, {}
@@ -689,7 +721,9 @@ def cmd_report(a) -> int:
     # --- control
     control = []
     if a.control:
-        for c in json.load(open(a.control)):
+        with open(a.control, encoding="utf-8") as fh:
+            control_rows = json.load(fh)
+        for c in control_rows:
             ud = c.get("user_days") or 0; outp = c.get("outp") or 0
             fixed = (c["inp"] * FIXED[0] + c["cwrite"] * FIXED[1] + c["cached"] * FIXED[2] + outp * FIXED[3]) / 1e6
             control.append({"wk": c["wk"], "users": c.get("users"), "usd_per_user_day": c["usd"] / ud if ud else None,
@@ -723,7 +757,7 @@ def cmd_report(a) -> int:
     out = {"basis": basis, "buckets": [metrics[b.name] for b in buckets], "weeks": [metrics[k] for k in sorted(weeks)],
            "control": control, "decomposition": decomps}
     if a.json:
-        json.dump(out, open(a.json, "w"), indent=1)
+        fsutil.atomic_write(a.json, json.dumps(out, indent=1))
     md = render_md(out)
     if a.out:
         Path(a.out).write_text(md, encoding="utf-8")
