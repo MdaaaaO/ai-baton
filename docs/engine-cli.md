@@ -14,7 +14,7 @@ the standard library; `CONTEXT_ROOT=<path>/.context` points one at another conte
 .context DB engine — Claude's CLI for the context document DB.
 The engine (this Makefile + bin/ + _templates/) lives under .claude/context-db/ so
 .claude/ is a portable kit; the CONTENT it operates on lives in a separate .context/
-folder (default: the sibling ../../.context, override with CONTEXT=).
+folder (override with CONTEXT=; the default content root is docs/layout.md's "Content root" paragraph).
 Each *.md doc carries YAML frontmatter (its "row"); INDEX.md is the generated catalog.
 These targets create, index, verify, and find docs.
 
@@ -37,7 +37,7 @@ Live session registry (who is working on what, right now — see SESSION_INDEX.m
   $CLAUDE_CODE_SESSION_ID (or SESSION_ID=<uuid>); NOSTATS=1 skips it. Zero model turns.
 
 Kit / config (env fact store .context/reference/env/):
-  make -C .claude/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|init
+  make -C .claude/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|config-set|init|path|migrate|discover|stale
   make -C .claude/context-db kb ARGS="set slack.channel foo C0… --from tool:slack_search_channels"
   make -C .claude/context-db profile                   # active environment name
   make -C .claude/context-db profile KEY=tracker.kind  # one env-config value
@@ -47,18 +47,19 @@ Kit / config (env fact store .context/reference/env/):
   make -C .claude/context-db check-links               # every relative Markdown link resolves
   make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
+  make -C .claude/context-db plugin-validate            # plugin + marketplace manifests and every skill/agent, through `claude plugin validate --strict` (needs the `claude` CLI)
   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
   make -C .claude/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
-  make -C .claude/context-db test                      # the engine's stdlib unittest suite (context-db/tests/)
+  make -C .claude/context-db test [T=test_kb] [ISOLATED=1]  # the engine's stdlib unittest suite (context-db/tests/); T= runs one file
   make -C .claude/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
   make -C .claude/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
   make -C .claude/context-db sync-check                # warn when .claude/ is ahead of origin or the last sync errored
   make -C .claude/context-db kit-health [STALE=90]     # full kit audit for this machine (the kit-health skill's script)
   make -C .claude/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
 
-Content root: CONTEXT defaults to ../../.context (the sibling of .claude/). Point the
-engine at a different content DB with, e.g.:
+Content root: CONTEXT overrides the default described in docs/layout.md's "Content root" paragraph.
+Point the engine at a different content DB with, e.g.:
   make -C .claude/context-db index CONTEXT=/path/to/some/.context
 Always run `index` after adding or editing a doc's frontmatter.
 ```
@@ -71,14 +72,66 @@ usage: kb.py [-h]
 
 kb.py — the environment fact store: `.context/reference/env/`.
 
+Skills need environment facts (a Slack channel id, a Jira custom-field id, an AWS account, a Notion
+database) that differ between the places the kit runs. Those facts never live in a SKILL.md or an
+engine script; they live here, in the user's local `.context/` — as a knowledge base that fills
+itself as the kit is used (discover → ask → `kb set`) and that nobody has to hand-author up front.
+
+Layout (all under `.context/reference/env/`, created by `kb.py init`):
+  config.json          the few STRUCTURAL switches scripts branch on: `environment` (this machine's
+                       environment name), tracker.kind / key_regex / url_template / mcp_tools,
+                       github.org / review_bot / bots / owner_teams, slack.enabled / domain, systems.*,
+                       tz_default, domains, labels, self_assessment, diagrams, kit.install_mode
+                       (written by setup.sh: clone | plugin | dev-checkout)
+  _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
+  <system>.md          one doc per system (slack, tracker, github, aws, notion, …); one `## <kind>`
+                       section per fact kind; one table row per fact:
+                       | name | value | purpose | learned-from |
+
+Usage:
+  kb.py get  <system>.<kind> <name>            → the value (exit 1 + a hint when unknown; a stale-row
+                                                 hint on stderr when it is older than its manifest ttl)
+  kb.py set  <system>.<kind> <name> <value> [--purpose TEXT] [--from PROVENANCE]   (upsert)
+                                                 PROVENANCE = tool:<tool-name> | user | derived:<key>;
+                                                 today's date is appended (default: user).
+                                                 Same value + an explicit --from = `re-verified` (the
+                                                 provenance is re-dated, so `stale` clears); exit 2 on an
+                                                 empty name
+  kb.py rm   <system>.<kind> <name>
+  kb.py list [<system>[.<kind>]]               → `system.kind  name  value  purpose  learned-from`
+  kb.py values                                 → every literal value, one per line (the leak scanner)
+  kb.py config [<dotted.key>]                  → config.json, or one key (JSON for non-scalars)
+  kb.py config-set <dotted.key> <json-or-string>
+  kb.py discover <system>.<kind> [<name>]      → the discovery PLAN for a fact (tool + args, verify, ttl,
+  kb.py discover <config.key>                    the write-back command) from context-db/discovery/*.json —
+                                                 it never calls the tool; the session does, then `set`
+  kb.py discover --all | --check               → every manifest fact with its state here | validate manifests
+  kb.py stale [--days N] [--check]             → tool/import/derived rows older than their manifest ttl_days
+                                                 (N overrides every ttl); --check = exit 3 when any
+  kb.py migrate [--check | --off]               → bring the store up to the kit's schema: renamed system
+                                                 flags moved (value kept), missing flags added (seeded from
+                                                 their legacy flag, else false), rows under a renamed kind
+                                                 (`slack.channels` → `slack.channel`) moved; prints the
+                                                 skills now off here; --check = dry run, exit 3 when pending; --off = only that list
+  kb.py init --blank                           → create an empty store (never overwrites anything)
+  kb.py init --personal                        → blank store + the zero-config GitHub-only fill: identity
+                                                 from `gh api user`, tracked repos from the workspace clones,
+                                                 tz from the OS, every systems.* false — discovered, never asked
+  kb.py path                                   → the store directory
+
+Resolution order for a fact a skill needs: `kb get` → `kb discover` (the manifest names the system's
+discovery tool: `slack_search_channels`, Jira issue-type metadata / transitions, `gh label list`, …) →
+run that tool and verify → ask the user only when the tool cannot settle it → `kb set … --from tool:<name>`
+(or `user`) so the next session has it. Manifest schema: context-db/discovery/README.md.
+Stdlib only. Reads CONTEXT_ROOT (default: the `.context/` beside `.claude/`).
+
 positional arguments:
   {get,set,rm,list,values,config,config-set,init,path,migrate,discover,stale}
 
 options:
   -h, --help            show this help message and exit
 
-exit: 0 ok · 1 the value / fact asked about is absent · 2 usage or I/O error ·
-3 stale --check found rows
+exit: 0 ok · 1 the value / fact asked about is absent · 2 usage or I/O error · 3 stale --check found rows
 ```
 
 ## `kit_profile.py`
@@ -105,11 +158,14 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py env            # the env fact store directory
                         python3 kit_profile.py context        # the .context/ root
                         python3 kit_profile.py source         # env | none
+                        python3 kit_profile.py list            # the environments this machine knows (exactly one, kept for callers that iterate)
                         python3 kit_profile.py get tracker.kind   # a dotted key (JSON for non-scalars)
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
+                        python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC
                         python3 kit_profile.py zone           # the zone timestamps render in (UTC when WORKSPACE_TZ is unknown)
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig
+                        python3 kit_profile.py identity-source <WORKSPACE_* var>  # option | env | `` (unset) — where the value comes from, never the value
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
@@ -282,9 +338,11 @@ inherited by the detached heartbeat). Missing id or transcript => exit 3, empty 
 treat that as "no stats", never as an error.
 
 Spend is a LIST-PRICE ESTIMATE priced per API request by the model that served it: Sonnet
-3/3.75/0.3/15, Haiku 1/1.25/0.1/5, everything else (Opus, Fable/Mythos) at the Opus-class default
-15/18.75/1.5/75 $/Mtok (in/cache_write/cache_read/out) — override the default with
-SESSION_STATS_PRICES="in,cw,cr,out". Subagents are billed too: every Agent/fork child writes its
+3/3.75/0.3/15/6, Haiku 1/1.25/0.1/5/2, everything else (Opus, Fable/Mythos) at the Opus-class default
+15/18.75/1.5/75/30 $/Mtok (in/cache_write_5m/cache_read/out/cache_write_1h) — a cache write against
+the 1-hour TTL (`cache_creation.ephemeral_1h_input_tokens`) is billed at its own, higher rate, not
+the 5-minute one. Override the default with SESSION_STATS_PRICES="in,cw,cr,out[,cw_1h]"; the 1h
+rate defaults to 2x the input price when the list has only 4 numbers. Subagents are billed too: every Agent/fork child writes its
 own transcript under <project>/<session-id>/subagents/*.jsonl, and those are summed into
 `subagents_cost` and `spend_total_usd_est` (main + subagents). Before 2026-09-22 the figure was
 main-session only; this session's review-runners alone cost ~3.4x the main prefix, so the total
@@ -408,4 +466,79 @@ options:
   -h, --help  show this help message and exit
   --dry-run   print the pending changes, write nothing
   --check     like --dry-run, exit 3 when anything is pending
+```
+
+## `check_links.py`
+
+```text
+usage: check_links.py [-h] [--repo REPO] [paths ...]
+
+check that relative Markdown links in the kit resolve
+
+positional arguments:
+  paths        files to check (default: every tracked *.md)
+
+options:
+  -h, --help   show this help message and exit
+  --repo REPO
+```
+
+## `transcripts.py`
+
+No `--help` (the tool has no argument parser); the usage is the module docstring:
+
+```text
+transcripts.py — the one reader of Claude Code session transcripts (`~/.claude/projects/<project>/*.jsonl`).
+
+A transcript is JSONL; every API request the session made appears as an `assistant` line whose
+`message.usage` carries the token counts. A streamed request is written as several assistant lines
+under the same request id (`requestId`, else `message.id`) as the response grows, and only the
+last of them carries the final `output_tokens` — so usage is de-duplicated per request id by
+keeping the LAST line seen, not the first. `session_stats.py` (one session's stats) and the
+cost-report skill (every transcript in a window) both read usage this way — this module is the
+shared path, so the two never drift.
+
+  usage_records(path, seen)   → (record, message, usage, request_id) per new API request in one file
+  tokens(usage)               → (input, cache_write, cache_read, output)
+  subagent_dir(path)          → <project>/<session-id>/subagents/ — the session's Agent/fork children
+  subagent_files(path)        → their transcripts, sorted
+  find_transcript(session_id) → the session's transcript path, or None
+  all_transcripts()           → every main and subagent transcript under ~/.claude/projects
+Stdlib only.
+```
+
+## `leak_shapes.py`
+
+No `--help` (the tool has no argument parser); the usage is the module docstring:
+
+```text
+leak_shapes.py — the generic SHAPES of environment facts the kit must never carry.
+
+One list for every scanner: `kit-health` § leaks (every kit file, plus the values THIS machine's env store
+holds) and `kit_verify --no-env` (a unit's own file, env-free — what a contributor's PR can run). No
+organisation's own values live here: those are read at run time from the env store.
+
+`SKIP_LINE` exempts the lines that legitimately hold such shapes — the frontmatter declarations
+(`requires:`, `tools:`, `facts:`); `SKIP_FILES` the scanners' own files (this module, kit-health.py, the
+allow-list) — a per-file rule, so a doc line that merely mentions `leak_shapes.py` is still scanned.
+`allowed()` reads `skills/kit-health/allow.txt` — one regex per line, anchored at the start of `<path>:<match>`
+(`$` for an exact match) — the ONE allow-list both scanners honour, so a provenance line kit-health accepts is
+not a `kit-verify` failure. `shapes(tracker_kind, key_regex)` is the shape list a scanner uses: the generic list always (kit-verify's
+env-free scan, and kit-health on any tracker), plus this environment's `tracker.key_regex` as a second
+ticket shape on a Jira-style tracker.
+Stdlib only.
+```
+
+## `gen_eval_rules.py`
+
+No `--help` (the tool has no argument parser); the usage is the module docstring:
+
+```text
+gen_eval_rules.py — copy the review rules into the kit-review eval prompts.
+
+`claude plugin eval` runs a case in a sandbox whose file reads are confined to a scratch cwd: the plugin's own
+`docs/REVIEW.md` is not readable from the prompt. So every `evals/kit-review-*/prompt.md` carries the rules inline,
+between `<!-- rules:begin -->` and `<!-- rules:end -->`, and this script keeps that block equal to docs/REVIEW.md
+§ 2–§ 6 (the judgment; § 1 is CI's). Run it after editing the rules; `tests/test_eval_rules.py` fails when a prompt
+drifts. Usage: gen_eval_rules.py [--check]  (exit 1 when a prompt would change). Stdlib only.
 ```

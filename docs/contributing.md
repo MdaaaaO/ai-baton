@@ -241,7 +241,12 @@ parallel reviews never race on one shared Claude Code install.
 ## Testing
 
 The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C .claude/context-db test` (discovery, < 10 s,
-no install; a clone without an env store gets a throw-away blank one) — and CI runs it on every PR. It covers `kb.py`
+no install; a clone without an env store gets a throw-away blank one) — and CI runs it on every PR. `make test
+T=test_kb` runs one file (`tests/test_kb.py`) instead of the full discovery — useful while iterating on one module.
+`make test` is the only supported entry point: a bare `python3 -m unittest discover -s context-db/tests -t
+context-db` sets up none of the isolation the bullets below describe, and — on a machine whose own `.context/`
+already has an env store — reads it, because nothing points it elsewhere; a test that leans on that only by
+accident then passes here and fails on someone else's machine or in CI (which always starts store-less). It covers `kb.py`
 (the store: set/get/rm, renamed kinds, provenance and stale rows, config, migrate), `kit_verify.py` (frontmatter
 schema, env-store checks, `--stale`, `--no-env`), `gen_index.py` / `verify.py` / `new.sh` on a throw-away
 `CONTEXT_ROOT`, `gen_sessions.py`, `commit_style.py`, `eval_check.py` (on a throw-away kit), `session_stats.py` + `transcripts.py` on a synthetic

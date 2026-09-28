@@ -4,6 +4,12 @@ The kit is one directory, `$BATON`: `<workspace root>/.claude/` on a clone, Clau
 install (`docs/packaging.md` — both paths are supported). Everything personal and everything environment-specific
 lives in the workspace's `.context/`, never in this repo. How the pieces call each other: `docs/architecture.md`.
 
+**Content root.** The engine finds `.context/` at `CONTEXT_ROOT` when that variable is set, else beside the kit
+(`.claude/`'s sibling — one level further up from a kit worktree such as `.worktrees/kit_<topic>/`), else
+`CLAUDE_PROJECT_DIR`, else — a plugin install only — the nearest `.context/reference/env/config.json` above the
+current directory. Full algorithm: `kit_profile.py`'s `context_root()`. Every other mention of the default
+(`context-db/Makefile`'s header, `docs/engine-cli.md`) links back to this paragraph rather than restating it.
+
 > **Plugin install:** the tree below is the clone's. On a plugin install the kit is not in `<workspace root>/.claude/`
 > (that directory holds only workspace settings such as your `settings.local.json`), the root `CLAUDE.md` has no `@.claude/WORKSPACE.md` line
 > (the SessionStart hook injects `WORKSPACE.md`) and the root `Makefile` has no `workspace.mk` include; `.context/`,

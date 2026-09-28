@@ -48,9 +48,15 @@ TOOLS = (
     "verify.py",
     "commit_style.py",
     "migrate_frontmatter.py",
+    "check_links.py",
+    "transcripts.py",
+    "leak_shapes.py",
+    "gen_eval_rules.py",
 )
-# Tools without an argument parser: listed by docstring, never executed (running them would do their job, not print help).
-DOCSTRING_ONLY = ("kit_profile.py", "gen_index.py", "verify.py")
+# Tools without an argument parser: listed by docstring, never executed (running them would do their job, not print
+# help — gen_eval_rules.py would rewrite the eval prompts; transcripts.py and leak_shapes.py are importable
+# libraries with no `__main__` at all).
+DOCSTRING_ONLY = ("kit_profile.py", "gen_index.py", "verify.py", "gen_eval_rules.py", "transcripts.py", "leak_shapes.py")
 
 HEADER = """# Engine CLI reference
 

@@ -242,6 +242,163 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.status()[1], "ok")
         self.assertFalse((self.kit / ".sync.lock.d").exists())
 
+    # ── lock owner, stale lock, busy exit ──
+    def _dead_pid(self) -> int:
+        p = subprocess.Popen(["true"])
+        p.wait()
+        return p.pid
+
+    def _owned_lockdir(self, pid: int, start: str | None = None) -> Path:
+        """An owner file for `pid`; with `start` omitted this is the old two-field format (pid + the time
+        the lock was taken, no process start time) — every existing caller wants that. Pass `start` (a
+        `ps -o lstart=` string) to write the current three-field format instead."""
+        d = self.kit / ".sync.lock.d"
+        d.mkdir()
+        line = f"{pid} 2026-01-01T00:00:00Z"
+        if start is not None:
+            line += f" {start}"
+        (d / "owner").write_text(line + "\n")
+        return d
+
+    def _pid_start(self, pid: int) -> str:
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True)
+        return r.stdout.strip()
+
+    def test_lock_busy_exits_3_and_names_the_holder(self):
+        self._owned_lockdir(os.getpid())
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn(f"held by pid {os.getpid()} since 2026-01-01T00:00:00Z", r.stderr)
+        self.assertIn(f"pid {os.getpid()}", self.log_file.read_text())
+        self.assertFalse(self.status_file.exists())
+
+    def test_flock_busy_exits_3_and_names_the_holder(self):
+        if not shutil.which("flock"):
+            self.skipTest("no flock on this host")
+        with open(self.kit / ".sync.lock", "w") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            fh.write(f"{os.getpid()} 2026-01-01T00:00:00Z\n")
+            fh.flush()
+            r = self.sync(env=dict(self.env, SYNC_LOCK_WAIT="1"))
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn(f"held by pid {os.getpid()}", r.stderr)
+
+    def test_flock_holder_records_its_pid(self):
+        if not shutil.which("flock"):
+            self.skipTest("no flock on this host")
+        self.assertEqual(self.sync().returncode, 0)
+        self.assertRegex((self.kit / ".sync.lock").read_text(), r"^\d+ \d{4}-\d\d-\d\dT")
+
+    def test_mkdir_lock_of_a_dead_owner_is_reclaimed_at_once(self):
+        self._owned_lockdir(self._dead_pid())
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("removed a stale lock dir (owner pid", self.log_file.read_text())
+        self.assertFalse((self.kit / ".sync.lock.d").exists())
+
+    def test_mkdir_lock_of_a_live_owner_is_never_aged_out(self):
+        # old two-field owner line (no process start time, as written before that check existed):
+        # judged by kill -0 alone, same as ever
+        d = self._owned_lockdir(os.getpid())
+        old = time.time() - 3600
+        os.utime(d, (old, old))
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertTrue((d / "owner").is_file(), "a live run's lock is left alone however old")
+
+    def test_mkdir_lock_of_a_live_owner_with_matching_start_time_is_never_aged_out(self):
+        if not shutil.which("ps"):
+            self.skipTest("no ps on this host")
+        # current three-field owner line, start time matching the real (live, ours) owner pid: a slow
+        # but genuinely live sync must never lose its lock, no matter its age
+        d = self._owned_lockdir(os.getpid(), self._pid_start(os.getpid()))
+        old = time.time() - 3600
+        os.utime(d, (old, old))
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertTrue((d / "owner").is_file(), "a live owner, start time and all, is left alone however old")
+
+    def test_mkdir_lock_of_a_reused_pid_is_reclaimed_at_once(self):
+        """The owner pid is alive (it's ours) but its recorded process start time does not match its
+        real one: the classic reused-pid case (a reboot or pid wraparound recycled the number onto an
+        unrelated process). Must be reclaimed immediately — same as a dead owner, not aged out by the
+        10-minute ownerless threshold."""
+        if not shutil.which("ps"):
+            self.skipTest("no ps on this host")
+        d = self._owned_lockdir(os.getpid(), "Mon Jan  1 00:00:00 1999")
+        r = self.sync(env=_env(self.tmp, self.path_without("flock")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        log = self.log_file.read_text()
+        self.assertIn("removed a stale lock dir (owner pid", log)
+        self.assertIn("different process", log)
+        self.assertFalse((d).exists())
+
+    def test_lockdir_vanishing_mid_check_is_retaken_not_reported_busy(self):
+        """The fast `mkdir $LOCKDIR` in take_lockdir can lose to a holder that releases the lock in the
+        gap before lockdir_stale runs: `find`/`owner_of` then see a directory that simply isn't there any
+        more. That must read as a free lock (retake it), not a busy one (exit 3) — a fake `mkdir` stands
+        in for the racing holder, removing the pre-seeded lock dir the instant our fast attempt fails."""
+        path = self.path_without("flock", "mkdir")
+        real_mkdir = shutil.which("mkdir")
+        raced_marker = self.tmp / "mkdir.raced"  # outside the kit checkout: must not trip the dirty-tree check
+        fake = Path(path) / "mkdir"
+        fake.write_text(
+            "#!/bin/sh\n"
+            'case "$1" in\n'
+            '  */.sync.lock.d)\n'
+            f'    if [ ! -e "{raced_marker}" ]; then\n'
+            f'      : >"{raced_marker}"\n'
+            f'      {real_mkdir} "$@" 2>/dev/null && exit 0\n'
+            '      rm -f "$1/owner"; rmdir "$1" 2>/dev/null\n'
+            "      exit 1\n"
+            "    fi\n"
+            "    ;;\n"
+            "esac\n"
+            f'exec {real_mkdir} "$@"\n'
+        )
+        fake.chmod(0o755)
+        (self.kit / ".sync.lock.d").mkdir()  # no owner file: just something for the fast mkdir to fail against
+        r = self.sync(env=_env(self.tmp, path))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("removed a stale lock dir (lock dir vanished", self.log_file.read_text())
+        self.assertFalse((self.kit / ".sync.lock.d").exists())
+
+    def test_concurrent_runs_break_a_stale_lock_once(self):
+        """Six runs start together on a stale (ownerless, old) mkdir lock. `find` (the age check) answers
+        at once but each run then stalls a little longer than the one before, so every run acts on a
+        staleness verdict taken before the first one broke the lock: exactly one run may take it and
+        fetch, the rest exit 3 without removing the fresh lock."""
+        path = self.path_without("flock", "find")
+        real_find = shutil.which("find")
+        turns = self.tmp / "turns"
+        turns.mkdir()
+        slow = Path(path) / "find"
+        slow.write_text("#!/bin/sh\n"
+                        f"out=$({real_find} \"$@\")\n"
+                        f"n=1; until mkdir {turns}/$n 2>/dev/null; do n=$((n + 1)); done\n"
+                        "sleep \"$(awk \"BEGIN{print $n * 0.2}\")\"\n"
+                        "[ -z \"$out\" ] || printf '%s\\n' \"$out\"\n")
+        slow.chmod(0o755)
+        fetches = self.tmp / "fetches"
+        self.upload_pack(f"echo x >>{fetches}; sleep 8; exec git upload-pack \"$@\"")
+        d = self.kit / ".sync.lock.d"
+        d.mkdir()
+        old = time.time() - 3600
+        os.utime(d, (old, old))
+        env = _env(self.tmp, path)
+        procs = [subprocess.Popen([SH, str(self.kit / "sync.sh")], env=env, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.PIPE, text=True) for _ in range(6)]
+        rcs = sorted(p.wait(timeout=60) for p in procs)
+        for p in procs:
+            p.stderr.close()
+        self.assertEqual(len(fetches.read_text().splitlines()), 1, f"runs that fetched; exit codes {rcs}")
+        self.assertEqual(rcs, [0, 3, 3, 3, 3, 3])
+        self.assertEqual(self.status()[1], "ok")
+        self.assertFalse(d.exists())
+
     # ── offline ──
     def test_offline_streak_warns_after_days(self):
         self.upload_pack("echo 'ssh: Could not resolve hostname github.com: nodename nor servname provided' >&2; exit 128")

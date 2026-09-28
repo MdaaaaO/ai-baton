@@ -18,11 +18,14 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py env            # the env fact store directory
                         python3 kit_profile.py context        # the .context/ root
                         python3 kit_profile.py source         # env | none
+                        python3 kit_profile.py list            # the environments this machine knows (exactly one, kept for callers that iterate)
                         python3 kit_profile.py get tracker.kind   # a dotted key (JSON for non-scalars)
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
+                        python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC
                         python3 kit_profile.py zone           # the zone timestamps render in (UTC when WORKSPACE_TZ is unknown)
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig
+                        python3 kit_profile.py identity-source <WORKSPACE_* var>  # option | env | `` (unset) — where the value comes from, never the value
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
@@ -69,6 +72,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # noqa: E402
 KIT = Path(__file__).resolve().parents[2]
 KIT_AS_CALLED = Path(os.path.abspath(__file__)).parents[2]  # symlinks kept: a `.claude` link to a checkout is a clone
 DEFAULT_NAME = "local"
+
+# The only values `tracker.kind` may hold — the one enum every doc and `kit_verify` cites, so the four never drift
+# apart again. No code path implements a `linear` adapter yet, so it is not offered here; add it (and the value)
+# together with the adapter.
+TRACKER_KINDS = ("jira", "github", "none")
 
 # How the kit is installed (#34) and what follows from it — the one table every mode-dependent hint reads.
 #   clone        — the workspace's `.claude/` (a git checkout, or a copy without git that sync.sh skips)
