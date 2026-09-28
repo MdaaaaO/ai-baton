@@ -48,7 +48,7 @@ jobs:
         working-directory: .claude
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}  # the PR author, not github.actor (whoever triggered this run, e.g. a re-run)
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}  # the PR author, not the run actor (whoever triggered this run, e.g. a re-run)
         run: |
           git fetch -q --no-tags origin "$BASE_REF"
           skip=false
