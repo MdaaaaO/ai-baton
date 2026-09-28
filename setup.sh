@@ -245,18 +245,18 @@ elif [ -d "$HARNESS_MEM" ]; then
   fi
   # keep only the newest 3 backups (sorted by name — the timestamp format sorts chronologically); a run that
   # never migrates a real dir leaves this alone, so it only grows one entry per actual migration
-  n_backups="$(cd "$MIGRATED_DIR" && find . -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+  # only names the backup step writes (YYYYMMDD-HHMMSS[-n]) are counted, kept or pruned — a stray dir someone left
+  # here takes no slot and is never deleted; ${…:?} stops an empty var from ever reaching /
+  prunelist="$(mktemp "$CONTEXT/.memory-prune.XXXXXX")"
+  (cd "$MIGRATED_DIR" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' \
+    | grep -E '^[0-9]{8}-[0-9]{6}(-[0-9]+)?$' | sort) > "$prunelist"
+  n_backups="$(wc -l < "$prunelist" | tr -d ' ')"
   n_pruned=0
   if [ "$n_backups" -gt 3 ]; then
     n_pruned=$((n_backups - 3))
-    prunelist="$(mktemp "$CONTEXT/.memory-prune.XXXXXX")"
-    (cd "$MIGRATED_DIR" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | sort) > "$prunelist"
-    # only a name the backup step writes (YYYYMMDD-HHMMSS[-n]) is ever pruned; ${…:?} stops an empty var from reaching /
-    head -n "$n_pruned" "$prunelist" | while IFS= read -r d; do
-      case "$d" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]*) rm -rf "${MIGRATED_DIR:?}/${d:?}" ;; esac
-    done
-    rm -f "$prunelist"
+    head -n "$n_pruned" "$prunelist" | while IFS= read -r d; do rm -rf "${MIGRATED_DIR:?}/${d:?}"; done
   fi
+  rm -f "$prunelist"
   echo "  memory: migrated real dir -> durable ($n_src files verified, $n_new new, $n_kept already durable, $n_conflict conflicting), replaced with symlink; pre-migration dir kept at $BACKUP"
   if [ "$n_pruned" -gt 0 ]; then
     echo "  memory: pruned $n_pruned old migration backup(s) under $MIGRATED_DIR (keeping the newest 3)"

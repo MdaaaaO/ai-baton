@@ -109,6 +109,11 @@ done
 check "exit 0 on the last run" '[ "$RC" -eq 0 ]'
 check "5 migrations so far (2, 2b, 2c and this loop), still only 3 backups kept" '[ "$(ls -d "$MIG"/* 2>/dev/null | wc -l | tr -d " ")" -eq 3 ]'
 check "the run that crossed the limit says so" 'printf "%s" "$OUT" | grep -q "pruned 1 old migration backup"'
+mkdir -p "$MIG/someone-else"; : > "$MIG/someone-else/keep.txt"
+rm -f "$MEM"; mkdir -p "$MEM"; printf 'filler x\n' > "$MEM/fillerx.md"
+run_setup
+check "a stray dir under the backups is never deleted" '[ -f "$MIG/someone-else/keep.txt" ]'
+check "a stray dir takes no backup slot: still 3 backup-named dirs" '[ "$(ls -d "$MIG"/[0-9]* 2>/dev/null | wc -l | tr -d " ")" -eq 3 ]'
 
 echo "== 3. a failed copy leaves the original untouched and exits non-zero =="
 scenario failcopy
