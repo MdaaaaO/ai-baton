@@ -1,6 +1,7 @@
 """README.md must pitch the kit through the loop it runs: one section, near the top — before the
 "Why a kit" comparison table — naming the skills that carry an issue from open to merge to the next retro.
-Every skill it names must be a real skill directory, so the section can never drift from what the kit ships."""
+Every skill it names, read from the section itself, must be a real skill directory, so the section cannot drift
+from what the kit ships."""
 from __future__ import annotations
 import re
 import unittest
@@ -51,6 +52,15 @@ class ReadmeLoopSection(unittest.TestCase):
         shipped = {p.name for p in (KIT / "skills").iterdir() if (p / "SKILL.md").exists()}
         missing = [s for s in LOOP_SKILLS if s not in shipped]
         self.assertEqual(missing, [], f"LOOP_SKILLS names a skill the kit no longer ships: {missing}")
+
+    def test_every_skill_the_section_names_ships(self):
+        # read the names from the section itself (a bold backticked name, **`x`**, is how it cites a skill), so a
+        # new or misspelled name added to the prose trips this even when LOOP_SKILLS was not updated
+        _, start, end = next(s for s in self.sections if s[0] == "The loop")
+        named = set(re.findall(r"\*\*`([a-z][a-z0-9-]*)`\*\*", self.readme[start:end]))
+        self.assertTrue(named, "found no **`skill`** names in 'The loop' — the pattern this test reads has changed")
+        shipped = {p.name for p in (KIT / "skills").iterdir() if (p / "SKILL.md").exists()}
+        self.assertEqual(sorted(named - shipped), [], "'The loop' names a skill the kit does not ship")
 
 
 if __name__ == "__main__":
