@@ -1,0 +1,106 @@
+# Troubleshooting — silent hooks, kit-health RED findings, uninstalling
+
+Both kit hooks are written to never fail loudly: a broken hook must not break the session. That means a real
+failure produces no error dialog and no non-zero exit — only a line in the transcript, or nothing at all. This
+page says where to look, and how to remove the kit once you no longer want it.
+
+## 1. A hook failed and printed nothing (or you're not sure)
+
+### SessionStart (`hooks/hooks.json`)
+
+Runs two things every session: `kit_profile.py session-env` (exports the plugin identity into
+`$CLAUDE_ENV_FILE`) and `kit_profile.py workspace-rules` (prints `WORKSPACE.md` into the session on a plugin
+install). The hook always `exit 0`s — Claude Code itself never sees it as failed — so the only signal is what it
+prints and where its stderr went:
+
+- **stderr** is appended to `<scratch>/hooks.log` when the scratch directory exists and is writable, else it is
+  discarded to `/dev/null`. Find the scratch directory the same way any skill does:
+
+  ```sh
+  python3 $BATON/context-db/bin/kit_profile.py scratch   # prints the directory; hooks.log lives inside it
+  ```
+
+- **`session-env` failing** prints one line into the session itself: `ai-baton: session-env failed writing to
+  $CLAUDE_ENV_FILE - see <path>/hooks.log`, or `- (no log available)` when the scratch directory could not be
+  used. Look there first.
+- **`workspace-rules` failing** prints `ai-baton: the SessionStart hook could not load WORKSPACE.md
+  (kit_profile.py workspace-rules failed) - the always-on rules are missing from this session; run /kit-health`.
+  Do that — § 4 of a kit-health run checks the exact wiring this hook depends on (below).
+
+Nothing prints at all only when both commands succeed — a session with no `ai-baton:` line at start had a clean
+SessionStart hook.
+
+### SessionEnd (`settings.json`, clone only)
+
+A plugin install has no SessionEnd hook (`docs/sync.md`'s banner). On a clone, the SessionEnd hook runs
+`sync.sh` in the background with both streams thrown away and its own exit code ignored
+(`… >/dev/null 2>&1 || true`) — by design, since an async hook's output is not visible anywhere a person would
+see it. `sync.sh` does not rely on that output surfacing: it writes `.sync-status` (`ok <sha>` / `error <reason>`
+/ `offline …` / `pending …`) and appends to `sync.log` on every run, and `sync-check.sh` reads `.sync-status` at
+the next `session-register` so a refused pull is never silent for long. `docs/sync.md` § What `sync.sh` does has
+the full state table; to see a failure immediately rather than at the next registration, run
+`sh $BATON/sync.sh` yourself from the workspace root.
+
+## 2. Start here: `/kit-health`
+
+Whenever something about the kit seems off — a skill misbehaves, a session looks like it's missing rules, a hook
+printed a line you don't understand — `/kit-health` is the first command, not a last resort. It is read-only
+(only `--stamp` writes), checks the kit itself, this machine's env store, and the wiring the hooks above depend
+on, and exits `0` GREEN, `1` AMBER, `2` RED. `skills/kit-health/SKILL.md` has the full walk; this page only
+covers what a RED finding means and how to fix it.
+
+## 3. The five most common RED findings
+
+A RED finding is an `ERR`-level check; kit-health prints the section (`kit`, `config`, `machine`, `engine`, …)
+with each one. These five cover most first-run and after-a-move problems:
+
+| Finding (as kit-health prints it, trimmed) | Section | Fix |
+|---|---|---|
+| `env store missing` | config | `python3 $BATON/context-db/bin/kb.py init --blank`, then fill `config.json` (`kb.py config-set`) and facts (`kb.py set`) — or just re-run `sh $BATON/setup.sh`, which does the same and seeds everything else too |
+| `no identity from any source: settings.local.json missing … and no WORKSPACE_* in the environment` | machine | `sh $BATON/setup.sh` seeds `settings.local.json` from the example (edit it), or `/plugin configure ai-baton` on a plugin install |
+| `root CLAUDE.md missing` | machine | `sh $BATON/setup.sh` seeds it from `CLAUDE.example.md` — only when the file is absent, so this fires after a manual delete or a workspace root moved without it |
+| `CLAUDE.md imports @.claude/WORKSPACE.md but the file is missing` (clone), or `CLAUDE.md does not import @.claude/WORKSPACE.md` | machine | add the line `@.claude/WORKSPACE.md` right after the preamble on a clone; on a plugin install this import should not exist at all — the plugin's SessionStart hook injects it (kit-health tells you which case you're in) |
+| `kit-verify failed: …` | kit | the message quotes `kit_verify.py`'s own output — almost always a frontmatter or body rule on a skill/agent you just edited; `make -C $BATON/context-db verify-skill UNIT=skills/<name>` re-runs the same check on just that unit |
+
+Every other RED and every AMBER is specific enough to act on directly from what kit-health prints; the walk in
+`skills/kit-health/SKILL.md` § 4 (Fix / Ticket / Accept) covers how to resolve one once you understand it.
+
+## 4. Uninstalling
+
+`setup.sh` has no `--uninstall` flag: what it creates is either a file it seeds only when absent (safe to leave —
+nothing re-creates or depends on it once the kit is gone) or a symlink/config value with one clear owner. The
+manual list below removes exactly what `setup.sh` creates, nothing that holds your own content, and separately by
+install mode (`docs/packaging.md` § Install mode names the three).
+
+Two artifacts are common to both modes:
+
+- **The harness memory symlink** — `~/.claude/projects/<workspace root with every / turned into ->/memory`,
+  pointing at `.context/memory`. Remove the symlink (`rm <that path>`); your notes stay in `.context/memory`
+  untouched, since the symlink is only the harness's side of the link.
+- **`.context/`** (the env store, the context DB, memory, self-assessment, kit-health stamps) is your captured knowledge,
+  not kit wiring — keep it unless you mean to discard that too. Delete it only as a deliberate last step, after
+  the two mode-specific sections below.
+
+**Clone** (`.claude/` is a git checkout of the kit):
+
+1. `rm -rf .claude` — removes the checkout itself, `settings.local.json`, `.context/state/pr-review/config.json`'s
+   seed source, and the kit's own git hooks config (`core.hooksPath`), since all of it lives inside that directory.
+2. In the root `CLAUDE.md`, delete the lines `@.claude/WORKSPACE.md` and `@.context/reference/environment.md`
+   (or delete the whole file if the kit created it and you never added your own preamble).
+3. In the root `Makefile`, delete the line `include .claude/workspace.mk` — delete the file entirely when that
+   was its only line.
+4. Remove the harness memory symlink (above).
+
+**Plugin** (`claude plugin install ai-baton@ai-baton-kit`):
+
+1. `claude plugin uninstall ai-baton@ai-baton-kit` removes it from Claude Code's plugin cache.
+2. `claude plugin marketplace remove ai-baton-kit`, if you added no other plugin from that marketplace.
+3. Remove `<workspace root>/.claude/settings.local.json` (a plugin install keeps identity beside the workspace,
+   never in the plugin cache) — delete `<workspace root>/.claude/` entirely if the kit was the only thing that
+   used it.
+4. In the root `CLAUDE.md`, delete the line `@.context/reference/environment.md` (a plugin install's `CLAUDE.md`
+   never imports `@.claude/WORKSPACE.md` — that came from the SessionStart hook at runtime, so there is no line
+   on disk for it to leave behind).
+5. Remove the harness memory symlink (above).
+
+Either way, `/kit-health` won't run again once step 1 is done — there is nothing left to check.
