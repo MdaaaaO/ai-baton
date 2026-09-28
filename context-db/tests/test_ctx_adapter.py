@@ -86,7 +86,9 @@ class Pin(Base):
         mod = load_adapter()
         self.assertRegex(mod.CTX_VERSION, r"^v\d+\.\d+\.\d+$")
         r = self.adapter("version")
-        self.assertEqual((r.returncode, r.stdout.strip()), (0, mod.CTX_VERSION))
+        lines = r.stdout.splitlines()
+        self.assertEqual((r.returncode, lines[0]), (0, mod.CTX_VERSION))
+        self.assertEqual(lines[1], f"api {mod.CTX_API}")
 
     def test_the_tag_is_named_in_one_place(self):
         """No other kit file pins a ctx-store version of its own: a second copy would drift from CTX_VERSION."""

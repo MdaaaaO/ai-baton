@@ -244,6 +244,62 @@ class CtxStoreCheck(unittest.TestCase):
         self.assertEqual(self.check(2, "")[0], "ERR")
 
 
+class CtxPinCheck(unittest.TestCase):
+    """§ 5 also checks the ctx AT THE PIN, not just whether `.context/` is adopted: `where` finds the pinned
+    executable (never installs it), then `<ctx> --version` is run directly and compared against the API
+    `ctx_adapter.py version`'s second line names — no adopted store is needed for either call."""
+
+    def check(self, **answers) -> tuple[str, str]:
+        kh = load_kit_health()
+
+        def fake_sh(cmd, **kw):
+            if cmd[-1] == "version":
+                return answers.get("adapter_version", (0, "v0.4.0\napi 1", ""))
+            if cmd[-1] == "where":
+                return answers.get("where", (0, "/opt/ctx", ""))
+            if cmd[-1] == "--version":
+                return answers.get("ctx_version", (0, "ctx 0.4.0 (api 1)", ""))
+            raise AssertionError(cmd)
+
+        r = kh.Report()
+        with mock.patch.object(kh, "sh", fake_sh):
+            kh.ctx_pin_check(r)
+        [level] = [k for k, n in r.counts.items() if n]
+        return level, r.lines[-1]
+
+    def test_matching_api_is_ok(self):
+        level, line = self.check()
+        self.assertEqual(level, "OK")
+        self.assertIn("api 1", line)
+
+    def test_pin_missing_is_a_warning_with_the_fix(self):
+        level, line = self.check(where=(1, "", "not installed"))
+        self.assertEqual(level, "WARN")
+        self.assertIn("ctx_adapter.py install && ", line)
+        self.assertIn("ctx_adapter.py adopt`", line)
+
+    def test_a_different_api_is_a_warning_naming_both(self):
+        with mock.patch.dict(os.environ, {"KIT_CTX": ""}):
+            level, line = self.check(ctx_version=(0, "ctx 0.3.0 (api 0)", ""))
+        self.assertEqual(level, "WARN")
+        self.assertIn("api 0", line)
+        self.assertIn("expects api 1", line)
+        self.assertIn("remove `", line)  # `install` keeps a usable copy at the pin: removing it is part of the fix
+        self.assertIn("ctx_adapter.py adopt`", line)
+
+    def test_a_different_api_under_kit_ctx_names_the_override(self):
+        with mock.patch.dict(os.environ, {"KIT_CTX": "/opt/other/ctx"}):
+            level, line = self.check(ctx_version=(0, "ctx 9.0.0 (api 2)", ""))
+        self.assertEqual(level, "WARN")
+        self.assertIn("`KIT_CTX` points at it", line)
+        self.assertNotIn("install &&", line)  # install would not clear it: KIT_CTX overrides the pin
+
+    def test_unparseable_ctx_version_output_is_a_warning(self):
+        level, line = self.check(ctx_version=(0, "garbage", ""))
+        self.assertEqual(level, "WARN")
+        self.assertIn("api none", line)
+
+
 class ConfigSection(unittest.TestCase):
     """kit-health § 3 (config) on a throw-away store — never the live one (kb.ENV / kit_profile.ENV_DIR
     patched directly, the StoreCase pattern test_kb_store.py uses)."""

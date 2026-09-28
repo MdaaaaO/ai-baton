@@ -376,7 +376,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
-  python3 ctx_adapter.py version          # the pinned tag
+  python3 ctx_adapter.py version          # the pinned tag, then `api <CTX_API>` on a second line
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
   python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports

@@ -372,6 +372,79 @@ class BodyChecks(unittest.TestCase):
             self.assertIs(leak_shapes.allowed(allow), pats)  # compiled once per process and file
 
 
+class CtxWriteProse(unittest.TestCase):
+    """`.context/` writes go through the ctx MCP tools, never Write/Edit/a shell redirect (#322/#324) — the
+    PreToolUse deny catches a Write/Edit tool call; this prose check exists for what it cannot see: a
+    Bash-run heredoc/`sed -i`/`tee`/`cat >`/`>>`, or wording that never names which tool routes the change."""
+
+    def hits(self, body: str) -> list[str]:
+        return [msg for _line, msg in kit_verify.ctx_write_prose_hits(body)]
+
+    def test_append_a_line_elsewhere_is_not_a_hit(self):
+        self.assertEqual(self.hits("1. Append a line to the PR body with the test result.\n"), [])
+        self.assertEqual(self.hits("1. Append a line to `.context/sessions/x.md`.\n"), [])  # an exempt path
+        self.assertTrue(self.hits("1. Append a line to the context doc's Session log.\n"))
+
+    def test_exempt_mirrors_the_deny_hooks_skip_list(self):
+        exempt = kit_verify._ctx_write_exempt
+        for rel in ("sessions/foo.md", "state/bar.md", "handoff/x.md", "_templates/y.md", "bin/z.md",
+                    ".hidden/x.md", "reference/INDEX.md", "reference/SESSION_INDEX.md", "reference/README.md",
+                    "reference/x.jsonl", "reference/x.txt"):
+            self.assertTrue(exempt(rel), rel)
+        for rel in ("reference/priorities.md", "reference/claude-cost-tracking.md", "pr-reviews/repo.md",
+                    "on-call/rotations/2026-W40.md"):
+            self.assertFalse(exempt(rel), rel)
+
+    def test_edit_a_backticked_path_is_a_hit(self):
+        hits = self.hits("Edit `.context/reference/priorities.md` and tick the box.")
+        self.assertTrue(any("reference/priorities.md" in h and "without naming a ctx tool" in h for h in hits), hits)
+
+    def test_write_to_is_a_hit(self):
+        hits = self.hits("Write the outcome to `.context/reference/notes.md` when you're done.")
+        self.assertTrue(any("reference/notes.md" in h for h in hits), hits)
+
+    def test_shell_redirects_into_a_context_doc_are_hits(self):
+        for line in (
+            "`sed -i 's/a/b/' .context/reference/notes.md`",
+            "pipe the summary with `cat >> .context/reference/notes.md`",
+            "`tee .context/reference/notes.md` the block",
+            "append with a heredoc: `cat > .context/reference/notes.md <<'EOF'`",
+        ):
+            hits = self.hits(line)
+            self.assertTrue(any("reference/notes.md" in h for h in hits), (line, hits))
+
+    def test_reading_a_doc_is_not_a_hit(self):
+        self.assertEqual(self.hits("Read `.context/reference/priorities.md` before you start."), [])
+
+    def test_a_ctx_tool_named_in_the_same_unit_exempts_it(self):
+        self.assertEqual(self.hits("Edit `.context/reference/priorities.md` through `ctx_str_replace`."), [])
+        self.assertEqual(self.hits("Edit `.context/reference/priorities.md` via `ctx_adapter.py ctx str-replace`."), [])
+        self.assertEqual(self.hits("Tick `.context/reference/priorities.md` — through the ctx tools, see step 1."), [])
+
+    def test_exempt_skip_dir_write_is_not_a_hit_even_with_a_write_verb(self):
+        self.assertEqual(self.hits("Append a row to `.context/sessions/_ledger.md` by hand."), [])
+
+    def test_a_write_verb_far_from_an_unrelated_path_in_the_same_step_is_not_a_hit(self):
+        # the verb targets the exempt sessions/ path; a second, non-exempt path mentioned only in passing
+        # (a read-only pipeline note, well outside the proximity window) must not be flagged for it
+        pad = "x" * 200
+        body = f"One row is appended to `.context/sessions/_ledger.md`. {pad} It feeds `.context/reference/report.md`."
+        self.assertEqual(self.hits(body), [])
+
+    def test_append_a_line_without_a_path_or_ctx_tool_is_a_hit(self):
+        hits = self.hits("Then append a line to the context doc with the outcome.")
+        self.assertTrue(any("append a line" in h for h in hits), hits)
+
+    def test_append_a_line_naming_a_ctx_tool_is_not_a_hit(self):
+        self.assertEqual(self.hits("Then append a line to the context doc via `ctx_log`."), [])
+
+    def test_wired_into_check_body(self):
+        errors: list[str] = []
+        p = FIX / "good-skill" / "SKILL.md"
+        kit_verify.check_body(p, p.relative_to(KIT), "Edit `.context/reference/priorities.md` directly.", errors)
+        self.assertTrue(any("without naming a ctx tool" in e for e in errors), errors)
+
+
 class IssueRefs(unittest.TestCase):
     """A kit file may not cite `#n` past this tracker's reach: the release CHANGELOG's highest issue + the margin."""
 

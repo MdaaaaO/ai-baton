@@ -38,7 +38,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
-  python3 ctx_adapter.py version          # the pinned tag
+  python3 ctx_adapter.py version          # the pinned tag, then `api <CTX_API>` on a second line
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
   python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
@@ -64,6 +64,9 @@ import tempfile
 from pathlib import Path
 
 CTX_VERSION = "v0.4.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
+CTX_API = 1             # the ctx API `ctx --version` must report (its `(api N)` suffix) — bump only alongside a
+                         # verb/output change the adapter now relies on; `ctx_adapter.py version`'s second line
+                         # exposes it so kit-health can catch a pinned install answering a different one
 CTX_REPO = "https://github.com/MdaaaaO/ctx-store"
 BRIEF_BUDGET = 2048     # bytes of a SessionStart brief (ctx's default is 4096; the start of a session is prime context)
 HOOK_TIMEOUT = 8        # seconds one ctx call may take inside a hook (the hook entries allow 10)
@@ -463,6 +466,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if a.cmd == "version":
         print(CTX_VERSION)
+        print(f"api {CTX_API}")
         return 0
     if a.cmd == "where":
         ctx, why = resolve()
