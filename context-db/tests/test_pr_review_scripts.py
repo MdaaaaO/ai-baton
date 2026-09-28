@@ -326,6 +326,45 @@ exec "{real}" "$@"
         self.assertNotIn("digest:", r.stdout)
         self.assertIn("unreadable", r.stderr)
 
+    # --- no env store at all is a documented, graceful state ("kit defaults apply") — never an error. `get`
+    # says so with a stderr warning + exit 1; `source` (checked first, no warning) tells the two states apart. ---
+
+    def test_submit_review_runs_without_a_store_skipping_the_lint(self):
+        # setUp's env_dir has no config.json under it at all — no store, by construction
+        req = self.write_request("req.json", {"event": "COMMENT", "body": "see ABC-123 for details", "comments": []})
+        r = subprocess.run(["bash", str(SUBMIT), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                            "--request", req], env=self.base_env(), capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("digest:", r.stdout)
+
+    def test_reply_threads_runs_without_a_store_skipping_the_lint(self):
+        req = self.write_request("req.json", {"replies": [
+            {"thread_id": "PRRT_x", "body": "see ABC-123 for details", "resolve": False}]})
+        env = self.base_env(); env["STUB_GRAPHQL_JSON"] = MATCHING_THREAD_GRAPHQL
+        r = subprocess.run(["bash", str(REPLY), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                            "--request", req], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("digest:", r.stdout)
+
+    # --- a store that DOES exist but is broken (unreadable/invalid JSON) is still fatal, no-store or not ---
+
+    def test_submit_review_a_broken_store_is_still_fatal(self):
+        self.env_dir.joinpath("config.json").write_text("{not valid json")
+        req = self.write_request("req.json", {"event": "COMMENT", "body": "see ABC-123 for details", "comments": []})
+        r = subprocess.run(["bash", str(SUBMIT), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                            "--request", req], env=self.base_env(), capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertNotIn("digest:", r.stdout)
+
+    def test_reply_threads_a_broken_store_is_still_fatal(self):
+        self.env_dir.joinpath("config.json").write_text("{not valid json")
+        req = self.write_request("req.json", {"replies": [
+            {"thread_id": "PRRT_x", "body": "see ABC-123 for details", "resolve": False}]})
+        r = subprocess.run(["bash", str(REPLY), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                            "--request", req], env=self.base_env(), capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertNotIn("digest:", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
