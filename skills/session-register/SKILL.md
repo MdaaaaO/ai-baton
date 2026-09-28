@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "16"
+  version: "17"
   updated: "2026-09-28"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -153,7 +153,7 @@ Then do the rest of the `session-handoff` close-out (flush to the context doc, p
 
 ## Fields
 
-`session` (name) · `ref` (ListAgents ref — the stable id) · `status` (`active`|`idle`|`ended`)
+`session` (name) · `session_id` (auto: `$CLAUDE_CODE_SESSION_ID` at register — the key a hook matches on) · `ref` (ListAgents ref — the stable id) · `status` (`active`|`idle`|`ended`)
 · `epic` (the initiative's tracker key) · `repos` · `working_on` (one line) · `responsibilities` · `stats` (auto, § 2b)
 · `heartbeat` (auto) · `updated` (auto). These are operational state, **not** knowledge — the registry is
 excluded from `make index`/`make verify` and the doc DB count.

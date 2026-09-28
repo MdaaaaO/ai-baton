@@ -306,25 +306,77 @@ between sessions (unlike a single shared file that everyone rewrites).
 one place a session reads to see who else is active and whether it must
 coordinate. Subcommands (each regenerates SESSION_INDEX.md): register
 create/update this session's entry (upsert; preserves the free-text body —
-`--note` fills only `## Notes`) touch refresh heartbeat + updated only — the
-<=12h keep-alive end mark the session ended; writes the `## Session stats`
-block into the body and (with --next FILE) the `## Next session` hand-off
-prompt — omit --next when the session has nothing to hand over, and pass
---next none to withdraw a prompt already on file — and appends one row to
-sessions/_ledger.md (the cross-session cost/activity ledger) stats print this
-session's stats (block) without touching the registry Every subcommand also
-refreshes the `stats:` field (one line: turns, context, tokens, rough spend,
-PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's
-transcript is discoverable via $CLAUDE_CODE_SESSION_ID / --session-id; `--no-
-stats` skips it. Stats are derived from the transcript with zero model turns,
-so the live registry row is always current. The content root is
-kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets from
-CONTEXT, else docs/layout.md's "Content root" default). Empty CLI values are
-treated as "leave unchanged" so the Makefile can pass every flag
-unconditionally. Stdlib only.
+`--note` fills only `## Notes`); stamps `session_id` with
+$CLAUDE_CODE_SESSION_ID when set, so a hook handed that id finds the row touch
+refresh heartbeat + updated only — the <=12h keep-alive end mark the session
+ended; writes the `## Session stats` block into the body and (with --next
+FILE) the `## Next session` hand-off prompt — omit --next when the session has
+nothing to hand over, and pass --next none to withdraw a prompt already on
+file — and appends one row to sessions/_ledger.md (the cross-session
+cost/activity ledger) stats print this session's stats (block) without
+touching the registry Every subcommand also refreshes the `stats:` field (one
+line: turns, context, tokens, rough spend, PRs/tickets/sign jobs/drafts — see
+session_stats.py) when the session's transcript is discoverable via
+$CLAUDE_CODE_SESSION_ID / --session-id; `--no-stats` skips it. Stats are
+derived from the transcript with zero model turns, so the live registry row is
+always current. The content root is kit_profile.context_root() (CONTEXT_ROOT,
+which the Makefile sets from CONTEXT, else docs/layout.md's "Content root"
+default). Empty CLI values are treated as "leave unchanged" so the Makefile
+can pass every flag unconditionally. Stdlib only.
 
 positional arguments:
   {register,touch,end,stats}
+
+options:
+  -h, --help            show this help message and exit
+```
+
+## `ctx_adapter.py`
+
+```text
+usage: ctx_adapter.py [-h] {version,where,install,hook} ...
+
+ctx_adapter.py — the kit's one adapter to ctx-store, the context-store CLI `ctx`.
+
+The kit talks to ctx through its verbs only: it never reads or writes the store's own files (`ctx-store.json`,
+`.ctx/`, `.audit/`), and `CTX_STORE` is an opaque locator it passes through, never a path it inspects. Whether a
+store exists is ctx's answer (`NO_STORE`), not a file test here.
+
+Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against. It is
+fetched, not vendored: `install` clones exactly that tag (`git clone --depth 1 --branch <tag>`) into a per-user
+cache directory whose path carries the tag, so a bumped pin never picks up an older copy.
+
+Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
+pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
+
+Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
+JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
+or found, or when anything in the adapter itself fails, so a machine that has not adopted ctx-store sees nothing:
+
+  post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
+                       comes back as `{"systemMessage": …}`, every other outcome is silent
+  post-tool-use-async  the same trigger → `ctx touch --session <session_id>` (the registry row `session register`
+                       stamped with the harness session id); output ignored
+  brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
+  brief-session        SessionStart compact → `ctx brief --session <session_id>`, byte-budgeted
+
+The store a hook names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
+(kit_profile.context_root()) — a write always names its store.
+
+  python3 ctx_adapter.py version          # the pinned tag
+  python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
+  python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
+  python3 ctx_adapter.py hook <name>      # one of the hooks above; hook JSON on stdin
+
+Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line). A hook always exits 0. Stdlib only.
+
+positional arguments:
+  {version,where,install,hook}
+    version             print the pinned ctx-store tag
+    where               print the ctx executable; exit 1 when not installed
+    install             fetch the pinned tag into the pinned location
+    hook                run one Claude Code hook (hook JSON on stdin); always
+                        exit 0
 
 options:
   -h, --help            show this help message and exit

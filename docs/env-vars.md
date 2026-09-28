@@ -35,8 +35,15 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `CONTEXT_ROOT` | walk-up discovery (`docs/layout.md` § Content root) | `context-db/bin/kit_profile.py` (every script that asks `context_root()`), `skills/kit-health/kit-health.py` | override where the `.context/` document DB lives | user-facing |
 | `KIT_SCRATCH` | computed per-session scratch dir | `context-db/bin/kit_profile.py` (`scratch()`) | override the per-session scratch directory outright | user-facing |
 | `XDG_RUNTIME_DIR` | unset (falls back to `TMPDIR`/`/tmp`) | `context-db/bin/kit_profile.py` (`scratch()`) | the standard XDG per-user runtime dir; used as the scratch root's parent when set | internal |
-| `XDG_CACHE_HOME` | `~/.cache` | `context-db/bin/kit_profile.py` (`scratch(stable=True)`) | the standard XDG cache dir; parent of the stable (per-user, cross-session) scratch dir | internal |
+| `XDG_CACHE_HOME` | `~/.cache` | `context-db/bin/kit_profile.py` (`scratch(stable=True)`), `context-db/bin/ctx_adapter.py` (the pinned ctx-store install) | the standard XDG cache dir; parent of the stable (per-user, cross-session) scratch dir and of the pinned ctx-store copy | internal |
 | `PROJECTS` | the computed workspace root (clone: kit's parent; plugin: `CLAUDE_PROJECT_DIR` or `$PWD`) | `setup.sh` | override the workspace root `setup.sh` installs into | user-facing |
+
+## ctx-store adapter (`context-db/bin/ctx_adapter.py`)
+
+| Name | Default | Read by | Purpose | Scope |
+|---|---|---|---|---|
+| `KIT_CTX` | unset (the pinned install under `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/`) | `context-db/bin/ctx_adapter.py` | a `ctx` executable to use instead of the pinned install; set but not an executable file means "not installed", never a fallback | user-facing |
+| `CTX_STORE` | unset (the hooks name the content root with `--store`) | `context-db/bin/ctx_adapter.py` | ctx-store's own store locator; when set, the hooks leave it to ctx instead of naming the content root | user-facing |
 
 ## `context-db/bin/new.sh` (`make new …`)
 

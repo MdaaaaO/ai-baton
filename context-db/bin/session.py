@@ -9,7 +9,8 @@ them into `<content-root>/SESSION_INDEX.md` — the one place a session reads to
 who else is active and whether it must coordinate.
 
 Subcommands (each regenerates SESSION_INDEX.md):
-  register  create/update this session's entry (upsert; preserves the free-text body — `--note` fills only `## Notes`)
+  register  create/update this session's entry (upsert; preserves the free-text body — `--note` fills only `## Notes`);
+            stamps `session_id` with $CLAUDE_CODE_SESSION_ID when set, so a hook handed that id finds the row
   touch     refresh heartbeat + updated only — the <=12h keep-alive
   end       mark the session ended; writes the `## Session stats` block into the body and
             (with --next FILE) the `## Next session` hand-off prompt — omit --next when the session has
@@ -46,7 +47,7 @@ CTX = str(profile.context_root())  # the one content-root resolver
 SESS_DIR = os.path.join(CTX, "sessions")
 
 # Frontmatter fields, in emit order.
-FIELDS = ["session", "ref", "status", "epic", "repos",
+FIELDS = ["session", "session_id", "ref", "status", "epic", "repos",
           "working_on", "responsibilities", "stats", "heartbeat", "updated"]
 STATS_HEADING = "## Session stats"
 NEXT_HEADING = "## Next session"
@@ -281,6 +282,12 @@ def cmd_register(a) -> None:
         check_convention(a.name)
         meta, body = {}, DEFAULT_BODY.format(name=a.name)
     meta["session"] = a.name
+    # The harness session id, so a Claude Code hook — handed `session_id` on stdin, never the registry name — can
+    # find this row (ctx_adapter.py's heartbeat and compact brief match on it). Only the harness's own variable
+    # counts: --session-id / SESSION_ID may name another session's transcript for its stats.
+    harness_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if harness_id:
+        meta["session_id"] = one_line(harness_id)
     if a.ref:    meta["ref"] = a.ref
     # A session that registers is active by definition: registering over an ended (or restored) doc reactivates
     # it, so the row shows under Active and the later session-end writes its stats + ledger row.

@@ -38,6 +38,7 @@ flowchart TB
     H1["settings.json SessionEnd → sync.sh (clone)"]
     H2["hooks/hooks.json SessionStart → kit_profile.py session-env + workspace-rules (plugin)"]
     H3["git hooks: pre-push (main guard) · commit-msg (commit style)"]
+    H4["PostToolUse + SessionStart → ctx_adapter.py → ctx verbs (both paths; silent until ctx-store is adopted)"]
   end
   H1 --> SY["sync.sh — fast-forward the kit, install the git hooks"]
   SY -.->|".sync-status, read by sync-check.sh at session-register"| EN
@@ -46,6 +47,7 @@ flowchart TB
   H2 -->|"workspace-rules: WORKSPACE.md on stdout (plugin)"| W
   PU["claude plugin update — the next release into the plugin cache"] -.-> K
   H3 --> K
+  H4 -.->|"validate --changed --adopt · touch · brief"| EN
 ```
 
 ## Reading the picture
@@ -71,5 +73,7 @@ flowchart TB
   `origin/main`, never a commit), and `hooks/pre-push` and `hooks/commit-msg` are git hooks installed by `setup.sh` /
   `sync.sh` (`core.hooksPath`). On a plugin install `hooks/hooks.json` runs at `SessionStart`: `session-env`
   re-exports plugin `userConfig` identity as `WORKSPACE_*`, plus `CLAUDE_PROJECT_DIR` and `BATON`, and
-  `workspace-rules` injects `WORKSPACE.md`. A plugin install has no `sync.sh`: the kit moves with
+  `workspace-rules` injects `WORKSPACE.md`. On both paths the ctx-store adapter (`context-db/bin/ctx_adapter.py`) runs
+  at `PostToolUse` and `SessionStart`, a silent no-op until ctx-store is installed and a store is named
+  (`docs/troubleshooting.md` § ctx-store hooks). A plugin install has no `sync.sh`: the kit moves with
   `claude plugin update` (`docs/sync.md`).

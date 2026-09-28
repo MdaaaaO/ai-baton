@@ -42,6 +42,7 @@ TOOLS = (
     "eval_check.py",
     "personal.py",
     "session.py",
+    "ctx_adapter.py",
     "session_stats.py",
     "session_retro.py",
     "gen_sessions.py",
