@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "25"
+  version: "26"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
@@ -95,51 +95,29 @@ Read, in this order, only the slices you need (`grep -n '^## ' file` first):
 
 Read `diff.patch` (and `files.json` for per-file stats). Default is one careful pass by this model,
 collecting candidates per `scope.md` classes. `--deep` — **only** when the user passes it or the queue row
-is over `deep_lines` (the `!` marker); a write-audit-publish/layer-placement/grant change is a reason to *suggest* `--deep` to the
-user, not to trigger it — runs three lenses **in parallel** as `Agent` calls with `model: opus` spawned
-by the runner (judgment work — not the Sonnet default), each given the bundle dir and one lens, returning
-≤ 12 lines of `sev · file:line · claim · what in the bundle shows it` — claims only, no SQL, no fixes:
-- design & data contracts (grain, keys, consumers, layer placement rules);
-- failure modes (NULLs, timezones, idempotency, backfill races, write-audit-publish routing, secrets/grants);
-- verification & maintainability (tests present and meaningful, CI coverage, docs, slop lens).
-Then the runner verifies their claims in **one** batched pass — a lens finding without evidence you can restate is a question, not a finding.
+is over `deep_lines` (the `!` marker); a write-audit-publish/layer-placement/grant change is a reason to
+*suggest* `--deep` to the user, not to trigger it — runs three lenses (design & data contracts, failure
+modes, verification & maintainability) **in parallel** as `Agent` calls with `model: opus` spawned by the
+runner, each given the bundle dir and one lens, returning ≤ 12 lines of claims only (no SQL, no fixes);
+the exact lens scope for each: `reference/runner.md` § Deep lenses. Then the runner verifies their claims
+in **one** batched pass — a lens finding without evidence you can restate is a question, not a finding.
 
 ## 4. Verify before you repeat *(runner)*
 
-- Data claims (`systems.datalake` only; else mark them `unverified`) → run SQL (the datalake MCP); distribution checks beat existence checks; on token
-  expiry ask the user to `/mcp` reauth. Check a timestamp column's actual type first — raw and modelled layers may type it differently.
-  The **main session probes the token before spawning** (`select 1`; `reference/runner.md` § Spawn) so
-  the runner never discovers it expired mid-review.
-- CI state → `bundle.json.checks/status` as fetched; **never poll or read CI job logs** — report red/pending as such.
-- Code/config baseline → `$CTX/base/<path>` (the file at the base sha, in the bundle); `gh api contents …?ref=`
-  only for a file the PR did not touch; never the working tree.
-- Convention claims → the documented spec (the schema/contract definitions the repo points
-  to, dbt doc blocks, config reference), not a neighbouring precedent.
-- Name the axis each ✅ covers ("logic verified against the manifest, not executed").
-- Drop any candidate you cannot evidence; keep one line for the body if it is a natural question.
-
-**Modelling PRs (`dbt/models/**`, BI-consumed tables, warehouse scripts that reshape data) — where
-`systems.datalake` is on, the data pass is mandatory when the PR is complex** (`--deep` triggers, a curated/serving-layer model, a filter/join/
-grain change, or a backfill). Rerun the numbers yourself in the datalake (its SQL MCP), never
-accept the author's: row count at the declared grain before vs after (`count(*)` vs `count(distinct
-<key>)`), distribution of every added/changed column, NULL-rate delta, and a sample of keys whose values
-flip. A PR body number you could not reproduce is a Verification-gap finding. If the token is expired,
-the runner marks those rows `unverified` and the main session asks the user to `/mcp` reauth, then
-re-spawns one re-verify runner (`reference/runner.md`). (owner decision, 2026-09-19.)
+Verify each candidate on the axis it claims — data (SQL, `systems.datalake` only), CI state (the
+bundle's `checks/status`, never job logs), code/config baseline (`$CTX/base/<path>`), convention
+(the documented spec, not a neighbouring precedent) — name the axis each ✅ covers, and drop what you
+cannot evidence. On a modelling PR the data pass is mandatory when the PR is complex: rerun the
+author's row counts and distributions yourself, never accept them. Exact rules per axis and the
+modelling-PR checklist: `reference/verify.md`.
 
 ## 4b. Stakeholder impact *(runner; modelling PRs, when feasible)*
 
-Build the consumer map of every model/column the PR changes and write it to `$CTX/impact.json`
-(`[{consumer, kind: dbt|bi|alert|export|other, owner, what_changes, rows_or_values_affected}]`):
-- **dbt**: `grep -rn "ref('<model>')"` under `dbt/models` at the PR head (`gh api contents …?ref=`, the
-  checkout is stale) + `exposures:` in the yml; note which of them select the changed columns.
-- **BI tool** (`systems.datalake` only): the BI tool's MCP search for the model or table name, where one is connected — which
-  workbooks/dashboards read it and who owns them. Skip with a `NOTE` line if the MCP is unavailable; never guess.
-- **Alerts / exports**: alerting models, customer-export factories, reverse-ETL configs — anything that turns the column into a message or a file someone receives.
-- Quantify: the SQL from step 4 gives "how many rows / which values change for consumer X".
-Then: a change that alters what a known consumer reads and the PR body does not say so → **Stakeholder
-impact** finding (`scope.md`), and the sheet's `NOTE` gets one `IMPACT:` line (consumers, owners, size).
-No consumers found is also a result — record it in `impact.json` so the KB gains the consumer map (step 8).
+Build the consumer map of every model/column the PR changes (dbt `ref()`/`exposures`, the BI tool's MCP
+search, alerting/export configs, quantified with step 4's SQL) and write it to `$CTX/impact.json`. A
+change that alters what a known consumer reads and the PR body does not say so → **Stakeholder impact**
+finding (`scope.md`). No consumers found is also a result — record it so the KB gains the map (step 8).
+The consumer-kind list and the exact search per kind: `reference/stakeholder-impact.md`.
 
 ## 5. Triage — overview, then walk every finding with the user (in the terminal, not on GitHub) *(main session)*
 
@@ -226,15 +204,7 @@ line outside a hunk) and preview again. The body gets no footer (config `footer`
 
 1. **KB write-back** (`.context/pr-reviews/<repo>.md`; create with
    `make -C $BATON/context-db new TYPE=pr-review DOMAIN=pr-reviews SLUG=<repo> TITLE="<org>/<repo> — PR review knowledge"`
-   if missing). Add only **verified, reusable** facts — a trap to check on future PRs, a mechanic
-   confirmed against the wheel/spec/data, a consumer map, a convention the repo docs do not state.
-   Format: `- **<one-line rule>** — <how to check / why>. Verified on #<pr> (<date>).` Grep for an
-   existing entry first and extend it rather than duplicate; a trap that fired again gets its
-   "seen on" list extended, which is the signal it deserves a repo fix. Never store the PR
-   narrative here (that is the session log) and never anything the repo's own docs already say.
-   If the file passes 30KB, move narrative sections to `.context/archive/pr-reviews-<repo>-log.md`.
-   Source every fact from `$CTX/triage.json` (`evidence`) and the walk decisions — the main session does
-   not re-read the diff; a fact that needs re-verification goes to a one-question child.
+   if missing). The bullet format, dedupe rule and the 30KB archive-move rule: `reference/kb-writeback.md`.
 2. `## Session log` line in the same file: `- <date> — #<pr> <author> <title> — <event>, <n>
    inline, <hits> traps hit, KB +<n>` (newest first).
 3. Self-assessment drop: append one evidence-linked bullet to
@@ -245,15 +215,12 @@ line outside a hunk) and preview again. The body gets no footer (config `footer`
 
 ## Auto-approve path for trivial PRs *(Sonnet `auto-runner` + main session; owner's standing decision 2026-09-19)*
 
-Docs-only PRs and dependency **patch** bumps (minor for dev tooling only, major never) skip steps 3–5 when the
-deterministic gate `scripts/trivial-check.py` passes (class, globs, size caps, CI green, the env config's `github.review_bot` green where
-required and set, no human CHANGES_REQUESTED, 0 unresolved threads — config `auto_approve` in `.context/state/pr-review/config.json`).
-`pr-scan` flags them `A`; the main session spawns `auto-runner` (`reference/runner.md` § `--auto`):
-zero findings → `APPROVE` posted on the user's behalf via `submit-review.sh --auto` (which re-runs the gate on the exact
-head and refuses unless `mode` is `live`) with a ≤3-line "Checked: …" body, or only logged
-as `shadow_approve` (mode `shadow`, until the review date in `auto_approve.shadow_review_due`); any finding or doubt → `fallback`, and the
-PR runs through the normal walk. This is the single exception to `scope.md` "APPROVE is never inferred"; the user
-can switch it off with `auto_approve.mode: off`.
+Docs-only PRs and dependency **patch** bumps that pass the deterministic gate `scripts/trivial-check.py`
+skip steps 3–5. `pr-scan` flags them `A`; the main session spawns `auto-runner`: zero findings →
+`APPROVE` posted on the user's behalf via `submit-review.sh --auto` (which re-runs the gate on the exact
+head and refuses unless `mode` is `live`) with a ≤3-line "Checked: …" body, or only logged as
+`shadow_approve`; any finding or doubt → `fallback`, and the PR runs through the normal walk. Gate
+criteria, modes and the ledger write: `reference/runner.md` § `--auto`.
 
 ## Not in scope
 Our own PRs (`pr-open`, `pr-watch`, `pr-event-brief`); merging (`pr-merge.sh` in `pr-watch`);

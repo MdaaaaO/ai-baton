@@ -6,6 +6,9 @@ reads is re-billed on every later tick. A PR snapshot is 20–100K tokens; three
 the verification round-trips live in a child that dies after the review, and the main session keeps
 only the sheet, the walk with the user, the post, and the KB write-back.
 
+The per-step routing table (which step runs in which child, what enters the main session's prefix) is
+`pr-review/SKILL.md` § Where each step runs — read it there, never repeat it here.
+
 ## Spawn (main session, after step 0 Coordinate)
 
 ```
@@ -55,6 +58,17 @@ Extra context from the queue: <pr-scan row: prio, why-now, size, human reviews, 
 | `IMPACT:` | Print with the overview; an undisclosed consumer change is walked like any finding, and the consumer map goes into the KB at step 8 |
 | `NOTE:` | Carry into the 5c body draft (human approval present → lighter touch; stacked base → say so) |
 
+## Deep lenses (step 3, `--deep`)
+
+Each lens is given the bundle dir and returns ≤ 12 lines of `sev · file:line · claim · what in the
+bundle shows it`:
+- **design & data contracts** — grain, keys, consumers, layer placement rules;
+- **failure modes** — NULLs, timezones, idempotency, backfill races, write-audit-publish routing, secrets/grants;
+- **verification & maintainability** — tests present and meaningful, CI coverage, docs, the slop lens.
+
+The bundle-vs-live-read contract (what the runner may read outside the bundle, and under which named
+exception) is stated once, in `pr-review/SKILL.md` § Contract — read it there, never repeat it here.
+
 ## Deep dives during the walk (5b)
 
 The user picks **Deep dive** → spawn a one-question child (`model: opus`, `general-purpose`) with the
@@ -63,6 +77,13 @@ returns ≤ 10 lines with evidence named. The main session re-presents the item 
 The runner itself is not re-used for deep dives — it has returned and its context is gone.
 
 ## `--auto` (trivial PRs flagged `A` by pr-scan)
+
+Docs-only PRs and dependency **patch** bumps (minor for dev tooling only, major never) skip pr-review
+steps 3–5 when the deterministic gate `scripts/trivial-check.py` passes (class, globs, size caps, CI
+green, the env config's `github.review_bot` green where required and set, no human CHANGES_REQUESTED,
+0 unresolved threads — config `auto_approve` in `.context/state/pr-review/config.json`). This is the
+single exception to `scope.md` "APPROVE is never inferred"; the user can switch it off with
+`auto_approve.mode: off`.
 
 Spawn the **Sonnet `auto-runner`** (`$BATON/agents/auto-runner.md`, ≤ 15 turns) — not the Opus review-runner;
 one per `A` row, in parallel when several. Only rows whose `src` is `direct` or `team` (the gate already

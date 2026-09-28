@@ -2,7 +2,7 @@
 name: gh-cli
 description: "Querying GitHub with `gh` without the known traps: auth (native login vs a proxy token prefix), `--jq` has no `--arg`, search rate limits, `reviewed-by`/`review-requested` semantics, review pagination, `--json` fields older gh lacks (`wait-checks.sh`), writes that silently fail. Load before non-trivial `gh api`/`search`/`pr` work."
 metadata:
-  version: "13"
+  version: "14"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "github.org,github.sandbox_token_prefix"
@@ -10,8 +10,8 @@ metadata:
 
 # gh-cli — querying GitHub with `gh`
 
-Every trap below has cost a real session at least one wasted background run. Read § Traps
-before writing a loop; copy the recipes in § Recipes rather than improvising.
+Every trap in `reference/traps.md` has cost a real session at least one wasted background run. Read it
+before writing a loop; copy the recipes in `reference/recipes.md` rather than improvising.
 
 ## Auth & environment
 
@@ -41,66 +41,16 @@ before writing a loop; copy the recipes in § Recipes rather than improvising.
 
 ## Traps (each one has happened)
 
-| Trap | What happens | Do this instead |
-|---|---|---|
-| `gh api … --jq '…' --arg x y` | `unknown flag: --arg` — `--jq` is a bare filter, it takes no jq flags. In a loop this fails on **every** iteration and the output file stays empty while the error file grows to hundreds of KB (2026-09-18, twice in one session). | `gh api … \| jq -c --arg x "$x" '…'`. Check `wc -l` of the output **and** the error file before trusting a background job's result. |
-| `gh api --paginate --jq` on `/reviews` or `/comments` | `--jq` runs **per page**; a filter like `[.[] \| …] \| length` returns one number per page, not a total. | `gh api --paginate … \| jq -s 'add // []' \| jq '…'`. |
-| Reading reviews without `--paginate` | 30/page; a verdict on page 2 is invisible. | Always `--paginate` on `/reviews`, `/comments`, `/pulls/N/files`. |
-| `gh search prs --json mergedAt` | `mergedAt` is not a supported field. | `gh search prs --merged --merged-at ">=YYYY-MM-DD" --json closedAt` (closedAt == mergedAt for merged PRs). |
-| `reviewed-by:<login>` | Includes PRs the person **authored** (own review comments, bot runs they triggered). One login's count dropped by three quarters once own PRs were excluded. | Always pair with `-author:<login>` for "peer reviews given". |
-| `review-requested:<login>` | Includes **team** requests via CODEOWNERS (e.g. `* @<org>/<team>`), so it inflates a personal queue (fourfold for one person). | `user-review-requested:<login>` for direct requests only; report both if the CODEOWNERS load matters. |
-| Search API rate limit | 30 requests/min authenticated; a 90-cell sweep must pace itself or silently loses cells. | `sleep 2.2` between calls, in a background job; write `login\tkind\twindow\tcount` rows to a TSV and re-run only the missing cells. |
-| Search result cap | 1,000 results per query; `--limit` above that is ignored. | Split by repo, by author or by date window. |
-| Renamed / suspended user | `Invalid search query … users cannot be searched` for one login (seen once). | Fall back to repo-scoped PR lists filtered by `.user.login`; mark the cell as partial in the write-up. |
-| `gh pr edit` | Applies **nothing** (Projects-classic GraphQL error) on every flag, exit 0. | REST: `gh api -X PATCH repos/o/r/pulls/N -f title=… -f body=…`, `POST issues/N/labels`; re-read afterwards. |
-| Re-requesting an already-requested reviewer | Emits no event; the bot runs nothing. | Remove, then re-add: `DELETE pulls/N/requested_reviewers` then `POST`. |
-| `gh api search/code` | Needs `org:` or `repo:` qualifier, and only indexes default branches. | `-f q="<term> org:<org>"`. |
-| `contents` API on a directory | Returns a JSON array, not content; feeding it to `base64 -d` gives `invalid input`. | Check `type` first; `--jq .content \| base64 -d` only on a file. Piping a 404 body into another `gh api` call produces the "unsupported protocol scheme" error. |
-| `--json` on `gh search prs` returns an **array** | `jq -r '.state'` on the top level fails with "Cannot index array". | `jq -r '.[] .state'`. |
-| `gh pr checks <n> --json …` | `unknown flag: --json` on older gh (2.46, the Ubuntu/WSL apt package). Behind `2>/dev/null` the empty result read as "still pending" and a poll loop spun >10 min (2026-09-25). | `bash wait-checks.sh` (§ Waiting on checks and runs) — the REST check APIs work on every version. |
-| Big loops in the foreground | The Bash tool kills the process group after ~10 min. | `run_in_background: true` for anything over ~100 calls; `setsid nohup` for anything that must outlive the tool call. |
+Sixteen recurring traps — `--jq` flags, unpaginated reviews, search-field/rate/result-cap surprises,
+`reviewed-by`/`review-requested` scope, `gh pr edit` applying nothing, re-request no-ops, the
+`contents` API on a directory, older-gh `--json` gaps, foreground loop timeouts — each with what
+happens and the fix: `reference/traps.md`.
 
 ## Recipes
 
-Counting (cheap, one call, exact):
-```sh
-gh api -X GET search/issues -f q="author:<login> type:pr user:<org> is:merged merged:>=<since>" --jq .total_count
-gh api -X GET search/issues -f q="reviewed-by:<login> -author:<login> type:pr user:<org> updated:>=<since>" --jq .total_count
-```
-
-Listing with fields (search, ≤1000, paged 100):
-```sh
-gh api -X GET search/issues -f q="…" -f per_page=100 --paginate \
-  --jq '.items[] | "\(.repository_url|sub(".*/repos/";""))\t\(.number)\t\(.user.login)\t\(.created_at)"' > list.tsv
-```
-`--jq` per page is fine here because each row is independent.
-
-Per-PR details in a loop (jq flags outside `gh`):
-```sh
-while IFS=$'\t' read -r repo num rest; do
-  gh api "repos/$repo/pulls/$num" 2>>err.txt \
-    | jq -c --arg r "$repo" '{repo:$r,n:.number,add:.additions,del:.deletions,files:.changed_files,merged:.merged_at}' >> sizes.jsonl
-  gh api "repos/$repo/pulls/$num/reviews" --paginate 2>>err.txt \
-    | jq -sc --arg n "$num" 'add // [] | {n:$n, states:[.[].state], reviewers:([.[].user.login]|unique)}' >> revs.jsonl
-done < list.tsv
-echo "rows=$(wc -l < sizes.jsonl) errs=$(wc -l < err.txt)"   # both, always
-```
-
-Paced search sweep (background):
-```sh
-ORG=$(python3 $BATON/context-db/bin/kit_profile.py get github.org)
-for l in "${LOGINS[@]}"; do for w in <window-start-1> <window-start-2>; do
-  n=$(gh api -X GET search/issues -f q="author:$l type:pr user:$ORG is:merged merged:>=$w" --jq .total_count 2>>err.txt)
-  printf '%s\tauthored\t%s\t%s\n' "$l" "$w" "$n" >> cells.tsv; sleep 2.2
-done; done
-```
-Afterwards: `awk -F'\t' '$4==""' cells.tsv` lists the cells to re-run.
-
-Reading a file from a repo without cloning:
-```sh
-gh api repos/<org>/<repo>/contents/<path> --jq .content | base64 -d
-gh api repos/<org>/<repo>/contents/<dir> --jq '.[] | .path'        # directory listing
-```
+Copy-paste shapes for counting, listing with fields, per-PR detail loops, a paced background sweep and
+reading a file without cloning (exact `jq`/`gh` flags, where `--jq` per-page is safe vs. where it silently
+undercounts): `reference/recipes.md`.
 
 ## Waiting on checks and runs
 
