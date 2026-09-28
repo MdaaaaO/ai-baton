@@ -189,6 +189,15 @@ def context_root() -> Path:
 ENV_DIR = context_root() / "reference" / "env"
 TEMPLATES_DIR = ENV_DIR / "_templates"  # `_`-prefixed: the index/verify walkers skip it
 
+SLUG_RE = re.compile("/")  # the one slug rule: every path separator becomes `-` (below)
+
+
+def harness_project_slug(path: str) -> str:
+    """The harness's per-project directory name for a workspace path (`~/.claude/projects/<slug>`) —
+    the one Python definition of the rule. `setup.sh` (`SLUG=$(printf '%s' "$PROJECTS" | sed 's#/#-#g')`)
+    and `context-db/tests/setup_sh_scenarios.sh` keep their own shell copies (setup.sh must run before an
+    env store — and so before Python — is guaranteed usable); a test asserts all three still agree."""
+    return SLUG_RE.sub("-", path)
 
 
 def section(cfg: dict, name: str) -> dict:

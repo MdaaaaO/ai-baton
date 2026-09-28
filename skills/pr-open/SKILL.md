@@ -2,8 +2,8 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "10"
-  updated: "2026-09-27"
+  version: "11"
+  updated: "2026-09-28"
   reviewed: "2026-09-25"
   facts: "slack.enabled,slack.review-venue,slack.channel,github.review_bot,github.owner_teams,github.signed_commits,tracker.kind,tracker.url_template"
 ---
@@ -144,9 +144,16 @@ without reading the diff — and nothing that the PR does not raise.
    `## Diagrams` ("Docs-only, no diagram." / "Config-only, no diagram.") and no block.
 3. Paste the marker as the last line of the `## Diagrams` section (HTML comment, invisible on GitHub).
 4. Validate every Mermaid block (below), then create/update the PR.
-5. **On every later push** run `diagram-plan.py --pr <o/r> <n> --check` — `OK` / `DRIFT <old> → <new>` (exit 3) /
-   `NO MARKER`. On drift, redraw in the same turn as the code (a new route file, a dropped RPC, a model added
-   to the PR). The `pr-watch` head-move event is the reminder.
+5. **On every later push** run `diagram-plan.py --pr <o/r> <n> --check` — `OK` / `DRIFT <old> → <new>` / `NO
+   MARKER` / `MALFORMED MARKER <line>` (a hand-edited marker that no longer parses — fix the line, don't
+   just redraw), each of the last three exit 3. On drift, redraw in the same turn as the code (a new route
+   file, a dropped RPC, a model added to the PR). The `pr-watch` head-move event is the reminder.
+
+**Exit codes** (`diagram-plan.py`, also in `--help`): `0` success (a plan printed, or `--check` found the
+marker current) · `1` a `gh`/`git` call failed · `2` bad usage (no changed files, or `--check` without
+`--pr`) · `3` `--check` found drift, no marker, or a marker present but malformed. The facet-weighting
+thresholds (a facet under 12 changed lines never earns a block; a secondary facet needs ≥ 25 % of the
+dominant's weight) are defaults — override per run with `--trivial-lines` / `--secondary-share`.
 
 **Facet → question matrix.** The one copy is the script: `python3 $BATON/skills/pr-open/diagram-plan.py --explain`
 prints every facet with its globs (first match wins; the env-config overlay before the defaults) and the WHERE /
@@ -167,8 +174,9 @@ route modules that are UI) go into the env config — `diagrams.repos.<owner/rep
   Jira does **not**: a ticket gets the PR link, never the diagram source.
 - **Validate before publishing.** A syntax error renders as a red box for every reviewer. Parse every block
   with the mermaid library: `node $BATON/skills/pr-open/mermaid-check.mjs <body.md>…` from a scratchpad dir
-  after `npm i --no-audit --no-fund mermaid@11 jsdom dompurify` (prints `OK (<type>)` / `FAIL <error>` per block, exit
-  non-zero on any failure) — or, if that is impossible, re-read against these traps: a `;` inside sequence
+  after `npm i --no-audit --no-fund mermaid@11 jsdom dompurify` (prints `OK (<type>)` / `FAIL <error>` per
+  block; handles CRLF-terminated fences; exits 1 on any failure, or on a file with zero mermaid blocks unless
+  `--allow-none` is passed — a docs/config-only push has none on purpose) — or, if that is impossible, re-read against these traps: a `;` inside sequence
   text **terminates the statement** (use `—`/`,` or parentheses); one message per line; quote node labels with
   `(`, `)`, `/`, `$`, `·`; `<br/>` for line breaks; edge labels `A -- text --> B` / `A -. text .-> B`.
 - **Honest labels.** Tag nodes `(existing)` / `(this PR)` / `(follow-up <key>)`; highlight the changed nodes
