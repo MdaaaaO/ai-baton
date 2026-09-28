@@ -3,7 +3,7 @@ name: alerts-sweep
 description: "Sonnet-forked sweep of the airflow-alerts Slack channel: reads all new messages (paginated), classifies each against the pattern KB, returns a state-advance trailer the main session applies, NO-OP when nothing was read, or `NEEDS <system>.<kind> <name>` for a missing fact. Arm with `/loop 20m /alerts-sweep`; never writes."
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-09-28"
   reviewed: "2026-09-28"
   requires: "airflow,slack"
@@ -48,8 +48,8 @@ through the trailer in Return value, which the main session applies.
    - **NEW** — anything else (a DAG/task pair not in the KB, or a known pair with a different error).
 4. For each KNOWN alert, keep the one recurrence-log line the main session will append to `KB`
    (`- <YYYY-MM-DD> <slack ts> <dag>/<task> — <KB entry title>`) — do not append it yourself; see step 5.
-5. Return (Return value). `NEWEST_TS` and any KNOWN lines travel in the trailer; the main session runs
-   `advance-state.py` and the index rebuild from there, never this fork.
+5. Return (Return value) — the trailer line already carries the exact command, fully resolved; this fork
+   never runs it itself.
 
 ## Return value
 
@@ -64,25 +64,27 @@ through the trailer in Return value, which the main session applies.
 - If nothing was newer than `LAST_TS` (step 2 found no page with a message), return exactly the single word
   `NO-OP` and nothing else — a re-arm 20 minutes later reads the same `LAST_TS`, so there is truly nothing
   for the main session to apply.
-- Otherwise at least one message was read, so `NEWEST_TS` is set — return one of the two shapes below,
-  always ending in the trailer line:
+- Otherwise at least one message was read, so `NEWEST_TS` is set (and `STATE`/`KB` are the paths step 0
+  resolved) — return one of the two shapes below, always ending in a **self-executing** trailer line: the
+  fork writes the real, already-resolved values into it — `STATE`, `KB`, `NEWEST_TS`, each `--recurrence`
+  line — never the literal word `STATE`/`KB`/`NEWEST_TS` and never an angle-bracket placeholder, because
+  `context: fork` means only this fork ever reads the rest of this file; the main session sees nothing but
+  the returned text, so the whole instruction has to travel inside it:
   ```
-  ADVANCE ts=<NEWEST_TS>
-    KB: <one recurrence line> | …          (omit this line when no KNOWN alert was found)
+  ADVANCE — run: python3 $BATON/skills/alerts-sweep/scripts/advance-state.py --state <STATE> --kb <KB> --ts <NEWEST_TS> [--recurrence "<line>" ...] --reindex
   ```
-  - **No NEW alert** (only KNOWN / HUMAN-RESOLVED / DIGEST): the whole return IS the trailer above, nothing
-    else — the main session applies it and moves on; it never re-reads the thread or spends a turn on it.
+  (shown with placeholders here only to name the shape; what you return has real values in every slot.)
+  - **No NEW alert** (only KNOWN / HUMAN-RESOLVED / DIGEST): the whole return IS that line, nothing else —
+    the main session runs it and moves on; it never re-reads the thread or spends a turn on it.
   - **At least one NEW alert**: ≤12 lines, one block per NEW alert (max 3; say `+N more` beyond that), then
-    the same trailer:
+    the same trailer line:
     ```
     NEW <slack ts> <dag>/<task> — <error signature, ≤15 words>
       log: <link if in the alert> · thread: <no replies | N replies, last by <name>>
       nearest KB: <entry title | none> · next: <one suggested step for the main session>
     ```
-  The main session applies the trailer with one command — re-resolve `STATE`/`KB` the same way as step 0,
-  then `python3 $BATON/skills/alerts-sweep/scripts/advance-state.py --state "$STATE" --kb "$KB" --ts
-  <NEWEST_TS> [--recurrence "<line>" ...] --reindex` (it does both writes and the engine's index rebuild) —
-  a fixed, few-second action, not a turn spent reasoning about the channel.
+  The main session runs the trailer line verbatim — a fixed, few-second command (both writes plus the
+  engine's index rebuild), not a turn spent reasoning about the channel.
 
 Do not investigate beyond reading (no datalake queries, no Airflow logs beyond the link text, no drafts,
 no Slack posts). The main session follows the on-call doc's process for NEW alerts: confirm with an

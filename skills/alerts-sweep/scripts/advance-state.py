@@ -39,6 +39,8 @@ import fsutil  # noqa: E402 — stdlib-only, ships with the kit
 LAST_SWEPT = re.compile(r"(\*\*Last swept through:\*\* ts `)[0-9.]+(`)")
 UPDATED = re.compile(r'^(updated:)\s*"?[0-9-]*"?\s*$', re.M)
 RECURRENCE_HEADING = "## Recurrence log"
+TS_RE = re.compile(r"^[0-9]+(\.[0-9]+)?$")  # a Slack ts: seconds.microseconds, digits and one dot only —
+# never a backreference/backslash or a leftover `<NEWEST_TS>` placeholder the fork forgot to fill in
 
 
 def safe_rel(raw: str) -> Path | None:
@@ -50,10 +52,13 @@ def safe_rel(raw: str) -> Path | None:
 
 
 def advance_state_text(text: str, ts: str, today: str) -> str:
-    new_text, n = LAST_SWEPT.subn(rf"\g<1>{ts}\g<2>", text, count=1)
+    # a function replacement, never an rf"...{ts}..." template: `re.subn`'s STRING form re-interprets
+    # backslashes and `\g<n>`/`\1` in whatever `ts` (or `today`) happens to contain, so a value that looked
+    # like a plain number could still smuggle a backreference into the file; a function gets the raw text.
+    new_text, n = LAST_SWEPT.subn(lambda m: f"{m.group(1)}{ts}{m.group(2)}", text, count=1)
     if n == 0:
         raise SystemExit("advance-state.py: no '**Last swept through:** ts `...`' line in the state file")
-    new_text, n2 = UPDATED.subn(rf'\1 "{today}"', new_text, count=1)
+    new_text, n2 = UPDATED.subn(lambda m: f'{m.group(1)} "{today}"', new_text, count=1)
     if n2 == 0:
         raise SystemExit("advance-state.py: no 'updated:' frontmatter line in the state file")
     return new_text
@@ -84,6 +89,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", default=".", help="the two paths resolve against this directory (default: cwd)")
     ap.add_argument("--reindex", action="store_true", help="also rebuild the engine's index for --root's store")
     a = ap.parse_args(argv)
+
+    if not TS_RE.match(a.ts):
+        print(f"advance-state.py: --ts {a.ts!r} is not a plain Slack timestamp (digits, at most one '.') "
+              "— a placeholder the fork forgot to fill in, or an unsafe value", file=sys.stderr)
+        return 2
 
     state_rel, kb_rel = safe_rel(a.state), safe_rel(a.kb)
     if state_rel is None or kb_rel is None:

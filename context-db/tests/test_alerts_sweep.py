@@ -104,6 +104,25 @@ class Pagination(unittest.TestCase):
         self.assertIn("alerts-sweep: read failed — state not advanced", skill_body())
 
 
+class SelfExecutingTrailer(unittest.TestCase):
+    """`context: fork` means only this fork ever reads the rest of SKILL.md — the main session sees nothing
+    but the returned text, so the exact `advance-state.py` invocation has to travel inside the trailer
+    itself. An instruction for the main session anywhere else in the body would never reach it."""
+
+    def test_return_value_shows_a_full_advance_state_command(self):
+        body = skill_body()
+        rv = body.split("## Return value", 1)[1]
+        self.assertIn("ADVANCE — run: python3 $BATON/skills/alerts-sweep/scripts/advance-state.py", rv)
+        self.assertIn("--ts", rv)
+        self.assertIn("--reindex", rv)
+
+    def test_advance_state_is_named_exactly_once_and_inside_return_value(self):
+        body = skill_body()
+        self.assertEqual(body.count("advance-state.py"), 1, "the script should be named once, in the trailer")
+        before_return_value = body.split("## Return value", 1)[0]
+        self.assertNotIn("advance-state.py", before_return_value)
+
+
 def load_advance_state():
     import importlib.util
     spec = importlib.util.spec_from_file_location("advance_state_under_test", ADVANCE_STATE)
@@ -222,6 +241,52 @@ class AdvanceStateCLI(unittest.TestCase):
                                  "--ts", "2", "--reindex")
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertTrue((tmp / ".context" / "INDEX.md").is_file())
+
+    def test_a_leftover_placeholder_ts_is_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            self.seed(tmp)
+            before = (tmp / ".context/oncall/state.md").read_text()
+            p = self.run_script(tmp, "--state", ".context/oncall/state.md", "--kb", ".context/oncall/kb.md",
+                                 "--ts", "<NEWEST_TS>")
+            self.assertEqual(p.returncode, 2)
+            self.assertEqual((tmp / ".context/oncall/state.md").read_text(), before)
+
+    def test_a_trailing_comma_ts_is_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            self.seed(tmp)
+            before = (tmp / ".context/oncall/state.md").read_text()
+            p = self.run_script(tmp, "--state", ".context/oncall/state.md", "--kb", ".context/oncall/kb.md",
+                                 "--ts", "1.2,")
+            self.assertEqual(p.returncode, 2)
+            self.assertEqual((tmp / ".context/oncall/state.md").read_text(), before)
+
+    def test_a_backslash_ts_is_rejected(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = Path(t)
+            self.seed(tmp)
+            before = (tmp / ".context/oncall/state.md").read_text()
+            p = self.run_script(tmp, "--state", ".context/oncall/state.md", "--kb", ".context/oncall/kb.md",
+                                 "--ts", "1\\1")
+            self.assertEqual(p.returncode, 2)
+            self.assertEqual((tmp / ".context/oncall/state.md").read_text(), before)
+
+
+class AdvanceStateTextReplacementIsSafe(unittest.TestCase):
+    """`advance_state_text` must use a function replacement, never a raw `re.subn` template string — a
+    template re-interprets a backslash/`\\g<n>` found IN THE VALUE, so anything that slipped past --ts
+    validation (or a future caller that skips it) could still smuggle a backreference into the file."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mod = load_advance_state()
+
+    def test_a_backslash_group_reference_in_ts_is_written_literally(self):
+        text = '---\nupdated: "2020-01-01"\n---\n\n**Last swept through:** ts `100.100`\n'
+        # a ts a naive rf"...{ts}..." template would mangle via \g<0> substitution semantics
+        out = self.mod.advance_state_text(text, r"1\g<0>2", "2026-09-28")
+        self.assertIn("ts `1\\g<0>2`", out)
 
 
 if __name__ == "__main__":
