@@ -149,8 +149,19 @@
       "constraints.txt",
       "**/constraints.txt",
       "requirements*.txt",
-      "**/requirements*.txt"
-    ]
+      "**/requirements*.txt",
+      "SKILL.md",
+      "**/SKILL.md",
+      "agents/**",
+      "**/agents/**",
+      "WORKSPACE.md",
+      "**/WORKSPACE.md",
+      "CLAUDE.md",
+      "**/CLAUDE.md",
+      "AGENTS.md",
+      "**/AGENTS.md"
+    ],
+    "_docs_exclude_note": "SKILL.md, agents/**, WORKSPACE.md, CLAUDE.md and AGENTS.md are Markdown but they are agent instructions: a change to them changes behaviour, so it is never docs-only. trivial-check.py enforces these exclusions even when a config omits them."
   },
   "bundle_max_files": 60,
   "bundle_max_kb": 200,

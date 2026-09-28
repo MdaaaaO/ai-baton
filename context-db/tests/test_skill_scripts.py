@@ -54,7 +54,7 @@ class TrivialCheck(unittest.TestCase):
         self.assertEqual(b("latest", "1.0.0"), "unknown")
 
     def test_pair_lines_and_version_only_change(self):
-        patch = "@@ -1,2 +1,2 @@\n-requests==2.31.0\n+requests==2.31.1\n context\n-a==1.0.0\n+a==1.0.1\n"
+        patch = "@@ -1,3 +1,3 @@\n-requests==2.31.0\n+requests==2.31.1\n context\n-a==1.0.0\n+a==1.0.1\n"
         pairs = self.tc.pair_lines(patch)
         self.assertEqual(pairs, [("requests==2.31.0", "requests==2.31.1"), ("a==1.0.0", "a==1.0.1")])
         self.assertEqual(self.tc.version_only_change(*pairs[0]), ("2.31.0", "2.31.1"))
@@ -63,6 +63,93 @@ class TrivialCheck(unittest.TestCase):
         self.assertIsNone(self.tc.version_only_change("no version", "still none"))
         with self.assertRaises(ValueError):
             self.tc.pair_lines("@@\n-a\n-b\n+c\n")  # unbalanced hunk
+
+    def test_pair_lines_keeps_content_lines_that_start_with_double_markers(self):
+        # a removed `--flag` line reads `---flag` and an added `++x` reads `+++x`: both are changes, not file headers
+        pairs = self.tc.pair_lines("@@ -1,2 +1,2 @@\n-a==1.0.0\n---flag\n+a==1.0.1\n+++x\n")
+        self.assertEqual(pairs, [("a==1.0.0", "a==1.0.1"), ("--flag", "++x")])
+        self.assertIsNone(self.tc.version_only_change("--flag", "++x"))
+        # a bump that also drops a `--require-hashes` line must not pair up as a clean bump
+        with self.assertRaises(ValueError):
+            self.tc.pair_lines("@@ -1,2 +1,1 @@\n-requests==2.31.0\n---require-hashes\n+requests==2.31.1\n")
+        # git file headers before the first hunk are still skipped
+        self.assertEqual(self.tc.pair_lines("--- a/requirements.txt\n+++ b/requirements.txt\n@@ -1 +1 @@\n-a==1.0.0\n+a==1.0.1\n"),
+                         [("a==1.0.0", "a==1.0.1")])
+
+    def test_pair_lines_refuses_patches_that_do_not_fit_their_hunk_headers(self):
+        for bad in ("@@ -1,2 +1,2 @@\n-a==1.0.0\n+a==1.0.1\n",               # truncated: counts not consumed
+                    "@@ -1 +1 @@\n-a==1.0.0\n+a==1.0.1\n+b==2.0.0\n",       # more lines than the header says
+                    "-a==1.0.0\n+a==1.0.1\n",                                # no hunk header at all
+                    "@@ -1 +1 @@\n-a==1.0.0\n+a==1.0.1\nstray\n"):           # a line outside any hunk
+            with self.assertRaises(ValueError, msg=bad):
+                self.tc.pair_lines(bad)
+        self.assertEqual(self.tc.pair_lines("@@ -1 +1 @@\n-a==1.0.0\n\\ No newline at end of file\n+a==1.0.1\n"),
+                         [("a==1.0.0", "a==1.0.1")])
+
+    def test_dep_name_accepts_only_dependency_pin_shapes(self):
+        d = self.tc.dep_name
+        pins = {
+            ("requirements.txt", "requests==2.31.0"): "requests",
+            ("sub/requirements-dev.txt", "ruff>=0.4.1  # lint"): "ruff",
+            ("pyproject.toml", '    "httpx[http2]==0.27.0",'): "httpx",
+            ("pyproject.toml", 'requests = "^2.31.0"'): "requests",
+            ("web/package.json", '    "@types/node": "^20.11.1",'): "@types/node",
+            ("go.mod", "\tgolang.org/x/text v0.14.0 // indirect"): "golang.org/x/text",
+            ("Dockerfile", "FROM python:3.12.1-slim AS base"): "python",
+            ("Dockerfile.ci", "ARG RUFF_VERSION=0.4.1"): "RUFF_VERSION",
+            (".pre-commit-config.yaml", "    rev: v0.4.1"): "?",
+            ("packages.yml", "    version: 1.1.1"): "?",
+            (".tool-versions", "python 3.12.1"): "python",
+            ("Cargo.toml", 'serde = "1.0.197"'): "serde",
+            (".python-version", "3.12.1"): "python",
+        }
+        for (path, line), want in pins.items():
+            self.assertEqual(d(path, line), want, (path, line))
+        host = ".".join(["10", "0", "0", "1"])  # an address, assembled at run time
+        not_pins = [
+            ("requirements.txt", "# pinned on 2026.9.1"),       # a date in a comment
+            ("Dockerfile", f"ENV UPSTREAM_HOST={host}"),         # an IP
+            ("Dockerfile", "LABEL release=1.2.3"),               # a label, not a base image
+            ("package.json", '  "version": "1.2.3",'),          # the package's own version
+            ("pyproject.toml", 'version = "0.1.0"'),
+            ("pyproject.toml", 'python = "^3.11"'),               # the runtime, not a dependency
+            ("pyproject.toml", 'requires-python = ">=3.11"'),
+            ("go.mod", "go 1.22"),
+            ("requirements.txt", "a==1.0.0; python_version >= '3.8'"),  # two literals
+            ("setup.cfg", "requests==2.31.0"),                    # no shape known for this manifest
+        ]
+        for path, line in not_pins:
+            self.assertIsNone(d(path, line), (path, line))
+
+    def test_head_arg_fails_closed(self):
+        script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
+        sha = "ab" * 20
+        with tempfile.TemporaryDirectory() as ctx:
+            env = dict(os.environ, PR_REVIEW_HOME=self.tmp.name, CONTEXT_ROOT=ctx)
+            run = lambda *a: subprocess.run([sys.executable, str(script), "o/r", "1", *a], capture_output=True, text=True, env=env)
+            for bad in (["--head", ""], ["--head"], ["--head", sha[:12]], ["--head", sha.upper()],
+                        ["--head", sha, "--head", ""]):
+                r = run(*bad)
+                self.assertEqual(r.returncode, 2, (bad, r.stdout, r.stderr))
+                self.assertNotIn('"eligible"', r.stdout, bad)
+            # a full sha (and no --head) still parse; the minimal config has mode off, so no API call is made
+            for ok in (["--head", sha], []):
+                r = run(*ok)
+                self.assertEqual(r.returncode, 0, (ok, r.stderr))
+                self.assertIn("auto_approve.mode=off", r.stdout)
+
+    def test_agent_instructions_are_never_docs(self):
+        example = json.loads((KIT / "pr-review" / "config.example.json").read_text(encoding="utf-8"))["auto_approve"]
+        legacy = {"docs_globs": example["docs_globs"]}  # a config seeded before the exclusions existed
+        for aa in (example, legacy):
+            for path in ("skills/pr-open/SKILL.md", "agents/auto-runner.md", "plugin/agents/x.md", "WORKSPACE.md",
+                         "CLAUDE.md", "sub/AGENTS.md"):
+                self.assertFalse(self.tc.is_docs_path(path, aa), path)
+            for path in ("README.md", "docs/guide.md", "skills/pr-open/README.md"):
+                self.assertTrue(self.tc.is_docs_path(path, aa), path)
+        # the example config documents the exclusion itself, not only the script
+        for g in ("**/SKILL.md", "**/agents/**", "**/WORKSPACE.md"):
+            self.assertIn(g, example["docs_exclude_globs"])
 
     def test_glob_any(self):
         g = self.tc.glob_any
