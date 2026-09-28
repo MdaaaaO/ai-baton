@@ -80,6 +80,12 @@ class IngestRobustness(unittest.TestCase):
             ctl = json.loads(control_out.read_text(encoding="utf-8")) if control_rows is not None else None
             return rc, daily, ctl, "\n".join(buf)
 
+    def test_null_and_non_object_rows_are_skipped_not_an_attributeerror(self):
+        rc, daily, _, out = self._run([None, "header", {"D": "2026-09-01", "Cost": 1}])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(daily), 1)
+        self.assertIn("2 row(s) skipped", out)
+
     def test_row_missing_date_column_is_skipped_not_a_keyerror(self):
         rows = [
             {"D": "2026-09-01", "usd": 1, "inp": 10, "outp": 5},  # fine (case-insensitive key)

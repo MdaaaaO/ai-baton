@@ -268,8 +268,10 @@ GROUP BY 1 ORDER BY 1;"""
     return 0
 
 
-def _lower_keys(rows: list[dict]) -> list[dict]:
-    return [{str(k).lower(): v for k, v in r.items()} for r in rows]
+def _lower_keys(rows: list) -> list[dict]:
+    """Lower-case every row's keys; a row that is not an object (a null, a bare string) becomes {} so the
+    caller's missing-column check skips and counts it."""
+    return [{str(k).lower(): v for k, v in r.items()} if isinstance(r, dict) else {} for r in rows]
 
 
 def _num(v) -> float:

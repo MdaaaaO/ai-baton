@@ -54,7 +54,8 @@ Say which mode ran; never present an estimate as a bill.
 3. **Work units** (both optional; the Basis says which were reachable)
    - PRs: `cost_report.py work-prs --since <date> --out prs.tsv` (GitHub search
      `author:<WORKSPACE_GITHUB_LOGIN>` over `github.org` + `cost.extra_repos`; the token prefix comes
-     from `kit_profile.py gh-env`).
+     from `kit_profile.py gh-env`). GitHub's `closed:`/`merged:` qualifiers select by UTC date while rows
+     are bucketed by local day, so a unit near a window edge can land a day outside `[since, until]`.
    - Tickets, gated on `tracker.kind`: `github` → `cost_report.py work-tickets --out tickets.tsv`
      (exits 2 on a missing login or empty `tracker.repos` — never "0 tickets"). Any other kind whose
      `systems.<kind>` flag is true → run the tracker's "resolved by me since `<since>`" query (§ Tracker
