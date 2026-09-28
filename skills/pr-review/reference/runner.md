@@ -42,7 +42,7 @@ Follow your agent definition ($BATON/agents/review-runner.md): pr-review steps 1
 $CTX/triage.json (+ traps.json, ff.json), return the REVIEW SHEET block with CTX/NEEDS/NOTE lines
 and nothing else. Do not post anything anywhere and do not ask questions.
 Before any live `gh` read: `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"`. An auth
-failure on one of those reads is `NEEDS github.auth runner`, not `unverified`.
+failure on one of those reads is `NEEDS gh reauth`, not `unverified`.
 Extra context from the queue: <pr-scan row: prio, why-now, size, human reviews, threads/bot>.
 <modelling PR: "Modelling PR — the datalake data pass and the 4b stakeholder-impact map are mandatory; write impact.json.">
 <follow_up only: "Our previous review is on head <sha7>; build the Addressed/Outstanding/Superseded/Reversed ledger first.">
@@ -55,7 +55,7 @@ Extra context from the queue: <pr-scan row: prio, why-now, size, human reviews, 
 | `REVIEW SHEET …` table | Print it verbatim as the 5a overview, then start the 5b loop from `$CTX/triage.json` |
 | `CTX: <path>` | Everything from here on reads `$CTX/triage.json` only — never `diff.patch`, `files.json`, `reviews.json`, `threads.json` |
 | `NEEDS datalake reauth (#…)` | Ask the user to `/mcp` reauth, then spawn **one** follow-up runner: "re-verify findings #… in `$CTX`, rewrite their `evidence`, return the changed rows" |
-| `NEEDS github.auth runner` | A permitted live `gh` read was unauthenticated (dotted-shaped but not an `env-init` fact — there is nothing to look up): tell the user to fix `gh` (native login, or `github.sandbox_token_prefix`), then spawn **one** follow-up runner for the same PR |
+| `NEEDS gh reauth` | A permitted live `gh` read was unauthenticated (a named reason like `datalake reauth`, not an `env-init` fact hand-back): tell the user to fix `gh` (native login, or `github.sandbox_token_prefix`), then spawn **one** follow-up runner for the same PR |
 | `NEEDS fetch failed — …` / `<other>` | Resolve it (usually a `gh` failure — a failed call is not an empty PR; a bundle gap → fix `fetch-context.sh`), re-spawn |
 | `NEEDS <system>.<kind> <name>` (the fact-shaped form — a dotted `<system>.<kind>`, never free text: the kit-wide forked-worker hand-back) | `/env-init <system>.<kind> <name>` in this session (the user round happens here), then re-spawn |
 | `IMPACT:` | Print with the overview; an undisclosed consumer change is walked like any finding, and the consumer map goes into the KB at step 8 |

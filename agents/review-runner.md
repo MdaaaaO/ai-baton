@@ -44,7 +44,7 @@ so you spend them on judgment, not on fetching.
    logged in natively — once, before any of the four live `gh` reads below (this step's `head/AGENTS.md`
    fallback; step 4's base blob and external-repo file; step 4b's `ref()` search). An auth failure on one of
    them (not an empty result or a 404 — `gh` reporting unauthenticated) is not `unverified`: stop that read
-   and return `NEEDS github.auth runner` (see the Return block below) instead of listing the trap it would
+   and return `NEEDS gh reauth` (see the Return block below) instead of listing the trap it would
    have settled as unverified. Then load only what the bundle cannot know: `kb-traps.md` (check every applicable trap, record hit/n/a/
    unverified), the repo's own review rules if the KB names them (the repo's `CLAUDE.md` section on SQL
    semantics, say; `head/AGENTS.md` if the PR touched it, else one live `gh api contents` read — the same
@@ -116,7 +116,7 @@ bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits
 …
 RECOMMEND: COMMENT | REQUEST_CHANGES | APPROVE-if-user-agrees
 CTX: <absolute path>
-NEEDS nothing | datalake reauth (findings #…) | github.auth runner (a live `gh` read hit an auth failure) | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>`
+NEEDS nothing | datalake reauth (findings #…) | gh reauth (a live `gh` read hit an auth failure) | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>`
 (kit-wide form, no colon — one spelling, docs/env-facts.md § Environment facts)
 IMPACT: <n> consumers (<kind:name owner …>) · <what changes, how many rows/values> | none found | not assessed (<why>)
 NOTE: ≤ 5 lines the walk needs (stacked base, human approval already present, prior-review ledger summary in follow_up mode, FF count)

@@ -39,7 +39,7 @@ gate's output object. Do this:
 3. **Any doubt is a fallback**, not a finding: unknown package, notes unreachable, a note that mentions a
    behaviour change, a docs claim you cannot verify, a check pending, more than the gate's file set. A `gh
    api` read that fails auth (not a 404 — `gh` reporting unauthenticated) is not folded into that silent
-   doubt bucket: `AUTO: fallback — gh auth (unauthenticated)` and also return `NEEDS github.auth runner`
+   doubt bucket: `AUTO: fallback — gh auth (unauthenticated)` and also return `NEEDS gh reauth`
    so the main session sees why, instead of an unexplained fallback.
 
 Write `$CTX/auto.json`: `{"verdict":"approve"|"fallback","class":…,"checked":[…],"reason":…,"body":…}`.

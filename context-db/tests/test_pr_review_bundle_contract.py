@@ -4,6 +4,7 @@ only" claim in one spot and a live `gh api` instruction a few lines later with n
 the two together. Text-shape checks only (no model judgement). Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import re
+import sys
 import unittest
 from pathlib import Path
 
@@ -65,25 +66,33 @@ class GhEnvBeforeLiveReads(unittest.TestCase):
     the main session spawns it with carry the same setup line `fetch-context.sh` already runs, and an auth
     failure on one of those reads is a `NEEDS` hand-back — never folded into an `unverified` trap."""
 
+    def test_the_auth_line_is_a_named_reason_not_a_fact_handback(self):
+        # a line matching kb.NEEDS_HANDBACK is routed to env-init as a missing fact; an auth failure is not one
+        sys.path.insert(0, str(KIT / "context-db" / "bin"))
+        import kb
+        self.assertIsNone(kb.NEEDS_HANDBACK.fullmatch("NEEDS gh reauth"))
+        self.assertIsNotNone(kb.NEEDS_HANDBACK.fullmatch("NEEDS github.person octo"))
+
+
     def test_review_runner_agent_runs_gh_env_before_its_live_reads(self):
         runner = RUNNER.read_text(encoding="utf-8")
         self.assertIn(GH_ENV_LINE, runner,
                       "agents/review-runner.md does not eval kit_profile.py gh-env before its live `gh` reads")
-        self.assertIn("NEEDS github.auth runner", runner,
+        self.assertIn("NEEDS gh reauth", runner,
                       "agents/review-runner.md does not turn a live-read auth failure into a NEEDS hand-back")
 
     def test_prompt_template_carries_the_same_gh_env_line(self):
         ref = RUNNER_REF.read_text(encoding="utf-8")
         self.assertIn(GH_ENV_LINE, ref,
                       "skills/pr-review/reference/runner.md § Prompt template does not carry the gh-env line")
-        self.assertIn("NEEDS github.auth runner", ref,
+        self.assertIn("NEEDS gh reauth", ref,
                       "skills/pr-review/reference/runner.md does not document the github.auth NEEDS hand-back")
 
     def test_auto_runner_agent_runs_gh_env_before_its_live_reads(self):
         auto = AUTO_RUNNER.read_text(encoding="utf-8")
         self.assertIn(GH_ENV_LINE, auto,
                       "agents/auto-runner.md does not eval kit_profile.py gh-env before its live `gh api` reads")
-        self.assertIn("NEEDS github.auth runner", auto,
+        self.assertIn("NEEDS gh reauth", auto,
                       "agents/auto-runner.md does not turn a live-read auth failure into a NEEDS hand-back")
 
 
