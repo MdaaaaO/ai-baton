@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -36,7 +36,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    you're the self-assessment session, append `.context/self-assessment/weeks/<week>.md`. New docs
    are created with `make -C $BATON/context-db new TYPE=… DOMAIN=… SLUG=…`.
 4. **Memory** — only if a *situational* fact worth recalling emerged (not an always-on rule — those
-   go to `CLAUDE.md` § Rules). Write or update the note **and** add or fix its one-line entry in
+   go to `WORKSPACE.md` § Rules). Write or update the note **and** add or fix its one-line entry in
    `MEMORY.md`. Prefer updating an existing note over adding a duplicate; delete notes proven wrong.
 5. **Index integrity** — after adding or editing any `.context/` doc, run `make -C $BATON/context-db index`
    (regenerates `INDEX.md`) and `make -C $BATON/context-db verify` (schema + freshness gate). If you added a
@@ -72,8 +72,8 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    your `pr-watch` `Monitor`s died with step 7, and the successor's `session-register` startup step
    re-arms exactly that list. Then mark the session ended:
    `make -C $BATON/context-db session-end NAME=<name> NEXT=<prompt file>` (step 10 writes the file; or
-   `session-touch` if you're only pausing). The registry row carries **~$ est.** (list-price estimate of
-   the main session, subagents excluded) and the prompt as their own columns.
+   `session-touch` if you're only pausing). The registry row carries **~$ est.** — the same TOTAL
+   (main + subagents) quoted in step 8, list-price — and the prompt as their own columns.
    Keeps `.context/SESSION_INDEX.md` honest about who is still live, and `session-end` is what writes
    the stats block + ledger row of step 8. (Setup: the `session-register` skill.)
 10. **Next-session prompt — only when there is one to write (owner decision, 2026-09-19; a closing session

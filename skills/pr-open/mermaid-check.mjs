@@ -1,8 +1,9 @@
-// Usage: node $BATON/skills/pr-open/mermaid-check.mjs <markdown-file>...
+// Usage: node $BATON/skills/pr-open/mermaid-check.mjs [--allow-none] <markdown-file>...
 // Run from a scratchpad dir that has `npm i --no-audit --no-fund mermaid@11 jsdom` installed
 // (modules resolve from the CURRENT DIRECTORY, not from this file's location).
-// Parses every ```mermaid block in each file; prints `OK (<type>)` / `FAIL <error>` per block;
-// exits 1 on any FAIL. See SKILL.md § Diagrams.
+// Parses every ```mermaid block in each file (CRLF- and LF-terminated fences alike); prints
+// `OK (<type>)` / `FAIL <error>` per block; exits 1 on any FAIL. A file with zero blocks also exits 1
+// (a plan called for diagrams that never got drawn) unless --allow-none is passed. See SKILL.md § Diagrams.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -19,11 +20,18 @@ globalThis.DOMPurify = (await load('dompurify'))(dom.window);
 const mermaid = await load('mermaid');
 mermaid.initialize({ startOnLoad: false });
 
+const args = process.argv.slice(2);
+const allowNone = args.includes('--allow-none');
+const files = args.filter((a) => a !== '--allow-none');
+
 let bad = 0;
-for (const f of process.argv.slice(2)) {
+for (const f of files) {
   const src = fs.readFileSync(f, 'utf8');
-  const blocks = [...src.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]);
-  if (blocks.length === 0) console.log(`${f}: no mermaid blocks`);
+  const blocks = [...src.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].map((m) => m[1]);
+  if (blocks.length === 0) {
+    console.log(`${f}: no mermaid blocks`);
+    if (!allowNone) bad++;
+  }
   for (const [i, b] of blocks.entries()) {
     try {
       const r = await mermaid.parse(b);

@@ -20,7 +20,14 @@ Usage (from the workspace root; stdlib only):
   --type   bugfix | refactor | feature — the PR *intent*, which paths cannot show. Read from the
            type label with --pr (bug/hotfix → bugfix; tech-debt/refactor → refactor), else feature.
   --check  with --pr: compare the body's `<!-- diagram-plan: … -->` marker to the fresh plan;
-           prints `OK`, `DRIFT <old> → <new>` or `NO MARKER`; exit 3 on drift so a watcher can act.
+           prints `OK`, `DRIFT <old> → <new>`, `NO MARKER` or `MALFORMED MARKER <line>`; exit 3 on
+           drift (or a marker that fails to parse) so a watcher can act.
+  --trivial-lines / --secondary-share  override the two facet-weighting thresholds below (rarely
+           needed; a repo whose diffs run unusually large or small).
+
+Exit codes: 0 success (a plan was printed, or --check found the marker current); 1 a `gh`/`git`
+call failed (message on stderr, `FAIL …`); 2 bad usage (no changed files found, or --check without
+--pr); 3 --check found drift, no marker, or a marker present but malformed.
 
 Facet globs: core defaults below (generic conventions) + the env config's overlay
 `diagrams.repos.<owner/repo>.facets.<facet>: [globs]` (first match wins, overlay before defaults)
@@ -163,6 +170,7 @@ TYPE_LABELS = {
 }
 TRIVIAL_LINES = 12  # a substantive facet touched below this many lines does not raise a diagram on its own
 SECONDARY_SHARE = 0.25  # a secondary facet fills a question only at ≥ this share of the dominant facet's weight
+# Both are overridable per run via --trivial-lines / --secondary-share (main()); these are only the defaults.
 
 
 # ── inputs ──────────────────────────────────────────────────────────────────────────────────
@@ -309,12 +317,13 @@ def classify(files: list[tuple[str, int]], repo: str | None) -> tuple[dict[str, 
     return by_facet, lines, ignored
 
 
-def plan(by_facet: dict[str, list[str]], lines: Counter, intent: str) -> dict:
+def plan(by_facet: dict[str, list[str]], lines: Counter, intent: str,
+         trivial_lines: int = TRIVIAL_LINES, secondary_share: float = SECONDARY_SHARE) -> dict:
     substantive = [f for f in by_facet if f not in SUPPORTING and f != "other"]
     # weight = changed lines when known, else file count
     weight = {f: (lines[f] if sum(lines.values()) else len(by_facet[f])) for f in substantive}
     if any(lines.values()):
-        big = [f for f in substantive if lines[f] >= TRIVIAL_LINES]
+        big = [f for f in substantive if lines[f] >= trivial_lines]
         if big:
             substantive = big  # a facet touched in passing does not raise a diagram
     substantive.sort(key=lambda f: -weight[f])
@@ -333,7 +342,7 @@ def plan(by_facet: dict[str, list[str]], lines: Counter, intent: str) -> dict:
             continue
         pick = None
         for f in substantive:  # dominant first; a secondary facet fills a question the dominant does not raise
-            if f != dominant and weight[f] < SECONDARY_SHARE * weight[dominant]:
+            if f != dominant and weight[f] < secondary_share * weight[dominant]:
                 continue  # touched in passing next to the dominant facet — it does not earn a block
             spec = MATRIX.get(f, {}).get(q)
             if spec:
@@ -367,6 +376,19 @@ def marker_from_body(body: str) -> str | None:
     # the real marker is a whole line starting with `facets=`; prose that quotes the marker shape is not it
     m = re.search(r"^\s*<!-- diagram-plan: (facets=[^>\n]*?) -->\s*$", body, re.M)
     return m.group(1).strip() if m else None
+
+
+def malformed_marker_line(body: str) -> str | None:
+    """A `<!-- diagram-plan: … -->`-shaped line present in the body that `marker_from_body` could not parse
+    (a hand edit that dropped the closing `-->`, added trailing text, lost the `facets=` prefix, …) —
+    distinguishes that case from a body that carries no marker at all, so `--check` names the broken line
+    instead of reporting NO MARKER on a marker that is actually there."""
+    if marker_from_body(body) is not None:
+        return None
+    for line in body.splitlines():
+        if line.lstrip().startswith("<!-- diagram-plan:"):  # prose quoting the shape is not a marker
+            return line.strip()
+    return None
 
 
 def render(p: dict, ignored: list[str], mk: str) -> str:
@@ -415,7 +437,8 @@ def explain() -> str:
     out.append(f"  supporting ({', '.join(sorted(SUPPORTING))}): never raise a block; alone → SKIP")
     out.append("")
     out.append("intent overlays: " + "; ".join(f"{k} → {', '.join(sorted(v))}" for k, v in INTENT.items()))
-    out.append(f"composition: dominant facet = most changed lines; a secondary facet fills a question only at ≥ {int(SECONDARY_SHARE * 100)} % "
+    out.append(f"composition (defaults, override with --secondary-share / --trivial-lines): dominant facet = most "
+               f"changed lines; a secondary facet fills a question only at ≥ {int(SECONDARY_SHARE * 100)} % "
                f"of the dominant's weight; a facet under {TRIVIAL_LINES} changed lines never earns a block; 3+ substantive facets → "
                "'one PR = one concern' note")
     return "\n".join(out)
@@ -431,6 +454,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--type", choices=sorted(INTENT), help="PR intent; overrides the label-derived one")
     ap.add_argument("--check", action="store_true", help="with --pr: compare the body marker to the fresh plan")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--trivial-lines", type=int, default=TRIVIAL_LINES, metavar="N",
+                     help=f"a substantive facet under N changed lines never earns a block (default {TRIVIAL_LINES})")
+    ap.add_argument("--secondary-share", type=float, default=SECONDARY_SHARE, metavar="F",
+                     help=f"a secondary facet fills a question only at >= F of the dominant facet's weight (default {SECONDARY_SHARE})")
     a = ap.parse_args(argv[1:])
     if a.explain:
         print(explain())
@@ -452,7 +479,7 @@ def main(argv: list[str]) -> int:
 
     intent = a.type or next((TYPE_LABELS[l.lower()] for l in labels if l.lower() in TYPE_LABELS), "feature")
     by_facet, lines, ignored = classify(files, repo)
-    p = plan(by_facet, lines, intent)
+    p = plan(by_facet, lines, intent, trivial_lines=a.trivial_lines, secondary_share=a.secondary_share)
     if repo_dir is not None and repo is None:  # the fallback is visible, never silent
         p["notes"].append(f"no `origin` remote in the --repo directory ({a.repo}; or an unparsable URL) — the env-config "
                           "overlay `diagrams.repos.<owner/repo>` was not applied; name the remote `origin` to use it")
@@ -465,6 +492,10 @@ def main(argv: list[str]) -> int:
         old = marker_from_body(body)
         new = mk[len("<!-- diagram-plan: "):-len(" -->")]
         if old is None:
+            bad = malformed_marker_line(body)
+            if bad is not None:
+                print(f"MALFORMED MARKER — {bad}; fresh plan: {new}")
+                return 3
             print(f"NO MARKER — body carries no diagram-plan marker; fresh plan: {new}")
             return 3
         if old == new:

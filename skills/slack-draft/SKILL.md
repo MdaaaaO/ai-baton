@@ -20,7 +20,7 @@ answered.
 ## 1. Create
 
 - `slack_send_message_draft` into the target channel / DM / thread (`thread_ts` for replies).
-  Never paste draft text in the terminal (CLAUDE.md § Rules). Formatting: `reference/formatting.md`
+  Never paste draft text in the terminal (WORKSPACE.md § Rules). Formatting: `reference/formatting.md`
   beside this file (`**bold**`, `<url|label>`, ≤55-char code-block lines).
 - **One attached draft per channel.** If the tool returns `draft_already_exists`, that pending
   draft is the one to update — do not create a second. A thread draft counts against the same

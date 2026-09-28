@@ -10,7 +10,7 @@ spec = importlib.util.spec_from_file_location("readme_check", KIT / "skills" / "
 rc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rc)
 
-BADGE = "[![CI](https://example.invalid/ci.svg)](https://example.invalid/ci)"
+BADGE = "[![CI](https://img.shields.io/badge/ci-pass-brightgreen)](https://example.invalid/ci)"
 GOOD = "\n".join([
     "# tool", "", "**One line on what it is.**", "",
     BADGE, BADGE, BADGE, "",
@@ -52,6 +52,75 @@ class Readme(unittest.TestCase):
     def test_list_lines_do_not_count_as_pitch(self):
         stats = rc.parse(GOOD.replace("It turns", "- " + "item " * 100 + "\n\nIt turns", 1))
         self.assertLess(stats["pitch_words"], 20)
+
+    def test_paragraph_band_is_ok_warn_fail_not_ok_twice(self):
+        # a paragraph right at the warn floor is ok, one word over is warn (not "ok" again), one word
+        # past the fail ceiling is FAIL — the band used to collapse the whole warn range into "ok".
+        def status_for(n):
+            body = GOOD.replace(
+                "It turns a thing into another thing for you.", " ".join(["word"] * n), 1
+            )
+            return results(body)["paragraphs"]
+
+        self.assertEqual(status_for(90), "ok")
+        self.assertEqual(status_for(91), "warn")
+        self.assertEqual(status_for(150), "warn")
+        self.assertEqual(status_for(151), "FAIL")
+
+    def test_badge_from_another_host_and_unlinked_image_are_counted(self):
+        # an <img> badge from a host other than shields.io, and a plain (unlinked) markdown image,
+        # both used to be read as prose instead of as a badge.
+        other_host_img = '<img alt="cov" src="https://badges.example.invalid/cov.svg">'
+        unlinked_md_image = "![build](https://ci.example.invalid/badge.svg)"
+        text = "\n".join([
+            "# tool", "", "**One line on what it is.**", "",
+            other_host_img, unlinked_md_image, BADGE, "",
+            "It does a thing.", "",
+            "```sh", "pip install tool", "```", "",
+        ])
+        self.assertEqual(rc.parse(text)["badges"], 3)
+
+    def test_logo_and_hero_gif_are_not_counted_as_badges(self):
+        # SKILL.md § 2 row 1 allows a logo or a hero screenshot/GIF under the title; neither is a badge,
+        # so a compliant README with both plus 6 real badges must still land in the "want 3-6" band.
+        text = "\n".join([
+            "# tool", "",
+            "![Logo](assets/logo.png)", "",
+            "**One line on what it is.**", "",
+            "![Demo](assets/hero.gif)", "",
+            BADGE, BADGE, BADGE, BADGE, BADGE, BADGE, "",
+            "It does a thing.", "",
+            "```sh", "pip install tool", "```", "",
+        ])
+        stats = rc.parse(text)
+        self.assertEqual(stats["badges"], 6)
+        self.assertEqual(results(text)["badges"], "ok")
+
+    def test_inline_logo_in_intro_is_not_counted_as_pitch(self):
+        # a logo/screenshot is not prose either: an intro line built entirely around one contributes
+        # no pitch words (it's exempt, the same as a badge line, not a prose line to count) — but real
+        # prose sharing a line with an inline image is not lost along with it.
+        lone_image = "\n".join(["# tool", "", "![Logo](assets/logo.png)", "", "```sh", "pip install tool", "```", ""])
+        self.assertEqual(rc.parse(lone_image)["pitch_words"], 0)
+
+        mixed = "\n".join([
+            "# tool", "",
+            "It turns a thing into another thing for the reader ![Logo](assets/logo.png) who needs it now.", "",
+            "```sh", "pip install tool", "```", "",
+        ])
+        self.assertGreaterEqual(rc.parse(mixed)["pitch_words"], 10)
+
+    def test_heading_indented_inside_a_details_block_starts_a_section(self):
+        # a `## ` heading indented (as authors commonly do inside <details>) used to be invisible to
+        # the section detector, which only matched a heading at column 0.
+        text = "\n".join([
+            "# tool", "", "Pitch.", "",
+            "<details>", "<summary>Alternate install</summary>", "",
+            "  ## Via conda", "", "conda install thing", "</details>", "",
+            "## License", "", "MIT.", "",
+        ])
+        titles = [t for t, _ in rc.parse(text)["sections"]]
+        self.assertIn("Via conda", titles)
 
 
 class Contributing(unittest.TestCase):

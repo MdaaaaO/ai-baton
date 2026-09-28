@@ -971,7 +971,7 @@ def sec_machine(r: Report) -> str:
         r.add(OK, "machine", "`.context/README.md` present")
     else:
         r.add(WARN, "machine", "`.context/README.md` missing — `sh $BATON/setup.sh` seeds it")
-    slug = str(root()).replace("/", "-")
+    slug = kit_profile.harness_project_slug(str(root()))
     hm = Path.home() / ".claude" / "projects" / slug / "memory"
     if hm.is_symlink() and hm.resolve() == (ctx() / "memory").resolve():
         r.add(OK, "machine", "harness memory dir → `.context/memory` symlink")

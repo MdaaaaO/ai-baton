@@ -221,7 +221,7 @@ version is its `metadata.version`; a step a machine must take is a `BREAKING CHA
 | axis | labels |
 |---|---|
 | type | `enhancement` (feat) · `bug` (fix) · `documentation` (docs) |
-| area — exactly one | `area:skills` (skills/, agents/) · `area:engine` (context-db/, pr-review/, sign-queue/) · `area:sync` (sync.sh, setup.sh, hooks/, workspace.mk, settings) · `area:docs` (README, WORKSPACE.md, docs/) · `area:ci` (.github/) |
+| area — exactly one | `area:skills` (skills/, agents/ — includes `skills/sign-queue/`) · `area:engine` (context-db/, pr-review/) · `area:sync` (sync.sh, setup.sh, hooks/, workspace.mk, settings) · `area:docs` (README, WORKSPACE.md, docs/) · `area:ci` (.github/) |
 | wording | `wording` — a wording-only PR; `ci.yml`'s `SKIP_BUMP` treats it (or `[skip-bump]` in the title or body) as skipping the version-bump check |
 | follow-up | `review-followup` — a review finding deferred out of a PR |
 | release | `release` — the `chore(release): X.Y.Z` PR, on its own (`make kit_release` applies it) |

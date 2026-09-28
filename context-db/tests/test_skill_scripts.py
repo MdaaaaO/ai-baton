@@ -1,7 +1,9 @@
 """The pure functions of two skill scripts: pr-review/scripts/trivial-check.py (version-bump shapes) and
 pr-open/diagram-plan.py (path → facet classes, the plan, the marker). Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -318,6 +320,90 @@ class DiagramPlan(unittest.TestCase):
             f = Path(tmp) / "files.txt"
             f.write_text("# comment\n3\t1\tdags/x.py\nM README.md\nsrc/y.py\n", encoding="utf-8")
             self.assertEqual(self.dp.files_from_list(str(f)), [("dags/x.py", 4), ("README.md", 0), ("src/y.py", 0)])
+
+    def test_malformed_marker_line_is_distinguished_from_no_marker(self):
+        # a hand-edited marker that no longer parses must not be reported the same as a body with none at all (#166)
+        self.assertIsNone(self.dp.malformed_marker_line("no marker here"))
+        good = "<!-- diagram-plan: facets=api dominant=api intent=feature where=api:x -->"
+        self.assertIsNone(self.dp.malformed_marker_line(f"body\n{good}\n"))
+        trailing = "<!-- diagram-plan: facets=api dominant=api intent=feature where=api:x -->extra"
+        self.assertEqual(self.dp.malformed_marker_line(f"body\n{trailing}\n"), trailing)
+        truncated = "<!-- diagram-plan: facets=api dominant=api"
+        self.assertEqual(self.dp.malformed_marker_line(f"body\n{truncated}\n"), truncated)
+        # prose that quotes the marker shape mid-line is not a marker, broken or otherwise
+        self.assertIsNone(self.dp.malformed_marker_line("the plan lives in a `<!-- diagram-plan: … -->` line\n"))
+
+    def test_check_reports_malformed_marker_distinctly_and_exits_3(self):
+        saved = self.dp.files_from_pr
+        files = [("app/api/orders.py", 40)]
+        broken = "<!-- diagram-plan: facets=api dominant=api intent=feature where=api:x -->trailing"
+        self.dp.files_from_pr = lambda repo, n: (files, [], f"body\n{broken}\n")
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = self.dp.main(["prog", "--pr", "o/r", "1", "--check"])
+            self.assertEqual(rc, 3)
+            self.assertIn("MALFORMED MARKER", buf.getvalue())
+            self.assertIn(broken, buf.getvalue())
+        finally:
+            self.dp.files_from_pr = saved
+
+    def test_check_reports_no_marker_when_truly_absent(self):
+        saved = self.dp.files_from_pr
+        files = [("app/api/orders.py", 40)]
+        self.dp.files_from_pr = lambda repo, n: (files, [], "plain body, nothing here\n")
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = self.dp.main(["prog", "--pr", "o/r", "1", "--check"])
+            self.assertEqual(rc, 3)
+            self.assertIn("NO MARKER", buf.getvalue())
+            self.assertNotIn("MALFORMED", buf.getvalue())
+        finally:
+            self.dp.files_from_pr = saved
+
+    def test_trivial_lines_override_admits_a_facet_the_default_excludes(self):
+        files = [("src/service/orders.py", 20), ("models/marts/fct_orders.sql", 5)]
+        by_facet, lines, _ = self.dp.classify(files, None)
+        p_default = self.dp.plan(by_facet, lines, "feature")
+        self.assertNotIn("what", p_default["questions"])  # dbt-model (5 lines) filtered out by the default threshold
+        p_override = self.dp.plan(by_facet, lines, "feature", trivial_lines=3)
+        self.assertEqual(p_override["questions"]["what"]["facet"], "dbt-model")
+
+    def test_secondary_share_override_admits_a_lighter_secondary_facet(self):
+        files = [("src/service/orders.py", 20), ("models/marts/fct_orders.sql", 4)]
+        by_facet, lines, _ = self.dp.classify(files, None)
+        p_default = self.dp.plan(by_facet, lines, "feature", trivial_lines=1)  # both admitted as substantive
+        self.assertNotIn("what", p_default["questions"])  # 4/20 = 20% < the default 25% share
+        p_override = self.dp.plan(by_facet, lines, "feature", trivial_lines=1, secondary_share=0.1)
+        self.assertEqual(p_override["questions"]["what"]["facet"], "dbt-model")
+
+    def test_cli_trivial_lines_flag_is_wired_through(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "files.txt"
+            f.write_text("20\t0\tsrc/service/orders.py\n5\t0\tmodels/marts/fct_orders.sql\n", encoding="utf-8")
+            script = KIT / "skills" / "pr-open" / "diagram-plan.py"
+            run = lambda *a: subprocess.run([sys.executable, str(script), "--files", str(f), "--json", *a],
+                                             capture_output=True, text=True)
+            r = run()
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertNotIn("what", json.loads(r.stdout)["questions"])
+            r2 = run("--trivial-lines", "3")
+            self.assertEqual(r2.returncode, 0, r2.stderr)
+            self.assertEqual(json.loads(r2.stdout)["questions"]["what"]["facet"], "dbt-model")
+
+    def test_help_documents_exit_codes_and_new_flags(self):
+        script = KIT / "skills" / "pr-open" / "diagram-plan.py"
+        r = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("Exit codes:", r.stdout)
+        self.assertIn("--trivial-lines", r.stdout)
+        self.assertIn("--secondary-share", r.stdout)
+
+    def test_skill_md_documents_exit_codes_and_malformed_marker(self):
+        text = (KIT / "skills" / "pr-open" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Exit codes", text)
+        self.assertIn("MALFORMED MARKER", text)
 
 
 if __name__ == "__main__":
