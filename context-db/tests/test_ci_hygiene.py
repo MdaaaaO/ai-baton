@@ -505,5 +505,53 @@ class KitHealthCI(unittest.TestCase):
             self.assertTrue(p.stdout.startswith("**GREEN** (CI)"), p.stdout)
 
 
+class AutoMergeCheckPick(unittest.TestCase):
+    """auto-merge.yml's required-check loop, run for real on synthetic check-run rows: a head can carry a
+    `skipped` claude-review run (a review-comment event) next to the real one, and the loop must judge the
+    newest non-skipped run, wait on anything still running, and still wait for the owner when every run of
+    a name was skipped."""
+
+    LOOP = None
+
+    @classmethod
+    def setUpClass(cls):
+        text = (WORKFLOWS / "auto-merge.yml").read_text(encoding="utf-8")
+        start = text.index("          IFS=',' read -ra required")
+        end = text.index("          done", start) + len("          done")
+        cls.LOOP = "\n".join(line[10:] for line in text[start:end].splitlines())
+
+    def decide(self, rows: list[tuple[str, str, str, str]], required: str = "claude-review") -> str:
+        runs = "\n".join("\t".join(r) for r in rows)
+        script = ('skip() { echo "SKIP: $*"; exit 0; }\n'
+                  f'REQUIRED={required!r}\nruns=$(cat)\n{self.LOOP}\necho MERGE\n')
+        r = subprocess.run(["bash", "-c", script], input=runs, capture_output=True, text=True, timeout=10)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def test_a_later_skipped_run_does_not_hide_the_real_success(self):
+        out = self.decide([("claude-review", "completed", "success", "2026-09-28T09:00:00Z"),
+                           ("claude-review", "completed", "skipped", "2026-09-28T09:05:00Z")])
+        self.assertEqual(out, "MERGE")
+
+    def test_the_newest_non_skipped_run_wins(self):
+        out = self.decide([("claude-review", "completed", "success", "2026-09-28T09:00:00Z"),
+                           ("claude-review", "completed", "failure", "2026-09-28T09:10:00Z"),
+                           ("claude-review", "completed", "skipped", "2026-09-28T09:20:00Z")])
+        self.assertIn("concluded failure", out)
+
+    def test_every_run_skipped_still_waits_for_the_owner(self):
+        out = self.decide([("claude-review", "completed", "skipped", "2026-09-28T09:00:00Z")])
+        self.assertIn("concluded skipped", out)
+
+    def test_a_run_still_going_waits_even_next_to_a_success(self):
+        out = self.decide([("claude-review", "completed", "success", "2026-09-28T09:00:00Z"),
+                           ("claude-review", "in_progress", "null", "")])
+        self.assertIn("still in_progress", out)
+
+    def test_a_missing_required_check_waits(self):
+        out = self.decide([("kit-verify", "completed", "success", "2026-09-28T09:00:00Z")])
+        self.assertIn("has not run on this head", out)
+
+
 if __name__ == "__main__":
     unittest.main()

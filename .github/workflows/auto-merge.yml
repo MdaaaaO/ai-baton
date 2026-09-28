@@ -95,14 +95,22 @@ jobs:
             || skip "PR #$pr changes what judges PRs ($(grep -E "$judges" <<< "$files" | tr '\n' ' ')) — the owner reviews and merges it by hand"
 
           runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
-                   --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion)"') \
+                   --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion)\t\(.completed_at // "")"') \
             || skip "could not list the check runs"
           IFS=',' read -ra required <<< "$REQUIRED"
           for name in "${required[@]}"; do
-            line=$(awk -F'\t' -v n="$name" '$1 == n' <<< "$runs" | tail -1)
-            [ -n "$line" ] || skip "check '$name' has not run on this head"
-            status=$(cut -f2 <<< "$line"); conclusion=$(cut -f3 <<< "$line")
-            [ "$status" = completed ] || skip "check '$name' is still $status"
+            # a head can carry several runs of one name: claude-review.yml also fires on review comments and
+            # skips its review job there, so replying to a thread adds a `skipped` claude-review run next to the
+            # real one. Any run still going → wait; otherwise judge the NEWEST non-skipped run, and fall back to
+            # the newest run of any kind only when every run was skipped (a release PR's skipped review still
+            # waits for the owner below).
+            all=$(awk -F'\t' -v n="$name" '$1 == n' <<< "$runs")
+            [ -n "$all" ] || skip "check '$name' has not run on this head"
+            pending=$(awk -F'\t' '$2 != "completed" {print $2; exit}' <<< "$all")
+            [ -z "$pending" ] || skip "check '$name' is still $pending"
+            line=$(awk -F'\t' '$3 != "skipped"' <<< "$all" | sort -t$'\t' -k4,4 | tail -1)
+            [ -n "$line" ] || line=$(sort -t$'\t' -k4,4 <<< "$all" | tail -1)
+            conclusion=$(cut -f3 <<< "$line")
             [ "$conclusion" = success ] || skip "check '$name' concluded $conclusion — waiting for the owner"
           done
 
