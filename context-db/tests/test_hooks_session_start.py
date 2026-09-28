@@ -52,22 +52,29 @@ class SessionStartIsIdempotent(unittest.TestCase):
 
 
 class SessionStartLogsFailures(unittest.TestCase):
-    def stub_kit(self, tmp: Path, exit_session_env: int) -> Path:
+    def stub_kit(self, tmp: Path, *, scratch_fails: bool = False, ws_marker: str = "") -> Path:
         """A fake `$CLAUDE_PLUGIN_ROOT` whose kit_profile.py stands in for the real one: `scratch`
-        prints a real dir under $KIT_SCRATCH, `session-env` prints to stderr and exits as told,
-        `workspace-rules` is a no-op — enough surface for the hook command, none of the real engine."""
+        either prints a real dir under $KIT_SCRATCH or fails outright (`scratch_fails`), `session-env`
+        prints to stderr and fails when $STUB_FAIL is set, else prints one export line, `workspace-rules`
+        prints `ws_marker` (so a test can prove it ran) — enough surface for the hook command, none of
+        the real engine."""
         bin_dir = tmp / "kit" / "context-db" / "bin"
         bin_dir.mkdir(parents=True)
         stub = bin_dir / "kit_profile.py"
+        scratch_body = "sys.exit(1)\n" if scratch_fails else (
+            "d = pathlib.Path(os.environ['KIT_SCRATCH']); d.mkdir(parents=True, exist_ok=True); print(d)\n"
+        )
         stub.write_text(
             "import os, sys, pathlib\n"
             "cmd = sys.argv[1] if len(sys.argv) > 1 else ''\n"
             "if cmd == 'scratch':\n"
-            "    d = pathlib.Path(os.environ['KIT_SCRATCH']); d.mkdir(parents=True, exist_ok=True); print(d)\n"
+            f"    {scratch_body}"
             "elif cmd == 'session-env':\n"
-            f"    print('boom-from-session-env', file=sys.stderr); sys.exit({exit_session_env})\n"
+            "    if os.environ.get('STUB_FAIL'):\n"
+            "        print('boom-from-session-env', file=sys.stderr); sys.exit(1)\n"
+            "    print('export X=1')\n"
             "elif cmd == 'workspace-rules':\n"
-            "    pass\n",
+            f"    print({ws_marker!r})\n",
             encoding="utf-8",
         )
         return bin_dir.parent.parent
@@ -75,15 +82,48 @@ class SessionStartLogsFailures(unittest.TestCase):
     def test_a_session_env_failure_prints_one_line_and_is_logged_not_swallowed(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            fake_kit = self.stub_kit(tmp_path, exit_session_env=1)
+            fake_kit = self.stub_kit(tmp_path)
             envfile = tmp_path / "env"
             scratch = tmp_path / "scratch"
-            r = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), CLAUDE_ENV_FILE=str(envfile), KIT_SCRATCH=str(scratch))
+            r = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), CLAUDE_ENV_FILE=str(envfile),
+                    KIT_SCRATCH=str(scratch), STUB_FAIL="1")
             self.assertEqual(r.returncode, 0)
             self.assertIn("ai-baton: session-env failed", r.stdout)  # visible in the session, not discarded
             log = scratch / "hooks.log"
             self.assertTrue(log.is_file())
             self.assertIn("boom-from-session-env", log.read_text(encoding="utf-8"))
+
+    def test_a_broken_scratch_and_log_dir_still_lets_workspace_rules_run(self):
+        """`scratch` fails outright and the log directory it would fall back to is not even a
+        directory — the hook must still run `workspace-rules` and surface its output, not die on
+        the log-path redirect before getting there."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_kit = self.stub_kit(tmp_path, scratch_fails=True, ws_marker="WORKSPACE-RULES-RAN")
+            blocked = tmp_path / "blocked"
+            blocked.touch()  # a FILE where the fallback log dir would need to be a directory
+            r = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), TMPDIR=str(blocked))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("WORKSPACE-RULES-RAN", r.stdout)
+
+    def test_a_failed_session_env_does_not_block_a_later_successful_one(self):
+        """A session-env failure must not leave the `# ai-baton session-env` marker behind — the
+        next SessionStart has to retry, and once it succeeds the env file ends with exactly one
+        export block, not zero and not two."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_kit = self.stub_kit(tmp_path)
+            envfile = tmp_path / "env"
+            scratch = tmp_path / "scratch"
+            r1 = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), CLAUDE_ENV_FILE=str(envfile),
+                     KIT_SCRATCH=str(scratch), STUB_FAIL="1")
+            self.assertEqual(r1.returncode, 0)
+            self.assertFalse(envfile.exists() and "# ai-baton session-env" in envfile.read_text(encoding="utf-8"))
+            r2 = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), CLAUDE_ENV_FILE=str(envfile), KIT_SCRATCH=str(scratch))
+            self.assertEqual(r2.returncode, 0, r2.stderr)
+            out = envfile.read_text(encoding="utf-8")
+            self.assertEqual(out.count("export X=1"), 1)
+            self.assertEqual(out.count("# ai-baton session-env"), 1)
 
 
 if __name__ == "__main__":

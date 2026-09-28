@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "K=\"${CLAUDE_PLUGIN_ROOT}/context-db/bin/kit_profile.py\"; L=\"$(python3 \"$K\" scratch 2>/dev/null)/hooks.log\"; if [ -n \"${CLAUDE_ENV_FILE:-}\" ] && ! grep -qF '# ai-baton session-env' \"$CLAUDE_ENV_FILE\" 2>/dev/null; then { echo '# ai-baton session-env'; python3 \"$K\" session-env; } >> \"$CLAUDE_ENV_FILE\" 2>>\"$L\" || echo \"ai-baton: session-env failed writing to $CLAUDE_ENV_FILE - see $L\"; fi; python3 \"$K\" workspace-rules 2>>\"$L\" || echo \"ai-baton: the SessionStart hook could not load WORKSPACE.md (kit_profile.py workspace-rules failed) - the always-on rules are missing from this session; run /kit-health\"; exit 0",
+            "command": "K=\"${CLAUDE_PLUGIN_ROOT}/context-db/bin/kit_profile.py\"; S=\"$(python3 \"$K\" scratch 2>/dev/null)\"; [ -n \"$S\" ] || S=\"${TMPDIR:-/tmp}/ai-baton-kit\"; L=\"$S/hooks.log\"; mkdir -p \"$S\" 2>/dev/null; if ( : >>\"$L\" ) 2>/dev/null; then T=\"$L\"; else T=/dev/null; fi; if [ -n \"${CLAUDE_ENV_FILE:-}\" ] && ! grep -qF '# ai-baton session-env' \"$CLAUDE_ENV_FILE\" 2>/dev/null; then if ( out=\"$(python3 \"$K\" session-env 2>>\"$T\")\" && printf '%s\\n' '# ai-baton session-env' \"$out\" >> \"$CLAUDE_ENV_FILE\" ) 2>>\"$T\"; then :; else echo \"ai-baton: session-env failed writing to $CLAUDE_ENV_FILE - see $L\"; fi; fi; python3 \"$K\" workspace-rules 2>>\"$T\" || echo \"ai-baton: the SessionStart hook could not load WORKSPACE.md (kit_profile.py workspace-rules failed) - the always-on rules are missing from this session; run /kit-health\"; exit 0",
             "timeout": 10
           }
         ]
