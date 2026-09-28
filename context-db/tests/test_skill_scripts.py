@@ -330,6 +330,8 @@ class DiagramPlan(unittest.TestCase):
         self.assertEqual(self.dp.malformed_marker_line(f"body\n{trailing}\n"), trailing)
         truncated = "<!-- diagram-plan: facets=api dominant=api"
         self.assertEqual(self.dp.malformed_marker_line(f"body\n{truncated}\n"), truncated)
+        # prose that quotes the marker shape mid-line is not a marker, broken or otherwise
+        self.assertIsNone(self.dp.malformed_marker_line("the plan lives in a `<!-- diagram-plan: … -->` line\n"))
 
     def test_check_reports_malformed_marker_distinctly_and_exits_3(self):
         saved = self.dp.files_from_pr

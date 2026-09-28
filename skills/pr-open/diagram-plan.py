@@ -386,7 +386,7 @@ def malformed_marker_line(body: str) -> str | None:
     if marker_from_body(body) is not None:
         return None
     for line in body.splitlines():
-        if "<!-- diagram-plan:" in line:
+        if line.lstrip().startswith("<!-- diagram-plan:"):  # prose quoting the shape is not a marker
             return line.strip()
     return None
 
