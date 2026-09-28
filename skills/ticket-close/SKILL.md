@@ -2,7 +2,7 @@
 name: ticket-close
 description: Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues): a final outcome comment (Delivered / Verified / Out-of-scope), the right transition or close reason (Done / Won't Do / Cancelled), the delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned.
 metadata:
-  version: "6"
+  version: "7"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.close_reasons"
