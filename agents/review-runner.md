@@ -40,7 +40,8 @@ so you spend them on judgment, not on fetching.
    findings unless the user asked; the walk is about replies).
 2. Load only what the bundle cannot know: `kb-traps.md` (check every applicable trap, record hit/n/a/
    unverified), the repo's own review rules if the KB names them (the repo's `CLAUDE.md` section on SQL
-   semantics, say; `head/AGENTS.md` if the PR touched it), and the tracker ticket in the title/body — `getJiraIssue`
+   semantics, say; `head/AGENTS.md` if the PR touched it, else one live `gh api contents` read — the same
+   named exception as `pr-review/SKILL.md` § Contract), and the tracker ticket in the title/body — `getJiraIssue`
    (one call) **only where `systems.jira` is true**; where it's false, skip the lookup and treat any ticket
    reference in the overview as `n/a in this environment`. Nothing else at this step.
 3. Review pass over `diff.patch` (per-file via `diffs/`), collecting candidates on these axes:
