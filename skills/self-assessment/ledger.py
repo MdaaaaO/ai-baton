@@ -2,15 +2,17 @@
 """ledger.py — the self-assessment skill's report ledger: one copy-ready card per composed week on a
 single self-contained HTML page (published as a private Artifact; URL in `self_assessment.ledger_url`).
 
-    ledger.py card  <weeks/2026-Wnn.md> [--tag TEXT]            # print the card as JSON
+    ledger.py card  <weeks/YYYY-Wnn.md> [--tag TEXT] [--mode MODE]  # print the card as JSON
     ledger.py build (--page index.html | --init) --week <file>... --out <html>
-                    [--title T] [--eyebrow T] [--report-url URL] [--tag TEXT]
-    ledger.py check <html>                                        # ids unique, no local paths, ≥3 sections
+                    [--title T] [--eyebrow T] [--report-url URL] [--tag TEXT] [--mode MODE]
+    ledger.py check <html>                       # ids unique, no local paths, no placeholders, ≥3 sections
 
 `card` parses the week file: the frontmatter `title:` gives id + dates, `status:`/banner give the tag
 (`composed <date>, week in progress …` while `status: active`; `back-filled <date>` when the
 frontmatter says `provenance: back-fill`), the `## <report> update` block gives the sections (`**Heading**`
-or `### Heading` lines, `- ` bullets, indented continuations). `build` merges cards into the page's
+or `### Heading` lines, `- ` bullets, indented continuations) — `week-file` mode never writes that block,
+so a week file composed in that mode falls back to its own `## ` sections instead (`--mode` overrides the
+store's `self_assessment.report`, which is the default). `build` merges cards into the page's
 `<script id="data">` JSON by id (replace or append, sorted by year+week) and refreshes the masthead.
 `--init` starts from `ledger-template.html` next to this script. stdlib only, no network — the
 publish itself is the Artifact tool (`url` = the configured ledger URL; without it on the first run).
@@ -34,6 +36,37 @@ TEMPLATE = HERE / "ledger-template.html"
 DATA_RE = re.compile(r'(<script id="data" type="application/json">)(.*?)(</script>)', re.S)
 FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 LOCAL_PATH_RE = re.compile(r"(?<![\w/])\.context/|\.worktrees/|/Users/|/home/", re.I)
+# A template placeholder that leaked into a composed week file: an angle-bracket hint (`<one sentence…>`,
+# `<Evidence link>`, `<step 1's Monday>`), a literal ellipsis, or an unfilled `TBD`/`TODO` marker — none of
+# these belong in a published card. `PLACEHOLDER_TAIL_RE` covers the non-bracket shapes; the angle-bracket
+# shape is broad (`<[^<>]+>`, so it catches any hint) with three narrow exclusions checked in
+# `_is_angle_placeholder` — a generic type directly after an identifier (`Option<T>`), a bare `<`/`>` with
+# whitespace on both sides (a comparison, `p99 < 200ms and > 50ms`), and a real HTML tag with no spaces
+# (`</script>`, `<br>`). `check_html` only ever runs this on the cards a build just composed (`new_ids`),
+# never a previously published one.
+PLACEHOLDER_TAIL_RE = re.compile(r"^\s*…\s*$|\s…\s*$|\bTBD\b|\bTODO\b")  # prose may still use "…" mid-sentence
+ANGLE_RE = re.compile(r"<[^<>]+>")
+COMPARISON_ANGLE_RE = re.compile(r"(?<=\s)[<>](?=\s)")  # a bare </> flanked by whitespace: a comparison
+GENERIC_TYPE_RE = re.compile(r"\w<[\w, ]+>")  # `Option<T>`, `List<int, str>` — a generic type, not a hint
+HTML_TAG_RE = re.compile(r"\A</?[a-z]+>\Z")  # `</script>`, `<br>` — a real tag, not a hint
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)  # a scaffold's instructional comment, never bullet text
+
+
+def _is_angle_placeholder(text: str) -> bool:
+    masked = COMPARISON_ANGLE_RE.sub(" ", text)
+    for m in ANGLE_RE.finditer(masked):
+        span = m.group(0)
+        if HTML_TAG_RE.match(span):
+            continue
+        start = m.start()
+        if start > 0 and re.match(r"\w", masked[start - 1]) and GENERIC_TYPE_RE.match(masked, start - 1):
+            continue
+        return True
+    return False
+
+
+def is_placeholder(text: str) -> bool:
+    return bool(PLACEHOLDER_TAIL_RE.search(text)) or _is_angle_placeholder(text)
 
 
 def frontmatter(text: str) -> dict[str, str]:
@@ -61,20 +94,25 @@ def week_dates(year: int, week: int) -> str:
     return f"{mon:%a %b} {mon.day} – {sun:%a %b} {sun.day}, {sun.year}"
 
 
-def parse_block(text: str) -> list[dict]:
-    """Sections of the report block: the last `## … update` heading to the next `## ` or EOF."""
-    heads = [m for m in re.finditer(r"^## .*update.*$", text, re.M | re.I)]
-    if not heads:
-        sys.exit("no `## … update` block in the week file")
-    start = heads[-1].end()
-    nxt = re.search(r"^## ", text[start:], re.M)
-    block = text[start : start + nxt.start()] if nxt else text[start:]
+def _heading(line: str) -> str | None:
+    """A `**Bold**` or `### H3` sub-heading inside the report block."""
+    m = re.match(r"^\*\*(.+?)\*\*\s*$", line) or re.match(r"^###\s+(.+?)\s*$", line)
+    return m.group(1).strip() if m else None
+
+
+def _top_heading(line: str) -> str | None:
+    """A week file's own `## Heading` (not `### …`, not the single `# Title`)."""
+    m = re.match(r"^##\s+(.+?)\s*$", line)
+    return m.group(1).strip() if m else None
+
+
+def _sections(text: str, heading_of) -> list[dict]:
     sections: list[dict] = []
     cur = None
-    for line in block.splitlines():
-        h = re.match(r"^\*\*(.+?)\*\*\s*$", line) or re.match(r"^###\s+(.+?)\s*$", line)
-        if h:
-            cur = {"heading": h.group(1).strip(), "bullets": []}
+    for line in text.splitlines():
+        name = heading_of(line)
+        if name is not None:
+            cur = {"heading": name, "bullets": []}
             sections.append(cur)
             continue
         if cur is None:
@@ -89,9 +127,31 @@ def parse_block(text: str) -> list[dict]:
     return [s for s in sections if s["bullets"]]
 
 
-def make_card(path: Path, extra_tag: str = "") -> dict:
+def parse_block(text: str, mode: str) -> list[dict]:
+    """Sections of the report block: the last `## … update` heading to the next `## ` or EOF.
+    `mode` is `self_assessment.report`. The block only exists in `lattice` mode (the `week-file`
+    template omits it on purpose — the week file itself is the deliverable there), so a missing
+    heading means different things depending which mode composed the file: in `week-file` mode it
+    is expected — fall back to the week file's own `## ` sections and say so on stderr; any other
+    mode is missing a block it should have, which is a real bug worth naming."""
+    heads = [m for m in re.finditer(r"^## .*update.*$", text, re.M | re.I)]
+    if not heads:
+        if mode == "week-file":
+            print("note: no `## … update` heading (expected — week-file mode omits it); "
+                  "using the week file's own `## ` sections instead", file=sys.stderr)
+            return _sections(HTML_COMMENT_RE.sub("", text), _top_heading)
+        sys.exit(f"no `## … update` heading in the week file — required when self_assessment.report is {mode!r}")
+    start = heads[-1].end()
+    nxt = re.search(r"^## ", text[start:], re.M)
+    block = text[start : start + nxt.start()] if nxt else text[start:]
+    return _sections(block, _heading)
+
+
+def make_card(path: Path, extra_tag: str = "", mode: str | None = None) -> dict:
     text = path.read_text(encoding="utf-8")
     fm = frontmatter(text)
+    if mode is None:
+        mode = profile.get("self_assessment.report", "week-file") or "week-file"
     year, week = week_id(path, fm)
     title = fm.get("title", "")
     m = re.search(r"—\s*(.+?)\s*(?:\(|$)", title)
@@ -115,7 +175,7 @@ def make_card(path: Path, extra_tag: str = "") -> dict:
         "dates": dates,
         "tag": " · ".join(tags),
         "nudge": f"{fri:%a %b} {fri.day}",
-        "sections": parse_block(text),
+        "sections": parse_block(text, mode),
     }
 
 
@@ -143,7 +203,11 @@ def load_page(args) -> str:
         )
         html = html.replace("{{TITLE}}", title).replace("{{EYEBROW}}", eyebrow).replace("{{REPORT_LINK}}", link)
         return html
-    return Path(args.page).read_text(encoding="utf-8")
+    page = Path(args.page)
+    if not page.is_file():
+        sys.exit(f"{page}: no such file — re-fetch the page named by `self_assessment.ledger_url` (Artifact "
+                 "read) before `ledger.py build`, or pass --init if this is the first run on this machine")
+    return page.read_text(encoding="utf-8")
 
 
 def refresh_masthead(html: str, data: list[dict]) -> str:
@@ -168,8 +232,10 @@ def build(args) -> None:
     if not m:
         sys.exit("page has no <script id=\"data\"> block — not a ledger page")
     data = json.loads(m.group(2) or "[]")
+    new_ids: set[tuple[int, str]] = set()
     for w in args.week:
-        card = make_card(Path(w), args.tag)
+        card = make_card(Path(w), args.tag, args.mode)
+        new_ids.add((card["year"], card["id"]))
         data = [c for c in data if not (c["id"] == card["id"] and card_year(c) == card["year"])]
         data.append(card)
     data.sort(key=sort_key)
@@ -177,7 +243,10 @@ def build(args) -> None:
     payload = json.dumps(data, ensure_ascii=False, indent=1).replace("</", "<\\/")
     html = html[: m.start(2)] + payload + "\n" + html[m.end(2) :]
     html = refresh_masthead(html, data)
-    problems = check_html(html)
+    # Placeholder text is only ever checked on the cards this run just composed — an old, already
+    # published card is never re-audited, so one legitimate `<`/`>` bullet that slipped past a stale
+    # version of this check can never block every later build.
+    problems = check_html(html, new_ids)
     if problems:
         # Never leave a publishable file behind on a failed check — a session that only sees the
         # file exists would republish it over the live ledger.
@@ -190,7 +259,10 @@ def build(args) -> None:
     print(f"wrote {args.out} — {len(data)} cards: {', '.join(c['id'] for c in data)}")
 
 
-def check_html(html: str) -> list[str]:
+def check_html(html: str, new_ids: set[tuple[int, str]] | None = None) -> list[str]:
+    """`new_ids` scopes the placeholder check to the cards a `build` just composed — `None` (the
+    standalone `check` command, auditing a whole page by hand) checks every card, since there is no
+    "this run" to narrow to."""
     m = DATA_RE.search(html)
     if not m:
         return ["no data block"]
@@ -204,10 +276,13 @@ def check_html(html: str) -> list[str]:
         seen.add(key)
         if len(c.get("sections", [])) < 3:
             problems.append(f"{c['id']}: only {len(c.get('sections', []))} section(s)")
+        check_placeholders = new_ids is None or key in new_ids
         for s in c.get("sections", []):
             for b in s["bullets"]:
                 if LOCAL_PATH_RE.search(b):
                     problems.append(f"{c['id']}: local path in a bullet — {b[:60]}…")
+                if check_placeholders and is_placeholder(b):
+                    problems.append(f"{c['id']}: placeholder text in a bullet — {b[:60]}…")
     if "{{" in html:
         problems.append("unfilled {{placeholder}} left in the page")
     return problems
@@ -219,6 +294,7 @@ def main() -> None:
     c = sub.add_parser("card")
     c.add_argument("week")
     c.add_argument("--tag", default="")
+    c.add_argument("--mode", default=None, help="self_assessment.report override (default: read from the store)")
     b = sub.add_parser("build")
     g = b.add_mutually_exclusive_group(required=True)
     g.add_argument("--page")
@@ -229,11 +305,12 @@ def main() -> None:
     b.add_argument("--eyebrow", default="")
     b.add_argument("--report-url", default="")
     b.add_argument("--tag", default="")
+    b.add_argument("--mode", default=None, help="self_assessment.report override (default: read from the store)")
     k = sub.add_parser("check")
     k.add_argument("html")
     args = ap.parse_args()
     if args.cmd == "card":
-        print(json.dumps(make_card(Path(args.week), args.tag), ensure_ascii=False, indent=1))
+        print(json.dumps(make_card(Path(args.week), args.tag, args.mode), ensure_ascii=False, indent=1))
     elif args.cmd == "build":
         build(args)
     else:
