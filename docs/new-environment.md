@@ -66,8 +66,12 @@ the workspace is yours. On a sandbox recreate (which wipes `~/.claude` but keeps
 <details>
 <summary>What the prompt does (the manual equivalent)</summary>
 
+HTTPS, matching `README.md` § Install: a sandbox's credential proxy injects a token for HTTPS only, never for
+SSH, so a clone command in these docs is always HTTPS. SSH is fine on your own machine, once, if you already
+have a working SSH key for GitHub — never inside a sandbox session.
+
 ```
-git clone git@github.com:MdaaaaO/ai-baton.git <workspace root>/.claude
+git clone https://github.com/MdaaaaO/ai-baton.git <workspace root>/.claude
 cp .claude/settings.local.example.json .claude/settings.local.json
 $EDITOR .claude/settings.local.json      # WORKSPACE_* identity keys (plugin install: /plugin configure ai-baton instead)
 sh .claude/setup.sh                      # from the workspace root — env store, memory link, seeds
@@ -123,9 +127,10 @@ edited — if you already have a root `CLAUDE.md` or `Makefile`, add the two imp
    `kb.py migrate --off` prints the same list at any time, both from `kb.unmet_units`), the
    leaks, and the machine wiring; fix until GREEN/AMBER, then it stamps
    `.context/kit-health/HEALTH-<name>.md`.
-9. **Skills that need an adapter.** `ticket-open/update/close` adapt to `tracker.kind` (`jira` |
-   `github`; `none` for a machine without a tracker — the template's `linear` is a reserved value with no
-   adapter yet); a third tracker means a new `## Adapter — <kind>` section in those three skills. A skill
+9. **Skills that need an adapter.** `ticket-open/update/close` adapt to `tracker.kind` — the enum is
+   `kit_profile.TRACKER_KINDS` (`jira` | `github` | `none`; `kit-verify` rejects any other value); a
+   third tracker means adding its kind there together with a new `## Adapter — <kind>` section in those
+   three skills. A skill
    whose `requires:` names a capability this machine lacks is inert here; a skill for a system the kit
    does not cover yet is a new kit skill gated on a new `systems.*` flag (added to `kb.py` `SYSTEMS`,
    reaching every store via `kb.py migrate`) — never a skill bound to one environment. Any kit-side change

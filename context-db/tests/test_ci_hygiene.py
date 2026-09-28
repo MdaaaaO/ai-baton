@@ -118,6 +118,17 @@ class ApprovalTrust(unittest.TestCase):
 
 
 class EngineMakefile(unittest.TestCase):
+    def test_t_selects_one_module_else_full_discovery(self):
+        """`make test T=<module>` runs one file instead of the whole suite (docs/contributing.md § Testing)."""
+        def recipe(**make_vars: str) -> str:
+            p = subprocess.run(["make", "-C", str(KIT / "context-db"), "-n", "test", *(f"{k}={v}" for k, v in make_vars.items())],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            return p.stdout
+        self.assertIn("python3 -m unittest discover -s tests -t .", recipe(ISOLATED="1"))
+        self.assertNotIn("tests.test_kb ", recipe(ISOLATED="1"))
+        self.assertIn("python3 -m unittest tests.test_kb -v", recipe(ISOLATED="1", T="test_kb"))
+
     def test_context_value_has_no_trailing_blanks(self):
         """an inline `# comment` after `CONTEXT := …` leaves the blanks before it in the value, and every recipe
         then reads a store literally named `.context  `."""

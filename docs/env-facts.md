@@ -20,7 +20,7 @@ Part of the `.context/` document DB (local, never synced), created by `setup.sh`
 ├── notion.md       # ## database · ## page
 ├── datalake.md     # ## setting · ## tool
 ├── _templates/     # optional context-doc scaffolds (epic.md, oncall.md, …) that override the engine's
-└── _discovery/     # optional discovery manifests a plugin shipped (`kb.py import <dir>` copies them here)
+└── _discovery/     # optional discovery manifests a plugin shipped (copy the plugin's discovery/*.json here)
 ```
 
 The environment's **prose** (domains, capabilities it turns on, conventions, rules, repo map) is the sibling doc
@@ -55,7 +55,7 @@ different values is reported as a `CONFLICT` and left for the user), and `kit-ve
 still carries one. Add a new kind only when no existing one means the same thing — `kb.py discover --all`
 lists the vocabulary.
 
-`config.json` carries only what scripts branch on: `tracker.kind` (`jira`|`github`), `tracker.key_regex`,
+`config.json` carries only what scripts branch on: `tracker.kind` (`kit_profile.TRACKER_KINDS`: `jira`|`github`|`none`), `tracker.key_regex`,
 `tracker.url_template`, `tracker.mcp_tools`, `tracker.close_reasons`, `tracker.repos`, `github.org`,
 `github.review_bot`, `github.bots`, `github.signed_commits`, `github.sandbox_token_prefix`,
 `github.owner_teams`, `slack.enabled`, `slack.domain`, `systems.*`, `tz_default`, `labels`,
@@ -117,7 +117,7 @@ Manifests: `slack`, `tracker-jira`, `tracker-github`, `github`, `aws`, `notion`,
 `airflow`, `dbt`, `incident-io`, `lattice`, `workspace` — one per capability flag plus the workspace itself (`ls context-db/discovery/` is the list; this sentence is not). A manifest may carry `"facts": []` with a `note`: the flag exists, no unit declares a store fact for it yet — `lattice`'s only input is an identity variable, never a store row. Two manifests may own the same key only when their `when` guards exclude each other
 (`tracker-jira` / `tracker-github` on `tracker.kind`; a vendor's `datalake-<vendor>` on `datalake.kind`) — `discover`
 follows the applicable one, `discover --check` rejects an unguarded duplicate. The switch a `when` reads
-(`tracker.kind`, `datalake.kind`) is itself a `user` fact in `workspace.json`, so the choice is never circular. A plugin ships its own as `<dir>/discovery/*.json` (`kb.py import <dir>` copies them into the
+(`tracker.kind`, `datalake.kind`) is itself a `user` fact in `workspace.json`, so the choice is never circular. A plugin ships its own as `<dir>/discovery/*.json` (copy them into the
 store's `_discovery/`, same file name wins). `kit-verify` validates the kit's manifests and every unit's
 `metadata.facts` frontmatter against them.
 
