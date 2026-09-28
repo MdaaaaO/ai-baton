@@ -7,14 +7,20 @@ Reads .context/state/pr-review/config.json `auto_approve` (PR_REVIEW_HOME overri
 `reasons` lists every failed gate (empty when eligible). Exit 0 always unless the API fails — then
 {"eligible": false, "error": true, "reasons": [...]} and exit 1 (callers must treat error=true as NOT eligible).
 `--head SHA` refuses (reason "head moved") when the live head differs — submit-review.sh --auto passes the reviewed head.
+`--head SHA` / `--head=SHA` with an empty or non-40-hex value (an unset shell variable in the caller), a
+repeated --head, or any other `--` flag exits 2: nothing disarms the check or is dropped silently.
 Never posts anything. A PR is eligible only if EVERY gate passes:
   - the user is a requested reviewer (login in requested_reviewers, or a requested team in auto_approve.owner_teams) — repo-sweep PRs never qualify
   - open, not draft, base == default branch (no stacked PRs), author != login, no human CHANGES_REQUESTED, 0 unresolved review threads
   - no file matches an exclude glob; files <= max_files; non-lock lines <= max_lines
-  - class docs: every file is a docs path (md/rst/txt outside manifests, docs/**)
+  - class docs: every file is a docs path (md/rst/txt outside manifests, docs/**); agent instructions
+    (SKILL.md, skills/*/reference/**,
+    agents/**, commands/**, WORKSPACE.md, CLAUDE.md, AGENTS.md) are behaviour, never docs, whatever the config says
   - class patch-bump: every file is a manifest/lockfile; every changed line in a non-lock manifest is
-    the same line with only a version literal changed; every bump is patch (x.y.Z), or minor when the
-    package is in dev_tooling; major never; lockfiles must accompany at least one manifest
+    the same line with only a version literal changed, and that line has the dependency-pin shape of
+    its manifest's ecosystem (DEP_SHAPES — a changed date, IP or section number is not a bump); every
+    bump is patch (x.y.Z), or minor when the package is in dev_tooling; major never; lockfiles must
+    accompany at least one manifest; a patch that does not parse as unified-diff hunks is refused
   - CI: if branch protection `required_status_checks` is readable, every required context is present and green;
     otherwise every check-run on head concluded success/skipped/neutral (>=1 run, paginated) and combined status is not failure
   - docs class excludes `docs_exclude_globs` (dbt model docs, packages/constraints txt are not "docs")
@@ -74,18 +80,38 @@ def bump_kind(a, b):
     if A[2] != B[2]: return "patch"
     return "none"
 
+HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+
 def pair_lines(patch):
-    """Return list of (minus, plus) pairs per hunk, or None when counts differ."""
+    """Return list of (minus, plus) pairs per hunk; ValueError when counts differ or the patch is not hunks.
+    Parsed by the hunk header's line counts, so a content line that itself starts with `--`/`++`
+    (a Markdown rule, a `--flag`) is a change like any other, never mistaken for a file header."""
     pairs = []; minus = []; plus = []
     def flush():
         nonlocal minus, plus
         if len(minus) != len(plus): raise ValueError("unbalanced hunk")
         pairs.extend(zip(minus, plus)); minus, plus = [], []
+    old_left = new_left = 0; in_hunk = False
     for ln in patch.splitlines():
-        if ln.startswith("@@"): flush(); continue
-        if ln.startswith("-") and not ln.startswith("---"): minus.append(ln[1:])
-        elif ln.startswith("+") and not ln.startswith("+++"): plus.append(ln[1:])
-        else: flush()
+        if old_left == 0 and new_left == 0:
+            if ln.startswith("@@"):
+                m = HUNK.match(ln)
+                if not m: raise ValueError(f"unparseable hunk header: {ln[:40]}")
+                flush(); in_hunk = True
+                old_left = int(m.group(1)) if m.group(1) is not None else 1
+                new_left = int(m.group(2)) if m.group(2) is not None else 1
+                continue
+            if ln.startswith("\\"): continue  # "\ No newline at end of file"
+            if in_hunk or not ln.startswith(("diff ", "index ", "--- ", "+++ ")):
+                raise ValueError(f"line outside a hunk: {ln[:40]}")
+            continue  # git file headers before the first hunk
+        if ln.startswith("\\"): continue
+        tag, body = ln[:1], ln[1:]
+        if tag == "-" and old_left: minus.append(body); old_left -= 1
+        elif tag == "+" and new_left: plus.append(body); new_left -= 1
+        elif tag in (" ", "") and old_left and new_left: flush(); old_left -= 1; new_left -= 1
+        else: raise ValueError(f"hunk line does not fit its header: {ln[:40]}")
+    if old_left or new_left: raise ValueError("truncated hunk")
     flush(); return pairs
 
 def version_only_change(a, b):
@@ -97,11 +123,78 @@ def version_only_change(a, b):
     diffs = [(x, y) for x, y in zip(ma, mb) if x != y]
     return diffs[0] if len(diffs) == 1 else None
 
+# The dependency-pin line shape per manifest ecosystem, matched on the line with its version literal
+# replaced by "§" (SEMVER.sub). A manifest line that changes one version-looking literal but has none of
+# these shapes (a date, an IP, a section number, the project's own version) is not a dependency bump.
+_N = r"(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)"
+_PEP508 = _N + r"(?:\[[A-Za-z0-9,._ -]*\])?\s*(?:===|==|~=|>=)\s*§"
+DEP_SHAPES = [
+    ("requirements*.txt", re.compile(r"^\s*" + _PEP508 + r"\s*(?:;[^#§]*)?(?:\s+#[^§]*)?$")),
+    ("pyproject.toml", re.compile(r"^\s*([\"'])" + _PEP508 + r"\s*(?:;[^\"'§]*)?\1\s*,?\s*(?:#[^§]*)?$")),
+    ("pyproject.toml", re.compile(r"^\s*" + _N + r"\s*=\s*([\"'])[\^~=]{0,2}§\2\s*(?:#[^§]*)?$"), True),
+    ("package.json", re.compile(r'^\s*"(?P<name>(?:@[a-z0-9._-]+/)?[a-z0-9._-]+)"\s*:\s*"[\^~]?§"\s*,?\s*$'), True),
+    ("go.mod", re.compile(r"^\s*(?:require\s+)?(?P<name>[a-z0-9.-]+\.[a-z]+/[A-Za-z0-9._/~-]+)\s+§(?:\s*//\s*indirect)?\s*$")),
+    ("Dockerfile", re.compile(r"^\s*FROM\s+(?:--platform=\S+\s+)?(?P<name>[a-z0-9][a-z0-9./_-]*):§(?:\s+AS\s+[A-Za-z0-9_.-]+)?\s*$", re.I)),
+    ("Dockerfile", re.compile(r"^\s*(?:ARG|ENV)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*_VERSION)=([\"']?)§\2\s*$", re.I), True),
+    (".pre-commit-config.yaml", re.compile(r"^\s*rev:\s*([\"']?)§\1\s*(?:#[^§]*)?$")),
+    ("packages.yml", re.compile(r"^\s*version:\s*([\"']?)§\1\s*(?:#[^§]*)?$")),
+    (".tool-versions", re.compile(r"^\s*" + _N + r"\s+§\s*$")),
+    ("Cargo.toml", re.compile(r"^\s*" + _N + r"\s*=\s*\"[\^~=]?§\"\s*$"), True),
+    ("Cargo.toml", re.compile(r"^\s*" + _N + r"\s*=\s*\{\s*version\s*=\s*\"[\^~=]?§\"[^§]*\}\s*$")),
+    (".python-version", re.compile(r"^\s*§\s*$")),
+]
+# keys that a `key = "version"` / `ARG X_VERSION=` shape (third field True) also matches but that name the
+# project itself, its release or its runtime, not a dependency
+NOT_DEPS = {"version", "requires-python", "python", "python_version", "target-version", "rust-version",
+            "edition", "minversion", "node", "npm", "current_version", "__version__", "project_version",
+            "app_version", "release_version", "image_version", "build_version", "service_version",
+            "package_version", "version_info"}
+
+def dep_name(path, line):
+    """The dependency a manifest line pins ("?" when the shape carries no name), or None when the line
+    is not a dependency pin in that manifest's ecosystem."""
+    base = path.rsplit("/", 1)[-1]
+    if len(SEMVER.findall(line)) != 1: return None
+    tmpl = SEMVER.sub("§", line)
+    for pat, rx, *keyed in DEP_SHAPES:
+        if not (fnmatch.fnmatch(base, pat) or (pat == "Dockerfile" and base.startswith("Dockerfile."))): continue
+        m = rx.match(tmpl)
+        if not m: continue
+        name = m.groupdict().get("name") or ("python" if pat == ".python-version" else "?")
+        if keyed and name.lower() in NOT_DEPS: return None
+        return name
+    return None
+
+# Agent instructions look like Markdown but change behaviour: never "docs", whatever docs_globs says.
+AGENT_DOCS = ["SKILL.md", "**/SKILL.md", "agents/**", "**/agents/**", "WORKSPACE.md", "**/WORKSPACE.md",
+              "CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "**/AGENTS.md", "skills/*/reference/**",
+              "**/skills/*/reference/**", "commands/**", "**/commands/**", ".claude/commands/**", "**/.claude/commands/**"]
+
+def is_docs_path(path, aa):
+    return (glob_any(path, aa.get("docs_globs", [])) and not glob_any(path, aa.get("docs_exclude_globs", []) + AGENT_DOCS)
+            and not glob_any(path, aa.get("manifest_globs", [])) and not glob_any(path, aa.get("lock_globs", [])))
+
+def parse_args(argv):
+    """Return (positional, head). `--head SHA` and `--head=SHA` both need the full 40-hex sha; an empty,
+    short or repeated --head, or any other `--` flag, exits 2 — nothing is dropped silently."""
+    pos = []; heads = []; i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--head":
+            heads.append(argv[i+1] if i+1 < len(argv) else ""); i += 2; continue
+        if a.startswith("--head="):
+            heads.append(a[len("--head="):]); i += 1; continue
+        if a.startswith("--"):
+            print(f"error: unknown flag {a!r}", file=sys.stderr); sys.exit(2)
+        pos.append(a); i += 1
+    if len(heads) > 1:
+        print("error: --head given twice", file=sys.stderr); sys.exit(2)
+    if heads and not re.fullmatch(r"[0-9a-f]{40}", heads[0]):
+        print(f"error: --head needs the full 40-char sha, got {heads[0]!r}", file=sys.stderr); sys.exit(2)
+    return pos, (heads[0] if heads else None)
+
 def main():
-    argv = sys.argv[1:]; want_head = None
-    if "--head" in argv:
-        i = argv.index("--head"); want_head = argv[i+1] if i+1 < len(argv) else None; del argv[i:i+2]
-    args = [a for a in argv if not a.startswith("--")]
+    args, want_head = parse_args(sys.argv[1:])
     if len(args) != 2: print(__doc__); sys.exit(2)
     repo, pr = args[0], args[1]; o, r = repo.split("/")
     res = {"repo": repo, "pr": int(pr), "eligible": False, "class": None, "reasons": [], "packages": []}
@@ -125,13 +218,12 @@ def main():
     res["files"] = p["changed_files"]
     if p["changed_files"] > AA.get("max_files", 10): res["reasons"].append(f"files {p['changed_files']} > max_files")
     files = gh(f"repos/{repo}/pulls/{pr}/files?per_page=100", paginate=True)
-    excl = AA.get("exclude_globs", []); docs_g = AA.get("docs_globs", []); man_g = AA.get("manifest_globs", []); lock_g = AA.get("lock_globs", [])
+    excl = AA.get("exclude_globs", []); man_g = AA.get("manifest_globs", []); lock_g = AA.get("lock_globs", [])
     paths = [f["filename"] for f in files]
     hard = AA.get("hard_exclude_globs", [])
     bad = [x for x in paths if glob_any(x, hard) or (glob_any(x, excl) and not glob_any(x, man_g) and not glob_any(x, lock_g))]
     if bad: res["reasons"].append("excluded path: " + ", ".join(bad[:3]))
-    docs_x = AA.get("docs_exclude_globs", [])
-    is_docs = [glob_any(x, docs_g) and not glob_any(x, docs_x) and not glob_any(x, man_g) and not glob_any(x, lock_g) for x in paths]
+    is_docs = [is_docs_path(x, AA) for x in paths]
     is_man = [glob_any(x, man_g) for x in paths]; is_lock = [glob_any(x, lock_g) for x in paths]
     nonlock_lines = sum(f["additions"] + f["deletions"] for f, l in zip(files, is_lock) if not l)
     res["lines"] = nonlock_lines
@@ -150,8 +242,9 @@ def main():
             for a, b in pairs:
                 vc = version_only_change(a, b)
                 if not vc: res["reasons"].append(f"{f['filename']}: non-version change: {b.strip()[:60]}"); continue
-                toks = [t for t in re.findall(r"[A-Za-z][A-Za-z0-9_.@/-]*", SEMVER.sub(" ", a)) if t.lower() not in ("from", "image", "rev", "version", "uses", "pip", "npm")]
-                name = toks[0] if toks else "?"
+                name = dep_name(f["filename"], a)
+                if name is None or dep_name(f["filename"], b) != name:
+                    res["reasons"].append(f"{f['filename']}: not a dependency pin: {b.strip()[:60]}"); continue
                 kind = bump_kind(*vc)
                 short = name.rsplit("/", 1)[-1].lower()
                 ok = kind == "patch" or (kind == "minor" and name != "?" and any(name.lower().startswith(d.lower()) or short.startswith(d.lower()) for d in dev))
