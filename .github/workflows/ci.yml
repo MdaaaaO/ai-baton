@@ -4,8 +4,9 @@ name: ci
 # the env-free validator passes on the bare checkout, every skill/agent carries its versioning frontmatter
 # against a blank env store (kit_verify.py), the engine's unittest suite
 # passes (context-db/tests/), every Python file
-# compiles, every shell script parses. Stdlib only, so nothing is installed. `make -C .claude/context-db ci`
-# reproduces it locally.
+# compiles, every shell script parses. The kit runtime is stdlib only; the two jobs that run the unittest
+# suite install one pinned test-only dependency (PyYAML, for the frontmatter cross-check — .github/versions.env).
+# `make -C .claude/context-db ci` reproduces it locally.
 #
 # Runs on GitHub-hosted runners like every workflow (docs/contributing.md § Where CI runs): a job triggered by a pull
 # request executes the PR's code, and a fork's PR may come from anyone. A fork's PR runs here without secrets, which
@@ -81,6 +82,14 @@ jobs:
       # nothing — over every kit file; CI mode writes nothing under .context/ and fails on an error or a leak hit.
       - name: kit-health --ci (leak scan, no writes)
         run: python3 .claude/skills/kit-health/kit-health.py --ci --quiet
+
+      # A real YAML parser to cross-check every unit's frontmatter against (context-db/tests/test_frontmatter_yaml.py) —
+      # not a kit runtime dependency (frontmatter.py stays stdlib-only), only this test job installs it. Pinned in
+      # .github/versions.env; the test hard-fails (not skips) when CI=true and this import is missing.
+      - name: Install PyYAML (frontmatter cross-check)
+        run: |
+          . .claude/.github/versions.env
+          python3 -m pip install --quiet "PyYAML==$PYYAML_VERSION"
 
       - name: Engine tests
         run: make -C .claude/context-db test
@@ -167,6 +176,10 @@ jobs:
           python-version: "3.9"
       - name: Env-free validator (kit-verify --no-env) on the floor
         run: make -C context-db verify-skill
+      - name: Install PyYAML (frontmatter cross-check)
+        run: |
+          . .github/versions.env
+          python3 -m pip install --quiet "PyYAML==$PYYAML_VERSION"
       - name: Engine tests on the floor
         run: make -C context-db test
 

@@ -1,6 +1,6 @@
 ---
 name: sign-queue
-description: Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains the queue with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners for the user to run. Inert where `systems.signed_commits` is false.
+description: "Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains the queue with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners for the user to run. Inert where `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
   version: "14"

@@ -1,6 +1,6 @@
 ---
 name: alerts-sweep
-description: Sonnet-forked sweep of the airflow-alerts Slack channel: reads messages since the last-swept timestamp, classifies each against the pattern KB, advances the timestamp; returns exactly NO-OP when nothing needs the main session, or `NEEDS <system>.<kind> <name>` for a missing fact (`/env-init`). Arm with `/loop 20m /alerts-sweep`; never acts on an alert itself.
+description: "Sonnet-forked sweep of the airflow-alerts Slack channel: reads messages since the last-swept timestamp, classifies each against the pattern KB, advances the timestamp; returns exactly NO-OP when nothing needs the main session, or `NEEDS <system>.<kind> <name>` for a missing fact (`/env-init`). Arm with `/loop 20m /alerts-sweep`; never acts on an alert itself."
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
   version: "8"
