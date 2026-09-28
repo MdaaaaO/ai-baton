@@ -171,6 +171,10 @@ class PlaceholderCheck(unittest.TestCase):
             problems = LEDGER.check_html(self.page([self.card(bullet)]))
             self.assertTrue(any("placeholder" in p for p in problems), (bullet, problems))
 
+    def test_a_mid_sentence_ellipsis_is_prose_not_a_placeholder(self):
+        problems = LEDGER.check_html(self.page([self.card("waited on CI… then merged it")]))
+        self.assertFalse(any("placeholder" in p for p in problems), problems)
+
     def test_ordinary_bullet_is_not_flagged(self):
         problems = LEDGER.check_html(self.page([self.card("shipped a thing (evidence link)")]))
         self.assertEqual([p for p in problems if "placeholder" in p], [])

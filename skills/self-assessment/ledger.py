@@ -38,7 +38,7 @@ FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 LOCAL_PATH_RE = re.compile(r"(?<![\w/])\.context/|\.worktrees/|/Users/|/home/", re.I)
 # A template placeholder that leaked into a composed week file: an angle-bracket hint (`<one sentence…>`),
 # a literal ellipsis, or an unfilled `TBD`/`TODO` marker — none of these belong in a published card.
-PLACEHOLDER_RE = re.compile(r"<[^>]+>|…|\bTBD\b|\bTODO\b")
+PLACEHOLDER_RE = re.compile(r"<[^>]+>|^\s*…\s*$|\s…\s*$|\bTBD\b|\bTODO\b")  # a template token; prose may still use "…" mid-sentence
 
 
 def frontmatter(text: str) -> dict[str, str]:
