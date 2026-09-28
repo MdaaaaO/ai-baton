@@ -650,7 +650,7 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
         errors.append(f"env-store config could not be loaded ({e}) — configured values not scanned")
         cfg = {}
     if cfg:
-        gh = cfg.get("github", {})
+        gh = (cfg.get("github") or {})
         keep(gh.get("review_bot"), "github.review_bot")
         for login in (gh.get("display_names") or {}):
             if keep_value(str(login)):  # the kit's own `<owner>/<repo>` address is not a leak (#118)
@@ -658,16 +658,16 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
                                "colleague login (github.display_names)"))
         for team in gh.get("owner_teams") or []:
             keep(team, "github.owner_teams")
-        keep(cfg.get("slack", {}).get("domain"), "slack.domain")
-        for v in (cfg.get("slack", {}).get("channels") or {}).values():
+        keep((cfg.get("slack") or {}).get("domain"), "slack.domain")
+        for v in ((cfg.get("slack") or {}).get("channels") or {}).values():
             keep(v, "Slack channel id (slack.channels)")
         for k in ("site", "project", "board_sprint_prefix"):
-            keep(cfg.get("tracker", {}).get(k), f"tracker.{k}")
+            keep((cfg.get("tracker") or {}).get(k), f"tracker.{k}")
         keep(cfg.get("tz_default"), "tz_default")
         for m in (cfg.get("leaks") or {}).get("markers") or []:  # #95: product/org markers no shape knows
             keep(m, "leaks.markers")
         deps = kit_dependencies()
-        for repo in cfg.get("tracker", {}).get("repos") or []:
+        for repo in (cfg.get("tracker") or {}).get("repos") or []:
             if str(repo).rsplit("/", 1)[-1] in deps:
                 continue
             keep(repo, "tracker.repos")
@@ -687,7 +687,7 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
     for v, what in vals.items():
         esc = re.escape(v)
         pats.append((re.compile((r"\b" if v[0].isalnum() else "") + esc + (r"\b" if v[-1].isalnum() else "")), what))
-    orgs = {str(cfg.get("github", {}).get("org") or "")} - {""}
+    orgs = {str((cfg.get("github") or {}).get("org") or "")} - {""}
     for org in sorted(orgs):
         deps = "|".join(re.escape(d) for d in sorted(kit_dependencies()))
         not_dep = rf"(?!(?:{deps})\b)" if deps else ""
@@ -1191,9 +1191,29 @@ def header_time(now: dt.datetime | None = None) -> str:
     return t.strftime("%Y-%m-%d %H:%M %Z") + note
 
 
+def guarded(r: Report, section: str, fn, *args, default=None):
+    """Run one section; a crash is a RED finding with its cause, and the run goes on to the next section — never a
+    traceback that loses the report. Unexpected store content (a null config section, a stray table) lands here."""
+    try:
+        return fn(*args)
+    except Exception as e:  # noqa: BLE001 — every section failure is reported, none swallowed
+        import traceback
+        where = traceback.extract_tb(e.__traceback__)[-1]
+        r.add(ERR, section, f"section crashed: `{type(e).__name__}: {e}` at `kit-health.py:{where.lineno}` — the checks "
+                            f"after that point did not run; fix the cause (often unexpected env-store content) and re-run")
+        return default
+
+
+def write_report(path: str | None, r: Report) -> None:
+    if path:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text("\n".join(r.lines) + "\n", encoding="utf-8")
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--stale", type=int, default=90)
+    ap = argparse.ArgumentParser(description="kit-health: audit the kit on this machine (exit 0 GREEN · 1 AMBER · 2 RED)")
+    ap.add_argument("--stale", type=int, default=90, metavar="DAYS",
+                    help="a unit whose metadata.reviewed is older than DAYS is a WARN (default 90)")
     ap.add_argument("--stamp", action="store_true", help="write the HEALTH.md stamp for this environment when there are no errors")
     ap.add_argument("--report", help="also write the report to this file")
     ap.add_argument("--quiet", action="store_true", help="print only the summary line")
@@ -1201,26 +1221,29 @@ def main() -> int:
                                                        "store CI builds; nothing under .context/ is written; exit 2 on an error or a leak hit, else 0")
     a = ap.parse_args()
     r = Report()
+    try:
+        return run(a, r)
+    finally:
+        write_report(a.report, r)  # a crash outside every section still leaves the findings gathered so far
+
+
+def run(a, r: Report) -> int:
     r.raw(f"# kit-health · {header_time()}" + (" · CI mode" if a.ci else ""))
     if a.ci:
-        sec_leaks(r)
-        sec_config(r)
+        guarded(r, "leaks", sec_leaks, r)
+        guarded(r, "config", sec_config, r)
         r.h("Summary")
         verdict = "RED" if r.counts[ERR] or r.leak_hits else "GREEN"
         summary = f"**{verdict}** (CI) — {r.counts[ERR]} errors · {r.leak_hits} leak hit(s) · {r.counts[WARN]} warnings · {r.counts[OK]} checks passed"
         r.raw(summary)
-        text = "\n".join(r.lines) + "\n"
-        if a.report:
-            Path(a.report).parent.mkdir(parents=True, exist_ok=True)
-            Path(a.report).write_text(text, encoding="utf-8")
-        print(summary if a.quiet else text)
+        print(summary if a.quiet else "\n".join(r.lines) + "\n")
         return 2 if (r.counts[ERR] or r.leak_hits) else 0
-    sec_kit(r, a.stale)
-    sec_leaks(r)
-    sec_config(r)
-    active = sec_machine(r)
-    sec_engine(r, stamping=a.stamp)
-    sec_stamp(r, active)
+    guarded(r, "kit", sec_kit, r, a.stale)
+    guarded(r, "leaks", sec_leaks, r)
+    guarded(r, "config", sec_config, r)
+    active = guarded(r, "machine", sec_machine, r, default="unknown")
+    guarded(r, "engine", sec_engine, r, a.stamp)
+    guarded(r, "stamp", sec_stamp, r, active)
     r.h("Summary")
     verdict = "RED" if r.counts[ERR] else ("AMBER" if r.counts[WARN] else "GREEN")
     summary = f"**{verdict}** — {r.counts[ERR]} errors · {r.counts[WARN]} warnings · {r.counts[OK]} checks passed · environment `{active}`"
@@ -1236,11 +1259,8 @@ def main() -> int:
     elif a.stamp:
         r.raw("\nNot stamped — " + ("errors present." if r.counts[ERR] else
               f"{r.leak_hits} un-accepted leak hit(s): fix each, or accept it in `skills/kit-health/allow.txt` with a `# reason`."))
-    text = "\n".join(r.lines) + "\n"
-    if a.report:
-        Path(a.report).parent.mkdir(parents=True, exist_ok=True)
-        Path(a.report).write_text(text, encoding="utf-8")
-    print(summary if a.quiet else text)
+    print(summary if a.quiet else "\n".join(r.lines) + "\n")
+    # the verdict is the exit code (0 GREEN · 1 AMBER · 2 RED); a stamp whose re-index failed is AMBER at worst
     return 2 if r.counts[ERR] else (1 if r.counts[WARN] or not index_ok else 0)
 
 

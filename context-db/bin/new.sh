@@ -2,7 +2,7 @@
 # new.sh — scaffold a new context doc from a template, with frontmatter filled in.
 # Called by `make -C .claude/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug> [TITLE="..."]`.
 #
-# The doc is placed under the CONTENT root (CONTEXT_ROOT, default ../../.context);
+# The doc is placed under the CONTENT root (`kit_profile.py context`: CONTEXT_ROOT, else docs/layout.md's default);
 # templates come from the env store's overrides first (.context/reference/env/_templates/<type>.md,
 # via `kit_profile.py template <type>`), then the ENGINE dir (_templates/, next to this bin/).
 # Refuses to clobber, and prints the path. Run `make index` afterwards (the Makefile chains it).
@@ -11,12 +11,8 @@ set -eu
 # Engine dir (holds _templates/) — the parent of this bin/.
 ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_DOMAINS="$(python3 "$ENGINE/bin/kit_profile.py" domains | tr '\n' '|' | sed 's/|$//')"
-# Content root — the Makefile passes CONTEXT_ROOT; fall back to the sibling .context/.
-if [ -n "${CONTEXT_ROOT:-}" ]; then
-  CTX="$CONTEXT_ROOT"
-else
-  CTX="$(cd "$ENGINE/../../.context" && pwd)"
-fi
+# Content root — kit_profile.py's context_root(), the one resolver (it honours CONTEXT_ROOT, which the Makefile passes).
+CTX="$(python3 "$ENGINE/bin/kit_profile.py" context)"
 
 TYPE="${TYPE:?set TYPE= (epic|reference|repo|meeting|1on1|oncall|self-assessment|pr-review|log)}"
 SLUG="${SLUG:?set SLUG= (kebab-case file slug, e.g. key-123-foo or 2026-09-11-team-sync)}"

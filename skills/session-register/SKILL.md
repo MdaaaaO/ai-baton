@@ -39,8 +39,13 @@ worktree.
 2. **Decide coordination:** if another *active* session already owns the epic/PR/worktree you
    are about to touch, agree ownership explicitly (one `SendMessage`, or leave it to them) —
    don't both edit the same PR or run git in the same worktree. If no one owns it, you do.
-3. **Register yourself.** Pick a short, descriptive `NAME` (the epic/feature you own, e.g.
-   `<feature>`, `<repo>-<ticket-key>`, `<repo>`), get your `ref` from `ListAgents` (your own row):
+3. **Register yourself.** `NAME` follows the convention **`<lane>-<topic>[-n]`**: lower-case kebab-case, at
+   least two parts, at most 32 characters. The *lane* is the repo or area (`kit`, the repo's short name), the *topic*
+   what you own (`hardening`, a ticket number, a feature); a successor on the same lane adds `-2`, `-3`
+   (`kit-hardening`, `kit-216-changelog`, `<repo>-weekly-2`). `session-register` refuses a new name outside it; a
+   successor takes the name its predecessor's prompt proposes. The name ends every PR body and PR comment you post on
+   your own PRs (`kit_profile.py footer`, below), so it is public: no person, org or private project in it. Get your
+   `ref` from `ListAgents` (your own row):
 
    ```sh
    make -C $BATON/context-db session-register NAME=<name> REF=<ref> EPIC=<tracker-key> \
@@ -67,6 +72,10 @@ worktree.
    (`repo#n head — what it waits on`) so the next session can repeat this step. Registration is not
    complete until the watches are up — a PR whose review lands unwatched is the failure this step
    prevents (owner decision, 2026-09-18).
+
+Registering records the name for this session: `python3 $BATON/context-db/bin/kit_profile.py session-name` prints it,
+and `kit_profile.py footer` prints the attribution line with it — `🤖 Generated with [Claude Code](…) · session
+\`<name>\`` — the last line of every PR body and PR comment on your own PRs (`pr-open`, `pr-watch`).
 
 ## 2. Keep the heartbeat fresh (≤12h)
 

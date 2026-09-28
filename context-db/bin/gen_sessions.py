@@ -20,8 +20,8 @@ under a fold. The full prompt and stats stay in `sessions/<name>.md` (§ Next se
 § Session stats) and `sessions/_ledger.md`. `make verify` warns when the file passes
 SESSION_INDEX_WARN bytes.
 
-The content root is CONTEXT_ROOT (set by the Makefile from CONTEXT, default the
-sibling ../../.context of the engine dir).
+The content root is kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets
+from CONTEXT, else docs/layout.md's "Content root" default).
 """
 from __future__ import annotations
 import argparse
@@ -31,18 +31,14 @@ import re
 import sys
 from datetime import datetime, timezone
 
-# Content root: the Makefile passes CONTEXT_ROOT; fall back to the sibling .context/
-# of the engine dir (../../.context relative to this bin/) for a direct invocation.
-CTX = os.environ.get("CONTEXT_ROOT") or os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".context")
-)
+import kit_profile as profile  # same dir — the one content-root resolver
+import frontmatter  # same dir — the one frontmatter parser
+from fsutil import atomic_write  # same dir
+
+CTX = str(profile.context_root())
 SESS_DIR = os.path.join(CTX, "sessions")
 OUT = os.path.join(CTX, "SESSION_INDEX.md")
 STALE_HOURS = 12
-
-import kit_profile as profile  # same dir
-import frontmatter  # same dir — the one frontmatter parser
-from fsutil import atomic_write  # same dir
 
 # Heartbeats are stored in UTC (12h-staleness math and cross-session sorting stay
 # correct across DST); every DISPLAYED timestamp is rendered in the owner's local zone.
