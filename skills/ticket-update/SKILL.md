@@ -5,7 +5,7 @@ metadata:
   version: "8"
   updated: "2026-09-28"
   reviewed: "2026-09-24"
-  facts: "tracker.kind"
+  facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link"
 user-invocable: true
 ---
 

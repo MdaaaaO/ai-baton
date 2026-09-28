@@ -5,7 +5,7 @@ metadata:
   version: "8"
   updated: "2026-09-28"
   reviewed: "2026-09-24"
-  facts: "tracker.kind,tracker.close_reasons"
+  facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
 user-invocable: true
 ---
 

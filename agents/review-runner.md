@@ -5,6 +5,7 @@ metadata:
   version: "13"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
+  facts: "tracker.mcp_tools.search"
 model: opus
 effort: medium
 omitClaudeMd: true
