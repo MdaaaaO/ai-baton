@@ -215,6 +215,8 @@ def build_meta(wt: str, branch: str, msg: str, topic: str = "", by: str = "", ti
         meta["epic"] = epic.upper()
     else:
         meta.update(epic_of(ticket))
+    if pr and pr.strip().lower() == "none":  # "no PR yet" (a first push); callers have always passed it
+        pr = ""
     if pr:
         if not re.match(r"^\d+$", pr):
             raise ValueError(f"--pr expects a bare PR number, got {pr!r}")

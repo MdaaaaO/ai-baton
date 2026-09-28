@@ -269,6 +269,9 @@ class PrFlagValidation(unittest.TestCase):
                 sq.build_meta(str(tmp), "b", str(tmp / "m"), pr="12a")
             meta = sq.build_meta(str(tmp), "b", str(tmp / "m"), pr="12")
             self.assertEqual(meta["pr"], 12)
+            # "none" (and any case of it) still means "no PR yet", as callers have always passed it
+            for none in ("none", "None"):
+                self.assertNotIn("pr_url", sq.build_meta(str(tmp), "b", str(tmp / "m"), pr=none))
 
     def test_enqueue_fails_when_signq_meta_rejects_a_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
