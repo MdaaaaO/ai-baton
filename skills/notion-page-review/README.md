@@ -6,7 +6,7 @@ posts only the comments the user approves, one by one, as thread replies or anch
 **Needs:** `systems.notion` (a Notion MCP connector in the session). Slack redirects inside the loop happen only
 where `systems.slack` is true, read from the env config, never inferred from the loaded tools.
 
-**Without it:** `notion-page-review: not applicable here (systems.notion is false)`, one line, stop.
+**Without it:** `notion-page-review: not applicable here — notion is false`, one line, stop.
 
 **Example:**
 

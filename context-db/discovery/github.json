@@ -35,7 +35,7 @@
       "purpose": "the bot whose review is the pr-watch verdict"
     },
     {
-      "key": "github.signed_commits",
+      "key": "systems.signed_commits",
       "target": "config",
       "tool": "cli",
       "args": {

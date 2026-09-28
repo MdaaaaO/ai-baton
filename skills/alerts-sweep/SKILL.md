@@ -3,7 +3,7 @@ name: alerts-sweep
 description: "Sonnet-forked sweep of the airflow-alerts Slack channel: reads all new messages (paginated), classifies each against the pattern KB, returns a state-advance trailer the main session applies, NO-OP when nothing was read, or `NEEDS <system>.<kind> <name>` for a missing fact. Arm with `/loop 20m /alerts-sweep`; never writes."
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-09-28"
   reviewed: "2026-09-28"
   requires: "airflow,slack"
@@ -22,6 +22,9 @@ in the environment's on-call domain and are named in its env store, never here. 
 Slack, and on `STATE`/`KB` too — this fork never writes anywhere (its `agent: triage` denies Edit/Write, and
 a shell rewrite or append from Bash is the same violation by another door); every state change goes
 through the trailer in Return value, which the main session applies.
+
+> On a machine where `airflow` or `slack` is false, print `alerts-sweep: not applicable here — airflow is
+> false` (or `— slack is false`, whichever tripped) and stop.
 
 ## Steps
 

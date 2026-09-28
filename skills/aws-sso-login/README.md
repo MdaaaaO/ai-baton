@@ -7,7 +7,7 @@ Gets AWS access through the SSO device-code flow the user approves in their own 
 profiles reach) and `aws.account` (the account ids, for the verify step). All from the env store — never typed
 into the skill.
 
-**Without it:** `aws-sso-login: not applicable here (systems.aws_sso is false)`, one line, stop. A failing `aws`
+**Without it:** `aws-sso-login: not applicable here — aws_sso is false`, one line, stop. A failing `aws`
 call on such a machine is reported as is.
 
 **Example:**

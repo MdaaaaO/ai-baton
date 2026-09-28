@@ -175,6 +175,7 @@ It also ships three agents (`triage`, `review-runner`, `auto-runner`) and the `c
 | [env-vars](docs/env-vars.md) | Every environment variable a kit script reads: default, reader, purpose |
 | [new-environment](docs/new-environment.md) | Setting up a machine with a tracker, chat or warehouse |
 | [plugin-setup](docs/plugin-setup.md) | The plugin install step by step, updating it, switching from a clone |
+| [troubleshooting](docs/troubleshooting.md) | Silent hooks, the five most common `kit-health` RED findings, uninstalling |
 | [loading](docs/loading.md) | What loads when, and the byte budgets |
 | [packaging](docs/packaging.md) | Plugin versus clone |
 | [sync](docs/sync.md) | How the kit moves between machines |
@@ -185,7 +186,9 @@ It also ships three agents (`triage`, `review-runner`, `auto-runner`) and the `c
 
 ## Contributing
 
-Issues and PRs are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) starts with the short version.
+Issues and PRs are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) starts with the short version;
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) sets the standard for the space. Found a security or token-handling
+issue? Report it privately per [`SECURITY.md`](SECURITY.md), not as a public issue.
 
 ## License
 

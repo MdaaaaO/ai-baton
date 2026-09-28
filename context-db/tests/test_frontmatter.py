@@ -29,6 +29,9 @@ agent: triage
 
 # demo
 
+> On a machine where `airflow` or `slack` is false, print `demo: not applicable here — airflow is
+> false` (or `slack is false`) and stop.
+
 body line with `requires: [slack]` that must stay untouched
 """
 
@@ -47,6 +50,9 @@ agent: triage
 ---
 
 # demo
+
+> On a machine where `airflow` or `slack` is false, print `demo: not applicable here — airflow is
+> false` (or `slack is false`) and stop.
 
 body line with `requires: [slack]` that must stay untouched
 """
@@ -237,6 +243,20 @@ class Verifier(unittest.TestCase):
         self.assertTrue(any("does not name the required flag 'airflow'" in e for e in errors), errors)
         errors = verify(MIGRATED.replace('requires: "airflow,slack"', 'requires: "airflow,slack,teletext"'))
         self.assertTrue(any("'teletext' is not a known capability flag" in e for e in errors), errors)
+
+    def test_requires_unit_needs_the_not_applicable_stop_line(self):
+        # docs/authoring.md § Body promises the exact stop line `<skill>: not applicable here — <why>`; a
+        # capability-gated unit's body must carry the literal phrase (em dash) so a user or an eval can match
+        # on it — MIGRATED carries it, stripping it must fail, and a unit with no `requires` needs none of this
+        self.assertEqual([e for e in verify(MIGRATED) if "not applicable here" in e], [])
+        stripped = MIGRATED.replace(
+            "> On a machine where `airflow` or `slack` is false, print `demo: not applicable here — airflow is\n"
+            "> false` (or `slack is false`) and stop.\n\n", "")
+        self.assertNotEqual(stripped, MIGRATED)
+        errors = verify(stripped)
+        self.assertTrue(any("not applicable here" in e and "stop" in e for e in errors), errors)
+        no_gate = stripped.replace('  requires: "airflow,slack"\n', "")
+        self.assertEqual([e for e in verify(no_gate) if "not applicable here" in e], [])
 
     def test_bare_scalar_with_a_hash_comment_is_flagged(self):
         errors = verify(MIGRATED.replace("Not for production.", "Not for PR #123 triage."))
@@ -466,6 +486,23 @@ class MigrationQuotesTopLevelScalars(unittest.TestCase):
         new, changes = mig.migrate_text(text)
         self.assertIn("license: quoted", changes)
         self.assertIn('license: "MIT: the kit license"  # not a real value\n', new)
+
+
+class DeprecatedCapabilityFacts(unittest.TestCase):
+    """One flag per capability — `slack.enabled` / `github.signed_commits` are retired, `systems.slack` /
+    `systems.signed_commits` are what every reader gates on now. pr-open's `metadata.facts` used to name the
+    two retired keys (both had a `target: config` entry in the discovery manifests); it must not any more —
+    the manifests answer `systems.slack` / `systems.signed_commits` instead, and a facts entry naming the old
+    key has no manifest to satisfy it."""
+
+    def test_pr_open_facts_do_not_name_the_retired_keys(self):
+        fm = fmt.load(KIT / "skills" / "pr-open" / "SKILL.md")
+        self.assertIsNotNone(fm)
+        meta = fm.get("metadata", {})
+        self.assertIsInstance(meta, dict)
+        facts = fmt.parse_csv(fmt.unquote(meta.get("facts", "")))
+        self.assertNotIn("slack.enabled", facts, facts)
+        self.assertNotIn("github.signed_commits", facts, facts)
 
 
 if __name__ == "__main__":

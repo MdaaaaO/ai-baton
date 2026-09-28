@@ -3,8 +3,8 @@ name: sign-queue
 description: "Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains it with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners. Inert where `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "15"
-  updated: "2026-09-27"
+  version: "16"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
   requires: "signed_commits"
 ---
@@ -13,6 +13,9 @@ metadata:
 
 Signing happens on the user's machine — "the host" (`commit -S` fails wherever the signing key is absent) — and long chained one-liners
 break on the user's terminal line wrap. So: sessions **enqueue**, the user **drains**.
+
+> On a machine where `signed_commits` is false, print `sign-queue: not applicable here — signed_commits is
+> false` and stop — a commit is made and pushed the ordinary way instead.
 
 ## Session side — enqueue a job
 

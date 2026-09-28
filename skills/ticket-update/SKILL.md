@@ -2,10 +2,10 @@
 name: ticket-update
 description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "7"
-  updated: "2026-09-27"
+  version: "8"
+  updated: "2026-09-28"
   reviewed: "2026-09-24"
-  facts: "tracker.kind"
+  facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link"
 user-invocable: true
 ---
 
@@ -98,9 +98,12 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
   body is plain text to the tracker, nobody is notified) — rich markdown body + a one-line ADF cc underneath.
 - **Status** via `tracker.mcp_tools.transition`: In Progress → **In Review**
   (`tracker.transitions.in_review`, when the PR is up — `pr-open` does this) → Done (`ticket-close`).
-  Check `getTransitionsForJiraIssue` first (ids drift).
-- **Pointer** = a remote issue link to the chat-thread permalink or PR
-  (`getJiraIssueRemoteIssueLinks` to check what's there, then the remote-link REST).
+  Check the transitions actually available first via `tracker.mcp_tools.transitions_list` (ids drift).
+- **Pointer** = a remote issue link to the chat-thread permalink or PR — first list the links already there
+  via `tracker.mcp_tools.remote_link` (read-only) and stop if this URL is one of them; otherwise create it with
+  `POST /rest/api/3/issue/{key}/remotelink`, body `{"object": {"url": "<link>", "title": "<title>"}}`. Check,
+  then create: never create without checking, even when the read tool is missing (then read the links via
+  `GET` on the same endpoint).
 
 ## Adapter — GitHub issues (tracker.kind = github)
 

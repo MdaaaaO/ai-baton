@@ -11,7 +11,7 @@
       "purpose": "the environment's name"
     },
     {
-      "key": "slack.enabled",
+      "key": "systems.slack",
       "target": "config",
       "tool": "roster",
       "args": {
@@ -20,7 +20,7 @@
       "verify": "the tool is callable in this session (a Slack MCP connector is attached)",
       "ttl_days": 0,
       "purpose": "Slack drafts/reads are possible here",
-      "note": "lives here, not in slack.json, because slack.json requires systems.slack — the flag this fact informs; set systems.slack to the same answer"
+      "note": "lives here, not in slack.json, because slack.json requires systems.slack — the flag this very fact informs"
     },
     {
       "key": "tz_default",

@@ -27,6 +27,15 @@
       "verify": "the form URL the ledger card links to, if the team has one",
       "ttl_days": 0,
       "purpose": "optional link the ledger card offers next to the copy-ready block"
+    },
+    {
+      "key": "self_assessment.sections",
+      "target": "config",
+      "tool": "user",
+      "args": {},
+      "verify": "the review form's own section headings, in order, verbatim; absent or empty reads as the kit's four-heading default (What I worked on / Next week / Blockers / risks / Is there anything else on your mind you'd like to share?)",
+      "ttl_days": 0,
+      "purpose": "the report block's headings, so a team on a different form or a different fourth question never edits the skill"
     }
   ]
 }

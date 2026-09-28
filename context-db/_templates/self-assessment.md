@@ -44,9 +44,10 @@ updated: {{DATE}}
      silently merged into the week, never dropped. Delete this section if there are none. -->
 
 <!-- Where self_assessment.report is "lattice" (and systems.lattice is on for the DM read in the
-     source sweep), append the paste-ready report block here: four sections, in this order and
-     with these headings verbatim — "What I worked on", "Next week", "Blockers / risks",
-     "Is there anything else on your mind you'd like to share?" (1-3 sentences, never restating a
-     shipped item or blocker already listed above; no local .context/ paths — tracker keys and PR
-     links only). Where self_assessment.report is "week-file", omit this block entirely; this file
-     is the deliverable. -->
+     source sweep), append the paste-ready report block here: the headings from
+     self_assessment.sections verbatim, in order (empty/absent falls back to the kit's own four —
+     "What I worked on", "Next week", "Blockers / risks", "Is there anything else on your mind
+     you'd like to share?"); the last section is 1-3 sentences, never restating a shipped item or
+     blocker already listed above; no local .context/ paths — tracker keys and PR links only.
+     Where self_assessment.report is "week-file", omit this block entirely; this file is the
+     deliverable. -->

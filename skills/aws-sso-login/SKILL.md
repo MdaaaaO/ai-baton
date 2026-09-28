@@ -3,8 +3,8 @@ name: aws-sso-login
 description: "Get AWS access via the SSO device-code flow: starts `aws sso login --no-browser` in the background, hands the user the URL and code to approve, verifies, then kubectl/aws work. Use whenever aws/kubectl fails with \"SSO session … expired or is otherwise invalid\" or before any stage/prod AWS or EKS check."
 compatibility: "Designed for Claude Code; needs aws_sso (systems.*)"
 metadata:
-  version: "7"
-  updated: "2026-09-26"
+  version: "8"
+  updated: "2026-09-28"
   reviewed: "2026-09-25"
   requires: "aws_sso"
   facts: "aws.profile,aws.cluster,aws.account"
@@ -16,6 +16,8 @@ Where the session's machine has no browser (a sandbox, a remote shell), `aws sso
 device-code mode: the CLI prints a URL + code, the user approves it in their own browser, the CLI polls until
 approved and writes the token cache. The same flow works on a machine with a browser. Environment background
 (which role sees what) belongs in `.context/reference/tools-access.md`, never here.
+
+> On a machine where `aws_sso` is false, print `aws-sso-login: not applicable here — aws_sso is false` and stop.
 
 ## Profiles (legacy per-profile SSO style — keep it that way)
 
