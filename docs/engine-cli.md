@@ -175,6 +175,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
 Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key, `plugin` on a clone) · 2 usage or I/O error.
+Below Python 3.9 this file exits with one line (`ai-baton needs Python 3.9+ (found …)`) before any other import.
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 ```
 
@@ -355,6 +356,46 @@ options:
   --format {line,block,json}
 ```
 
+## `session_retro.py`
+
+```text
+usage: session_retro.py [-h] [--session-id SESSION_ID |
+                        --transcript TRANSCRIPT] [--json]
+
+session_retro.py — what ONE session did and where it may have slipped, from its transcript (the session-retro skill).
+
+Deterministic extraction, no model call: the `session-retro` fork reads this output and judges each candidate against
+WORKSPACE.md § Rules and the skills the session invoked. It extracts
+  - every user message, with the assistant turn before it (its last text, the tools it called) and two flags:
+    `interrupt` (the user stopped a tool call) and `correction_hint` (the wording reads like a correction);
+  - every tool call with its key argument (the command, the file, the skill, the agent and its model);
+  - denied or blocked tool calls (a permission prompt answered no, a rule or hook that blocked it);
+  - failed commands (any other tool result marked as an error);
+and runs the rule checks a script can decide (`rule_hits`), each a CANDIDATE the fork confirms against the rule text:
+  pr-no-labels        a `gh pr create` without `--label`, and no label added later in the session
+  pr-no-footer        a PR body (inline or a body file the session wrote) without the attribution footer line
+  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style)
+  agent-no-model      an `Agent` call without `model` (it inherits the main session's, the most expensive one)
+  workspace-path      a `.context/`, `.worktrees/` or home-directory path in a title or body posted to GitHub
+  store-write-no-root a writing `kb.py` / `session.py` call from a worktree without an explicit `CONTEXT_ROOT=`
+  merge-no-registry   a PR merge the session never followed with a registry touch (register / touch / end)
+Calls that errored or were denied do not count for the rule checks: they did not happen.
+
+    session_retro.py [--session-id <uuid> | --transcript <path>] [--json]
+
+The session id defaults to $CLAUDE_CODE_SESSION_ID; the transcript is found the way session_stats.py finds it. Exit 0
+with the report (text by default, every field with --json — `tool_calls` only there); exit 3, one stderr line and no
+output when there is no session id or transcript. Stdlib only.
+
+options:
+  -h, --help            show this help message and exit
+  --session-id SESSION_ID
+                        the session to read (default $CLAUDE_CODE_SESSION_ID)
+  --transcript TRANSCRIPT
+                        a transcript .jsonl path instead of a session id
+  --json                every field as JSON, tool_calls included
+```
+
 ## `gen_sessions.py`
 
 ```text
@@ -498,6 +539,7 @@ keeping the LAST line seen, not the first. `session_stats.py` (one session's sta
 cost-report skill (every transcript in a window) both read usage this way — this module is the
 shared path, so the two never drift.
 
+  records(path)               → every parsed JSONL record of one file, in order (junk lines skipped)
   usage_records(path, seen)   → (record, message, usage, request_id) per new API request in one file
   tokens(usage)               → (input, cache_write, cache_read, output)
   subagent_dir(path)          → <project>/<session-id>/subagents/ — the session's Agent/fork children

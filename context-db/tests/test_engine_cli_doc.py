@@ -23,6 +23,21 @@ def run(*args: str) -> subprocess.CompletedProcess:
                           encoding="utf-8", env=env, cwd=KIT)
 
 
+class Norm(unittest.TestCase):
+    """argparse itself renamed a heading (`optional arguments:` before 3.10, `options:` from 3.10 on) — the same
+    class of per-Python-version drift `norm()` already absorbs for whitespace, so a 3.9 CI leg comparing
+    `--help` output against a doc committed under a newer Python does not fail on wording norm() already knows."""
+
+    def test_pre_310_wording_matches_the_310_wording(self):
+        self.assertEqual(g.norm("positional arguments:\n  x\n\noptional arguments:\n  -h, --help"),
+                         g.norm("positional arguments:\n  x\n\noptions:\n  -h, --help"))
+
+    def test_does_not_touch_the_phrase_without_the_heading_colon(self):
+        # only the argparse heading (`optional arguments:`) is canonicalised — the same words in prose are not.
+        self.assertEqual(g.norm("some optional arguments in prose, not the heading"),
+                         "some optional arguments in prose, not the heading")
+
+
 class EngineCliDoc(unittest.TestCase):
     def test_generator_runs_and_covers_make_help_and_every_tool(self):
         p = run("--stdout")

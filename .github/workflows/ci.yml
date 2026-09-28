@@ -19,11 +19,6 @@ on:
 permissions:
   contents: read
 
-# One pin for every job that installs the Claude Code CLI (kit-verify's manifest check, install-smoke's plugin leg);
-# bump on purpose.
-env:
-  CLAUDE_CODE_VERSION: 2.1.283
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -114,9 +109,12 @@ jobs:
 
       # The plugin manifests through Claude Code's own validator. A hosted runner has no `claude` CLI, and the
       # Makefile target skips silently without one — so install it first (no account needed to validate); a failed
-      # install fails the step rather than dropping the check. Pinned like every other CI dependency; bump on purpose.
+      # install fails the step rather than dropping the check. Version pinned once, in .github/versions.env — every
+      # job that installs the CLI sources the same file.
       - name: Install the Claude Code CLI
-        run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
+        run: |
+          . .claude/.github/versions.env
+          npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
       - name: Plugin manifests validate
         run: make -C .claude/context-db plugin-validate
 
@@ -154,6 +152,24 @@ jobs:
         working-directory: .claude
         run: python3 context-db/bin/check_links.py
 
+  # The floor the kit declares (kit_profile.py's own guard; docs/contributing.md § Testing): the engine's stdlib
+  # code uses zoneinfo, Path.is_relative_to and str.removeprefix, all 3.9+-only, so 3.9 is the oldest interpreter
+  # that must still pass. ubuntu-latest only — a macOS leg needs BSD-vs-GNU date/sed/awk fixes first (its own
+  # issue) and would go red for a reason this job is not about; add it once that's done, not before.
+  python-floor:
+    name: python-floor (3.9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+      - name: Env-free validator (kit-verify --no-env) on the floor
+        run: make -C context-db verify-skill
+      - name: Engine tests on the floor
+        run: make -C context-db test
+
   # The README's own install blocks, replayed on a runner that has never seen the kit (#98): the clone path and the
   # plugin path (a real `claude plugin marketplace add` + `install` from this checkout), each ending in kit-health. The
   # block is read from README.md, so a README change is tested as written; the few swaps (this checkout for the
@@ -170,6 +186,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the Claude Code CLI (plugin path)
         if: matrix.path == 'plugin'
-        run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
+        run: |
+          . .github/versions.env
+          npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
       - name: Replay the README install block
         run: python3 context-db/tests/install_smoke.py ${{ matrix.path }} --require-cli

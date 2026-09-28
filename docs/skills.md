@@ -10,6 +10,8 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
   heartbeat fresh.
 - **session-handoff** — flushes the context doc, indexes and stats, and writes the prompt the next session starts
   from.
+- **session-retro** — forked self-check of the session against the kit: corrections, denials and rule slips, each
+  judged a kit gap (offered as an issue) or a session slip (offered as a memory).
 - **env-init** — fills or refreshes this machine's env fact store from the discovery manifests.
 - **kit-setup** — scaffolds this workspace from inside a session (runs the kit's `setup.sh --personal`), once per machine.
 - **kit-health** — audits the kit on this machine: frontmatter, env-value leaks, store coverage, wiring.

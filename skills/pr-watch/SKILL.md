@@ -2,7 +2,7 @@
 name: pr-watch
 description: Low-noise watch on the PRs you authored: ONE multi-PR Monitor per repo per session, emitting only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeping waiting branches updated with their base, and merging via `pr-merge.sh` once the gates hold. Park rule: sign-off, idle windows, human gate. For every open PR your session owns.
 metadata:
-  version: "11"
+  version: "13"
   updated: "2026-09-27"
   reviewed: "2026-09-26"
 ---
@@ -39,7 +39,9 @@ a second repo needs a second Monitor. Per-PR state lives in `${TMPDIR:-/tmp}/pr-
 (one file per variable). A merged/closed PR prints its line and drops out of the round-robin; the
 process exits when the last one is gone. The script applies `github.sandbox_token_prefix` itself (a
 placeholder token in a sandbox whose proxy injects credentials, nothing where `gh` is logged in). Set `PR_WATCH_SELF=<your GitHub login>` if it is not `$WORKSPACE_GITHUB_LOGIN` (the user's login);
-events by that login are dropped as your own.
+events by that login are dropped as your own. Neither set and `gh api user` fails (or names nobody):
+startup prints an `ERROR … startup:` line and exits 2 — it never falls back to a placeholder identity,
+since that would stop filtering this session's own replies and turn every one of them into a new event.
 
 **No bot configured (`github.review_bot` empty — the default on most machines).** The watcher prints
 which mode it is in on the first line (`pr-watch: bot mode …` / `pr-watch: no-bot mode … — gating on CI
@@ -75,10 +77,16 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
 - Every poll it reads `compare/<base>...<head>.behind_by`; when > 0 and **no human `APPROVED` review
   exists** (approvals on any head — a push would dismiss them where the ruleset says so) it runs
   `PUT pulls/N/update-branch` with `expected_head_sha` (GitHub-signed merge commit) and prints `SYNCED`.
-  One attempt per head; `PR_WATCH_SYNC_COOLDOWN` (default 3600 s) stops a busy `main` from restarting
-  the PR's CI every two minutes; the cooldown is seeded from the head commit when it is a GitHub `web-flow` merge
-  commit, so a re-armed watcher (30-min Monitor cap) does not restart the clock at zero. `PR_WATCH_SYNC=0` turns it off (e.g. a PR someone is mid-review on, or
-  a branch the user is about to force-push).
+  An approval by the configured review bot (`github.review_bot`) or by a login in the configured
+  `github.bots` list (which covers the identity auto-merge.yml's own approval carries — a different
+  login than the review bot's own account when it posts its Assessment; never hardcoded, gh-cli
+  SKILL.md) does not count as that human approval: a PR approved only by one of
+  those still gets synced, since nothing would dismiss a bot's own review and the alternative is a
+  BEHIND, bot-approved PR that never reaches auto-merge. One attempt per head; `PR_WATCH_SYNC_COOLDOWN`
+  (default 3600 s) stops a busy `main` from restarting the PR's CI every two minutes; the cooldown is
+  seeded from the head commit when it is a GitHub `web-flow` merge commit, so a re-armed watcher
+  (30-min Monitor cap) does not restart the clock at zero. `PR_WATCH_SYNC=0` turns it off (e.g. a PR
+  someone is mid-review on, or a branch the user is about to force-push).
 - A failure (403 workflow scope, 422 conflict) is reported once per head and not retried — act per the
   table above. `mergeable_state=dirty` is reported as `CONFLICTS` and never touched.
 - Consequences you own: a merge commit lands on the branch, so any further push from the worktree needs
@@ -101,7 +109,10 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
 - **`CHECK NOT GREEN` fires at most once per head** (reset on `HEAD MOVED`) and only once the suite has
   settled — no check run still `queued`/`in_progress` — listing every failing check at that moment.
   Before 2026-09-22 it re-fired whenever the *set* of failing names changed, i.e. once per check that
-  finished red — ~10 wake-ups for one cause.
+  finished red — ~10 wake-ups for one cause. The rollup mixes check runs with legacy commit statuses (a
+  required status context an external CI posts); both count toward pending and toward red — a status
+  context carries no `status`/`conclusion` field of its own, only a `state`, which the watcher maps to
+  the same tri-state a check run's `conclusion` uses.
 - **`PR_WATCH_KNOWN_RED=<extended-regex>`** — when the red is a known, external cause, pass a regex over
   the *failure annotations*. Before emitting, the watcher fetches `check-runs/<id>/annotations` for every
   failing check run; it suppresses the line (stderr note only) **only if** each failing run has at least
@@ -175,10 +186,17 @@ Monitor({
 
 Phases: (1) wait for the review bot's **Assessment on the current head**, read from the review
 *object* (a green "PR Review" check is not a review); (2) if BEHIND, `update-branch`, force a full
-bot review on the merge head with the draft toggle (`gh pr ready --undo && gh pr ready` — a plain
-re-request is a no-op on merge-commit heads), wait again; (3) squash-merge when `CLEAN` +
-`reviewDecision APPROVED` + zero unresolved threads. It exits non-zero with a one-line reason
-(head moved, open threads, not green, approval missing) — read it and rerun after acting.
+bot review on the merge head with a DELETE + POST re-request of the bot as a requested reviewer — a
+single, plain re-request (`POST` alone) is a no-op on a merge-commit head, and the draft-toggle
+fallback named above (§ Rules this encodes: `gh pr ready --undo && gh pr ready`) is visible to every
+other reviewer and cancels a `ready_for_review`-triggered run, so `pr-merge.sh` uses neither of
+those and does the DELETE+POST itself), wait again; (3) squash-merge when `CLEAN` +
+`reviewDecision APPROVED` + zero unresolved threads,
+**confirmed by re-reading the PR's `merged_at`** — a `gh pr merge` call that reports success but
+leaves `merged_at` unset is not read as merged. Exit 0 = confirmed merged; exit 1 = a gate failed,
+the merge call failed, or `merged_at` came back unset (one-line reason: head moved, open threads,
+not green, approval missing — read it and rerun after acting); exit 3 = gave up (CLEAN + APPROVED
+never held within the deadline).
 
 ## Staleness rules — why the scripts look the way they do
 
