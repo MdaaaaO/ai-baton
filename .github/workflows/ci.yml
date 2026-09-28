@@ -215,10 +215,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # macOS's system python3 is externally managed (PEP 668) — `pip install` straight into it errors
+      # unless you pass --break-system-packages, which this kit doesn't do anywhere else. A venv sidesteps
+      # that without a second pinned Python (no PYTHON_VERSION in versions.env — every other job just uses
+      # the runner's preinstalled python3 too); its bin/ goes on PATH so `make … test` below picks it up.
       - name: Install PyYAML (frontmatter cross-check)
         run: |
           . .github/versions.env
-          python3 -m pip install --quiet "PyYAML==$PYYAML_VERSION"
+          python3 -m venv "$RUNNER_TEMP/pyyaml-venv"
+          "$RUNNER_TEMP/pyyaml-venv/bin/pip" install --quiet "PyYAML==$PYYAML_VERSION"
+          echo "$RUNNER_TEMP/pyyaml-venv/bin" >> "$GITHUB_PATH"
       - name: Engine tests on macOS
         run: make -C context-db test
       # Picked by shebang, like the Linux "Shell scripts parse" + "POSIX scripts parse under dash" steps
