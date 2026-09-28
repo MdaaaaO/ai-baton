@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "20"
+  version: "21"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack"
@@ -32,8 +32,8 @@ enter its prefix — everything read there is re-billed on every later tick. The
 
 | Steps | Runs in | What enters the main prefix |
 |---|---|---|
-| 1–4 snapshot · KB · review pass · verification | **`review-runner` child** — `Agent(subagent_type: "review-runner")`, Opus `effort: medium`, ≤ 60 turns, no CLAUDE.md (`$BATON/agents/review-runner.md`; prompt + return contract in `reference/runner.md`). It works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`, `kb-traps.md`) — no `gh api contents`, `git show` or CI-log polling | its return only: the 5a overview + `CTX:` / `NEEDS:` / `NOTE:` lines (≤ 3K tokens) |
-| `--auto` trivial-PR pass | **`auto-runner` child** — Sonnet, ≤ 15 turns (`$BATON/agents/auto-runner.md`) | `AUTO:` / `CTX:` / `NEEDS:` lines |
+| 1–4 snapshot · KB · review pass · verification | **`review-runner` child** — `Agent(subagent_type: "review-runner")`, Opus `effort: medium`, ≤ 60 turns, no CLAUDE.md (`$BATON/agents/review-runner.md`; prompt + return contract in `reference/runner.md`). It works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`, `kb-traps.md`) — no `gh api contents`, `git show` or CI-log polling | its return only: the 5a overview + `CTX:` / `NEEDS` / `NOTE:` lines (≤ 3K tokens) |
+| `--auto` trivial-PR pass | **`auto-runner` child** — Sonnet, ≤ 15 turns (`$BATON/agents/auto-runner.md`) | `AUTO:` / `CTX:` / `NEEDS` lines |
 | 5 walk · 6 post · 7 replies | **main session** — AskUserQuestion needs the user; the post carries their login | `$CTX/triage.json`, `request.json` / `replies.json`, the script previews |
 | 5b deep dives | one-question `opus` `Agent` spawned from the main session | its ≤ 10-line answer |
 | 8 KB write-back | main session, sourced from `triage.json` `evidence` + the walk decisions | the KB's `## Known traps` slice |
