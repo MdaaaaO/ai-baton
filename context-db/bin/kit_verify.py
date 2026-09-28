@@ -567,6 +567,49 @@ HARDCODED_KIT_PATH = re.compile(r"(?<![~\w>*/.$-])\.claude/(?:context-db|skills/
                                 r"environment-template/)[\w./<>-]*")
 
 
+# A skill forked to a read-only agent (agents/<name>.md whose disallowedTools denies both Edit and Write —
+# `triage`, today) must never mutate state through Bash either: `sed -i`, a shell append or `make … index`
+# in its own body is the tool restriction defeated by another door (the very bug this check exists to
+# catch — a fork that wrote STATE/KB straight through Bash while its docs called it read-only). The write
+# belongs to whichever session applies the fork's return value, never a step the fork runs itself.
+FORK_WRITE_PATTERNS = (
+    (re.compile(r"\bsed\s+-i\b"), "sed -i"),
+    (re.compile(r'(?:^|[\s"\'])>>(?:[\s"\'$]|$)', re.M), ">>"),
+    (re.compile(r"\bmake\b[^\n]*\bindex\b"), "make … index"),
+)
+
+
+def read_only_fork_agents() -> set[str]:
+    """Agent names (agents/<name>.md) whose disallowedTools denies both Edit and Write."""
+    out: set[str] = set()
+    agents_dir = KIT / "agents"
+    if not agents_dir.is_dir():
+        return out
+    for p in sorted(agents_dir.glob("*.md")):
+        fm = fmt.parse(p.read_text(encoding="utf-8", errors="replace"))
+        if not fm:
+            continue
+        denied = set(fmt.parse_csv(fm.get("disallowedTools", "")))
+        if {"Edit", "Write"} <= denied:
+            out.add(fmt.unit_name(p))
+    return out
+
+
+def check_forked_write_leak(rel, fm, body: str, errors: list[str]) -> None:
+    """A skill whose `agent:` names a read-only fork (`read_only_fork_agents()`) must not carry a
+    state-mutating shell form in its own body — see FORK_WRITE_PATTERNS above."""
+    agent = fmt.unquote(fm.get("agent", ""))
+    if not agent or agent not in read_only_fork_agents():
+        return
+    for pat, label in FORK_WRITE_PATTERNS:
+        m = pat.search(body)
+        if m:
+            line = body.count("\n", 0, m.start()) + 1
+            errors.append(f"{rel}: body line {line} uses `{label}` but `agent: {agent}` denies Edit/Write — "
+                          "a read-only fork must not mutate state through Bash either; describe the write as "
+                          "something the main session applies, never a step the fork runs itself")
+
+
 STEP = re.compile(r"^(\d+)\.\s+(.*\S)")
 
 
@@ -655,6 +698,8 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
         return 0
     body = parts[1] if parts else ""
     check_body(p, rel, body, errors)
+    if not is_agent:
+        check_forked_write_leak(rel, fm, body, errors)
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there
         km = fmt.KEY.match(line) or fmt.SUBKEY.match(line)
         val = (km.group(2) or "").lstrip() if km else ""

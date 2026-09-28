@@ -8,11 +8,14 @@ each message is classified against). All three come from the env store; a missin
 `NEEDS <system>.<kind> <name>` and the main session resolves it with `/env-init`.
 
 **Without it:** on a machine where either flag is false the fork returns one line — `alerts-sweep: not applicable
-here` — and the loop does nothing else. It never acts on an alert itself anywhere.
+here` — and the loop does nothing else. It never acts on an alert itself anywhere, and it never writes `STATE` or
+`KB` itself either — every state change comes back as a trailer the main session applies with one script call
+(`skills/alerts-sweep/scripts/advance-state.py`).
 
 **Example:**
 
 > **user:** `/loop 20m /alerts-sweep`
 >
-> **claude (fork, every 20 min):** `NO-OP` — or, when something needs the main session: `2 new: <pattern> ×2
-> since <timestamp>; state advanced` and the main session decides what to do.
+> **claude (fork, every 20 min):** `NO-OP` when nothing at all was new — or, when something needs the main
+> session: `2 new: <pattern> ×2 since <timestamp>` plus a trailer line (`ADVANCE ts=<newest ts>`) the main
+> session applies in one command before deciding what to do about the alerts.
