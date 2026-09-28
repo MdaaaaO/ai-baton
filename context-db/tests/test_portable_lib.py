@@ -31,6 +31,11 @@ def _cleanup_fake_paths() -> None:
         shutil.rmtree(d, ignore_errors=True)
 
 
+def _is_windows_drive(path_entry: str) -> bool:
+    """A WSL Windows-drive mount (`/mnt/c`, `/mnt/d/…`): skipped when building a fake PATH."""
+    return re.match(r"^/mnt/[a-z]/", path_entry.rstrip("/") + "/") is not None
+
+
 def path_without(*names) -> str:
     """A PATH of symlinks to every executable on this host's PATH except `names` (e.g. no `flock`,
     no `setsid`) — the same technique test_sync_sh.py uses to exercise sync.sh's own mkdir fallback.
@@ -39,7 +44,7 @@ def path_without(*names) -> str:
     d = Path(tempfile.mkdtemp(prefix="kit-portable-nobin-"))
     _MADE.append(d)
     for p in os.environ.get("PATH", "").split(os.pathsep):
-        if not os.path.isdir(p) or re.match(r"^/mnt/[a-z]/", p + "/"):
+        if not os.path.isdir(p) or _is_windows_drive(p):
             continue
         for e in os.listdir(p):
             if e in names or (d / e).exists():
@@ -229,10 +234,6 @@ class ScriptsNoLongerCarryGnuOnlyConstructs(unittest.TestCase):
         self.assertNotIn("sed -i -E", text)  # BSD sed's -i needs a backup-suffix argument
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class FakePathsAreCleanedUp(unittest.TestCase):
     """path_without() makes a dir of symlinks per call; a run must leave none behind (a leak exhausted
     /tmp's inodes on a WSL host whose PATH lists thousands of Windows executables)."""
@@ -248,7 +249,14 @@ class FakePathsAreCleanedUp(unittest.TestCase):
             left = [n for n in os.listdir(tmp) if n.startswith("kit-portable-nobin-")]
             self.assertEqual(left, [], f"fake PATH dirs left behind: {left}")
 
-    def test_wsl_windows_drives_are_not_linked(self):
-        d = Path(path_without())
-        self.assertFalse(any(os.path.realpath(e).startswith("/mnt/") and re.match(r"^/mnt/[a-z]/", os.path.realpath(e))
-                             for e in d.iterdir()), "a /mnt/<drive> executable was linked into the fake PATH")
+    def test_windows_drive_entries_are_the_ones_skipped(self):
+        # the rule itself, checked directly (a CI runner's PATH has no /mnt/<drive>, so a
+        # link-scan would pass there without ever exercising the skip)
+        for entry in ("/mnt/c/Windows/System32", "/mnt/c", "/mnt/d/tools/", "/mnt/z/x"):
+            self.assertTrue(_is_windows_drive(entry), entry)
+        for entry in ("/usr/bin", "/mnt/data/bin", "/mnt", "/home/u/mnt/c/bin"):
+            self.assertFalse(_is_windows_drive(entry), entry)
+
+
+if __name__ == "__main__":
+    unittest.main()
