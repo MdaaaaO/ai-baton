@@ -102,7 +102,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 11. **Coordination** — if another active session owns follow-on work (check `SESSION_INDEX.md`),
    leave the handoff in the context doc; message a peer only for a lock/handoff, not to dump
    context (§ Cost & context hygiene).
-12. **Retro (optional, last)** — offer `/session-retro` in one line, above the step-10 code block: "Run a
+12. **Retro (optional, last)** — offer `/session-retro` in one line, above the step-10 code block (or last in the final message when there is none): "Run a
     retro of this session against the kit?". It forks, so the main session pays only for its ≤ 15-line result;
     a yes runs it now, before the session ends. Skip the offer for a short read-only session.
 
