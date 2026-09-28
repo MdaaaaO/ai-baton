@@ -1,6 +1,6 @@
 ---
 name: session-retro
-description: Sonnet-forked self-check of this session against the kit: corrections, denials, failures and rule slips from the transcript, each judged kit gap or session slip. Use when winding down after session-handoff, or on "run a retro" / "did I follow the kit?". Not for the weekly self-assessment or the handoff.
+description: "Sonnet-forked self-check of this session against the kit: corrections, denials, failures and rule slips from the transcript, each judged kit gap or session slip. Use when winding down after session-handoff, or on \"run a retro\" / \"did I follow the kit?\". Not for the weekly self-assessment or the handoff."
 metadata:
   version: "1"
   updated: "2026-09-27"
