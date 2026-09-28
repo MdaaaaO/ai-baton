@@ -48,7 +48,7 @@ the full state table; to see a failure immediately rather than at the next regis
 
 | Event | Call |
 |---|---|
-| `PreToolUse` on `Write`/`Edit`/`MultiEdit`/`NotebookEdit` of a `*.md` doc under an adopted content root | deny, with a reason that names the ctx tool to use; exempt: the index's skip dirs (`bin _templates sessions handoff memory state`), dot dirs, `INDEX.md`/`SESSION_INDEX.md` and what the store settings ignore (`README.md`). Not adopted, ctx missing, or any adapter error: no decision |
+| `PreToolUse` on `Write`/`Edit`/`MultiEdit`/`NotebookEdit` of a `*.md` doc under an adopted content root | deny, with a reason that names the ctx tool to use; exempt: the index's skip dirs (`bin _templates sessions handoff memory state`), dot dirs, `INDEX.md`/`SESSION_INDEX.md` and what the store settings ignore (`README.md` at any level). Not adopted, ctx missing, or any adapter error: no decision |
 | `PostToolUse` on `Write`/`Edit`/`MultiEdit`/`NotebookEdit` of a file under the content root | `ctx validate --changed --adopt`, synchronous; findings come back as the hook's `systemMessage` (a `ctx validate: …` line); any other failure except `NO_STORE`, a timeout included, comes back as `ctx validate did not run: <first error line>`, so validation never stops unnoticed |
 | the same, `async`, and a write through a ctx MCP tool | `ctx touch --session <session_id>`: the heartbeat of the registry row `session register` stamped with the harness session id; then `INDEX.md` and `SESSION_INDEX.md` are regenerated (`gen_index.py`, `gen_sessions.py --no-archive` — with or without ctx; a failure is logged to `hooks.log` in the scratch dir) |
 | `SessionStart` `startup`/`resume`/`clear` | `ctx brief --registry`, byte-budgeted, into the session's context |

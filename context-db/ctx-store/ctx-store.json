@@ -1,6 +1,25 @@
 {
   "schema_version": 1,
-  "generated": ["INDEX.md", "SESSION_INDEX.md", "sessions/archive/INDEX.md"],
-  "ignore": ["README.md", "memory/**", "bin/**", "_templates/**", "handoff/**", "on-call/handoff/**", "state/**"],
-  "resolve": {"key_regex": "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+", "fields": ["epic"], "section": "Tracker & links"}
+  "generated": [
+    "INDEX.md",
+    "SESSION_INDEX.md",
+    "sessions/archive/INDEX.md"
+  ],
+  "ignore": [
+    "README.md",
+    "**/README.md",
+    "memory/**",
+    "bin/**",
+    "_templates/**",
+    "handoff/**",
+    "on-call/handoff/**",
+    "state/**"
+  ],
+  "resolve": {
+    "key_regex": "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+",
+    "fields": [
+      "epic"
+    ],
+    "section": "Tracker & links"
+  }
 }

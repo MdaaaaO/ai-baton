@@ -428,7 +428,8 @@ class StoreData(unittest.TestCase):
 
 
 class Adopt(Base):
-    """`adopt`: the one-time bootstrap. It writes the kit's settings only where ctx answers NO_STORE, never over a file."""
+    """`adopt`: `ctx init` with the kit's settings and types (never a store file written by the kit itself), then
+    validate and adopt; a store file the user changed is a finding unless `--replace`."""
 
     def data(self) -> dict[str, str]:
         d = KIT / "context-db" / "ctx-store"
@@ -448,11 +449,13 @@ class Adopt(Base):
         self.assertEqual(r.returncode, 2)
         self.assertEqual(self.calls(), [])
 
-    def test_an_existing_store_gets_no_file_from_the_kit(self):
-        """ctx says the store exists (no NO_STORE): adopt validates and adopts, and writes no settings of its own."""
+    def test_adopt_hands_the_kit_data_to_ctx_init_and_writes_no_store_file(self):
         r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual([c["argv"][2:] for c in self.calls()], [["validate"], ["validate", "--changed", "--adopt"]])
+        data = KIT / "context-db" / "ctx-store"
+        self.assertEqual([c["argv"][2:] for c in self.calls()],
+                         [["init", "--settings", str(data / "ctx-store.json"), "--types", str(data / "types")],
+                          ["validate"], ["validate", "--changed", "--adopt"]])
         self.assertEqual({c["argv"][1] for c in self.calls()}, {str(self.root)})
         self.assertFalse((self.root / "ctx-store.json").exists())
         self.assertFalse((self.root / ".ctx").exists())
@@ -466,27 +469,29 @@ class Adopt(Base):
         self.assertFalse((self.root / "ctx-store.json").exists())
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
-    def test_adopt_writes_the_kit_settings_once_and_never_overwrites(self):
+    def test_adopt_inits_the_kit_settings_and_keeps_a_changed_file_until_replace(self):
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         (self.root / "d").mkdir()
         (self.root / "d" / "a.md").write_text(EPIC, encoding="utf-8")
         self.assertEqual(self.adapter("adopt", "--check", **env).returncode, 4)
         self.assertFalse((self.root / "ctx-store.json").exists())
-        mine = '{"schema_version": 1}\n'  # a type schema the user already had is kept as it is
-        (self.root / ".ctx" / "types").mkdir(parents=True)
-        (self.root / ".ctx" / "types" / "log.json").write_text(mine, encoding="utf-8")
         r = self.adapter("adopt", **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("1 adopted", r.stdout)
         for rel, text in self.data().items():
-            want = mine if rel.endswith("/log.json") else text
-            self.assertEqual((self.root / rel).read_text(encoding="utf-8"), want, rel)
-        # a second run: the store exists, so nothing is written, whatever the files hold now
-        (self.root / "ctx-store.json").write_text('{"schema_version": 1}\n', encoding="utf-8")
-        r = self.adapter("adopt", **env)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual((self.root / "ctx-store.json").read_text(encoding="utf-8"), '{"schema_version": 1}\n')
+            if rel.startswith(".ctx/"):  # the marker is ctx's own layout of the same settings, not a byte copy
+                self.assertEqual((self.root / rel).read_text(encoding="utf-8"), text, rel)
         self.assertEqual(self.adapter("adopt", "--check", **env).returncode, 0)
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)  # a second run changes nothing
+        mine = '{"frontmatter": {"title": {"required": true}}}\n'  # the user changed a schema: a finding, kept
+        (self.root / ".ctx" / "types" / "log.json").write_text(mine, encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("adopt --replace", r.stdout)
+        self.assertEqual((self.root / ".ctx" / "types" / "log.json").read_text(encoding="utf-8"), mine)
+        self.assertEqual(self.adapter("adopt", "--replace", **env).returncode, 0)
+        self.assertEqual((self.root / ".ctx" / "types" / "log.json").read_text(encoding="utf-8"),
+                         self.data()[".ctx/types/log.json"])
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_findings_are_printed_and_exit_3(self):
@@ -520,9 +525,14 @@ class PreToolUseDeny(Base):
                 self.assertIn(word, out["permissionDecisionReason"])
         self.assertEqual(self.calls()[-1]["argv"], ["--store", str(self.root), "get", "d/a"])
 
-    def test_an_existing_doc_and_a_subdir_readme_are_store_docs_too(self):
+    def test_an_existing_doc_is_a_store_doc_too(self):
         self.assertIsNotNone(self.decide(self.root / "d" / "a.md", FAKE_CTX_RC="0", FAKE_CTX_ERR=""))
-        self.assertIsNotNone(self.decide(self.root / "pr-reviews" / "README.md"))
+
+    def test_a_readme_at_any_level_stays_writable(self):
+        # gen_index skips README.md at every level and the shipped settings ignore `**/README.md`, so no ctx verb
+        # writes one: a deny would leave a folder's local standards file with no way to change it
+        self.assertIsNone(self.decide(self.root / "pr-reviews" / "README.md"))
+        self.assertIn("**/README.md", json.loads((KIT / "context-db" / "ctx-store" / "ctx-store.json").read_text())["ignore"])
 
     def test_a_relative_path_resolves_against_the_payload_cwd(self):
         payload = json.dumps({"cwd": str(self.root.parent), "tool_name": "Write",
@@ -536,7 +546,7 @@ class PreToolUseDeny(Base):
         (self.root / "memory").symlink_to(memory)
         allowed = ["sessions/lane-topic.md", "sessions/archive/old.md", "state/pr-review/notes.md", "bin/x.md",
                    "reference/env/_templates/t.md", "on-call/handoff/page.md", "handoff/x.md", "memory/MEMORY.md",
-                   "INDEX.md", "SESSION_INDEX.md", "README.md", "d/notes.txt", "d/n.ipynb", ".ctx/types/epic.json",
+                   "INDEX.md", "SESSION_INDEX.md", "README.md", "self-assessment/README.md", "d/notes.txt", "d/n.ipynb", ".ctx/types/epic.json",
                    ".audit/seq"]
         for rel in allowed:
             self.assertIsNone(self.decide(self.root / rel), rel)

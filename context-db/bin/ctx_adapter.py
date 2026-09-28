@@ -12,11 +12,10 @@ cache directory whose path carries the tag, so a bumped pin never picks up an ol
 Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
 
-Adopt — makes the content root a store, once: when `ctx validate` answers NO_STORE it writes the kit's store
-settings and type schemas (`context-db/ctx-store/`) into the content root, never over a file that exists, then runs
-`ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the
-read-only probe kit-health runs. Writing those files is the documented bootstrap exception to verbs-only, until a
-ctx release with `ctx init` replaces it.
+Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
+`context-db/ctx-store/` (idempotent; a store file the user changed is a finding, never overwritten, unless
+`--replace`), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
+is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
@@ -42,7 +41,7 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
   python3 ctx_adapter.py version          # the pinned tag
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
-  python3 ctx_adapter.py adopt [--check]  # make the content root a store (once); --check only reports
+  python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
   python3 ctx_adapter.py mcp              # the ctx MCP server on the store; audit actor `claude` unless CTX_ACTOR is set
   python3 ctx_adapter.py mcp-json <file>  # add that server to a .mcp.json (clone installs; never replaces an entry)
   python3 ctx_adapter.py ctx <verb> …     # run one ctx verb on the store (the Bash route when the MCP tools are absent)
@@ -63,7 +62,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-CTX_VERSION = "v0.2.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
+CTX_VERSION = "v0.3.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
 CTX_REPO = "https://github.com/MdaaaaO/ctx-store"
 BRIEF_BUDGET = 2048     # bytes of a SessionStart brief (ctx's default is 4096; the start of a session is prime context)
 HOOK_TIMEOUT = 8        # seconds one ctx call may take inside a hook (the hook entries allow 10)
@@ -71,7 +70,7 @@ LOCK_TIMEOUT = "3"      # CTX_LOCK_TIMEOUT for a hook's ctx call unless the user
 MESSAGE_MAX = 1000      # characters of validate findings returned as the systemMessage
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
 BIN = Path(__file__).resolve().parent
-STORE_DATA = BIN.parent / "ctx-store"  # the kit's store settings + type schemas, written by `adopt` (data, not code)
+STORE_DATA = BIN.parent / "ctx-store"  # the kit's store settings + type schemas, handed to `ctx init` by `adopt`
 ADOPT_TIMEOUT = 300     # seconds `adopt` gives one ctx call (a whole-store validate; not a hook)
 MCP_ACTOR = "claude"    # CTX_ACTOR of the MCP server unless the user set one: the audit rows of the model's writes
 # A write through the ctx MCP server's tools (plugin: mcp__plugin_<plugin>_ctx__…, a clone's .mcp.json: mcp__ctx__…).
@@ -135,7 +134,7 @@ def install(url: str = CTX_REPO, version: str = CTX_VERSION, dest: Path | None =
     return dest
 
 
-# ── adopt (the bootstrap exception) ─────────────────────────────────────────────────────────────────────────────
+# ── adopt ───────────────────────────────────────────────────────────────────────────────────────────────────────
 def _code(r: subprocess.CompletedProcess) -> str:
     """The error code of a failed ctx call (`NO_STORE`, `NO_SUCH_DOC`, …), "" when there is none."""
     m = re.match(r"[A-Z_]+", r.stderr.strip())
@@ -146,24 +145,7 @@ def _lines(text: str) -> list[str]:
     return [ln.strip() for ln in text.splitlines() if ln.strip()]
 
 
-def _seed(root: Path) -> list[str]:
-    """Write the kit's store settings and type schemas into `root`; an existing file is kept, never replaced. The
-    settings file is the store's marker, so it goes last: an interrupted run leaves no half-adopted store behind.
-    This is the one place kit code writes a store's own files — `ctx init` replaces it once the pin reaches it."""
-    wrote = []
-    for src in [*sorted((STORE_DATA / "types").glob("*.json")), STORE_DATA / "ctx-store.json"]:
-        dest = root / (src.name if src.parent == STORE_DATA else Path(".ctx", "types", src.name))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(dest, "x", encoding="utf-8") as f:
-                f.write(src.read_text(encoding="utf-8"))
-            wrote.append(str(dest.relative_to(root)))
-        except FileExistsError:
-            pass
-    return wrote
-
-
-def adopt(check: bool = False) -> int:
+def adopt(check: bool = False, replace: bool = False) -> int:
     ctx, why = resolve()
     if ctx is None:
         print(why, file=sys.stderr)
@@ -173,13 +155,23 @@ def adopt(check: bool = False) -> int:
         print(f"ctx_adapter.py adopt: no content root at {root} — run setup.sh first", file=sys.stderr)
         return 2
     store = ["--store", str(root)]
-    r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
-    if _code(r) == "NO_STORE":
-        if check:
+    if check:
+        r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
+        if _code(r) == "NO_STORE":
             print(f"not adopted: {root} is not a ctx store — run `python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
             return 4
-        wrote = _seed(root)
-        print(f"adopted {root}: wrote {', '.join(wrote) or 'nothing'}")
+    else:
+        r = _ctx(ctx, store, "init", "--settings", str(STORE_DATA / "ctx-store.json"),
+                 "--types", str(STORE_DATA / "types"), *(["--replace"] if replace else []), timeout=ADOPT_TIMEOUT)
+        if r.returncode == 3:  # a store file the user changed: theirs stays; say how to take the kit's
+            for f in _lines(r.stderr):
+                print(f"finding: {f} — differs from the kit's; `ctx_adapter.py adopt --replace` takes the kit's")
+            return 3
+        if r.returncode != 0:
+            print(f"ctx_adapter.py adopt: ctx init failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
+                  file=sys.stderr)
+            return 2
+        print((_lines(r.stdout) or [f"ok: store {root}"])[0])
         r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
     if r.returncode not in (0, 3):
         print(f"ctx_adapter.py adopt: ctx validate failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
@@ -329,7 +321,7 @@ def _exempt(rel: str) -> bool:
     parts = rel.split("/")
     if not rel.endswith(".md") or rel == "." or any(x.startswith(".") for x in parts):
         return True
-    if set(parts[:-1]) & gen_index.SKIP_DIRS or rel in ("INDEX.md", "SESSION_INDEX.md"):
+    if set(parts[:-1]) & gen_index.SKIP_DIRS or rel in ("INDEX.md", "SESSION_INDEX.md") or parts[-1] in gen_index.SKIP_FILES:
         return True
     settings = json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8"))
     return any(fnmatch.fnmatch(rel, g) for g in [*settings.get("generated", []), *settings.get("ignore", [])])
@@ -448,8 +440,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("version", help="print the pinned ctx-store tag")
     sub.add_parser("where", help="print the ctx executable; exit 1 when not installed")
     sub.add_parser("install", help="fetch the pinned tag into the pinned location")
-    ap = sub.add_parser("adopt", help="make the content root a ctx store (once; never overwrites)")
+    ap = sub.add_parser("adopt", help="make the content root a ctx store with the kit's settings (ctx init)")
     ap.add_argument("--check", action="store_true", help="report only: exit 4 when not adopted, 3 on findings")
+    ap.add_argument("--replace", action="store_true", help="overwrite store files that differ from the kit's")
     sub.add_parser("mcp", help="run the ctx MCP server on the store (stdio)")
     mp = sub.add_parser("mcp-json", help="add the ctx MCP server to a project .mcp.json")
     mp.add_argument("file", type=Path)
@@ -481,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
         return mcp_json(a.file)
     try:
         if a.cmd == "adopt":
-            return adopt(a.check)
+            return adopt(a.check, a.replace)
         print(install())
     except (OSError, subprocess.SubprocessError) as e:
         print(f"ctx_adapter.py {a.cmd}: {e}", file=sys.stderr)

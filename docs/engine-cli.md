@@ -350,11 +350,10 @@ cache directory whose path carries the tag, so a bumped pin never picks up an ol
 Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
 
-Adopt — makes the content root a store, once: when `ctx validate` answers NO_STORE it writes the kit's store
-settings and type schemas (`context-db/ctx-store/`) into the content root, never over a file that exists, then runs
-`ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the
-read-only probe kit-health runs. Writing those files is the documented bootstrap exception to verbs-only, until a
-ctx release with `ctx init` replaces it.
+Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
+`context-db/ctx-store/` (idempotent; a store file the user changed is a finding, never overwritten, unless
+`--replace`), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
+is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
@@ -380,7 +379,7 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
   python3 ctx_adapter.py version          # the pinned tag
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
-  python3 ctx_adapter.py adopt [--check]  # make the content root a store (once); --check only reports
+  python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
   python3 ctx_adapter.py mcp              # the ctx MCP server on the store; audit actor `claude` unless CTX_ACTOR is set
   python3 ctx_adapter.py mcp-json <file>  # add that server to a .mcp.json (clone installs; never replaces an entry)
   python3 ctx_adapter.py ctx <verb> …     # run one ctx verb on the store (the Bash route when the MCP tools are absent)
@@ -394,8 +393,8 @@ positional arguments:
     version             print the pinned ctx-store tag
     where               print the ctx executable; exit 1 when not installed
     install             fetch the pinned tag into the pinned location
-    adopt               make the content root a ctx store (once; never
-                        overwrites)
+    adopt               make the content root a ctx store with the kit's
+                        settings (ctx init)
     mcp                 run the ctx MCP server on the store (stdio)
     mcp-json            add the ctx MCP server to a project .mcp.json
     ctx                 run one ctx verb on the store: ctx_adapter.py ctx

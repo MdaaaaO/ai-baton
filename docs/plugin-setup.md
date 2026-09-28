@@ -108,7 +108,9 @@ lists the units that changed. `/kit-health` also warns when a newer release is o
 `setup.sh` needs no re-run; the step 3 line with `--refresh-seeds` added shows how your seeded files differ from
 the current templates. The one exception so far: a workspace from before writes went through ctx-store adopts its
 store once, with `python3 $BATON/context-db/bin/ctx_adapter.py adopt` (or a `setup.sh` re-run); `/kit-health` § 5
-reports a store that is not adopted.
+reports a store that is not adopted. `adopt` runs `ctx init` with the kit's store settings and type schemas, so a
+re-run after an update brings the store to the kit's schemas; a store file you changed is reported and kept
+(`adopt --replace` takes the kit's).
 
 ## Switching from a clone
 
