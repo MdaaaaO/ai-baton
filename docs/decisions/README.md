@@ -37,4 +37,4 @@ quoting large blocks.
 |---|---|---|
 | [0001](0001-env-store.md) | Environment facts live in a per-machine env store | Accepted |
 | [0002](0002-sign-queue-location.md) | Where the sign-queue lives | Accepted |
-| [0003](0003-bundle-only-review-runner.md) | The pr-review runner works from a bundle only | Accepted |
+| [0003](0003-bundle-only-review-runner.md) | The pr-review runner works from a bundle only | Proposed |

@@ -5,7 +5,7 @@
 
 ## Status
 
-Accepted
+Proposed — the behaviour is implemented; the rationale waits on the owner's confirmation
 
 ## Context
 

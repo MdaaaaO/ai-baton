@@ -35,8 +35,8 @@ applicable on that machine — never improvised around.
 ## Consequences
 
 - A skill, agent or shared doc that carries a literal value is a bug the leak scan can catch mechanically
-  (`kit-health` § leaks: generic id shapes plus every value the local store actually holds), not something
-  a reviewer has to notice by inspection.
+  (`kit-health` § leaks: generic id shapes plus every value the local store actually holds), leaving only
+  leaks by meaning (environment, org or team names, anecdotes) to the reviewer (`docs/REVIEW.md` § 2.1).
 - A new environment needs no kit change: `setup.sh` seeds a blank store, `/env-init` fills it from the
   discovery manifests, and the machine is running facts nothing else on that machine had to invent.
 - Every fact carries provenance and a staleness clock, so a stale id is a `kb.py stale` finding rather
