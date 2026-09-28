@@ -37,15 +37,21 @@ if [ "$(jq -r '.event' "$req")" = "COMMENT" ] && [ "$(jq -r '(.body|length)==0 a
 # 1b. external-surface lint — local paths and bare Jira keys never leave the workspace
 leaks=$(jq -r '[.body, .comments[].body] | map(select(test("(^|[^A-Za-z0-9_])\\.context/|scratchpad|/tmp/|\\.cache/tmp|(claude|ai-baton)-kit(-[0-9]+)?/|/run/user/|/Users/[a-z]|/home/[a-z]|(^|[^A-Za-z0-9_])\\.claude/"))) | length' "$req")
 [ "$leaks" = 0 ] || { echo "error: $leaks body/comment(s) mention a local workspace path (.context/, scratchpad, /tmp, ai-baton-kit/ (formerly claude-kit/), home dir) — link the PR/ticket or inline the evidence instead" >&2; exit 2; }
-# bare tracker keys: only a Jira-style tracker needs the link (GitHub `#n` auto-links); regex/template come from the env config
-TRK_KIND=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.kind 2>/dev/null || echo "")
-if [ "$TRK_KIND" = jira ]; then
-  TRK_RE=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.key_regex 2>/dev/null || echo "")
-  TRK_URL=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.url_template 2>/dev/null || echo "")
-  if [ -n "$TRK_RE" ]; then
-    bare=$(jq -r --arg re "$TRK_RE" '[.body, .comments[].body] | map(gsub("\\[[^\\]]*\\]\\([^)]*\\)";"") | gsub("https?://[^ )>]+";"") | select(test($re))) | length' "$req")
-    [ "$bare" = 0 ] || { echo "error: $bare body/comment(s) carry a bare tracker key — every key must be a link: [KEY](${TRK_URL:-<tracker.url_template>})" >&2; exit 2; }
-  fi
+# bare tracker keys: any tracker whose `tracker.key_regex` is configured needs the link (not just Jira — a
+# Linear-style key is bare-shaped too; GitHub `#n` auto-links and configures no key_regex, so it never gates).
+# The lookup itself must not fail silently: a missing store, a broken python3 or a config typo is not
+# "no tracker configured" and must stop here, never post with bare keys (WORKSPACE.md § Verification).
+err=$(mktemp)
+TRK_RE=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.key_regex 2>"$err"); rc=$?
+[ $rc -gt 1 ] && { echo "error: tracker.key_regex unreadable: $(cat "$err")" >&2; rm -f "$err"; exit 2; }
+rm -f "$err"
+if [ -n "$TRK_RE" ]; then
+  err=$(mktemp)
+  TRK_URL=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.url_template 2>"$err"); rc=$?
+  [ $rc -gt 1 ] && { echo "error: tracker.url_template unreadable: $(cat "$err")" >&2; rm -f "$err"; exit 2; }
+  rm -f "$err"
+  bare=$(jq -r --arg re "$TRK_RE" '[.body, .comments[].body] | map(gsub("\\[[^\\]]*\\]\\([^)]*\\)";"") | gsub("https?://[^ )>]+";"") | select(test($re))) | length' "$req")
+  [ "$bare" = 0 ] || { echo "error: $bare body/comment(s) carry a bare tracker key — every key must be a link: [KEY](${TRK_URL:-<tracker.url_template>})" >&2; exit 2; }
 fi
 if [ "$auto" = 1 ]; then
   [ "$(jq -r .event "$req")" = "APPROVE" ] || { echo "error: --auto is only for APPROVE" >&2; exit 2; }

@@ -25,13 +25,17 @@ jq -e '.replies|type=="array" and length>0 and all(.[]; (.thread_id|type=="strin
 o=${repo%/*}; r=${repo#*/}
 leaks=$(jq -r '[.replies[].body] | map(select(test("(^|[^A-Za-z0-9_])\\.context/|scratchpad|/tmp/|\\.cache/tmp|(claude|ai-baton)-kit/|/run/user/|/Users/[a-z]|/home/[a-z]|(^|[^A-Za-z0-9_])\\.claude/"))) | length' "$req")
 [ "$leaks" = 0 ] || { echo "error: $leaks reply body(ies) mention a local workspace path — link the PR/ticket or inline the evidence instead" >&2; exit 2; }
-TRK_KIND=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.kind 2>/dev/null || echo "")
-if [ "$TRK_KIND" = jira ]; then
-  TRK_RE=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.key_regex 2>/dev/null || echo "")
-  if [ -n "$TRK_RE" ]; then
-    bare=$(jq -r --arg re "$TRK_RE" '[.replies[].body] | map(gsub("\\[[^\\]]*\\]\\([^)]*\\)";"") | gsub("https?://[^ )>]+";"") | select(test($re))) | length' "$req")
-    [ "$bare" = 0 ] || { echo "error: $bare reply body(ies) carry a bare tracker key — make it a link ([KEY](tracker.url_template))" >&2; exit 2; }
-  fi
+# bare tracker keys: any tracker whose `tracker.key_regex` is configured needs the link (not just Jira — a
+# Linear-style key is bare-shaped too; GitHub `#n` auto-links and configures no key_regex, so it never gates).
+# The lookup itself must not fail silently: a missing store, a broken python3 or a config typo is not
+# "no tracker configured" and must stop here, never post with bare keys (WORKSPACE.md § Verification).
+err=$(mktemp)
+TRK_RE=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.key_regex 2>"$err"); rc=$?
+[ $rc -gt 1 ] && { echo "error: tracker.key_regex unreadable: $(cat "$err")" >&2; rm -f "$err"; exit 2; }
+rm -f "$err"
+if [ -n "$TRK_RE" ]; then
+  bare=$(jq -r --arg re "$TRK_RE" '[.replies[].body] | map(gsub("\\[[^\\]]*\\]\\([^)]*\\)";"") | gsub("https?://[^ )>]+";"") | select(test($re))) | length' "$req")
+  [ "$bare" = 0 ] || { echo "error: $bare reply body(ies) carry a bare tracker key — make it a link ([KEY](tracker.url_template))" >&2; exit 2; }
 fi
 live=$(gh api "repos/$repo/pulls/$pr" 2>/dev/null) || { echo "error: cannot read PR" >&2; exit 3; }
 live_head=$(jq -r .head.sha <<<"$live"); pr_author=$(jq -r .user.login <<<"$live")
