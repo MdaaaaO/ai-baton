@@ -29,6 +29,8 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Env store (env fact store)** — `.context/reference/env/`: `config.json` with the structural switches scripts
   branch on, plus one markdown table per system (`name · value · purpose · learned-from`) holding the ids and
   names skills need. Managed by `kb.py`; read by `kit_profile.py get`; spec `docs/env-facts.md`.
+- **Env var** — a process environment variable a kit script reads (`os.environ`/`${NAME:-…}`), distinct from
+  an env-store fact or config key: one reference table, default, reader and purpose per name, `docs/env-vars.md`.
 - **Epic** — the tracker's grouping item (an epic or a tracking issue) an initiative hangs on; the kit's context doc
   for it is `TYPE=epic` and the session registry's `EPIC=` names it.
 - **Evidence (tier 1)** — `.review/evidence.md`, written by `review_evidence.py` for the CI reviewer: the changed
