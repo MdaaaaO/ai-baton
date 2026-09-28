@@ -2,8 +2,8 @@
 name: cost-report
 description: The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7 by default, named phases on request. Org mode reports billed cost with an anonymous aggregate control; private mode estimates list price from local transcripts. Opens with a Basis block; never names anyone. Invoke as "cost report" or "how efficient was last week".
 metadata:
-  version: "7"
-  updated: "2026-09-26"
+  version: "8"
+  updated: "2026-09-27"
   reviewed: "2026-09-25"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
 user-invocable: true
@@ -153,7 +153,9 @@ are the only work units — lines changed are never a denominator.
   `--since/--until` must be `YYYY-MM-DD`, the email is quote-escaped; `cost.filters` is free SQL by design —
   it is the environment owner's own predicate, not user input.
 - `work-prs` never runs one `gh pr view` per PR: where an older gh reports `closed` for merged PRs, one extra
-  `is:merged` search per scope-month settles the merge date.
+  `is:merged` search per scope-month settles the merge date. `work-prs`/`work-tickets` turn GitHub's UTC
+  `createdAt`/`closedAt` into the owner's calendar day the same way `collect-private` does, so a PR merged or
+  ticket closed near local midnight lands on the day its spend does, not on whichever day UTC happened to show.
 - A transcript estimate is high for cache-heavy sessions relative to a negotiated rate and low when
   the account is billed for retries; treat private-mode $ as ±20%, and lean on in/out and cheap%,
   which need no prices at all.
