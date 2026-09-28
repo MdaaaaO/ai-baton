@@ -32,9 +32,11 @@ And the env store (`.context/reference/env/config.json`, see kb.py — one per m
 kit) for every top-level key `environment-template/config.json` has, `systems.*` covering every
 flag a skill may `require` as booleans, a compiling one-group `tracker.key_regex`, and no rows left
 under a renamed kind (`kb.py migrate` moves them).
-  - the body: ≤ 500 lines (evolve's Tier 0 cap), every `scripts/…` / `references/…` / `$BATON/skills/<name>/…`
-    path it cites exists, and no generic environment-fact shape (Slack id, custom-field id, account id, ticket
-    key, org host, tz literal — `leak_shapes.py`, shared with kit-health) in the file.
+  - the body: warns past `BODY_WARN_LINES` (130, docs/authoring.md's target) and errors past `BODY_MAX_LINES`
+    (300) — a unit named in `BODY_LINES_ALLOW` with a reason skips the warning, never the cap — every `scripts/…` /
+    `references/…` / `$BATON/skills/<name>/…` path it cites exists, and no generic environment-fact shape
+    (Slack id, custom-field id, account id, ticket key, org host, tz literal — `leak_shapes.py`, shared with
+    kit-health) in the file.
   - docs/loading.md's `<!-- kit-verify:<key> -->` numbers must match what this run just computed (`--loading-table`
     prints them without running the rest of the checks).
 With --stale N also lists units whose `reviewed` is older than N days (warning, not an error). Two more
@@ -526,9 +528,10 @@ FIRST_PERSON = re.compile(r"\b(I|I'm|I've|my|our|myself)\b")
 
 def check_description_shape(rel, fm, warn: list[str]) -> None:
     d = fmt.unquote(fm.get("description", ""))
-    if "when" not in d.lower():
+    if "when" not in fmt.trigger_clause(d).lower():
         warn.append(f"{rel}: description names no trigger (\"Use when …\", \"Invoke when …\", or plain \"when …\") — "
-                     "a reader cannot tell when to load this unit from the description alone")
+                     "a reader cannot tell when to load this unit from the description alone (a \"when\" only in "
+                     "its \"Not for …\" clause does not count)")
     if FIRST_PERSON.search(d):
         warn.append(f"{rel}: description reads in the first person — write it as the unit's own trigger, not prose about writing one")
 
@@ -584,7 +587,21 @@ def audit_facts_read(rel, body: str, declared: set[str], errors: list[str]) -> N
                       "but does not declare it in metadata.facts")
 
 
-BODY_MAX_LINES = 500  # evolve Tier 0's cap on a skill body
+BODY_WARN_LINES = 130  # docs/authoring.md's target for a body — past this, warn to move detail into references/
+BODY_MAX_LINES = 300  # the hard cap — errors past this for every unit, allow-listed or not
+
+# A unit whose body legitimately needs to stay past BODY_WARN_LINES because the long form IS the procedure, not
+# reference material a step loads on demand — `fmt.unit_name(p)` (a skill's directory, an agent's file stem) to
+# its reason. Exempts the unit from the BODY_WARN_LINES warning only: BODY_MAX_LINES still applies, so an
+# allow-listed body cannot grow without bound.
+BODY_LINES_ALLOW = {
+    "pr-review": "the per-finding walk (Post / Deep dive / Body only / Skip), the repo trap KB and the "
+                 "verification steps are the one walkthrough a reviewer follows top to bottom, not reference "
+                 "material to split out",
+    "self-assessment": "the week-file, report-block and ledger-card templates and the back-fill branch for "
+                       "every systems-of-record source are the procedure itself, not reference material to "
+                       "split out",
+}
 # a backticked path a unit cites inside its own directory: `scripts/x.sh …`, `references/y.md`, `.claude/skills/<name>/scripts/x`
 # `skills/<x>/SKILL.md` or a bare `skills/<x>/` in a body: another skill referenced by PATH. The contract is by name
 # (docs/contributing.md § Skills) — installed paths differ per host and a plugin root moves on every update. A script or
@@ -681,8 +698,9 @@ def duplicated_steps(body: str) -> list[str]:
     return out
 
 
-def check_body(p: Path, rel, body: str, errors: list[str], is_agent: bool = False) -> None:
+def check_body(p: Path, rel, body: str, errors: list[str], is_agent: bool = False, warn: list[str] | None = None) -> None:
     """Environment-free checks on a unit's body: length, cited own paths exist, no fact-shaped literal."""
+    warn = warn if warn is not None else []
     if is_agent:
         for n, line in enumerate(body.split("\n"), 1):
             if NEEDS_COLON.search(line):
@@ -690,8 +708,14 @@ def check_body(p: Path, rel, body: str, errors: list[str], is_agent: bool = Fals
                               "hand-back form is `NEEDS <system>.<kind> <name>`, never a colon (one spelling, "
                               "docs/env-facts.md § Environment facts)")
     n_lines = body.count("\n") + (1 if body and not body.endswith("\n") else 0)
+    allow_reason = BODY_LINES_ALLOW.get(fmt.unit_name(p))
     if n_lines > BODY_MAX_LINES:
-        errors.append(f"{rel}: body is {n_lines} lines > {BODY_MAX_LINES} — move detail into references/ (loaded on demand)")
+        errors.append(f"{rel}: body is {n_lines} lines > {BODY_MAX_LINES} — move detail into references/ (loaded on "
+                      f"demand); BODY_LINES_ALLOW only silences the {BODY_WARN_LINES}-line warning, not this cap")
+    elif allow_reason is None and n_lines > BODY_WARN_LINES:
+        warn.append(f"{rel}: body is {n_lines} lines > {BODY_WARN_LINES} (docs/authoring.md's target) — move detail "
+                    "into references/ (loaded on demand), or name the unit in BODY_LINES_ALLOW (kit_verify.py) "
+                    "with a reason")
     unit_dir = p.parent
     for n, target in cited_make_targets(body):
         if target not in make_targets():
@@ -744,7 +768,7 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
         errors.append(f"{rel}: no frontmatter block")
         return 0
     body = parts[1] if parts else ""
-    check_body(p, rel, body, errors, is_agent=is_agent)
+    check_body(p, rel, body, errors, is_agent=is_agent, warn=warn)
     if not is_agent:
         check_forked_write_leak(rel, fm, body, errors)
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there

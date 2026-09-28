@@ -137,9 +137,11 @@ jobs:
           rm -rf .context && $kb init --blank && $kb config-set environment ci
 
       # The eval suite's static gate (#54): every case loads, every skill's trigger suite has >= 10 cases with positives
-      # and near misses. No model and no tokens — the token-spending run is the manual `evals` workflow.
+      # and near misses. No model and no tokens — the token-spending run is the manual `evals` workflow. REQUIRE_ALL
+      # also fails a skill with no trigger suite yet or a description with no recognized trigger phrase — the eventual
+      # gate docs/authoring.md's table already describes; every skill now clears both.
       - name: Eval suite (static, no tokens)
-        run: make -C .claude/context-db eval-check
+        run: make -C .claude/context-db eval-check REQUIRE_ALL=1
 
       # The plugin manifests through Claude Code's own validator. A hosted runner has no `claude` CLI, and the
       # Makefile target skips silently without one — so install it first (no account needed to validate); a failed

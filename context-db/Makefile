@@ -171,7 +171,8 @@ parse:
 
 # make eval-check [REQUIRE_ALL=1]  — the eval suite's static gate (#54; no model, no tokens): every case loads
 # (prompt.md keys, graders of a known type), every trigger suite has >= 10 cases with positives and near misses.
-# Skills without a suite and descriptions without "Use when" are notes; REQUIRE_ALL=1 turns them into failures.
+# Skills without a suite and descriptions with no recognized trigger phrase (TRIGGER_WHEN / TRIGGER_OTHER) are
+# notes on a bare run; ci.yml runs REQUIRE_ALL=1, so both are a failure there.
 eval-check:
 	@cd $(ENGINE).. && $(PY) $(BIN)/eval_check.py $(if $(REQUIRE_ALL),--require-all,)
 

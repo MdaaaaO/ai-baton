@@ -33,8 +33,10 @@ Also failed: a bare value with a ` #` in it (YAML cuts it there — quote it), a
 
 - **Runs on any machine or stops with one line**: `<skill>: not applicable here — <why>` when a required flag is
   false (`kit_profile.py get systems.<flag>`). Never improvise a substitute.
-- **Numbered imperative sections** (`## 1. Detect`, `## 2. Do`, `## 3. Report`); 70–130 lines as the target, 500 the
-  cap (`BODY_MAX_LINES`). Rationale, history and worked scripts go to `reference.md` / `references/` (loaded on demand).
+- **Numbered imperative sections** (`## 1. Detect`, `## 2. Do`, `## 3. Report`); 70–130 lines as the target
+  (`kit-verify` warns past `BODY_WARN_LINES`), 300 the hard cap (`BODY_MAX_LINES`) — a unit that genuinely needs
+  more is named in `BODY_LINES_ALLOW` (kit_verify.py) with a reason, not left to grow past the warning silently.
+  Rationale, history and worked scripts go to `reference.md` / `references/` (loaded on demand).
 - **No environment value**: no id, host, org / team / channel name, person, ticket key, timezone literal — the
   body names the fact (`metadata.facts`) and reads it (`kb.py get`); a missing one is resolved as `docs/env-facts.md`
   § How a skill resolves a fact says, and a forked worker returns exactly `NEEDS <system>.<kind> <name>`.
