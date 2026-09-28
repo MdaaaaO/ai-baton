@@ -67,9 +67,9 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    Channel = `slack.repo_channels.<owner/repo>` (the env fact `slack.review-venue <owner/repo>`); no entry →
    `/env-init slack.review-venue <owner/repo>` (**the pick is this skill's call** — never type a channel id
    from memory). Create the draft through the `slack-draft` skill (`slack_send_message_draft`); the user
-   reviews and sends it themselves. The exact one-sentence shape, the no-emoji/no-ticket-key/no-CI-status
-   rule, the multi-PR and pending-draft cases, and thread-vs-DM routing for related asks:
-   `reference/slack-review-request.md`.
+   reviews and sends it themselves. **A draft already pending for the same channel gets updated, never
+   duplicated.** The exact one-sentence shape, the no-emoji/no-ticket-key/no-CI-status rule, and
+   thread-vs-DM routing for related asks: `reference/slack-review-request.md`.
 7. **Tell the user** in one line: PR link + labels + where the ask went ("review-request draft is in
    #<channel>" or "reviewers requested: …").
 

@@ -107,17 +107,18 @@ in **one** batched pass — a lens finding without evidence you can restate is a
 Verify each candidate on the axis it claims — data (SQL, `systems.datalake` only), CI state (the
 bundle's `checks/status`, never job logs), code/config baseline (`$CTX/base/<path>`), convention
 (the documented spec, not a neighbouring precedent) — name the axis each ✅ covers, and drop what you
-cannot evidence. On a modelling PR the data pass is mandatory when the PR is complex: rerun the
-author's row counts and distributions yourself, never accept them. Exact rules per axis and the
-modelling-PR checklist: `reference/verify.md`.
+cannot evidence. On a modelling PR, where `systems.datalake` is on, the data pass is mandatory when
+the PR is complex: rerun the author's row counts and distributions yourself, never accept them.
+Exact rules per axis and the modelling-PR checklist: `reference/verify.md`.
 
 ## 4b. Stakeholder impact *(runner; modelling PRs, when feasible)*
 
 Build the consumer map of every model/column the PR changes (dbt `ref()`/`exposures`, the BI tool's MCP
-search, alerting/export configs, quantified with step 4's SQL) and write it to `$CTX/impact.json`. A
-change that alters what a known consumer reads and the PR body does not say so → **Stakeholder impact**
-finding (`scope.md`). No consumers found is also a result — record it so the KB gains the map (step 8).
-The consumer-kind list and the exact search per kind: `reference/stakeholder-impact.md`.
+search — skip it with a `NOTE` line, never guess, when the MCP is unavailable — alerting/export configs,
+quantified with step 4's SQL) and write it to `$CTX/impact.json`. A change that alters what a known
+consumer reads and the PR body does not say so → **Stakeholder impact** finding (`scope.md`). No
+consumers found is also a result — record it so the KB gains the map (step 8). The consumer-kind list
+and the exact search per kind: `reference/stakeholder-impact.md`.
 
 ## 5. Triage — overview, then walk every finding with the user (in the terminal, not on GitHub) *(main session)*
 

@@ -103,8 +103,10 @@ Don't read the PR yourself at full prefix when a line lands. Invoke the forked s
 low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line brief ending in one
 `ACTION:` (`REPLY+RESOLVE` / `FIX+PUSH` / `RE-REQUEST-BOT` / `UPDATE-BRANCH` / `MERGE` / `WAIT(<who>)` /
 `INVESTIGATE-CHECK`). **You perform the action** — replies, resolves, re-requests, merges post to
-GitHub and stay on the main model. Skip the fork for `HEAD MOVED` (just re-request the bot) and
-`MERGED`/`CLOSED` (close out per the table). A brief slot marked `unverified` means fetch it yourself.
+GitHub and stay on the main model. Skip the fork for `HEAD MOVED` (just re-request the bot),
+`MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork
+`pr-event-brief` for it — it is not a PR event, there is nothing on the PR to triage). A brief slot
+marked `unverified` means fetch it yourself.
 
 ## Rules this encodes (verified on a strict-ruleset repo with a review bot)
 
