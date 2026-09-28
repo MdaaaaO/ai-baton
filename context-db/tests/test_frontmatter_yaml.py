@@ -94,13 +94,12 @@ class RealYamlCrossCheck(unittest.TestCase):
                 self.assertEqual(doc["working_on"], value, value)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class SingleQuoteEscape(unittest.TestCase):
     def test_doubled_single_quote_unquotes_like_yaml(self):
-
         self.assertEqual(fmt.unquote("'it''s'"), "it's")
         if yaml is not None:
             self.assertEqual(yaml.safe_load("k: 'it''s'")["k"], fmt.unquote("'it''s'"))
+
+
+if __name__ == "__main__":
+    unittest.main()
