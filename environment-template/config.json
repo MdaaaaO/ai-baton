@@ -66,6 +66,10 @@
     "kind": "",
     "_comment": "kind: warehouse vendor (snowflake | bigquery | …) — selects the datalake-<vendor> discovery manifest; empty when systems.datalake is false."
   },
+  "mcp_tools": {
+    "_comment": "MCP tool names that differ by vendor connector, named here so a skill never hardcodes one vendor's tool. datalake_probe: the tool pr-review's step 4b calls for a cheap listing check on the BI/datalake connector (never a query); empty when systems.datalake is false or this environment has no such probe.",
+    "datalake_probe": ""
+  },
   "labels": {
     "shared": [
       "bug",
@@ -104,7 +108,8 @@
     "scope": "<one sentence: what work counts in this environment>",
     "ledger": false,
     "ledger_url": "",
-    "report_url": ""
+    "report_url": "",
+    "sections": []
   },
   "cost": {
     "_comment": "cost-report skill; optional (absent = private mode). spend_table/email/filters/columns: the warehouse spend table at grain user × model × day (org mode, needs systems.datalake); extra_repos: owner/repo outside github.org that count as the user's work; phases: named before/after windows. Set as one object with `kb.py config-set cost '{…}'`.",

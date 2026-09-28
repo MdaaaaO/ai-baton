@@ -40,6 +40,11 @@ Also failed: a bare value with a ` #` in it (YAML cuts it there — quote it), a
   § How a skill resolves a fact says, and a forked worker returns exactly `NEEDS <system>.<kind> <name>`.
   `leak_shapes.py` fails the generic shapes; `skills/kit-health/allow.txt` is the one allow-list (dated examples
   that must stay verbatim, never a value a skill reads). Use `<placeholder>` forms otherwise.
+- **No deployment anecdotes**: a worked example states the rule it illustrates in one clause, not one
+  environment's incident, one vendor's UI behaviour, or a dated count/ratio computed from one team's data —
+  none of that is a secret (`leak_shapes.py` never catches it), but it is noise for every other installer and
+  a hint at who runs the reference deployment. A real story that must survive moves to a `reference/lessons.md`
+  -style file marked as such, loaded on demand, never the always-loaded body.
 - **Cross-reference other skills by name** (`pr-watch`, `/pr-watch`), never by path — a `skills/<x>/SKILL.md`
   literal fails; a script of another skill that a step runs is cited by its path at that one point.
 - **Own paths exist**: every `scripts/…` / `references/…` the body cites must be a file beside it.

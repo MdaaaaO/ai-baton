@@ -6,7 +6,7 @@ so a failing `lint-models` check is green in one CI round.
 **Needs:** `systems.dbt` (the environment has dbt models and a sqlfluff lint check on their PRs). Reads the
 failed job's log through `gh` (with `github.sandbox_token_prefix` applied where one is set); no env fact rows.
 
-**Without it:** `dbt-sqlfluff-fixes: not applicable here (systems.dbt is false)`, one line, stop — a plain SQL
+**Without it:** `dbt-sqlfluff-fixes: not applicable here — dbt is false`, one line, stop — a plain SQL
 file is edited without this skill's rules.
 
 **Example:**

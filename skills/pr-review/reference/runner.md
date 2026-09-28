@@ -20,9 +20,11 @@ Run it in the background; relay nothing until it returns. Never spawn two runner
 **Before spawning for a modelling PR** (`dbt/models/**`, BI-consumed tables, data-reshaping SQL): the
 main session runs one cheap `select 1` through the datalake SQL MCP. An auth
 error → ask the user to `/mcp` reauth **first**, then spawn — a runner that discovers the expired token
-mid-review burns its budget marking rows `unverified` and forces a second runner. Same probe for the BI tool's
-MCP (`list_documents`, tiny) when step 4b will be needed; unavailable → say so in the prompt so the runner
-writes `not assessed` instead of trying.
+mid-review burns its budget marking rows `unverified` and forces a second runner. Same probe for the BI
+tool's MCP when step 4b will be needed and `systems.datalake` is true: `python3
+$BATON/context-db/bin/kit_profile.py get mcp_tools.datalake_probe` names the one tool this environment's
+connector exposes for a cheap listing call (never a query); unset or unavailable → say so in the prompt
+so the runner writes `not assessed` instead of trying.
 
 The runner works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`,
 `kb-traps.md`) — it should not spend turns on `gh api contents`, `git show` or CI logs. If a returned sheet

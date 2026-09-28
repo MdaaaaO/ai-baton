@@ -1018,9 +1018,11 @@ def migrate_kinds(apply: bool = True) -> list[str]:
 
 # Top-level config.json keys a store may leave out: absent means the kit default (commit_style.py falls back to
 # `conventional`; cost-report runs in private mode; datalake.kind is read only where systems.datalake is true; `kit`
-# holds kit.install_mode, which setup.sh records — absent until it has run, and kit-health § 1 says so, #34).
+# holds kit.install_mode, which setup.sh records — absent until it has run, and kit-health § 1 says so, #34;
+# `mcp_tools` names MCP tools whose name differs by vendor connector, e.g. pr-review's datalake/BI probe —
+# absent or empty means no such probe on this machine).
 # kit_verify reads this set; `config_key_drift()` keeps blank_config() and environment-template/config.json in step.
-OPTIONAL_CONFIG_KEYS = frozenset({"commits", "cost", "datalake", "kit"})
+OPTIONAL_CONFIG_KEYS = frozenset({"commits", "cost", "datalake", "kit", "mcp_tools"})
 TEMPLATE_CONFIG = KIT / "environment-template" / "config.json"
 
 

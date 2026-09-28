@@ -3,8 +3,8 @@ name: alerts-sweep
 description: "Sonnet-forked sweep of the airflow-alerts Slack channel: reads new messages, classifies each against the pattern KB, advances the timestamp, returns exactly NO-OP when nothing needs the main session, or `NEEDS <system>.<kind> <name>` for a missing fact (`/env-init`). Arm with `/loop 20m /alerts-sweep`; never acts on an alert."
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
-  version: "9"
-  updated: "2026-09-27"
+  version: "10"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
   requires: "airflow,slack"
   facts: "slack.channel airflow-alerts,airflow.path alerts-state,airflow.path alerts-kb"
@@ -20,6 +20,9 @@ Working directory: the workspace root. Three env facts (step 0): the alerts chan
 file `STATE` (holds the line `**Last swept through:** ts \`<ts>\``) and the pattern KB `KB`. Both files live
 in the environment's on-call domain and are named in its env store, never here. You are read-only on Slack;
 you may edit only `STATE` and `KB`.
+
+> On a machine where `airflow` or `slack` is false, print `alerts-sweep: not applicable here — airflow is
+> false` (or `— slack is false`, whichever tripped) and stop.
 
 ## Steps
 

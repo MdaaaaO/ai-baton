@@ -3,7 +3,7 @@ name: notion-page-review
 description: "Reviews a Notion page tree (page, sub-pages, every comment thread) against the user's position, walks each proposed comment (Comment, Update wording, Skip, batches of 4), posts only approved ones as thread replies or inline comments. Invoke when the user asks to \"go through\", \"catch up on\" or \"comment on\" a Notion page."
 compatibility: "Designed for Claude Code; needs notion (systems.*)"
 metadata:
-  version: "9"
+  version: "10"
   updated: "2026-09-28"
   reviewed: "2026-09-28"
   requires: "notion"
@@ -16,6 +16,8 @@ user-invocable: true
 The value is in three things: (1) nothing on the page or in its threads is missed, (2) the user approves
 every single comment's wording before it goes out, (3) comments land where people are notified
 (inside the thread they started), not as a wall on the page title.
+
+> On a machine where `notion` is false, print `notion-page-review: not applicable here — notion is false` and stop.
 
 ## 1. Ingest the tree with discussions
 
@@ -67,11 +69,13 @@ Rules for the proposals:
 
 - Reply: `notion-create-comment` with `page_id` + `discussion_id` (full `discussion://…` url).
 - Inline: `notion-create-comment` with `page_id` + `selection_with_ellipsis: "start…end"`. The snippet
-  must be **unique on the page** — a shared tail such as `(DE + DA)` fails with
-  `Multiple occurrences found`; re-anchor to a distinctive phrase, never retry verbatim.
+  must be **unique on the page** — a short shared tail that also occurs elsewhere (e.g. a repeated
+  parenthetical) fails with `Multiple occurrences found`; re-anchor to a distinctive phrase, never
+  retry verbatim.
 - Backticked words in the page are code spans: anchor around them, not through them.
-- Never attach several comments to one block: the owner's four 9/1 comments on one title block landed
-  in **one** discussion and went unanswered for two weeks. One block, one comment.
+- Never attach several comments to one block: several separate comments on the same title block all
+  land in **one** discussion, where they are easy to miss and easy to leave unanswered. One block,
+  one comment.
 
 ## 5. Flush (same session)
 

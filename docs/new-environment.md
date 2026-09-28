@@ -105,7 +105,8 @@ edited — if you already have a root `CLAUDE.md` or `Makefile`, add the two imp
      `display_names` (login → first name, used by `pr-scan`), `sandbox_token_prefix`.
    - `slack`: `enabled` + `domain`; disabled = the Slack steps of every skill are skipped.
    - `labels` (per-repo label names for `pr-open`), `diagrams` (per-repo diagram overlays),
-     `self_assessment` (`sources`, `report`, `scope`, `ledger`, `ledger_url`, `report_url`), `systems` (the capability flags — `jira`,
+     `self_assessment` (`sources`, `report`, `scope`, `ledger`, `ledger_url`, `report_url`, `sections` — the
+     report block's headings, empty = the kit's own four), `systems` (the capability flags — `jira`,
      `slack`, `notion`, `datalake`, `airflow`, `dbt`, `aws_sso`, `incident_io`, `lattice`, `signed_commits`;
      a skill with `metadata.requires: "x"` is "not applicable" wherever `systems.x` is false), `tz_default`.
    - `domains`: the extra `.context/` domain folders (core domains need no entry).

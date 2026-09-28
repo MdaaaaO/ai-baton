@@ -576,6 +576,11 @@ STEP = re.compile(r"^(\d+)\.\s+(.*\S)")
 # one form misses the other.
 NEEDS_COLON = re.compile(r"\bNEEDS:")
 
+# The capability-gate stop line docs/authoring.md § Body promises: `<skill>: not applicable here — <why>` when
+# a required flag is false. A unit with metadata.requires must spell this literal somewhere in its body, so a
+# user or an eval can match on it.
+NOT_APPLICABLE = "not applicable here —"
+
 
 def duplicated_steps(body: str) -> list[str]:
     """Top-level numbered lists that repeat a step number or a step's text (#19). A list runs until a heading or an
@@ -749,6 +754,10 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
             for r in reqs:
                 if not re.search(rf"\b{re.escape(r)}\b", compat):
                     errors.append(f"{rel}: compatibility does not name the required flag '{r}'")
+        if reqs and NOT_APPLICABLE not in body:
+            errors.append(f"{rel}: a unit with metadata.requires has no `<skill>: not applicable here — <why>` stop "
+                          "line in its body — the literal phrase 'not applicable here —' (em dash) must appear "
+                          "somewhere in the text (docs/authoring.md § Body)")
     if "compatibility" in fm and len(fmt.unquote(fm["compatibility"])) > 500:
         errors.append(f"{rel}: compatibility is longer than the spec's 500 characters")
     declared: set[str] = set()

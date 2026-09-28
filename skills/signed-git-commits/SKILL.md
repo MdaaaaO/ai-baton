@@ -3,8 +3,8 @@ name: signed-git-commits
 description: "Discipline behind signed/SSH commits where the editing machine cannot sign or push: worktree-first branching, exact staging, message-to-file, rebase signing quirks, gh-token prefix. Hand-off runs through `sign-queue`, never pasted git commands. Read when committing/pushing in a repo with a signed-commits ruleset (`systems.signed_commits`)."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "10"
-  updated: "2026-09-27"
+  version: "11"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
   requires: "signed_commits"
 user-invocable: true
@@ -24,6 +24,9 @@ corrupting the user's working tree or silently dropping files.
 > failure is *why* the queue exists). This skill is the **why + the discipline you must
 > satisfy before enqueuing** (worktree isolation, exact staging, message-to-file, rebase
 > gpg trap, `gh` token). Do the signing/push handoff via `sign-queue`.
+
+> On a machine where `signed_commits` is false, print `signed-git-commits: not applicable here —
+> signed_commits is false` and stop — commits are made and pushed directly.
 
 ## Why the editing machine cannot do this itself
 

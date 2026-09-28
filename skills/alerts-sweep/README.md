@@ -8,7 +8,8 @@ each message is classified against). All three come from the env store; a missin
 `NEEDS <system>.<kind> <name>` and the main session resolves it with `/env-init`.
 
 **Without it:** on a machine where either flag is false the fork returns one line — `alerts-sweep: not applicable
-here` — and the loop does nothing else. It never acts on an alert itself anywhere.
+here — airflow is false` (or `— slack is false`, whichever tripped) — and the loop does nothing else. It never
+acts on an alert itself anywhere.
 
 **Example:**
 

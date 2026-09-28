@@ -2,10 +2,10 @@
 name: self-assessment
 description: "Composes the user's weekly self-assessment for a past ISO week or range from `.context/` and the systems of record, never live sessions: the week file plus the report block and ledger card the env config asks for, back-filled where `.context/` lacks coverage. Invoke as \"self-assessment for last week\" or \"for W37\"."
 metadata:
-  version: "14"
+  version: "15"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
-  facts: "self_assessment.ledger,self_assessment.ledger_url"
+  facts: "self_assessment.ledger,self_assessment.ledger_url,self_assessment.sections"
 user-invocable: true
 ---
 
@@ -60,9 +60,9 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      gets this wrong without the rule.
    - **Retraction carve-out — corrections escape the boundary, facts don't.** A later
      retraction/correction of an in-window claim applies to the week *regardless of when it landed* —
-     the week reports what turned out to be **true**, not what was believed Sunday night (a pilot
-     example: in-window traffic-drop projections retracted the next week were a NAT-gateway confound,
-     not a finding — "status as of window end" would have shipped them as live results). Grep the days
+     the week reports what turned out to be **true**, not what was believed Sunday night (a number that
+     looked like a real finding on Sunday can turn out Tuesday to be a measurement confound, not a
+     finding — "status as of window end" would have shipped it as a live result). Grep the days
      *after* the window on the week's items for retraction language (`retract`, `confound`,
      `was wrong`, `corrected`, `superseded`).
    - **Required output shape for cross-boundary hits.** The sweeps *will* surface items just outside
@@ -158,12 +158,12 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      above are complete.)
 4. **Verify, don't trust — and tie-break conflicts explicitly.** Numbers and tracker keys come from
    evidence, not memory or a drop's say-so; check anything surprising against the listed systems of
-   record (`WORKSPACE.md` § Verification). Cross-sweep numeric conflicts are **routine** (a pilot week had three)
+   record (`WORKSPACE.md` § Verification). Cross-sweep numeric conflicts are **routine, not rare**
    — apply a fixed tie-break, don't average or guess:
    - **PR line/file stats → GitHub** (the diff is authoritative over a ticket comment's recollection).
    - **Ticket-scoped measurements → that ticket's own closing comment** (row counts, per-event shares).
-   - **Look for a derived/ratio figure in the same comment to arbitrate** before choosing — e.g. a
-     "guardrail is ~7× the worst observed" line pins which of two worst-case digits is right (0.1 / 6.8 ≈ 0.0146%).
+   - **Look for a derived/ratio figure in the same comment to arbitrate** before choosing — e.g. a line
+     stating one figure as a multiple of the other pins which of two candidate numbers is right.
    - **If nothing arbitrates, drop the contested digit** rather than pick one — a vaguer true
      statement beats a precise wrong one.
 5. **Compose `weeks/YYYY-Wnn.md`** in the charter's fixed format
@@ -172,13 +172,15 @@ it); `report_url` is the form the ledger links to (optional). A store without th
    frontmatter once the week is reconciled — a completed week is a closed record and this self-exempts it from
    the 30KB verify guardrail. A mid-week compose stays `status: active` and says **"week in progress — re-run
    Mon <date>"** in its banner; the Monday re-run folds the weekend, re-verifies every status claim and flips it.
-   - **The report block has four sections, in this order and with these headings verbatim:** `What I worked on`,
-     `Next week`, `Blockers / risks`, `Is there anything else on your mind you'd like to share?`. The fourth is
-     the form's own free-text prompt: **1–3 sentences of reflection** — a learning, a concern about direction,
-     a thank-you, a process observation — sourced from the week's *Learnings*, 1:1 notes and meeting outcomes.
-     It never restates a shipped item or a blocker already listed; when the week gives nothing, write one plain
-     sentence ("Nothing beyond the above this week.") rather than dropping the heading — the ledger card and
-     the form both expect it.
+   - **The report block's sections, in order and with their headings verbatim, come from
+     `self_assessment.sections`** (`python3 $BATON/context-db/bin/kit_profile.py get self_assessment.sections`):
+     an ordered list of headings set by the environment for its own review form. Empty or absent falls back to
+     the kit's own four: `What I worked on`, `Next week`, `Blockers / risks`, `Is there anything else on your
+     mind you'd like to share?`. The last section is the form's own free-text prompt: **1–3 sentences of
+     reflection** — a learning, a concern about direction, a thank-you, a process observation — sourced from
+     the week's *Learnings*, 1:1 notes and meeting outcomes. It never restates a shipped item or a blocker
+     already listed; when the week gives nothing, write one plain sentence ("Nothing beyond the above this
+     week.") rather than dropping the heading — the ledger card and the form both expect it.
 6. **Index + initiatives.** Add/refresh the week's row in the README index; update (or, for
    initiatives no live session owns, gap-fill) the `initiatives/<slug>.md` arcs the week touched; a
    new multi-week effort gets a new initiative doc.
@@ -190,7 +192,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      review tool has no connector; they paste it into the form its bot DM (`WORKSPACE_SLACK_LATTICE_DM`) links
      to). **No local `.context/` paths in that block** — it's an external surface (`CLAUDE.md`
      § Rules); refer to work by tracker key with clickable links. **Never infer submission state from the DM**
-     — the bot nudges with a button into the web form, silence there means nothing.
+     — a nudge from the tool's own bot is not evidence of submission, and silence there means nothing.
    - `week-file` — the week file *is* the deliverable; no external block. Reply with a ≤5-line TLDR and
      the file path.
 10. **Update the ledger — gated by `self_assessment.ledger`; when on, it is mandatory, every report mode, never

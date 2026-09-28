@@ -1,0 +1,15 @@
+{
+  "system": "mcp_tools",
+  "requires": "datalake",
+  "facts": [
+    {
+      "key": "mcp_tools.datalake_probe",
+      "target": "config",
+      "tool": "user",
+      "args": {},
+      "verify": "the MCP tool name, as this session's roster shows it, that lists something small and cheap on the environment's BI/datalake connector — a listing call, never a query; empty when this environment has no such probe",
+      "ttl_days": 0,
+      "purpose": "pr-review step 4b's availability probe for the BI tool's MCP, so the kit never hardcodes one vendor's tool name"
+    }
+  ]
+}

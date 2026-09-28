@@ -6,7 +6,7 @@ itself runs through the `sign-queue` skill — never pasted git commands.
 
 **Needs:** `systems.signed_commits`. No env fact rows.
 
-**Without it:** `signed-git-commits: not applicable here (systems.signed_commits is false)`, one line, stop —
+**Without it:** `signed-git-commits: not applicable here — signed_commits is false`, one line, stop —
 commits are made and pushed directly.
 
 **Example:**

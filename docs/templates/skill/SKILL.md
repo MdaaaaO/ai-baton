@@ -18,8 +18,9 @@ user-invocable: true
 ## 1. Detect
 
 - <Capability tier only: `python3 $BATON/context-db/bin/kit_profile.py get systems.<flag>` — `false` →
-  print `my-skill: not applicable here (systems.<flag> is false)` and stop. (`kit_profile.py get` prints the
-  JSON literal `false`/`true`, never Python's `False`/`True`.)>
+  print `my-skill: not applicable here — <flag> is false` and stop. (`kit_profile.py get` prints the
+  JSON literal `false`/`true`, never Python's `False`/`True`.) `kit-verify` fails a `requires:` unit whose
+  body has no literal `not applicable here —` (em dash) — docs/authoring.md § Body.>
 - <Each fact the body reads: `python3 $BATON/context-db/bin/kb.py get <system>.<kind> <name>`. Missing →
   `kb.py discover <system>.<kind> <name>` prints the tool call and the verify clause; run it, verify, write back
   with `kb.py set … --from tool:<name>`. Inside a fork return exactly `NEEDS <system>.<kind> <name>` instead.>

@@ -3,7 +3,7 @@
 Adapted from an engineering-writing guide for pull requests, plus this kit's rules.
 
 ## Inline comments
-- One finding per comment, anchored to the line where the reader must look. Lead with the concrete risk and the evidence, then the fix: "`created_at` here is naive UTC; `CONVERT_TIMEZONE` shifts it +7h (checked: the column type is TIMESTAMP_NTZ). Drop the conversion or cast first."
+- One finding per comment, anchored to the line where the reader must look. Lead with the concrete risk and the evidence, then the fix: "`created_at` here is naive UTC; converting it with the session's local timezone shifts it +7h before the comparison (checked: the column stores no UTC offset). Compare in UTC, or convert explicitly, before the cast."
 - Optional feedback starts with `nit:` or `suggestion:`. Questions end with a question mark and say what answer would close them.
 - Suggest code with a ```suggestion block only when the replacement is exact and ≤10 lines.
 - Write to the change, not the author. No "you forgot"; "this misses …".
