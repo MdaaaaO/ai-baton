@@ -599,7 +599,7 @@ def cmd_meta(argv: List[str]) -> int:
 def migrate_legacy(legacy: Path = LEGACY_Q, q: Path = Q) -> int:
     """Move jobs and logs a pre-#7 kit queued under the kit dir into the workspace queue; returns how many files
     moved. Never overwrites a job already in the new queue (it stays in place and is named). Explicit only —
-    called from the `migrate-legacy` subcommand (setup.sh / sync.sh run it once), never as a side effect of
+    called from the `migrate-legacy` subcommand (`make sign` / `make sign_list` run it first), never as a side effect of
     another subcommand: a checkout that still holds a legacy `sign-queue/logs/` must not lose it to whatever
     queue the current process happens to resolve just because someone ran `list` or `meta`."""
     if "SIGN_QUEUE_DIR" in os.environ or not legacy.is_dir() or legacy.resolve() == q.resolve():
@@ -618,11 +618,12 @@ def migrate_legacy(legacy: Path = LEGACY_Q, q: Path = Q) -> int:
     return moved
 
 
-def cmd_migrate_legacy(_: List[str]) -> int:
+def cmd_migrate_legacy(args: List[str]) -> int:
+    """`-q`: say something only when files moved (the `make sign` entry points run it before every drain)."""
     moved = migrate_legacy()
     if moved:
         print(f"moved {moved} file(s) from {LEGACY_Q} to {Q}")
-    else:
+    elif "-q" not in args:
         print("nothing to migrate" if not LEGACY_Q.is_dir() else f"{LEGACY_Q} and {Q} already the same directory, or nothing new to move")
     return 0
 
