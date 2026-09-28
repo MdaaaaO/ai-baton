@@ -188,6 +188,12 @@ class Extraction(RetroCase):
         self.assertEqual([c["tool"] for c in r["tool_calls"]], ["Bash", "Bash", "Skill", "Read"])
         self.assertEqual(r["tool_calls"][3]["key"], "/x/y.md")
 
+    def test_denial_wording_in_a_successful_result_is_not_a_denial(self):
+        quoted = "Permission to use Bash with command rm -rf build has been denied."
+        b = Builder().user("go").call("Read", file_path="tests/t.py", result=quoted).bash("grep -r denied .", result=quoted)
+        r = self.report(b)
+        self.assertEqual((r["denials"], r["failures"]), ([], []))
+
     def test_clean_session_has_no_hits(self):
         b = Builder().user("read the readme").call("Read", file_path="README.md").say("Done.")
         r = self.report(b)

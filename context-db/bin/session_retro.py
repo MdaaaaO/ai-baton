@@ -258,9 +258,10 @@ class Retro:
     def _result(self, b: dict) -> None:
         call = self.calls.get(b.get("tool_use_id") or "")
         body = _text(b.get("content")) if not isinstance(b.get("content"), str) else b["content"]
-        denied = bool(DENIAL_RE.search(body or ""))
-        if not (b.get("is_error") or denied) or call is None:
+        if not b.get("is_error") or call is None:
             return
+        # denial wording counts only on an error result: a successful Read/Grep of text that quotes it is not a denial
+        denied = bool(DENIAL_RE.search(body or ""))
         self.errored.add(call["id"])
         row = {"turn": call["turn"], "time": call["time"], "tool": call["tool"], "key": call["key"]}
         if denied:
