@@ -47,11 +47,11 @@ after it, never in the `pr-scan` monitor session.
 ### Contract: bundle vs. live reads
 
 The runner reads only the bundle — never `git show`, never CI-log polling, no `gh api` call the bundle
-already answers. Three reads are live because the bundle cannot hold them, each capped to what step names
-it: a repo's own `CLAUDE.md`/`AGENTS.md` review rules when the PR did not touch that file (step 2.3, else
-it's the bundle's own `head/<path>`), a base blob for a path the PR did not touch (step 4), and one named
-file in an external repo when a convention claim needs settling (step 4) or a repo-wide `ref()`/`exposures`
-search at the head ref for stakeholder impact (step 4b).
+already answers. Four reads are live because the bundle cannot hold them, each capped to what its step names:
+a repo's own `CLAUDE.md`/`AGENTS.md` review rules when the PR did not touch that file (step 2.3, else it's
+the bundle's own `head/<path>`); a base blob for a path the PR did not touch (step 4); one named file in an
+external repo when a convention claim needs settling (`agents/review-runner.md` step 3); and a repo-wide
+`ref()`/`exposures` search at the head ref for stakeholder impact (step 4b).
 
 ## 0. Coordinate (repos other sessions also work) *(main session)*
 
