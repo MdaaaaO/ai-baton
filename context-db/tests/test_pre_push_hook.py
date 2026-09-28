@@ -5,6 +5,7 @@ documented one-off override. Runs the hook directly against a stdin git would fe
 sha> <remote ref> <remote sha>` per line) — no real remote needed. Stdlib unittest. Run: make -C
 .claude/context-db test."""
 from __future__ import annotations
+import os
 import shutil
 import subprocess
 import unittest
@@ -21,8 +22,11 @@ ZERO = "0" * 40
 class PrePushHook(unittest.TestCase):
     def run_hook(self, lines: list, *args: str, env_extra: dict | None = None) -> subprocess.CompletedProcess:
         stdin = "".join(f"{a} {b} {c} {d}\n" for a, b, c, d in lines)
-        env = dict(env_extra or {})
-        return subprocess.run(["bash", str(HOOK), *args], input=stdin, env=env or None,
+        # the caller's env minus the hook's own override, so a developer with KIT_ALLOW_MAIN_PUSH exported
+        # still sees the "refused" cases refused; env_extra goes on top
+        env = {k: v for k, v in os.environ.items() if k != "KIT_ALLOW_MAIN_PUSH"}
+        env.update(env_extra or {})
+        return subprocess.run(["bash", str(HOOK), *args], input=stdin, env=env,
                                capture_output=True, text=True, timeout=15)
 
     def test_a_push_that_updates_main_is_refused(self):
