@@ -151,6 +151,109 @@ class PythonFloorLeg(unittest.TestCase):
         self.assertIn("python-floor (3.9)", required)
 
 
+class MacosLeg(unittest.TestCase):
+    """The BSD/macOS fallbacks in skills/_lib/portable.sh (no flock, no setsid, BSD date) were exercised by
+    PATH-manipulation tests on a Linux runner only, never on a real macOS interpreter — a real macos-latest job
+    proves the fallbacks, not just the tests that stand in for them, and must be gated so it doesn't run (and
+    cost) on every unrelated PR."""
+
+    TEXT = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+
+    def test_declares_a_macos_job(self):
+        self.assertIn("runs-on: macos-latest", self.TEXT)
+
+    def test_macos_job_runs_the_engine_suite(self):
+        job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
+        self.assertIn("make -C context-db test", job)
+
+    def test_macos_job_is_gated_by_changed_paths(self):
+        job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
+        self.assertIn("needs: changed-paths", job)
+        self.assertIn("needs.changed-paths.outputs.portability", job)
+
+    def test_changed_paths_job_covers_the_scoped_globs(self):
+        # docs claim: sh scripts, their tests, skills/_lib — the three places a shell portability bug can hide
+        job = self.TEXT.split("\n  changed-paths:\n", 1)[1].split("\n  macos:\n", 1)[0]
+        self.assertIn(r"\.sh$", job)
+        self.assertIn("context-db/tests/", job)
+        self.assertIn("skills/_lib/", job)
+
+    def test_a_push_to_main_is_never_silently_skipped(self):
+        # the path filter only bounds a PR's own iterating pushes; a merge to main always gets the full matrix
+        job = self.TEXT.split("\n  changed-paths:\n", 1)[1].split("\n  macos:\n", 1)[0]
+        self.assertIn('"$EVENT_NAME" != "pull_request"', job)
+
+
+class ForcedSigningLeg(unittest.TestCase):
+    """test_hermetic_fixtures.py checks the tests against a hostile ~/.gitconfig built inside one test, never
+    across a whole suite run whose runner itself has commit.gpgsign=true (what a contributor with SSH-signed
+    commits on by default actually has) — a CI leg that forces it ambiently, with a signing key that cannot
+    exist, and requires the suite to stay green anyway."""
+
+    TEXT = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+
+    def test_declares_the_job(self):
+        self.assertIn("forced-signing:", self.TEXT)
+
+    def job_text(self) -> str:
+        return self.TEXT.split("\n  forced-signing:\n", 1)[1].split("\n  python-floor:\n", 1)[0]
+
+    def test_forces_commit_signing_through_a_missing_key(self):
+        job = self.job_text()
+        self.assertIn("git config --global commit.gpgsign true", job)
+        self.assertIn("git config --global gpg.format ssh", job)
+        self.assertIn("git config --global user.signingkey", job)
+
+    def test_the_engine_suite_runs_after_the_hostile_config_and_is_not_allowed_to_fail(self):
+        job = self.job_text()
+        self.assertNotIn("continue-on-error", job)
+        signing_at = job.index("git config --global commit.gpgsign true")
+        test_at = job.index("make -C context-db test")
+        self.assertLess(signing_at, test_at, "the suite must run AFTER signing is forced, not before")
+
+    def test_is_gated_by_changed_paths_like_macos(self):
+        job = self.job_text()
+        self.assertIn("needs: changed-paths", job)
+        self.assertIn("needs.changed-paths.outputs.portability", job)
+
+
+class MermaidDepsPinned(unittest.TestCase):
+    """pr-open's mermaid-check.mjs used to be run after `npm i --no-audit --no-fund mermaid@11 jsdom dompurify` —
+    two of the three packages unpinned, no lockfile, so the Mermaid validation result depended on whatever npm
+    resolved that day. skills/pr-open now carries its own package.json + package-lock.json (installed with
+    `npm ci`, so the exact versions in the lockfile are what runs), and Dependabot tracks that directory."""
+
+    PR_OPEN = KIT / "skills" / "pr-open"
+
+    def test_package_json_and_lockfile_exist(self):
+        self.assertTrue((self.PR_OPEN / "package.json").is_file(), "no skills/pr-open/package.json")
+        self.assertTrue((self.PR_OPEN / "package-lock.json").is_file(), "no skills/pr-open/package-lock.json")
+
+    def test_package_json_pins_all_three_deps_to_exact_versions(self):
+        import json
+        deps = json.loads((self.PR_OPEN / "package.json").read_text(encoding="utf-8"))["dependencies"]
+        for name in ("mermaid", "jsdom", "dompurify"):
+            self.assertIn(name, deps, f"package.json is missing {name}")
+            self.assertRegex(deps[name], r"^\d+\.\d+\.\d+$", f"{name}: {deps[name]!r} is not an exact version")
+
+    def test_lockfile_versions_match_package_json(self):
+        import json
+        pkg = json.loads((self.PR_OPEN / "package.json").read_text(encoding="utf-8"))
+        lock = json.loads((self.PR_OPEN / "package-lock.json").read_text(encoding="utf-8"))
+        root_deps = lock["packages"][""]["dependencies"]
+        self.assertEqual(pkg["dependencies"], root_deps)
+
+    def test_skill_md_no_longer_tells_readers_to_npm_i_unpinned(self):
+        text = (self.PR_OPEN / "SKILL.md").read_text(encoding="utf-8")
+        self.assertNotIn("npm i --no-audit --no-fund mermaid@11 jsdom dompurify", text)
+        self.assertIn("npm ci", text)
+
+    def test_dependabot_tracks_the_pr_open_npm_manifest(self):
+        cfg = (KIT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        self.assertIn("package-ecosystem: npm", cfg)
+        self.assertIn("directory: /skills/pr-open", cfg)
+
+
 class Hosting(unittest.TestCase):
     """A public repository runs every job on GitHub-hosted runners — no workflow names a self-hosted runner, so
     neither a pull request's code nor a push can reach a maintainer's machine."""

@@ -161,10 +161,107 @@ jobs:
         working-directory: .claude
         run: python3 context-db/bin/check_links.py
 
+  # Whether this run needs the two legs below (macos, forced-signing): both exercise BSD/macOS fallbacks and
+  # signing-hostile git config that only skills/_lib/portable.sh, the shell fixtures and their tests touch — a
+  # macOS runner is the priciest minute on the matrix, so it (and its Linux sibling, kept next to it so the two
+  # stay in the same on-condition) starts only when the diff could plausibly move them. A push to main (not a
+  # pull_request) always runs both: main is never skipped just because no single PR's diff looked relevant.
+  changed-paths:
+    name: changed-paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      portability: ${{ steps.check.outputs.portability }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # Always runs (never gated by its own `if:`), so the two jobs below can simply key off its output instead
+      # of also reasoning about GitHub's "needs a skipped job" propagation. A push to main always sets
+      # portability=true (main gets the full matrix on every merge — this only bounds cost across a PR's own
+      # iterating pushes); a pull_request diffs base..head, falling back to "run it" when the base is unusable
+      # (force-push over history this shallow-enough checkout doesn't have).
+      - id: check
+        name: Does this PR touch a shell script, its tests, or skills/_lib?
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "portability=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$PR_BASE" ] || ! git cat-file -e "$PR_BASE" 2>/dev/null; then
+            echo "portability=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$PR_BASE" "$PR_HEAD")"
+          echo "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '\.sh$|^context-db/tests/|^skills/_lib/'; then
+            echo "portability=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "portability=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The BSD/macOS fallbacks in skills/_lib/portable.sh (no flock, no setsid, BSD date) are exercised by
+  # PATH-manipulation tests on a Linux runner only — this is the real interpreter those fallbacks are for.
+  # Gated by changed-paths above so an unrelated PR never pays for a macOS minute.
+  macos:
+    name: macos (portable.sh, sh/dash parse)
+    needs: changed-paths
+    if: needs.changed-paths.outputs.portability == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install PyYAML (frontmatter cross-check)
+        run: |
+          . .github/versions.env
+          python3 -m pip install --quiet "PyYAML==$PYYAML_VERSION"
+      - name: Engine tests on macOS
+        run: make -C context-db test
+      - name: Shell scripts parse under macOS sh (and dash, where installed)
+        run: |
+          rc=0
+          command -v dash >/dev/null 2>&1 || brew install dash >/dev/null 2>&1 || true
+          while IFS= read -r -d '' f; do
+            sh -n "$f" || { echo "::error file=$f::sh -n failed"; rc=1; }
+            if command -v dash >/dev/null 2>&1; then
+              dash -n "$f" || { echo "::error file=$f::dash -n failed"; rc=1; }
+            fi
+          done < <(git ls-files -z '*.sh' hooks/ ':!hooks/*.json')
+          exit $rc
+
+  # The hermetic-fixture work (test_hermetic_fixtures.py) checks the tests against a hostile ~/.gitconfig built
+  # inside one test, never across a whole suite run whose runner itself has commit.gpgsign=true — a config a
+  # contributor with SSH-signed commits on by default really has. Force it on the runner before the suite (a
+  # signing key that cannot exist, so any unhermetic `git commit` fails loudly) and require the suite to stay
+  # green; same path gate as macos above.
+  forced-signing:
+    name: forced-signing (hostile ambient git config)
+    needs: changed-paths
+    if: needs.changed-paths.outputs.portability == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Force commit signing through a key that does not exist
+        run: |
+          git config --global commit.gpgsign true
+          git config --global gpg.format ssh
+          git config --global user.signingkey "$RUNNER_TEMP/no-such-signing-key"
+      - name: Install PyYAML (frontmatter cross-check)
+        run: |
+          . .github/versions.env
+          python3 -m pip install --quiet "PyYAML==$PYYAML_VERSION"
+      - name: Engine tests under forced signing
+        run: make -C context-db test
+
   # The floor the kit declares (kit_profile.py's own guard; docs/contributing.md § Testing): the engine's stdlib
   # code uses zoneinfo, Path.is_relative_to and str.removeprefix, all 3.9+-only, so 3.9 is the oldest interpreter
-  # that must still pass. ubuntu-latest only — a macOS leg needs BSD-vs-GNU date/sed/awk fixes first (its own
-  # issue) and would go red for a reason this job is not about; add it once that's done, not before.
+  # that must still pass. ubuntu-latest only — a Python-version floor is orthogonal to the macos leg above
+  # (BSD/macOS shell behaviour, not the interpreter version), so it stays its own always-on job.
   python-floor:
     name: python-floor (3.9)
     runs-on: ubuntu-latest

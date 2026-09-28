@@ -10,3 +10,13 @@ updates:
     commit-message:
       prefix: "ci(deps)"
     labels: [enhancement, area:ci]
+
+  # skills/pr-open/mermaid-check.mjs's own three deps (mermaid, jsdom, dompurify) — installed into a
+  # scratchpad with `npm ci`, never run in place; Dependabot still needs the manifest's directory to track them.
+  - package-ecosystem: npm
+    directory: /skills/pr-open
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(deps)"
+    labels: [enhancement, area:skills]

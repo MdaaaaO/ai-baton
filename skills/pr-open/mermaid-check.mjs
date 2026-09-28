@@ -1,6 +1,6 @@
 // Usage: node $BATON/skills/pr-open/mermaid-check.mjs [--allow-none] <markdown-file>...
-// Run from a scratchpad dir that has `npm i --no-audit --no-fund mermaid@11 jsdom` installed
-// (modules resolve from the CURRENT DIRECTORY, not from this file's location).
+// Run from a scratchpad dir seeded with this skill's package.json + package-lock.json
+// (`npm ci --no-audit --no-fund` — modules resolve from the CURRENT DIRECTORY, not from this file's location).
 // Parses every ```mermaid block in each file (CRLF- and LF-terminated fences alike); prints
 // `OK (<type>)` / `FAIL <error>` per block; exits 1 on any FAIL. A file with zero blocks also exits 1
 // (a plan called for diagrams that never got drawn) unless --allow-none is passed. See SKILL.md § Diagrams.

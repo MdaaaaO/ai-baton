@@ -25,3 +25,7 @@ sign-queue/*
 # a leftover clone of the retired profiles layer must never block a pull (sync.sh refuses untracked files);
 # kit-health warns while it exists — delete it
 profiles/
+
+# skills/pr-open's mermaid-check.mjs deps are meant to land in a scratchpad, not here — but ignore a stray
+# in-place `npm ci` so it never gets committed by accident
+node_modules/

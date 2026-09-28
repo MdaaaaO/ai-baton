@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "13"
+  version: "14"
   updated: "2026-09-28"
   reviewed: "2026-09-25"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
@@ -174,7 +174,9 @@ route modules that are UI) go into the env config — `diagrams.repos.<owner/rep
   Jira does **not**: a ticket gets the PR link, never the diagram source.
 - **Validate before publishing.** A syntax error renders as a red box for every reviewer. Parse every block
   with the mermaid library: `node $BATON/skills/pr-open/mermaid-check.mjs <body.md>…` from a scratchpad dir
-  after `npm i --no-audit --no-fund mermaid@11 jsdom dompurify` (prints `OK (<type>)` / `FAIL <error>` per
+  after copying `$BATON/skills/pr-open/package.json` and `package-lock.json` there and running
+  `npm ci --no-audit --no-fund` (pinned versions, not the day's latest — Dependabot bumps the lockfile;
+  prints `OK (<type>)` / `FAIL <error>` per
   block; handles CRLF-terminated fences; exits 1 on any failure, or on a file with zero mermaid blocks unless
   `--allow-none` is passed — a docs/config-only push has none on purpose) — or, if that is impossible, re-read against these traps: a `;` inside sequence
   text **terminates the statement** (use `—`/`,` or parentheses); one message per line; quote node labels with
