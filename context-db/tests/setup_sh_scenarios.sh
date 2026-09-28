@@ -14,6 +14,12 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 fails=0
 
+# every git call below (setup.sh's own hooks/git-tracked-plugin checks, and the fixture git repos this script
+# builds by hand) must ignore the developer's global/system git config: a host with commit.gpgsign=true and no
+# signer configured must not fail these scenarios.
+. "$(dirname "$0")/hermetic.sh"
+hermetic_git_env "$WORK"
+
 pass() { echo "  ok   $1"; }
 fail() { echo "  FAIL $1" >&2; fails=$((fails + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1"; fi; }

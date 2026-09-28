@@ -13,9 +13,11 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
 BIN = HERE.parent / "bin"
 sys.path.insert(0, str(BIN))
+sys.path.insert(0, str(HERE.parent))
 
 import check_links  # noqa: E402
 import kit_verify  # noqa: E402
+from tests import hermetic_env  # noqa: E402
 
 
 def main(*argv: str) -> int:
@@ -31,7 +33,7 @@ def main_capture(*argv: str) -> tuple[int, str]:
 
 
 def git(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=hermetic_env(repo))
 
 
 class Links(unittest.TestCase):
@@ -175,7 +177,7 @@ class ListingFailures(unittest.TestCase):
 
     def test_a_repo_without_markdown_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "init", "-q", tmp], check=True, env=hermetic_env(tmp))
             p = subprocess.run([sys.executable, str(BIN / "check_links.py"), "--repo", tmp], capture_output=True, text=True)
             self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
             self.assertIn("no Markdown files to check", p.stderr)

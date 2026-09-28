@@ -16,6 +16,8 @@ from unittest import mock
 
 KIT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
+sys.path.insert(0, str(KIT / "context-db"))
+from tests import hermetic_env  # noqa: E402
 
 
 def load_script(path: Path, name: str, env: dict | None = None):
@@ -253,7 +255,8 @@ class DiagramPlan(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "clone"
             repo.mkdir()
-            git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True)
+            git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True,
+                                            env=hermetic_env(repo))
             git("init", "-q", "-b", "main")
             git("config", "user.email", "t@example.invalid"); git("config", "user.name", "t")
             git("remote", "add", "origin", "git@github.com:acme/widgets.git")

@@ -7,6 +7,7 @@ import importlib.util
 import io
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -17,6 +18,18 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
 SIGNQ = KIT / "skills" / "sign-queue" / "signq.py"
 ENQUEUE = KIT / "skills" / "sign-queue" / "enqueue.sh"
+sys.path.insert(0, str(HERE.parent))
+from tests import hermetic_env  # noqa: E402
+
+
+def _env(tmp, ctx=None) -> dict:
+    """hermetic_env(tmp) with any ambient SIGN_QUEUE_* stripped, so a developer's own sign-queue env (or queue
+    dir) can never leak into a fixture; ctx, when given, becomes CONTEXT_ROOT — the shape every test below needs
+    for enqueue.sh / signq.py, plus the git isolation a seeded fixture repo needs."""
+    env = {k: v for k, v in hermetic_env(tmp).items() if not k.startswith("SIGN_QUEUE_")}
+    if ctx is not None:
+        env["CONTEXT_ROOT"] = str(ctx)
+    return env
 
 
 def load_signq():
@@ -31,17 +44,16 @@ class QueueHome(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = Path(tmp) / "ws" / ".context"
             ctx.mkdir(parents=True)
-            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
-            with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(ctx)}, clear=True):
+            with mock.patch.dict(os.environ, _env(tmp, ctx), clear=True):
                 sq = load_signq()
             self.assertEqual((sq.Q, sq.CONTEXT, sq.ROOT), (ctx / "state" / "sign-queue", ctx, ctx.parent))
             self.assertEqual(sq.LEGACY_Q, KIT / "sign-queue")
             self.assertFalse(str(sq.Q).startswith(str(KIT)))  # never below the kit
 
     def test_enqueue_refuses_without_a_workspace(self):
-        env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
-        r = subprocess.run(["sh", str(ENQUEUE), "t", "/nonexistent", "b", "/nonexistent/msg"],
-                           env={**env, "CONTEXT_ROOT": "/nonexistent/ws/.context"}, capture_output=True, text=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            r = subprocess.run(["sh", str(ENQUEUE), "t", "/nonexistent", "b", "/nonexistent/msg"],
+                               env=_env(tmp, "/nonexistent/ws/.context"), capture_output=True, text=True)
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn("no workspace .context/ found", r.stderr)
 
@@ -54,18 +66,18 @@ class FirstEnqueue(unittest.TestCase):
             ctx.mkdir(parents=True)
             wt = Path(tmp) / "ws" / "repo"
             wt.mkdir()
+            git_env = _env(tmp)  # every git call below ignores the host's own commit.gpgsign / gpg.format
             git = ["git", "-C", str(wt), "-c", "user.name=t", "-c", "user.email=t"]
-            subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True)
+            subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True, env=git_env)
             (wt / "a.txt").write_text("a\n")
-            subprocess.run([*git, "add", "a.txt"], check=True)
-            subprocess.run([*git, "commit", "-q", "-m", "chore: seed"], check=True)
+            subprocess.run([*git, "add", "a.txt"], check=True, env=git_env)
+            subprocess.run([*git, "commit", "-q", "-m", "chore: seed"], check=True, env=git_env)
             (wt / "a.txt").write_text("b\n")
             msg = Path(tmp) / "msg.txt"
             msg.write_text("fix: change a\n")
-            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
             r = subprocess.run(["sh", str(ENQUEUE), "topic-a", str(wt), "main", str(msg), "--files", "a.txt",
                                 "--ticket", "none", "--epic", "none", "--pr", "1", "--summary", "s", "--by", "t"],
-                               env={**env, "CONTEXT_ROOT": str(ctx)}, capture_output=True, text=True, timeout=60)
+                               env=_env(tmp, ctx), capture_output=True, text=True, timeout=60)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             jobs = list((ctx / "state" / "sign-queue").glob("*-topic-a.sh"))
             self.assertEqual(len(jobs), 1, r.stdout + r.stderr)
@@ -82,8 +94,7 @@ class Migration(unittest.TestCase):
             (legacy / ".gitkeep").write_text("")
             q.mkdir(parents=True)
             (q / "b.sh.failed").write_text("new b\n")
-            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
-            with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(Path(tmp) / "ws" / ".context")}, clear=True):
+            with mock.patch.dict(os.environ, _env(tmp, Path(tmp) / "ws" / ".context"), clear=True):
                 sq = load_signq()
                 moved = sq.migrate_legacy(legacy, q)
             self.assertEqual(moved, 2)
@@ -110,16 +121,16 @@ class HostileValues(unittest.TestCase):
             ctx = tmp / "ws" / ".context"
             ctx.mkdir(parents=True)
             origin, wt = tmp / "origin.git", tmp / "ws" / "re'po $(touch PWNED-wt)"
-            subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-            subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True)
+            git_env = _env(tmp, ctx)  # the baseline; the full env below layers the ssh-signing config on top
+            subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, env=git_env)
+            subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True, env=git_env)
             key = tmp / "key"
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
             cfg = {"user.name": "t", "user.email": "t@example.invalid", "gpg.format": "ssh",
                    "user.signingkey": str(key), "remote.origin.url": str(origin)}
-            env = {k: v for k, v in os.environ.items() if not k.startswith(("SIGN_QUEUE_", "GIT_"))}
-            env.update(GIT_CONFIG_COUNT=str(len(cfg)), CONTEXT_ROOT=str(ctx), HOME=str(tmp),
-                       **{f"GIT_CONFIG_KEY_{i}": k for i, k in enumerate(cfg)},
-                       **{f"GIT_CONFIG_VALUE_{i}": v for i, v in enumerate(cfg.values())})
+            env = {**git_env, "GIT_CONFIG_COUNT": str(len(cfg)),
+                   **{f"GIT_CONFIG_KEY_{i}": k for i, k in enumerate(cfg)},
+                   **{f"GIT_CONFIG_VALUE_{i}": v for i, v in enumerate(cfg.values())}}
             git = ["git", "-C", str(wt)]
             (wt / "seed").write_text("s\n")
             subprocess.run([*git, "add", "seed"], check=True, env=env)
@@ -156,30 +167,29 @@ class HostileValues(unittest.TestCase):
             self.assertEqual(sq.Job(legacy)._files_from_script(), 3)
 
     def test_newline_in_a_value_is_refused(self):
-        env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / ".context").mkdir()
             r = subprocess.run(["sh", str(ENQUEUE), "t", tmp, "fix/a\nb", "/nonexistent"],
-                               env={**env, "CONTEXT_ROOT": str(Path(tmp) / ".context")}, capture_output=True, text=True)
+                               env=_env(tmp, Path(tmp) / ".context"), capture_output=True, text=True)
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn("contains a newline", r.stderr)
 
 
 def _load_in(ctx: Path):
     """load_signq() with CONTEXT_ROOT pointed at a temp workspace's .context, like the other tests here."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
-    with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(ctx)}, clear=True):
+    with mock.patch.dict(os.environ, _env(ctx, ctx), clear=True):
         return load_signq()
 
 
 def _seed_repo(root: Path) -> Path:
     wt = root / "repo"
     wt.mkdir()
+    git_env = _env(root)  # every git call below ignores the host's own commit.gpgsign / gpg.format
     git = ["git", "-C", str(wt), "-c", "user.name=t", "-c", "user.email=t"]
-    subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True, env=git_env)
     (wt / "a.txt").write_text("a\n")
-    subprocess.run([*git, "add", "a.txt"], check=True)
-    subprocess.run([*git, "commit", "-q", "-m", "chore: seed"], check=True)
+    subprocess.run([*git, "add", "a.txt"], check=True, env=git_env)
+    subprocess.run([*git, "commit", "-q", "-m", "chore: seed"], check=True, env=git_env)
     (wt / "a.txt").write_text("b\n")
     return wt
 
@@ -282,10 +292,9 @@ class PrFlagValidation(unittest.TestCase):
             wt = _seed_repo(tmp / "ws")
             msg = tmp / "msg.txt"
             msg.write_text("fix: change a\n")
-            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
             r = subprocess.run(["sh", str(ENQUEUE), "topic-b", str(wt), "main", str(msg), "--files", "a.txt",
                                 "--ticket", "none", "--epic", "none", "--pr", "12a", "--summary", "s", "--by", "t"],
-                               env={**env, "CONTEXT_ROOT": str(ctx)}, capture_output=True, text=True, timeout=60)
+                               env=_env(tmp, ctx), capture_output=True, text=True, timeout=60)
             self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
             self.assertIn("signq.py meta failed", r.stderr)
             self.assertEqual(list((ctx / "state" / "sign-queue").glob("*.sh")), [], "a rejected flag must not queue a job")
@@ -303,10 +312,9 @@ class StagingRuleIsExplicit(unittest.TestCase):
             wt = _seed_repo(tmp / "ws")
             msg = tmp / "msg.txt"
             msg.write_text("fix: change a\n")
-            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
             r = subprocess.run(["sh", str(ENQUEUE), "topic-c", str(wt), "main", str(msg), "--all",
                                 "--ticket", "none", "--epic", "none", "--pr", "1", "--summary", "s", "--by", "t"],
-                               env={**env, "CONTEXT_ROOT": str(ctx)}, capture_output=True, text=True, timeout=60)
+                               env=_env(tmp, ctx), capture_output=True, text=True, timeout=60)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("staging", r.stderr)
             jobs = list((ctx / "state" / "sign-queue").glob("*-topic-c.sh"))

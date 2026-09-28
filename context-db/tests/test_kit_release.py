@@ -6,20 +6,22 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 KIT = Path(__file__).resolve().parents[2]
 MAKE = shutil.which("make")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tests import hermetic_env  # noqa: E402
 
 
 def _env(home: Path) -> dict:
-    env = {k: v for k, v in os.environ.items()
-           if "proxy" not in k.lower() and not k.startswith(("GIT_", "MAKE")) and k not in ("MFLAGS", "CONTEXT_ROOT")}
-    env.update(HOME=str(home), GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0",
-               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t")
-    return env
+    """hermetic_env(home) with any inherited proxy or make-runtime variable stripped too — this file's own
+    concern, not hermetic_env's."""
+    return {k: v for k, v in hermetic_env(home).items()
+            if "proxy" not in k.lower() and not k.startswith("MAKE") and k not in ("MFLAGS", "CONTEXT_ROOT")}
 
 
 @unittest.skipUnless(MAKE, "make not installed")
