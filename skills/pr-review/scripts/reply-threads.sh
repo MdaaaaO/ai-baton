@@ -25,12 +25,36 @@ jq -e '.replies|type=="array" and length>0 and all(.[]; (.thread_id|type=="strin
 o=${repo%/*}; r=${repo#*/}
 leaks=$(jq -r '[.replies[].body] | map(select(test("(^|[^A-Za-z0-9_])\\.context/|scratchpad|/tmp/|\\.cache/tmp|(claude|ai-baton)-kit/|/run/user/|/Users/[a-z]|/home/[a-z]|(^|[^A-Za-z0-9_])\\.claude/"))) | length' "$req")
 [ "$leaks" = 0 ] || { echo "error: $leaks reply body(ies) mention a local workspace path — link the PR/ticket or inline the evidence instead" >&2; exit 2; }
-TRK_KIND=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.kind 2>/dev/null || echo "")
-if [ "$TRK_KIND" = jira ]; then
-  TRK_RE=$(python3 "$KIT/context-db/bin/kit_profile.py" get tracker.key_regex 2>/dev/null || echo "")
-  if [ -n "$TRK_RE" ]; then
-    bare=$(jq -r --arg re "$TRK_RE" '[.replies[].body] | map(gsub("\\[[^\\]]*\\]\\([^)]*\\)";"") | gsub("https?://[^ )>]+";"") | select(test($re))) | length' "$req")
-    [ "$bare" = 0 ] || { echo "error: $bare reply body(ies) carry a bare tracker key — make it a link ([KEY](tracker.url_template))" >&2; exit 2; }
+# bare tracker keys: this lint needs a real env store (tracker.kind + key_regex). Exactly three cases:
+#   - `kit_profile.py source` itself fails (nonzero exit)     → fatal, the store is broken.
+#   - it says "none" (no store at all)                        → nothing is configured anywhere; `get` would
+#     document that with a stderr warning + exit 1 ("kit defaults apply") — that is NOT an error, so check
+#     `source` first and skip the lint entirely rather than read the warning as a failure.
+#   - it says "env" (a real store exists)                     → a GitHub `#123` auto-links, so the lint still
+#     does not apply when `tracker.kind` is github; every other kind gates on `tracker.key_regex` being
+#     configured (the field the lint actually uses — a Linear-style key is bare-shaped too). Here a `get`
+#     lookup's exit 1 means "absent" ONLY when it wrote nothing to stderr (an ordinary missing key); exit 1
+#     WITH stderr (the Python-floor guard, an uncaught traceback) or any exit above 1 is a real failure and
+#     must stop here, never post with bare keys (WORKSPACE.md § Verification).
+kget(){ # kget <dotted.key> -> value on stdout; rc 0 ok, 1 genuinely absent (empty stdout), 2 lookup failed (message on stderr)
+  local v rc kerr; kerr=$(mktemp)
+  v=$(python3 "$KIT/context-db/bin/kit_profile.py" get "$1" 2>"$kerr"); rc=$?
+  if [ $rc -eq 0 ]; then rm -f "$kerr"; printf '%s' "$v"; return 0; fi
+  if [ $rc -eq 1 ] && [ ! -s "$kerr" ]; then rm -f "$kerr"; return 1; fi
+  echo "error: $1 unreadable: $(cat "$kerr")" >&2; rm -f "$kerr"; return 2
+}
+err=$(mktemp)
+SRC=$(python3 "$KIT/context-db/bin/kit_profile.py" source 2>"$err"); rc=$?
+[ $rc -ne 0 ] && { echo "error: kit_profile.py source failed: $(cat "$err")" >&2; rm -f "$err"; exit 2; }
+rm -f "$err"
+if [ "$SRC" = env ]; then
+  TRK_KIND=$(kget tracker.kind); rc=$?; [ $rc -eq 2 ] && exit 2
+  if [ "$TRK_KIND" != github ]; then
+    TRK_RE=$(kget tracker.key_regex); rc=$?; [ $rc -eq 2 ] && exit 2
+    if [ -n "$TRK_RE" ]; then
+      bare=$(jq -r --arg re "$TRK_RE" '[.replies[].body] | map(gsub("\\[[^\\]]*\\]\\([^)]*\\)";"") | gsub("https?://[^ )>]+";"") | select(test($re))) | length' "$req")
+      [ "$bare" = 0 ] || { echo "error: $bare reply body(ies) carry a bare tracker key — make it a link ([KEY](tracker.url_template))" >&2; exit 2; }
+    fi
   fi
 fi
 live=$(gh api "repos/$repo/pulls/$pr" 2>/dev/null) || { echo "error: cannot read PR" >&2; exit 3; }
