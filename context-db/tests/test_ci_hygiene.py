@@ -225,6 +225,10 @@ class MacosLeg(unittest.TestCase):
         ):
             script = run_block(self.TEXT, step_name)
             self.assertTrue(script.strip(), f"could not extract the '{step_name}' step's script")
+            # a CI runner may install dash; a developer's `make test` must never install anything, so the
+            # package-manager line is dropped before the step runs locally
+            script = "\n".join(l for l in script.splitlines() if "brew install" not in l and "apt-get install" not in l)
+            self.assertNotRegex(script, r"\b(brew|apt-get|pip3?) install\b", "a local test run must never install a package")
             r = subprocess.run(["bash", "-c", script], cwd=KIT, capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, f"{step_name}:\n{r.stdout}{r.stderr}")
 
