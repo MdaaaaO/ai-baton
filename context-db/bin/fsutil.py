@@ -13,7 +13,9 @@ except ImportError:  # pragma: no cover — non-POSIX host
 
 def atomic_write(path: str, text: str) -> None:
     """Write `text` to `path` so a reader sees the old file or the new one, never a torn one: a temp file in the
-    same directory, fsync'd, then `os.replace`. The temp file is removed when anything fails."""
+    same directory, fsync'd, then `os.replace`. The temp file is removed when anything fails. `mkstemp` creates
+    the temp file `0600`; before the replace it is chmod'd to the target's existing mode (a doc stays `0644`,
+    say, across every rewrite) or, for a brand new file, to `0644` minus the process umask — never left `0600`."""
     d = os.path.dirname(os.path.abspath(path))
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=f".{os.path.basename(path)}.", suffix=".tmp")
@@ -22,6 +24,13 @@ def atomic_write(path: str, text: str) -> None:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except FileNotFoundError:
+            cur = os.umask(0)
+            os.umask(cur)
+            mode = 0o644 & ~cur
+        os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):

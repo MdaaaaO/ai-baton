@@ -1,5 +1,5 @@
 """check_links.py and kit_verify's make-target check: a relative Markdown link must resolve, a cited
-`make -C .claude/context-db <target>` must exist. Stdlib unittest. Run: make -C .claude/context-db test."""
+`make -C $BATON/context-db <target>` must exist. Stdlib unittest. Run: make -C $BATON/context-db test."""
 from __future__ import annotations
 import contextlib
 import io
@@ -21,6 +21,13 @@ import kit_verify  # noqa: E402
 def main(*argv: str) -> int:
     with contextlib.redirect_stdout(io.StringIO()):
         return check_links.main(list(argv))
+
+
+def main_capture(*argv: str) -> tuple[int, str]:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = check_links.main(list(argv))
+    return code, buf.getvalue()
 
 
 def git(repo: Path, *args: str) -> None:
@@ -69,6 +76,88 @@ class Links(unittest.TestCase):
             self.assertEqual(main("--repo", str(repo)), 0)
 
     def test_kit_has_no_broken_links(self):
+        self.assertEqual(main("--repo", str(KIT)), 0)
+
+
+class SectionPointers(unittest.TestCase):
+    """`<file> § <heading>` pointers: the heading (or a `**Bold**` run-in label) must exist in the target."""
+
+    def repo(self, tmp: str, files: dict[str, str]) -> Path:
+        repo = Path(tmp)
+        for rel, text in files.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(text, encoding="utf-8")
+        git(repo, "init", "-q")
+        git(repo, "add", "-A")
+        return repo
+
+    def test_a_heading_prefix_and_a_bold_run_in_label_both_resolve(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, {
+                "a.md": "see `docs/b.md` § Setup steps and `docs/b.md` § Notes for more\n",
+                "docs/b.md": "# Doc\n\n## Setup steps, in order\n\n**Notes.** more text follows\n",
+            })
+            self.assertEqual(check_links.broken_section_pointers(repo / "a.md", repo), [])
+
+    def test_trailing_words_that_do_not_narrow_are_dropped_one_at_a_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, {
+                "a.md": "what `docs/b.md` § Skills asks of the text\n",
+                "docs/b.md": "## Skills — the contract, on one screen\n",
+            })
+            self.assertEqual(check_links.broken_section_pointers(repo / "a.md", repo), [])
+
+    def test_a_heading_the_target_does_not_have_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, {
+                "a.md": "see `docs/b.md` § Nowhere-at-all\n",
+                "docs/b.md": "## Setup\n",
+            })
+            self.assertEqual(check_links.broken_section_pointers(repo / "a.md", repo),
+                              [(1, "docs/b.md § Nowhere-at-all")])
+            self.assertEqual(main("--repo", str(repo)), 1)
+
+    def test_bare_claude_md_and_an_unresolved_same_name_file_are_not_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, {
+                "a.md": "`CLAUDE.md` § Nothing-that-exists and SKILL.md § Also-nowhere\n",
+            })
+            self.assertEqual(check_links.broken_section_pointers(repo / "a.md", repo), [])
+
+    def test_kit_has_no_dangling_section_pointers(self):
+        self.assertEqual(main("--repo", str(KIT)), 0)
+
+
+class ClaudePrefixedMakeCalls(unittest.TestCase):
+    """`docs/` must not tell a contributor to run `make -C .claude/context-db …`: only a clone install has a
+    kit at `.claude/`. `docs/new-environment.md` is exempt — its install prompt runs before `$BATON` exists."""
+
+    def repo(self, tmp: str, files: dict[str, str]) -> Path:
+        repo = Path(tmp)
+        for rel, text in files.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(text, encoding="utf-8")
+        git(repo, "init", "-q")
+        git(repo, "add", "-A")
+        return repo
+
+    def test_a_docs_file_citing_the_clone_prefix_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, {"docs/x.md": "run `make -C .claude/context-db ci`\n"})
+            self.assertEqual(check_links.claude_prefixed_make_calls(repo / "docs" / "x.md"), [1])
+            code, out = main_capture("--repo", str(repo))
+            self.assertEqual(code, 1)
+            self.assertIn("docs/x.md:1:", out)
+
+    def test_new_environment_and_files_outside_docs_are_exempt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self.repo(tmp, {
+                "docs/new-environment.md": "run `make -C .claude/context-db ci`\n",
+                "CLAUDE.md": "run `make -C .claude/context-db ci`\n",
+            })
+            self.assertEqual(main("--repo", str(repo)), 0)
+
+    def test_kit_docs_say_baton_not_a_clone_path(self):
         self.assertEqual(main("--repo", str(KIT)), 0)
 
 

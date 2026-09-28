@@ -5,49 +5,49 @@
 # Each *.md doc carries YAML frontmatter (its "row"); INDEX.md is the generated catalog.
 # These targets create, index, verify, and find docs.
 #
-#   make -C .claude/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
-#   make -C .claude/context-db index          # regenerate INDEX.md (run after any change)
-#   make -C .claude/context-db verify         # validate frontmatter + INDEX freshness (CI-style gate)
-#   make -C .claude/context-db find TAG=pii            # docs carrying a tag
-#   make -C .claude/context-db find DOMAIN=<domain>    # docs in a domain
-#   make -C .claude/context-db archive SLUG=opine      # flip a doc to status: archived
+#   make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
+#   make -C $BATON/context-db index          # regenerate INDEX.md (run after any change)
+#   make -C $BATON/context-db verify         # validate frontmatter + INDEX freshness (CI-style gate)
+#   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
+#   make -C $BATON/context-db find DOMAIN=<domain>    # docs in a domain
+#   make -C $BATON/context-db archive SLUG=opine      # flip a doc to status: archived
 #
 # Live session registry (who is working on what, right now — see SESSION_INDEX.md):
-#   make -C .claude/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
+#   make -C $BATON/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
 #                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
-#   make -C .claude/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat (also on every flush)
-#   make -C .claude/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
-#   make -C .claude/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
-#   make -C .claude/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
-#   make -C .claude/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
+#   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat (also on every flush)
+#   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
+#   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
+#   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
+#   make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
 #   Every session-* target refreshes the row's `stats:` line from the transcript named by
 #   $CLAUDE_CODE_SESSION_ID (or SESSION_ID=<uuid>); NOSTATS=1 skips it. Zero model turns.
 #
 # Kit / config (env fact store .context/reference/env/):
-#   make -C .claude/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|config-set|init|path|migrate|discover|stale
-#   make -C .claude/context-db kb ARGS="set slack.channel foo C0… --from tool:slack_search_channels"
-#   make -C .claude/context-db profile                   # active environment name
-#   make -C .claude/context-db profile KEY=tracker.kind  # one env-config value
-#   make -C .claude/context-db kit-verify [STALE=90]     # every skill/agent carries versioning frontmatter; env store complete
-#   make -C .claude/context-db verify-skill [UNIT=skills/x] # env-free validator: frontmatter schema, body, leak shapes — no .context/ needed
-#   make -C .claude/context-db ci                        # every gate .github/workflows/ci.yml runs (ALLOW_SKIP=1: tolerate a missing tool)
-#   make -C .claude/context-db check-links               # every relative Markdown link resolves
-#   make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
-#   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
-#   make -C .claude/context-db plugin-validate            # plugin + marketplace manifests and every skill/agent, through `claude plugin validate --strict` (needs the `claude` CLI)
-#   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
-#   make -C .claude/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
-#   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
-#   make -C .claude/context-db test [T=test_kb]          # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file
-#   make -C .claude/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
-#   make -C .claude/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
-#   make -C .claude/context-db sync-check                # warn when .claude/ is ahead of origin or the last sync errored
-#   make -C .claude/context-db kit-health [STALE=90] [KIT_HEALTH_ARGS=…]  # full kit audit of the store CONTEXT names (the kit-health skill's script)
-#   make -C .claude/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
+#   make -C $BATON/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|config-set|init|path|migrate|discover|stale
+#   make -C $BATON/context-db kb ARGS="set slack.channel foo C0… --from tool:slack_search_channels"
+#   make -C $BATON/context-db profile                   # active environment name
+#   make -C $BATON/context-db profile KEY=tracker.kind  # one env-config value
+#   make -C $BATON/context-db kit-verify [STALE=90]     # every skill/agent carries versioning frontmatter; env store complete
+#   make -C $BATON/context-db verify-skill [UNIT=skills/x] # env-free validator: frontmatter schema, body, leak shapes — no .context/ needed
+#   make -C $BATON/context-db ci                        # every gate .github/workflows/ci.yml runs (ALLOW_SKIP=1: tolerate a missing tool)
+#   make -C $BATON/context-db check-links               # every relative Markdown link and `<file> § <heading>` pointer resolves; docs/ says $BATON, not .claude/
+#   make -C $BATON/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
+#   make -C $BATON/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
+#   make -C $BATON/context-db plugin-validate            # plugin + marketplace manifests and every skill/agent, through `claude plugin validate --strict` (needs the `claude` CLI)
+#   make -C $BATON/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
+#   make -C $BATON/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
+#   make -C $BATON/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
+#   make -C $BATON/context-db test [T=test_kb]          # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file
+#   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
+#   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
+#   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
+#   make -C $BATON/context-db kit-health [STALE=90] [KIT_HEALTH_ARGS=…]  # full kit audit of the store CONTEXT names (the kit-health skill's script)
+#   make -C $BATON/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
 #
 # Content root: CONTEXT overrides the default described in docs/layout.md's "Content root" paragraph.
 # Point the engine at a different content DB with, e.g.:
-#   make -C .claude/context-db index CONTEXT=/path/to/some/.context
+#   make -C $BATON/context-db index CONTEXT=/path/to/some/.context
 # Always run `index` after adding or editing a doc's frontmatter.
 
 ENGINE  := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -275,10 +275,17 @@ session-archive:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) gen_sessions.py $(if $(DRY),--dry-run,) $(if $(NOARCHIVE),--no-archive,)
 
 # make archive SLUG=<file-slug>  — flip status to archived in place (kept in INDEX).
+# Atomic: sed writes a temp copy in the same directory, `mv` replaces the doc in one rename — a reader
+# (or a second `make archive`/`make index` racing this one) sees the old doc or the new one, never a
+# half-written one; the temp copy is removed if the sed or the mv fails, so nothing is left behind.
+# `cp -p` (portable — BSD/macOS has no `chmod --reference`) seeds the temp copy with the doc's own mode
+# before sed overwrites its content, so the mode survives the swap instead of settling at mktemp's 0600.
 archive:
 	@test -n "$(SLUG)" || { echo "usage: make archive SLUG=<file-slug>"; exit 2; }
 	@f=$$(find $(CONTEXT) -name '$(SLUG).md' -not -path '*/_templates/*' | head -1); \
 	 test -n "$$f" || { echo "no doc named $(SLUG).md"; exit 1; }; \
-	 sed -i.bak -E 's|^status:.*|status: archived|' "$$f" && rm -f "$$f.bak" && \
-	 echo "archived $$f (still indexed; move to archive/ by hand if you want it out of the domain view)"; \
+	 tmp=$$(mktemp "$$f.XXXXXX"); \
+	 if cp -p "$$f" "$$tmp" && sed -E 's|^status:.*|status: archived|' "$$f" > "$$tmp" && mv -f "$$tmp" "$$f"; then \
+	   echo "archived $$f (still indexed; move to archive/ by hand if you want it out of the domain view)"; \
+	 else rm -f "$$tmp"; exit 1; fi; \
 	 $(MAKE) --no-print-directory -f $(lastword $(MAKEFILE_LIST)) index

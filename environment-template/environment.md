@@ -26,7 +26,7 @@ self-assessment → **<Lattice | week file>**; signed commits **<yes | no>**. Ke
 `dbt` (which project), `datalake` (which warehouse). Then how the shared skills behave here: where
 `pr-open` asks for review, what `pr-watch` treats as the bot verdict (`github.review_bot`), whether
 `sign-queue` is live, what `session-handoff` ticks.> The skills that are **not applicable** here are
-whatever `python3 .claude/context-db/bin/kb.py migrate --off` prints — never list them by hand.
+whatever `python3 $BATON/context-db/bin/kb.py migrate --off` prints — never list them by hand.
 
 ## Conventions specific to this environment
 
