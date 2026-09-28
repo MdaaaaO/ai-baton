@@ -405,6 +405,21 @@ def loading_table_values(n: dict[str, int] | None = None) -> dict[str, str]:
     }
 
 
+LOADING_BYTES_TOLERANCE = 0.05  # byte totals move with nearly every skill edit; counts must match exactly
+
+
+def _within_tolerance(key: str, have: str, want: str) -> bool:
+    """A byte total within 5% of the measured one still tells the reader the right size: an exact match would fail
+    every PR that edits a body and make parallel PRs conflict on the doc."""
+    if not key.endswith("-bytes"):
+        return False
+    try:
+        h, w = (int(v.replace(",", "").replace("B", "").strip()) for v in (have, want))
+    except ValueError:
+        return False
+    return abs(h - w) <= LOADING_BYTES_TOLERANCE * w
+
+
 def check_loading_table_drift(errors: list[str]) -> None:
     """docs/loading.md quotes these numbers in prose; `<!-- kit-verify:<key> --><!-- /kit-verify:<key> -->` marks
     the exact span so a later PR's description or a new skill's body cannot leave it stale — the same
@@ -418,7 +433,7 @@ def check_loading_table_drift(errors: list[str]) -> None:
         if key not in have:
             errors.append(f"docs/loading.md: no <!-- kit-verify:{key} --> marker — add one around the number and "
                           "re-run `kit_verify.py --loading-table`")
-        elif have[key] != want:
+        elif have[key] != want and not _within_tolerance(key, have[key], want):
             errors.append(f"docs/loading.md: <!-- kit-verify:{key} --> says {have[key]!r}, kit-verify now computes "
                           f"{want!r} — re-measure (`kit_verify.py --loading-table`) and update the doc")
 
@@ -456,8 +471,8 @@ def check_description(rel, fm, errors: list[str]) -> int:
 
 
 # A description is what loads into every session's prefix; a reader (human or the trigger evals) must be able
-# to tell WHEN a unit fires from it alone. Warn only for now — 15 of 18 units predate this rule (see the PR body
-# for the list) and a wording pass on every one of them is a separate, editorial piece of work; the next release
+# to tell WHEN a unit fires from it alone. Warn only for now — about a third of the units predate this rule
+# and a wording pass on every one of them is a separate, editorial piece of work; the next release
 # turns this into a failure (docs/authoring.md).
 FIRST_PERSON = re.compile(r"\b(I|I'm|I've|my|our|myself)\b")
 

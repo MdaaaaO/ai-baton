@@ -467,6 +467,14 @@ class LoadingTable(unittest.TestCase):
         errors = self.with_doc(self.marked(want), kit_verify.check_loading_table_drift)
         self.assertTrue(any("kit-verify:units" in e and "re-measure" in e for e in errors), errors)
 
+    def test_byte_totals_tolerate_small_drift_but_not_large(self):
+        n = kit_verify.loading_numbers()
+        near = dict(kit_verify.loading_table_values({**n, "body_bytes": int(n["body_bytes"] * 1.03)}))
+        self.assertEqual(self.with_doc(self.marked(near), kit_verify.check_loading_table_drift), [])
+        far = dict(kit_verify.loading_table_values({**n, "body_bytes": int(n["body_bytes"] * 1.2)}))
+        errors = self.with_doc(self.marked(far), kit_verify.check_loading_table_drift)
+        self.assertTrue(any("kit-verify:body-bytes" in e for e in errors), errors)
+
     def test_missing_markers_are_each_reported(self):
         errors = self.with_doc("no markers here\n", kit_verify.check_loading_table_drift)
         self.assertEqual(len(errors), 4, errors)
