@@ -53,8 +53,8 @@ Also failed: a bare value with a ` #` in it (YAML cuts it there — quote it), a
 1. `make -C .claude/context-db verify-skill UNIT=skills/<name>` — the env-free validator (schema, caps, body,
    cited paths, leak shapes, manifests), then `make -C .claude/context-db ci` (every gate CI runs; `ALLOW_SKIP=1`
    where shellcheck or the `claude` CLI is missing).
-2. **Bump**: a behaviour change bumps `metadata.version`, sets `metadata.updated`, and adds one line at the top of
-   `docs/CHANGELOG.md` naming the unit and version. Wording-only edits bump nothing and the PR says so (`wording`
+2. **Bump**: a behaviour change bumps `metadata.version` and sets `metadata.updated`; what a machine must do after the
+   sync goes in the PR's § Machines (the release log is generated from the squash commit). Wording-only edits bump nothing and the PR says so (`wording`
    label or `[skip-bump]` in its title or body). `make -C .claude/context-db review-gate BASE=origin/main` is the
    tier-0 gate CI runs: leak and PII shapes on every added line, and the bump per changed unit (`docs/REVIEW.md` § 1).
 3. **Tests**: a script beside the skill or an engine change gets a stdlib `unittest` in `context-db/tests/`

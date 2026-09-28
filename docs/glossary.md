@@ -62,7 +62,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   `user`, `import:<env>` or `derived:<key>` (`kb.py set --from`). `kb.py stale` measures the date against the
   manifest's `ttl_days`; a `user` row is never stale.
 - **Review gate (tier 0)** — `review_gate.py`, run by `ci.yml` and `make -C .claude/context-db review-gate`: leak
-  and PII shapes on every added line, and a version / `updated` / CHANGELOG bump for every changed unit. Tiers 1–3
+  and PII shapes on every added line, and a version / `updated` bump for every changed unit. Tiers 1–3
   are the evidence file, the Claude review and the `evals/kit-review-*` cases (`docs/REVIEW.md`).
 - **Session registry** — `.context/sessions/<name>.md`, one file per live session (what it owns, a ≤ 12 h heartbeat,
   a `stats:` line), aggregated into `SESSION_INDEX.md` by `gen_sessions.py`; managed by `session.py` and the
@@ -72,7 +72,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Ticket** — one tracker item (a Jira issue or a GitHub issue, per `tracker.kind`), always cited by its key as a
   link. `ticket-open` / `ticket-update` / `ticket-close` act on it; `tracker.key_regex` recognises it.
 - **Unit** — one skill (`skills/<name>/SKILL.md`) or one agent (`agents/<name>.md`): the thing `kit-verify`
-  validates, `review_gate.py` bumps and `docs/CHANGELOG.md` lists by version.
+  validates and `review_gate.py` bumps by version.
 - **Wording-only** — a PR that changes text but no behaviour: no version bump, declared with the `wording` label or
   `[skip-bump]` in the title or body (`review_gate.py --skip-bump`); the reviewer may question the claim.
 - **Workspace root** — the directory Claude Code sessions run in: the repos, the root `CLAUDE.md` and `Makefile`,

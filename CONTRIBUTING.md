@@ -12,8 +12,8 @@ through an issue and a reviewed PR.
 - **Start the PR body with `Closes #N`**, or with `Refs #N` for one step of a larger issue.
 - **Run `make -C context-db ci` in your worktree** before you push. It runs every gate CI runs; it needs `origin/main`
   fetched, and a missing tool (shellcheck, the `claude` CLI) fails it unless you pass `ALLOW_SKIP=1`.
-- **Bump a skill whose behaviour changes.** Raise `metadata.version` and add one line to the top of
-  [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+- **Bump a skill whose behaviour changes.** Raise `metadata.version` and set `metadata.updated`. The release log is
+  generated from your PR title; say what a machine must do in the PR's § Machines.
 - **Keep machine values out of the kit.** No ids, hosts, org names or people. They belong in the env store.
 
 ## Use of AI

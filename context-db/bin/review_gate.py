@@ -11,8 +11,8 @@ locally):
          the scanners' own files are skipped. A login or a person's name has no shape — that stays with kit-health's
          identity scan (this machine's values) and the reviewer's leak-by-meaning lens.
   bump   a skill or agent with a changed file (anything under `skills/<x>/` except README.md, or `agents/<x>.md`) bumps
-         `metadata.version` (a higher integer than base), sets `metadata.updated` to a later date, and gets a new
-         `docs/CHANGELOG.md` line that names it; a new unit needs the CHANGELOG line; a deleted unit too. Wording-only
+         `metadata.version` (a higher integer than base) and sets `metadata.updated` to a later date; a new unit needs an
+         integer version. What changed is the PR's squash commit, which the generated release log lists. Wording-only
          edits are exempt with `--skip-bump` (ci.yml passes it for the `wording` label or `[skip-bump]` in the PR
          title/body — the exemption is the author's explicit claim, visible on the PR).
 
@@ -39,7 +39,6 @@ import frontmatter as fmt  # noqa: E402
 import leak_shapes  # noqa: E402
 
 KIT = HERE.parents[1]
-CHANGELOG = "docs/CHANGELOG.md"
 RULE_LEAK = "REVIEW.md § 2.1"
 RULE_BUMP = "docs/contributing.md § Versioning"
 ALLOW = "skills/kit-health/allow.txt"
@@ -229,23 +228,17 @@ def tree_findings(head: str = "HEAD", cwd: Path = KIT) -> tuple[list[str], int]:
 def bump_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] | None = None) -> list[str]:
     files = changed_files(base, head, cwd) if files is None else files
     mb = merge_base(base, head, cwd)
-    changelog_added = "\n".join(t for _n, t in added_lines(base, head, CHANGELOG, cwd)) if CHANGELOG in files else ""
     units = sorted({u for u in (unit_of(p) for p in files) if u})
     out: list[str] = []
     for unit in units:
         name = unit_name(unit)
         before, after = show(mb, unit, cwd), show(head, unit, cwd)
-        mentioned = re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", changelog_added) is not None
-        if after is None:  # deleted unit
-            if not mentioned:
-                out.append(f"[STOP] {CHANGELOG}:1 — `{name}` is removed but no added CHANGELOG line names it ({RULE_BUMP})")
+        if after is None:  # a removed unit needs nothing: the squash commit and the release log record it
             continue
         v_new, u_new = meta(after)
         if before is None:  # new unit
             if v_new is None:
                 out.append(f"[STOP] {unit}:1 — new unit without an integer `metadata.version` ({RULE_BUMP})")
-            if not mentioned:
-                out.append(f"[STOP] {CHANGELOG}:1 — new unit `{name}` has no CHANGELOG line ({RULE_BUMP})")
             continue
         v_old, u_old = meta(before)
         if v_new is None or v_old is None or v_new <= v_old:
@@ -255,8 +248,6 @@ def bump_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] |
             out.append(f"[STOP] {unit}:1 — `metadata.updated` is {u_new!r} (base {u_old!r}); set it to the change's date ({RULE_BUMP})")
         elif u_new > latest_date():
             out.append(f"[STOP] {unit}:1 — `metadata.updated` {u_new!r} is in the future ({RULE_BUMP})")
-        if not mentioned:
-            out.append(f"[STOP] {CHANGELOG}:1 — `{name}` changed but no added CHANGELOG line names it ({RULE_BUMP})")
     return out
 
 
@@ -269,11 +260,11 @@ def run(base: str, head: str = "HEAD", skip_bump: bool = False, cwd: Path = KIT)
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="tier-0 review gate: leak shapes on added lines, version/CHANGELOG bumps")
+    ap = argparse.ArgumentParser(description="tier-0 review gate: leak shapes on added lines, version/updated bumps")
     ap.add_argument("check", nargs="?", choices=("all", "leak", "bump"), default="all")
     ap.add_argument("--base", default="origin/main", help="the base ref (default origin/main)")
     ap.add_argument("--head", default="HEAD")
-    ap.add_argument("--skip-bump", action="store_true", help="wording-only PR: no version/CHANGELOG check")
+    ap.add_argument("--skip-bump", action="store_true", help="wording-only PR: no version/updated check")
     ap.add_argument("--json", action="store_true", help="print the findings as a JSON list")
     ap.add_argument("--repo", type=Path, default=None, help="the repository (default: the working directory's git top level)")
     ap.add_argument("--tree", action="store_true", help="leak-scan every file at --head, not the diff (no base, no bump check)")

@@ -105,7 +105,7 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
   (`type(scope): description`, tracker key inside, ≤72 chars) unless the repo overrides it;
   `commit_style.py resolve|check|title` decides; never infer it from the log, never add a marker to
   someone else's repo. Spec: `docs/commit-style.md`.
-- A kit behaviour change bumps its `metadata.version` and adds a `docs/CHANGELOG.md` line.
+- A kit behaviour change bumps its `metadata.version` and `metadata.updated`.
 - Never resolve a PR review thread waiting on a named third party — the open thread is the merge gate.
 
 **Verification**

@@ -23,11 +23,16 @@ Closes #
 
 <!-- Each skill/agent whose behaviour changes: `name vN → vN+1`. Wording-only edits bump nothing — say so. -->
 
+## Machines
+
+<!-- What a machine must do after `make claude_sync` — usually "nothing". A step every machine must take (a `kb.py migrate`,
+     a `config-set`, a re-run of setup) also goes in the squash commit as a `BREAKING CHANGE: <step>` footer, so the
+     generated release notes carry it. -->
+
 ## Verified how
 
 - [ ] `make -C context-db kit-verify` green locally (CI runs it against a blank env store)
-- [ ] versions bumped + `docs/CHANGELOG.md` line added — or wording only
+- [ ] versions + `updated` bumped for every changed skill/agent — or wording only
 - [ ] no environment-specific value (ids, orgs, channels, hosts, token prefixes) added to a core file
-- [ ] capabilities affected (every machine, or the `systems.*` flags involved) named above, with any `kb.py migrate` / `kb.py config-set …` or
-      migration step a machine needs after `make claude_sync`
+- [ ] capabilities affected (every machine, or the `systems.*` flags involved) named, and § Machines filled
 - [ ] `/kit-health` run on at least one machine after the change
