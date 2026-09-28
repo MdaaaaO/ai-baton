@@ -106,12 +106,14 @@ class ConventionalReleaseVersionPin(unittest.TestCase):
         # MAKELEVEL/MAKEFLAGS from that outer make — strip them (as _env() above does for KitRelease) so the
         # inner make below prints nothing but the target's own output, not an inherited "Entering directory".
         env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS"))}
+        # `--eval` is GNU make 4+ only (Apple ships 3.81); an included wrapper makefile works on both.
         with tempfile.TemporaryDirectory() as tmp:
             kit = Path(tmp)
             (kit / ".github").mkdir()
             (kit / ".github" / "versions.env").write_text(f"CONVENTIONAL_RELEASE_VERSION={version}\n")
-            r = subprocess.run([MAKE, "-f", str(KIT / "workspace.mk"), "-s",
-                                "--eval", "print-crel: ; @printf '%s' \"$(_CREL)\"", "print-crel", f"KIT={kit}"],
+            wrapper = kit / "print-crel.mk"
+            wrapper.write_text(f"include {KIT / 'workspace.mk'}\nprint-crel: ; @printf '%s' \"$(_CREL)\"\n", encoding="utf-8")
+            r = subprocess.run([MAKE, "-f", str(wrapper), "-s", "print-crel", f"KIT={kit}"],
                                capture_output=True, text=True, cwd=tmp, env=env, check=True)
             return r.stdout
 

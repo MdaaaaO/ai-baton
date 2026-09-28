@@ -54,14 +54,18 @@ while [ $# -gt 0 ]; do
     *) [ -z "$path" ] && path=$1; shift ;;
   esac
 done
+# defaults held in plain variables, never a literal `{...}` inside `${VAR:-...}`: a `}` in a
+# parameter expansion's default word is a portability trap some shells mis-scan for the closing brace.
+CHECKRUNS_DEFAULT='{"check_runs":[]}'
+STATUS_DEFAULT='{"state":"success","total_count":0,"statuses":[]}'
 case "$path" in
   graphql) printf '%s\n' "$STUB_GRAPHQL_JSON"; exit 0 ;;
   */pulls/*/files\?per_page=100) printf '%s\n' "$STUB_FILES_JSON"; exit 0 ;;
   */pulls/*/reviews\?per_page=100) printf '%s\n' "${STUB_REVIEWS_JSON:-[]}"; exit 0 ;;
   */pulls/*/comments\?per_page=100) printf '%s\n' "${STUB_REVIEW_COMMENTS_JSON:-[]}"; exit 0 ;;
   */issues/*/comments\?per_page=100) printf '%s\n' "${STUB_ISSUE_COMMENTS_JSON:-[]}"; exit 0 ;;
-  */commits/*/check-runs\?per_page=100) printf '%s\n' "${STUB_CHECKRUNS_JSON:-{\"check_runs\":[]\}}"; exit 0 ;;
-  */commits/*/status) printf '%s\n' "${STUB_STATUS_JSON:-{\"state\":\"success\",\"total_count\":0,\"statuses\":[]\}}"; exit 0 ;;
+  */commits/*/check-runs\?per_page=100) printf '%s\n' "${STUB_CHECKRUNS_JSON:-$CHECKRUNS_DEFAULT}"; exit 0 ;;
+  */commits/*/status) printf '%s\n' "${STUB_STATUS_JSON:-$STATUS_DEFAULT}"; exit 0 ;;
   */contents/*)
     f="${path#*/contents/}"; f="${f%%\?*}"
     key=$(printf '%s' "$f" | tr -c 'A-Za-z0-9' '_')
