@@ -125,6 +125,17 @@ class Migration(unittest.TestCase):
         self.assertIn("version: dropped (metadata.version already set)", changes)
         self.assertEqual(mig.migrate_text(new)[1], [])
 
+    def test_a_hand_written_single_quoted_metadata_value_is_quoted_not_double_wrapped(self):
+        """A hand-written `version: '5'` must be canonicalized to `version: "5"` (metadata is double-quote
+        only) — not wrapped a second time around its own quotes (`"'5'"`), which `quote = fmt.quote` (no
+        longer unquoting first) used to produce."""
+        text = "---\nname: x\ndescription: d\nversion:\nupdated: 2026-09-26\nreviewed: 2026-09-25\nmetadata:\n  version: '5'\n---\nbody\n"
+        new, changes = mig.migrate_text(text)
+        fm = fmt.parse(new)
+        self.assertEqual(fm["metadata"]["version"], '"5"')
+        self.assertEqual(fmt.unquote(fm["metadata"]["version"]), "5")
+        self.assertEqual(mig.migrate_text(new)[1], [])  # idempotent: quoting an already-quoted value is a no-op
+
     def test_no_frontmatter_is_left_alone(self):
         self.assertEqual(mig.migrate_text("just a body\n"), ("just a body\n", []))
 
@@ -304,6 +315,157 @@ class Verifier(unittest.TestCase):
             kit_verify.check_unit(p, p.relative_to(tmp), errors, stale, 30, date(2027, 1, 1))
             self.assertEqual(errors, [])
             self.assertEqual(len(stale), 1)
+
+    def test_unquoted_colon_space_scalar_fails_kit_verify(self):
+        """The actual shape a real YAML parser refused (`description: …lands: the week file…`) even though
+        this module's own lenient parser reads it fine — kit-verify must fail it, unquoted, and pass once
+        migrate_frontmatter.py (or a hand edit) quotes it."""
+        bad = MIGRATED.replace("description: Demo skill. Use when testing. Not for production.",
+                               "description: Demo skill: use when testing. Not for production.")
+        errors = verify(bad)
+        self.assertTrue(any("'description:' contains ': '" in e for e in errors), errors)
+        fixed = MIGRATED.replace("description: Demo skill. Use when testing. Not for production.",
+                                 'description: "Demo skill: use when testing. Not for production."')
+        self.assertEqual(verify(fixed), [])
+
+    def test_leading_indicator_and_trailing_colon_scalars_fail_kit_verify(self):
+        errors = verify(MIGRATED.replace("context: fork", "context: &anchor"))
+        self.assertTrue(any("'context:' starts with '&'" in e for e in errors), errors)
+        errors = verify(MIGRATED.replace("context: fork", "context: fork:"))
+        self.assertTrue(any("'context:' ends with ':'" in e for e in errors), errors)
+
+    def test_balanced_flow_collection_is_not_flagged(self):
+        """`arguments: [repo, pr, event]` is a deliberate YAML flow sequence (frontmatter.parse_csv's legacy
+        `[a, b]` form) — valid as is; only an unbalanced bracket is a real problem."""
+        errors = verify(MIGRATED.replace("context: fork", "context: fork\narguments: [repo, pr]"))
+        self.assertEqual([e for e in errors if "arguments" in e], [])
+        errors = verify(MIGRATED.replace("context: fork", "context: fork\narguments: [repo, pr"))
+        self.assertTrue(any("'arguments:' starts with '[' with no matching ']'" in e for e in errors), errors)
+
+
+class EscapedQuotesRoundTrip(unittest.TestCase):
+    """A description that itself contains a literal `"` (quoting a phrase, e.g. aws-sso-login's `\\"SSO
+    session…\\"`) is written as `\\"` inside the double-quoted value — strip_comment's naive `v.find('"', 1)`
+    stopped at that escaped quote instead of the real closing one, silently truncating everything after it.
+    Exercised for real by test_frontmatter_yaml.py's PyYAML cross-check; this is the always-on (no PyYAML
+    needed) version of the same regression."""
+
+    def test_strip_comment_does_not_stop_at_an_escaped_quote(self):
+        raw = '"Use whenever it fails with \\"SSO session\\" or before check." # a comment'
+        self.assertEqual(fmt.strip_comment(raw), '"Use whenever it fails with \\"SSO session\\" or before check."')
+
+    def test_unquote_decodes_the_escapes_strip_comment_kept(self):
+        raw = '"Use whenever it fails with \\"SSO session\\" or before check."'
+        self.assertEqual(fmt.unquote(fmt.strip_comment(raw)), 'Use whenever it fails with "SSO session" or before check.')
+
+    def test_full_unit_with_an_escaped_quote_is_not_truncated(self):
+        text = MIGRATED.replace(
+            "description: Demo skill. Use when testing. Not for production.",
+            'description: "Use whenever it fails with \\"SSO session\\" or before check."')
+        fm = fmt.parse(text)
+        self.assertEqual(fmt.unquote(fm["description"]), 'Use whenever it fails with "SSO session" or before check.')
+
+    def test_doubled_single_quote_is_not_the_close(self):
+        # YAML's own escape for a literal `'` inside a single-quoted scalar: `''`
+        self.assertEqual(fmt.strip_comment("'it''s fine' # trailing"), "'it''s fine'")
+
+
+class IsQuoted(unittest.TestCase):
+    """The one "already quoted, either style" check kit_verify.py and migrate_frontmatter.py both call —
+    `is_quoted_string` stays the stricter double-quote-only check `metadata:` requires."""
+
+    def test_either_quote_style_counts_is_quoted_string_is_double_only(self):
+        self.assertTrue(fmt.is_quoted('"double"'))
+        self.assertTrue(fmt.is_quoted("'single'"))
+        self.assertFalse(fmt.is_quoted("bare"))
+        self.assertFalse(fmt.is_quoted(""))
+        self.assertFalse(fmt.is_quoted_string("'single'"))
+        self.assertTrue(fmt.is_quoted_string('"double"'))
+
+
+class PlainScalarProblem(unittest.TestCase):
+    def test_fine_unquoted_values(self):
+        for v in ("", "sonnet", "fork", "true", "6", "a plain sentence.", "[repo, pr, event]", '{a: b}'):
+            self.assertIsNone(fmt.plain_scalar_problem(v), v)
+
+    def test_colon_space_and_trailing_colon(self):
+        self.assertEqual(fmt.plain_scalar_problem("lands: the week file"), "contains ': ', which YAML reads as a nested mapping")
+        self.assertEqual(fmt.plain_scalar_problem("a mapping opener:"), "ends with ':', which YAML reads as an empty mapping")
+
+    def test_leading_indicator_characters(self):
+        for c in "]}&*!|>'\"%@`":
+            self.assertIsNotNone(fmt.plain_scalar_problem(f"{c}oops"), c)
+
+    def test_unbalanced_flow_collection_is_a_problem_balanced_is_not(self):
+        self.assertIsNone(fmt.plain_scalar_problem("[a, b]"))
+        self.assertIsNone(fmt.plain_scalar_problem("{a: b}"))
+        self.assertIsNotNone(fmt.plain_scalar_problem("[a, b"))
+        self.assertIsNotNone(fmt.plain_scalar_problem("{a: b"))
+
+    def test_leading_hash_and_mid_value_comment_are_problems(self):
+        """A leading '#' and a ' #' anywhere (not just the description budget check in kit_verify.py) must be
+        caught by plain_scalar_problem itself, so no caller (session.py's quoted_value) can forget it — a
+        real YAML parser reads either as a comment and truncates the value there."""
+        self.assertIsNotNone(fmt.plain_scalar_problem("#leads with a hash"))
+        self.assertEqual(fmt.plain_scalar_problem("fix PR #261 review"),
+                         "contains ' #', which YAML reads as a comment")
+        self.assertIsNone(fmt.plain_scalar_problem("no hash here at all"))
+
+    def test_leading_comma_is_a_problem(self):
+        self.assertIsNotNone(fmt.plain_scalar_problem(",oops"))
+
+    def test_leading_dash_question_colon_only_with_a_following_space_or_alone(self):
+        for v in ("- oops", "? oops", "-", "?", ":"):
+            self.assertIsNotNone(fmt.plain_scalar_problem(v), v)
+        for v in ("-5", "-quiet", "?ok", ":ok"):
+            self.assertIsNone(fmt.plain_scalar_problem(v), v)
+
+    def test_quote_escapes_backslash_before_quote(self):
+        # backslash escaped BEFORE quotes: an already-escaped quote must not be double-escaped
+        self.assertEqual(fmt.quote('a "quoted" value'), '"a \\"quoted\\" value"')
+        self.assertEqual(fmt.quote(r"a \ backslash"), '"a \\\\ backslash"')
+        self.assertEqual(fmt.quote('needs "quotes" and \\ backslashes'), '"needs \\"quotes\\" and \\\\ backslashes"')
+
+
+class MigrationQuotesTopLevelScalars(unittest.TestCase):
+    """migrate_frontmatter.py's generic pass: any top-level scalar a real YAML parser would refuse gets quoted,
+    not just the metadata block — the bug this fixes is exactly an unquoted `description:` with ': ' in it."""
+
+    def test_unquoted_description_with_colon_space_is_quoted(self):
+        text = MIGRATED.replace("description: Demo skill. Use when testing. Not for production.",
+                                "description: Demo skill: use when testing. Not for production.")
+        new, changes = mig.migrate_text(text)
+        self.assertIn("description: quoted", changes)
+        fm = fmt.parse(new)
+        self.assertEqual(fmt.unquote(fm["description"]), "Demo skill: use when testing. Not for production.")
+        self.assertTrue(fmt.is_quoted_string(fm["description"]))
+        self.assertEqual(mig.migrate_text(new)[1], [])  # idempotent
+
+    def test_already_quoted_description_is_left_alone(self):
+        text = MIGRATED.replace("description: Demo skill. Use when testing. Not for production.",
+                                'description: "Demo skill: use when testing. Not for production."')
+        self.assertEqual(mig.migrate_text(text), (text, []))
+
+    def test_already_single_quoted_description_is_left_alone(self):
+        """A top-level scalar has no double-quote-only requirement (unlike `metadata:`): a valid single-quoted
+        `description: 'Demo: skill'` is already fine YAML and must not be flagged or rewritten."""
+        text = MIGRATED.replace("description: Demo skill. Use when testing. Not for production.",
+                                "description: 'Demo: skill. Use when testing. Not for production.'")
+        self.assertEqual(mig.migrate_text(text), (text, []))
+        fm = fmt.parse(text)
+        self.assertEqual(fmt.unquote(fm["description"]), "Demo: skill. Use when testing. Not for production.")
+
+    def test_balanced_flow_collection_value_is_not_quoted(self):
+        text = MIGRATED.replace("context: fork", "context: fork\narguments: [repo, pr, event]")
+        new, changes = mig.migrate_text(text)
+        self.assertEqual(changes, [])
+        self.assertIn("arguments: [repo, pr, event]", new)
+
+    def test_trailing_comment_survives_quoting(self):
+        text = MIGRATED.replace("context: fork", 'context: fork\nlicense: MIT: the kit license  # not a real value')
+        new, changes = mig.migrate_text(text)
+        self.assertIn("license: quoted", changes)
+        self.assertIn('license: "MIT: the kit license"  # not a real value\n', new)
 
 
 if __name__ == "__main__":

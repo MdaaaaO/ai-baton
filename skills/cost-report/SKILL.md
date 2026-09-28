@@ -1,6 +1,6 @@
 ---
 name: cost-report
-description: The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7 by default, named phases on request. Org mode reports billed cost with an anonymous aggregate control; private mode estimates list price from local transcripts. Opens with a Basis block; never names anyone. Invoke as "cost report" or "how efficient was last week".
+description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7 by default, named phases on request. Org mode reports billed cost with an anonymous aggregate control; private mode estimates list price from local transcripts. Opens with a Basis block; never names anyone. Invoke as \"cost report\" or \"how efficient was last week\"."
 metadata:
   version: "9"
   updated: "2026-09-27"

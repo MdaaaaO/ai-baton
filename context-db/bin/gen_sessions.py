@@ -103,7 +103,10 @@ def parse(path: str) -> dict:
         text = f.read()
     # the shared parser: only a leading `---` block is front matter — a `---` rule in the body is body (#132)
     parts = frontmatter.split(text)
-    meta: dict[str, str] = frontmatter.parse_flat(parts[0]) if parts else {}
+    # bare values: session.py quotes a field on write whenever the raw text needs it (working_on/responsibilities
+    # free text often contains ': '), and every reader of this registry wants the plain string back
+    meta: dict[str, str] = ({k: frontmatter.unquote(v) for k, v in frontmatter.parse_flat(parts[0]).items()}
+                             if parts else {})
     body = parts[1] if parts else text
     meta["_next"] = section(body, NEXT_HEADING)
     meta["_path"] = path
