@@ -281,6 +281,11 @@ class EndedTablePromptPointer(unittest.TestCase):
         self.assertIn("1 ended with no prompt (not listed)", text)
         self.assertTrue((self.root / "sessions" / "folded-lane.md").exists())  # still on disk, still archivable later
 
+    def test_no_follow_up_note_is_not_listed(self):
+        session_file(self.root, "done-lane", "ended", 0.1, "No follow-up from this session.")
+        run(self.root)
+        self.assertNotIn("done-lane", (self.root / "SESSION_INDEX.md").read_text())
+
     def test_older_fold_gets_the_path_but_no_block(self):
         session_file(self.root, "newest", "ended", 0.1, "Register as newest-2.", hb=(
             datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))

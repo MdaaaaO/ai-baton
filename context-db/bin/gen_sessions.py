@@ -75,7 +75,7 @@ except ValueError:  # a bad value must not leave the index stale behind a traceb
 # that ended with nothing to hand over but still wanted to point a reader at where the work went (e.g.
 # "No successor: the lane folds into <other session>") — tells a reader where the work went, not what to
 # paste to pick it up: it does not count as a real prompt, same as an absent or blank one.
-NO_SUCCESSOR_RE = re.compile(r"^no\s+successor\b", re.IGNORECASE)
+NO_SUCCESSOR_RE = re.compile(r"^no\s+(?:successor|follow-?up)\b", re.IGNORECASE)  # the handoff skill's two closing phrases
 
 
 def has_next_prompt(m: dict) -> bool:
