@@ -285,12 +285,12 @@ def check_make_targets(errors: list[str], files=None) -> None:
 
 
 # `#n` citations in kit files. The ceiling is offline and moves with each release: the highest issue/PR the release
-# CHANGELOG links, plus a margin for what is opened between releases. Backticked `#n` are examples; the CHANGELOGs are
+# CHANGELOG links, plus a margin for what is opened between releases. Backticked `#n` are examples; the release CHANGELOG is
 # history; tests and evals carry fixture numbers.
 ISSUE_REF = re.compile(r"(?<![\w/&#])#([1-9]\d{0,3})\b")
 ISSUE_REF_MARGIN = 30
 ISSUE_REF_SUFFIXES = {".md", ".py", ".sh", ".yml", ".yaml", ".json", ".mk"}
-ISSUE_REF_SKIP = ("CHANGELOG.md", "docs/CHANGELOG.md", "context-db/tests/", "evals/")
+ISSUE_REF_SKIP = ("CHANGELOG.md", "context-db/tests/", "evals/")
 ISSUE_REF_SKIP_DIRS = {".git", ".worktrees", "__pycache__", "node_modules"}
 
 

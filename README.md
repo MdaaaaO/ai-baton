@@ -64,7 +64,7 @@ The kit maintains itself, and each machine that runs it checks its own copy:
 | Loop | What it does |
 |---|---|
 | `/kit-health` | Audits the kit and this machine's wiring (frontmatter, leaked values, env store, hooks, an engine smoke), names the update command when a newer release is out, and stamps `.context/kit-health/HEALTH-<env>.md` |
-| Versioned units | Every skill and agent carries a version; each change adds a CHANGELOG line that says what a machine must do, usually nothing |
+| Versioned units | Every skill and agent carries a version; each PR says what a machine must do, usually nothing, and the release log is generated |
 | Updates | A clone fast-forwards itself at session end, a plugin install updates per release, and each machine re-stamps on its own |
 | Many sessions | A live registry with heartbeats, one PR watcher per repo and a handoff prompt per session, so parallel and successor sessions pick up in-flight work |
 | The kit's own PRs | Claude reviews every PR, a gate blocks leaked values and missing version bumps, and auto-merge lands it on green |
@@ -143,7 +143,7 @@ It also ships three agents (`triage`, `review-runner`, `auto-runner`) and the `c
 | [sync](docs/sync.md) | How the kit moves between machines |
 | [authoring](docs/authoring.md) | The checklist for a new skill or agent |
 | [engine-cli](docs/engine-cli.md) | Every engine command and flag |
-| [commit-style](docs/commit-style.md) · [REVIEW](docs/REVIEW.md) · [glossary](docs/glossary.md) · [CHANGELOG](docs/CHANGELOG.md) | Contributor reference |
+| [commit-style](docs/commit-style.md) · [REVIEW](docs/REVIEW.md) · [glossary](docs/glossary.md) · [CHANGELOG](CHANGELOG.md) | Contributor reference |
 
 ## Contributing
 

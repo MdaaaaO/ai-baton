@@ -4,7 +4,7 @@
 Writes one markdown file (default `.review/evidence.md`) for a PR head against its base:
 
   1. the changed files and the units among them with their `metadata.requires` sets, before → after;
-  2. the tier-0 verdict (`review_gate.py`: leak shapes on added lines, version/CHANGELOG bumps) — what CI already
+  2. the tier-0 verdict (`review_gate.py`: leak shapes on added lines, version/updated bumps) — what CI already
      decided, so the reviewer stops asking for it;
   3. two grep-able-but-ambiguous checks, pre-flagged for judgment, never decided here:
      - a swallowed error on an added line of a script or skill body (`2>/dev/null`, `|| true`, `|| echo`,
@@ -147,7 +147,7 @@ def render(ev: dict, rules_source: str) -> str:
         L += ["**FAILED** — the PR is red until these are fixed; do not repeat them as findings:", ""] + [f"- {f}" for f in ev["tier0"]]
     else:
         L.append("PASSED: leak shapes on every added line (chat/user ids, ticket keys, account ids, org hosts, timezone literals, e-mails, "
-                 "home paths, token shapes), version + `updated` bump and a CHANGELOG line for every changed unit"
+                 "home paths, token shapes), version + `updated` bump for every changed unit"
                  + (" (bump check skipped: the PR is marked wording-only — judge whether that claim holds)" if ev["skip_bump"] else "")
                  + ". Also green before this step: frontmatter schema, description budget, referenced scripts, plugin manifests (kit-verify).")
     L += ["", "## 3. Pre-flagged for judgment (grep found the shape, only you can tell the meaning)", "", "### Swallowed errors on added lines", ""]

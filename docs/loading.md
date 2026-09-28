@@ -68,5 +68,5 @@ diff .context/README.md .claude/context-db/context-README.template.md
 ```
 
 `kit-health` § 4 checks only the wiring (the two `@` imports, the `include .claude/workspace.mk` line, the memory
-symlink), not the templates' contents; the `docs/CHANGELOG.md` line of such a PR says "apply to a machine by …"
-when a step is needed.
+symlink), not the templates' contents; such a PR's § Machines says "apply to a machine by …"
+when a step is needed (a `BREAKING CHANGE:` footer when every machine must).
