@@ -160,6 +160,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py source         # env | none
                         python3 kit_profile.py list            # the environments this machine knows (exactly one, kept for callers that iterate)
                         python3 kit_profile.py get tracker.kind   # a dotted key (JSON for non-scalars)
+                        python3 kit_profile.py get --nonempty tracker.close_reasons.done  # exit 1 on unset OR "" / [] / {}, not just unset
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC
@@ -175,7 +176,8 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
-Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key, `plugin` on a clone) · 2 usage or I/O error.
+Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key — or, with `--nonempty`, one set to
+`""` / `[]` / `{}` — `plugin` on a clone) · 2 usage or I/O error.
 Below Python 3.9 this file exits with one line (`ai-baton needs Python 3.9+ (found …)`) before any other import.
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 ```
@@ -184,7 +186,7 @@ Stdlib only; never prints anything from settings.local.json (`identity-env` re-e
 
 ```text
 usage: kit_verify.py [-h] [--stale N] [--no-env] [--no-git] [--loading-table]
-                     [--write]
+                     [--write] [--force]
                      [units ...]
 
 Verify the kit itself — every skill and agent carries the versioning
@@ -203,8 +205,11 @@ options:
                    compare against)
   --loading-table  print the numbers docs/loading.md quotes (units,
                    description bytes, bodies, body bytes) and exit
-  --write          with --loading-table: rewrite the marked numbers in
-                   docs/loading.md
+  --write          with --loading-table: rewrite a marked number in
+                   docs/loading.md, but only one the drift check would fail on
+                   (a count that differs, or a byte total outside tolerance)
+  --force          with --loading-table --write: also rewrite markers within
+                   tolerance (a deliberate refresh, e.g. at release time)
 ```
 
 ## `review_gate.py`

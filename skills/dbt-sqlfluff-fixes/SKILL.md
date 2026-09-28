@@ -3,8 +3,8 @@ name: dbt-sqlfluff-fixes
 description: "Recognise and fix the sqlfluff violations that keep recurring in dbt models: WHERE/ON line breaks, OVER-clause-in-OR-chain indent fights, short aliases, AS alignment, nested CASE. Use when writing or editing a dbt .sql model, or when a PR's lint-models check fails and you need the exact reviewdog findings fixed in one CI round."
 compatibility: "Designed for Claude Code; needs dbt (systems.*)"
 metadata:
-  version: "6"
-  updated: "2026-09-26"
+  version: "7"
+  updated: "2026-09-28"
   reviewed: "2026-09-24"
   requires: "dbt"
 user-invocable: true
@@ -18,6 +18,8 @@ templater needs the connection — so every lint fix round-trips through CI, whi
 `command -v sqlfluff && test -f ~/.dbt/profiles.yml`; where both hold, lint locally and skip the round
 trip. This skill exists to front-load pattern recognition so a fix is right the first time, and to make
 reading CI's actual findings fast when it isn't.
+
+> On a machine where `dbt` is false, print `dbt-sqlfluff-fixes: not applicable here — dbt is false` and stop.
 
 ## Reading the real findings instead of guessing
 

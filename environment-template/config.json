@@ -32,7 +32,10 @@
       "create": "<MCP tool name suffix>",
       "comment": "<…>",
       "transition": "<…>",
-      "search": "<… the tracker's issue-search tool, used by cost-report>"
+      "search": "<… the tracker's issue-search tool, used by cost-report and a single-ticket lookup by key (JQL `key = <KEY>`)>",
+      "edit": "<… the generic issue-edit tool, e.g. setting a resolution field>",
+      "transitions_list": "<… the tool that lists the transitions actually available on an issue (ids drift)>",
+      "remote_link": "<… the read-only tool that lists an issue's remote links>"
     }
   },
   "github": {
@@ -64,7 +67,10 @@
   },
   "datalake": {
     "kind": "",
-    "_comment": "kind: warehouse vendor (snowflake | bigquery | …) — selects the datalake-<vendor> discovery manifest; empty when systems.datalake is false."
+    "_comment": "kind: warehouse vendor (snowflake | bigquery | …) — selects the datalake-<vendor> discovery manifest; empty when systems.datalake is false. mcp_tools.probe: the MCP tool pr-review's step 4b calls for a cheap listing check on the BI/datalake connector (never a query), named here so a skill never hardcodes one vendor's tool; empty when systems.datalake is false or this environment has no such probe.",
+    "mcp_tools": {
+      "probe": ""
+    }
   },
   "labels": {
     "shared": [
@@ -104,7 +110,8 @@
     "scope": "<one sentence: what work counts in this environment>",
     "ledger": false,
     "ledger_url": "",
-    "report_url": ""
+    "report_url": "",
+    "sections": []
   },
   "cost": {
     "_comment": "cost-report skill; optional (absent = private mode). spend_table/email/filters/columns: the warehouse spend table at grain user × model × day (org mode, needs systems.datalake); extra_repos: owner/repo outside github.org that count as the user's work; phases: named before/after windows. Set as one object with `kb.py config-set cost '{…}'`.",

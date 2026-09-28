@@ -14,6 +14,9 @@ metadata:
 Signing happens on the user's machine — "the host" (`commit -S` fails wherever the signing key is absent) — and long chained one-liners
 break on the user's terminal line wrap. So: sessions **enqueue**, the user **drains**.
 
+> On a machine where `signed_commits` is false, print `sign-queue: not applicable here — signed_commits is
+> false` and stop — a commit is made and pushed the ordinary way instead.
+
 ## Session side — enqueue a job
 
 ```

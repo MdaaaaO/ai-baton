@@ -137,7 +137,40 @@
       },
       "verify": "the tool is callable in this session's roster and a JQL query returns the expected issues",
       "ttl_days": 0,
-      "purpose": "MCP tool name suffix cost-report uses for the resolved-by-me query"
+      "purpose": "MCP tool name suffix cost-report uses for the resolved-by-me query, and pr-review/review-runner reuse (JQL `key = <KEY>`) for a single-ticket lookup"
+    },
+    {
+      "key": "tracker.mcp_tools.edit",
+      "target": "config",
+      "tool": "roster",
+      "args": {
+        "tool": "editJiraIssue"
+      },
+      "verify": "the tool is callable in this session's roster and edits a field (e.g. resolution) on a real issue",
+      "ttl_days": 0,
+      "purpose": "MCP tool name suffix ticket-close uses to set the resolution when only the Done transition is exposed"
+    },
+    {
+      "key": "tracker.mcp_tools.transitions_list",
+      "target": "config",
+      "tool": "roster",
+      "args": {
+        "tool": "getTransitionsForJiraIssue"
+      },
+      "verify": "the tool is callable in this session's roster and lists the transitions actually available on a real issue",
+      "ttl_days": 0,
+      "purpose": "MCP tool name suffix ticket-update/-close use to check the live transitions before posting one (ids drift)"
+    },
+    {
+      "key": "tracker.mcp_tools.remote_link",
+      "target": "config",
+      "tool": "roster",
+      "args": {
+        "tool": "getJiraIssueRemoteIssueLinks"
+      },
+      "verify": "the tool is callable in this session's roster and lists the remote links already on a real issue",
+      "ttl_days": 0,
+      "purpose": "MCP tool name suffix ticket-update uses to check for an existing pointer link before creating one via the remote-link REST endpoint"
     },
     {
       "key": "tracker.user",

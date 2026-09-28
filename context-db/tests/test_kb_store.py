@@ -562,6 +562,13 @@ class Discover(StoreCase):
         self.assertEqual(rc, 0)
         self.assertIn("OK —", out)
 
+    def test_config_driven_report_sections_and_datalake_probe_have_manifests(self):
+        # self-assessment's report-block headings and pr-review's BI-tool probe are both env facts now —
+        # no vendor form question or MCP tool name hardcoded in a skill body — so each needs a discovery
+        # manifest entry a session can find via `kb.py discover`
+        self.assertIsNotNone(kb.find_fact("self_assessment.sections", ""))
+        self.assertIsNotNone(kb.find_fact("datalake.mcp_tools.probe", ""))
+
 
 if __name__ == "__main__":
     unittest.main()

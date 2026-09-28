@@ -13,5 +13,7 @@ user-invocable: true
 
 # good-skill
 
+> On a machine where `slack` is false, print `good-skill: not applicable here — slack is false` and stop.
+
 Run `scripts/hello.sh` first; the pattern is in `$BATON/skills/good-skill/scripts/hello.sh` too, and
 `scripts/*.sh` globs or `scripts/<name>.sh` placeholders are not checked.

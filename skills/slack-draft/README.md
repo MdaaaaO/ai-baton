@@ -6,7 +6,7 @@ edits and sends, recorded at once, and read back from the channel before any fol
 **Needs:** `systems.slack` (a Slack MCP connector able to create drafts). The venues it drafts into are env
 facts of the calling skill (`slack.channel …`, `slack.review-venue …`), never values in this skill.
 
-**Without it:** `slack-draft: not applicable here (systems.slack is false)`, one line, stop — nothing is
+**Without it:** `slack-draft: not applicable here — slack is false`, one line, stop — nothing is
 drafted and no Slack step of any other skill runs.
 
 **Example:**

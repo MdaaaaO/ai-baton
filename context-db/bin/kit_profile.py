@@ -20,6 +20,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py source         # env | none
                         python3 kit_profile.py list            # the environments this machine knows (exactly one, kept for callers that iterate)
                         python3 kit_profile.py get tracker.kind   # a dotted key (JSON for non-scalars)
+                        python3 kit_profile.py get --nonempty tracker.close_reasons.done  # exit 1 on unset OR "" / [] / {}, not just unset
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC
@@ -35,7 +36,8 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
-Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key, `plugin` on a clone) · 2 usage or I/O error.
+Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key — or, with `--nonempty`, one set to
+`""` / `[]` / `{}` — `plugin` on a clone) · 2 usage or I/O error.
 Below Python 3.9 this file exits with one line (`ai-baton needs Python 3.9+ (found …)`) before any other import.
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 """
@@ -352,6 +354,14 @@ def get(path: str, default=None):
             return default
         cur = cur[part]
     return copy.deepcopy(cur) if isinstance(cur, (dict, list)) else cur
+
+
+def is_empty(value: object) -> bool:
+    """True for `None` and every falsy container/string a config value can legitimately hold (`""`, `[]`,
+    `{}`) — but not `0` or `False`, which are meaningful values, not "unset". The one predicate behind
+    `get --nonempty`, so a guard that only checked `is None` (a template placeholder left as `""`, or a
+    close-reason key present but blanked out) stops silently passing a blank value downstream."""
+    return value is None or (isinstance(value, (str, list, dict)) and len(value) == 0)
 
 
 # Identity: the user's own values, never the environment's. Two sources, one reader. On the plugin path
@@ -793,8 +803,14 @@ def main(argv: list[str]) -> int:
         if p and not os.environ.get(p[0]):
             print(f"export {p[0]}={shlex.quote(p[1])}")
     elif cmd == "get":
-        v = get(argv[2])
-        if v is None:
+        rest = argv[2:]
+        nonempty = "--nonempty" in rest
+        rest = [a for a in rest if a != "--nonempty"]
+        if not rest:
+            print(f"kit_profile: `get` needs {NEEDS_ARG['get']} — kit_profile.py get [--nonempty] {NEEDS_ARG['get']}", file=sys.stderr)
+            return 2
+        v = get(rest[0])
+        if v is None or (nonempty and is_empty(v)):
             return 1
         print(v if isinstance(v, (str, int, float)) and not isinstance(v, bool) else json.dumps(v))
     else:
