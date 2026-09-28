@@ -4,7 +4,7 @@
   "description": "Pinned deps for skills/pr-open/mermaid-check.mjs — installed with `npm ci` into a scratchpad, never run in place.",
   "dependencies": {
     "mermaid": "11.12.0",
-    "jsdom": "27.1.0",
+    "jsdom": "30.1.1",
     "dompurify": "3.3.1"
   }
 }
