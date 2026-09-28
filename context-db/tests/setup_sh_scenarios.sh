@@ -25,12 +25,13 @@ mkdir -p "$KITCOPY"
   mkdir -p "$KITCOPY/$(dirname "$f")"; cp "$KIT/$f" "$KITCOPY/$f"; done)
 
 # scenario N: a fresh workspace tree with its own HOME; prints the paths setup.sh derives
-scenario() {  # scenario <name> → sets WS (workspace root), HOME_DIR, MEM (harness memory dir), DUR (durable memory dir)
+scenario() {  # scenario <name> → sets WS (workspace root), HOME_DIR, MEM (harness memory dir), DUR (durable memory
+              # dir), MIG (where a real-dir migration backs up the pre-migration dir, outside the memory tree)
   WS="$WORK/$1/ws"; HOME_DIR="$WORK/$1/home"
   mkdir -p "$WS" "$HOME_DIR"
   rm -rf "$WS/.claude"; cp -R "$KITCOPY" "$WS/.claude"
   SLUG="$(printf '%s' "$WS" | sed 's#/#-#g')"
-  MEM="$HOME_DIR/.claude/projects/$SLUG/memory"; DUR="$WS/.context/memory"
+  MEM="$HOME_DIR/.claude/projects/$SLUG/memory"; DUR="$WS/.context/memory"; MIG="$WS/.context/state/memory-migrated"
 }
 recorded() {  # recorded <ws> → the kit.install_mode setup.sh wrote to <ws>'s env store, "" when none (#34)
   python3 -c 'import json, sys; print((json.load(open(sys.argv[1])).get("kit") or {}).get("install_mode", ""))' "$1/.context/reference/env/config.json"
@@ -60,17 +61,54 @@ printf 'same on both sides\n' > "$MEM/same.md"
 printf 'same on both sides\n' > "$DUR/same.md"
 printf 'harness copy\n' > "$MEM/both.md"
 printf 'durable copy\n' > "$DUR/both.md"
+mkdir -p "$MEM/notes.v2" "$DUR/notes.v2"   # a dotted directory, and a conflicting note with NO extension of its own
+printf 'harness dotted-dir note\n' > "$MEM/notes.v2/readme"
+printf 'durable dotted-dir note\n' > "$DUR/notes.v2/readme"
 run_setup
 check "exit 0" '[ "$RC" -eq 0 ]'
 check "new notes arrive in durable (incl. nested and a name with a space)" '[ "$(cat "$DUR/new.md")" = "fresh note" ] && [ "$(cat "$DUR/sub/deep.md")" = "nested note" ] && [ "$(cat "$DUR/has space.md")" = "with space" ]'
 check "an identical note on both sides is just kept, no conflict copy" '[ "$(cat "$DUR/same.md")" = "same on both sides" ] && [ ! -e "$DUR/same.from-harness.md" ]'
 check "a differing note keeps the durable copy under its name" '[ "$(cat "$DUR/both.md")" = "durable copy" ]'
 check "the differing harness copy is saved alongside it, not dropped" '[ -f "$DUR/both.from-harness.md" ] && [ "$(cat "$DUR/both.from-harness.md")" = "harness copy" ]'
+check "conflict_name splits only the basename: a dotted directory is left alone" '[ -f "$DUR/notes.v2/readme.from-harness" ] && [ "$(cat "$DUR/notes.v2/readme.from-harness")" = "harness dotted-dir note" ] && [ ! -e "$DUR/notes.from-harness.v2/readme" ]'
 check "harness dir replaced by the symlink" '[ -L "$MEM" ]'
-check "report counts 5 verified, 3 new, 1 already durable, 1 conflicting" 'printf "%s" "$OUT" | grep -q "5 files verified, 3 new, 1 already durable, 1 conflicting"'
+check "report counts 6 verified, 3 new, 1 already durable, 2 conflicting" 'printf "%s" "$OUT" | grep -q "6 files verified, 3 new, 1 already durable, 2 conflicting"'
 check "summary names the conflicting file" 'printf "%s" "$OUT" | grep -q "both.md -> both.from-harness.md"'
 check "no staging dir left behind" '[ -z "$(ls -d "$WS/.context/.memory-migrate."* 2>/dev/null)" ]'
-check "the pre-migration dir is kept as a recoverable backup under durable, not deleted" 'b="$(ls -d "$DUR/.migrated-"* 2>/dev/null | head -1)"; [ -n "$b" ] && [ "$(cat "$b/both.md")" = "harness copy" ] && [ "$(cat "$b/new.md")" = "fresh note" ]'
+check "the pre-migration dir is kept as a recoverable backup under .context/state/, outside the memory tree" 'b="$(ls -d "$MIG"/* 2>/dev/null | head -1)"; [ -n "$b" ] && [ "$(cat "$b/both.md")" = "harness copy" ] && [ "$(cat "$b/new.md")" = "fresh note" ]'
+check "the memory dir itself holds no migration backup (the harness would read it back as a memory)" '[ -z "$(find "$DUR" -maxdepth 1 -name ".migrated-*" 2>/dev/null)" ]'
+
+echo "== 2b. a second migration hitting the same conflict does not overwrite the first from-harness copy =="
+rm -f "$MEM"   # setup.sh replaced the real dir with a symlink; recreate a real dir (a sandbox recreate does this)
+mkdir -p "$MEM"
+printf 'harness copy v2\n' > "$MEM/both.md"
+run_setup
+check "exit 0" '[ "$RC" -eq 0 ]'
+check "the durable copy is still untouched" '[ "$(cat "$DUR/both.md")" = "durable copy" ]'
+check "the first from-harness copy from scenario 2 survives untouched" '[ "$(cat "$DUR/both.from-harness.md")" = "harness copy" ]'
+check "the new conflict gets a counted-up name instead of overwriting it" '[ "$(cat "$DUR/both.from-harness.2.md")" = "harness copy v2" ]'
+check "the summary names the counted-up file" 'printf "%s" "$OUT" | grep -q "both.md -> both.from-harness.2.md"'
+
+echo "== 2c. a harness dir that already holds an unclaimed .from-harness note does not lose it either =="
+rm -f "$MEM"
+mkdir -p "$MEM"
+printf 'harness copy v3\n' > "$MEM/both.md"
+printf 'a note that already used the from-harness name\n' > "$MEM/both.from-harness.3.md"
+run_setup
+check "exit 0" '[ "$RC" -eq 0 ]'
+check "the pre-existing from-harness.3 note (new to durable) is kept under its own name" '[ "$(cat "$DUR/both.from-harness.3.md")" = "a note that already used the from-harness name" ]'
+check "the new conflict counts past it rather than colliding" '[ "$(cat "$DUR/both.from-harness.4.md")" = "harness copy v3" ]'
+
+echo "== 2d. migration backups are pruned to the newest 3 =="
+i=1
+while [ "$i" -le 2 ]; do
+  rm -f "$MEM"; mkdir -p "$MEM"; printf 'filler %s\n' "$i" > "$MEM/filler$i.md"
+  run_setup
+  i=$((i + 1))
+done
+check "exit 0 on the last run" '[ "$RC" -eq 0 ]'
+check "5 migrations so far (2, 2b, 2c and this loop), still only 3 backups kept" '[ "$(ls -d "$MIG"/* 2>/dev/null | wc -l | tr -d " ")" -eq 3 ]'
+check "the run that crossed the limit says so" 'printf "%s" "$OUT" | grep -q "pruned 1 old migration backup"'
 
 echo "== 3. a failed copy leaves the original untouched and exits non-zero =="
 scenario failcopy

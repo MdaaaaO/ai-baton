@@ -18,11 +18,13 @@
 #      BEFORE the merge (a failed copy leaves the original untouched and exits 1; a dir holding a
 #      non-regular entry — a symlink, a pipe — is refused with exit 1, since a copy cannot carry it). A
 #      name both sides hold is compared byte-for-byte: identical is a no-op, different keeps the durable
-#      copy under its name and saves the harness copy alongside it (never dropped silently), naming every
-#      such conflict in the summary. The pre-migration dir is then moved aside under the durable dir
-#      (never deleted) before the symlink is verified to resolve to durable, so a mistake is recoverable; a
-#      symlink that already points at something else is reported and left alone unless --force, while a
-#      DANGLING one (target absent) is repointed.
+#      copy under its name and saves the harness copy alongside it under a `.from-harness` name that is
+#      never overwritten (a `.N` counts up when that name is already taken), naming every such conflict in
+#      the summary. The pre-migration dir is then moved aside — never deleted — under
+#      .context/state/memory-migrated/<timestamp>/ (outside the memory tree the harness reads through the
+#      symlink, and out of gen_index.py's reach), keeping only the newest 3, before the symlink is verified
+#      to resolve to durable, so a mistake is recoverable; a symlink that already points at something else
+#      is reported and left alone unless --force, while a DANGLING one (target absent) is repointed.
 #   3. Seeds .claude/settings.local.json (ignored, personal identity env) from the example, and
 #      .context/state/pr-review/config.json from pr-review/config.example.json, if absent.
 #   4. Makes sure this environment has its configuration: the env fact store
@@ -100,14 +102,22 @@ seed() {
   cat "$1" > "$2" && cmp -s "$1" "$2" || { echo "  ERROR: copy of $1 -> $2 is corrupt (sandbox mount?) — removed; re-run setup.sh" >&2; rm -f "$2"; return 1; }
 }
 
-# conflict_name REL — a name-collision copy of a harness note that differs from the durable one: the
+# conflict_name REL [N] — a name-collision copy of a harness note that differs from the durable one: the
 # harness copy is never dropped silently, so it lands beside the durable copy under this name instead.
-# Inserts ".from-harness" before the final extension (REL keeps any subdirectory prefix).
+# Inserts ".from-harness" (plus ".N" from the second collision on that same name) before REL's own final
+# extension — splitting only REL's basename, so a dotted directory in the path is left alone and a REL
+# with no extension of its own just gets the suffix appended.
 conflict_name() {
-  case "$1" in
-    *.*) printf '%s.from-harness.%s' "${1%.*}" "${1##*.}" ;;
-    *) printf '%s.from-harness' "$1" ;;
+  rel="$1"; n="${2:-}"
+  dir="${rel%/*}"; base="${rel##*/}"
+  if [ "$dir" = "$rel" ]; then dir=""; fi   # no '/' in rel — ${1%/*} is then a no-op, not a directory
+  case "$base" in
+    *.*) stem="${base%.*}"; ext=".${base##*.}" ;;
+    *) stem="$base"; ext="" ;;
   esac
+  if [ -n "$n" ]; then tag=".from-harness.$n"; else tag=".from-harness"; fi
+  new="$stem$tag$ext"
+  if [ -n "$dir" ]; then printf '%s/%s' "$dir" "$new"; else printf '%s' "$new"; fi
 }
 
 echo "== workspace setup =="
@@ -166,30 +176,64 @@ elif [ -d "$HARNESS_MEM" ]; then
   n_conflict=0
   list="$STAGE.list"
   conflicts="$STAGE.conflicts"
-  : > "$conflicts"
+  reserved="$STAGE.reserved"   # every destination name claimed so far — a "new" file's own name, or a conflict name
+  pending="$STAGE.pending"     # real conflicts, name resolved in pass B
+  plan="$STAGE.plan"           # f<TAB>destination pairs decided in passes A/B, executed in pass C
+  tab="$(printf '\t')"
+  : > "$conflicts"; : > "$reserved"; : > "$pending"; : > "$plan"
   (cd "$STAGE" && find . -type f | sed 's|^\./||') > "$list"
+  # Pass A — classify every file without moving anything yet. A "new" file (durable has no such name) reserves its
+  # own name right away, since it is never renamed; a real conflict (durable already differs) is only queued for
+  # pass B, so it can never race a still-unprocessed "new" file for a name — a harness dir can hold BOTH a
+  # conflicting `x.md` AND an unrelated, already-named `x.from-harness.md` (an earlier run's output, or the user's
+  # own note), and `find`'s order between the two is arbitrary.
   while IFS= read -r f; do   # a list file, not `for $(find)`: a note name with a space stays one name
-    if [ -e "$DURABLE_MEM/$f" ]; then
-      if cmp -s "$STAGE/$f" "$DURABLE_MEM/$f"; then
-        n_kept=$((n_kept + 1))   # identical on both sides — nothing the harness copy has that durable lacks
-      else
-        # same name, different bytes — never silently drop the harness copy: durable keeps the name (it is the
-        # one sessions have been reading), the harness copy lands beside it under conflict_name, and both survive
-        cf="$(conflict_name "$f")"
-        mkdir -p "$DURABLE_MEM/$(dirname "$cf")" && mv "$STAGE/$f" "$DURABLE_MEM/$cf" || {
-          echo "  ERROR: could not move conflicting $f into $DURABLE_MEM/$cf — $HARNESS_MEM left untouched (staged copy in $STAGE)" >&2; exit 1; }
-        n_conflict=$((n_conflict + 1))
-        printf '%s -> %s\n' "$f" "$cf" >> "$conflicts"
-      fi
+    if [ -e "$DURABLE_MEM/$f" ] && cmp -s "$STAGE/$f" "$DURABLE_MEM/$f"; then
+      n_kept=$((n_kept + 1))   # identical on both sides — nothing the harness copy has that durable lacks
+    elif [ -e "$DURABLE_MEM/$f" ]; then
+      printf '%s\n' "$f" >> "$pending"
     else
-      mkdir -p "$DURABLE_MEM/$(dirname "$f")" && mv "$STAGE/$f" "$DURABLE_MEM/$f" || {
-        echo "  ERROR: could not move $f into $DURABLE_MEM — $HARNESS_MEM left untouched (staged copy in $STAGE)" >&2; exit 1; }
+      printf '%s\n' "$f" >> "$reserved"
+      printf '%s%s%s\n' "$f" "$tab" "$f" >> "$plan"
       n_new=$((n_new + 1))
     fi
   done < "$list"
-  rm -f "$list"
+  # Pass B — now that every "new" file's own name is reserved, give each queued conflict a name of its own: durable
+  # keeps the original name, the harness copy lands beside it under conflict_name — counting up (`.2`, `.3`, …)
+  # past whatever is already on disk or already reserved this run, so it can never overwrite or steal a name.
+  while IFS= read -r f; do
+    cfn=1
+    cf="$(conflict_name "$f")"
+    while [ -e "$DURABLE_MEM/$cf" ] || grep -qxF "$cf" "$reserved"; do
+      cfn=$((cfn + 1))
+      cf="$(conflict_name "$f" "$cfn")"
+    done
+    printf '%s\n' "$cf" >> "$reserved"
+    printf '%s%s%s\n' "$f" "$tab" "$cf" >> "$plan"
+    n_conflict=$((n_conflict + 1))
+    printf '%s -> %s\n' "$f" "$cf" >> "$conflicts"
+  done < "$pending"
+  # Pass C — execute the plan. `mv -n` is belt-and-braces against a race; either way, confirm the move actually
+  # happened, since `mv -n` silently no-ops rather than erroring when the destination already exists.
+  while IFS="$tab" read -r f cf; do
+    mkdir -p "$DURABLE_MEM/$(dirname "$cf")" && mv -n "$STAGE/$f" "$DURABLE_MEM/$cf"
+    if [ -e "$STAGE/$f" ] || [ ! -e "$DURABLE_MEM/$cf" ]; then
+      echo "  ERROR: could not move $f into $DURABLE_MEM/$cf (already occupied?) — $HARNESS_MEM left untouched (staged copy in $STAGE)" >&2
+      exit 1
+    fi
+  done < "$plan"
+  rm -f "$list" "$reserved" "$pending" "$plan"
   rm -rf "$STAGE"
-  BACKUP="$DURABLE_MEM/.migrated-$(date +%Y%m%d-%H%M%S)"
+  # the pre-migration dir is backed up OUTSIDE the memory tree — inside it, the harness would read it back
+  # through the symlink (its stale MEMORY.md and note copies could be recalled as memories). .context/state/
+  # is the kit's usual home for this kind of operational leftover (sign-queue's jobs live there too); gen_index.py
+  # skips both `memory` and `state` outright, so neither this dir nor the durable one is ever indexed as knowledge.
+  MIGRATED_DIR="$CONTEXT/state/memory-migrated"
+  mkdir -p "$MIGRATED_DIR"
+  ts="$(date +%Y%m%d-%H%M%S)"
+  BACKUP="$MIGRATED_DIR/$ts"
+  bn=2
+  while [ -e "$BACKUP" ]; do BACKUP="$MIGRATED_DIR/$ts-$bn"; bn=$((bn + 1)); done   # same-second reruns (tests)
   mv "$HARNESS_MEM" "$BACKUP" || {
     echo "  ERROR: could not move $HARNESS_MEM aside to $BACKUP — left as a real dir, nothing linked; the notes above are already merged into $DURABLE_MEM" >&2; exit 1; }
   ln -sfn "$DURABLE_MEM" "$HARNESS_MEM"
@@ -199,7 +243,21 @@ elif [ -d "$HARNESS_MEM" ]; then
     echo "  ERROR: symlink at $HARNESS_MEM does not resolve to $DURABLE_MEM after migration — the pre-migration dir is safe at $BACKUP; fix the link by hand" >&2
     exit 1
   fi
+  # keep only the newest 3 backups (sorted by name — the timestamp format sorts chronologically); a run that
+  # never migrates a real dir leaves this alone, so it only grows one entry per actual migration
+  n_backups="$(cd "$MIGRATED_DIR" && find . -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+  n_pruned=0
+  if [ "$n_backups" -gt 3 ]; then
+    n_pruned=$((n_backups - 3))
+    prunelist="$(mktemp "$CONTEXT/.memory-prune.XXXXXX")"
+    (cd "$MIGRATED_DIR" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | sort) > "$prunelist"
+    head -n "$n_pruned" "$prunelist" | while IFS= read -r d; do rm -rf "$MIGRATED_DIR/$d"; done
+    rm -f "$prunelist"
+  fi
   echo "  memory: migrated real dir -> durable ($n_src files verified, $n_new new, $n_kept already durable, $n_conflict conflicting), replaced with symlink; pre-migration dir kept at $BACKUP"
+  if [ "$n_pruned" -gt 0 ]; then
+    echo "  memory: pruned $n_pruned old migration backup(s) under $MIGRATED_DIR (keeping the newest 3)"
+  fi
   if [ "$n_conflict" -gt 0 ]; then
     echo "  memory: conflicting notes — durable keeps the name, the harness copy is saved alongside it:"
     sed 's/^/    /' "$conflicts"
