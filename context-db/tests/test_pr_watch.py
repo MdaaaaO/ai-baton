@@ -107,10 +107,16 @@ class PrWatchStub(unittest.TestCase):
         gh = self.tmp / "bin" / "gh"
         gh.write_text(GH_STUB)
         gh.chmod(0o755)
-        env_dir = self.tmp / "ws" / ".context" / "reference" / "env"
-        env_dir.mkdir(parents=True)
-        (env_dir / "config.json").write_text(json.dumps({"github": {"review_bot": "", "sandbox_token_prefix": ""}}))
+        self.env_dir = self.tmp / "ws" / ".context" / "reference" / "env"
+        self.env_dir.mkdir(parents=True)
+        self.write_config()
         self.log = self.tmp / "gh.log"
+
+    def write_config(self, *, review_bot: str = "", bots: list | None = None) -> None:
+        (self.env_dir / "config.json").write_text(json.dumps({
+            "github": {"review_bot": review_bot, "sandbox_token_prefix": "",
+                       "bots": ["github-actions[bot]"] if bots is None else bots},
+        }))
 
     def calls(self) -> str:
         return self.log.read_text() if self.log.exists() else ""
@@ -196,6 +202,33 @@ class PrWatchStub(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("but APPROVED", r.stdout)
         self.assertNotIn("SYNCED", r.stdout)
+
+    # --- the auto-merge identity must come from the configured `github.bots` list, never a hardcoded login ---
+
+    def test_a_login_in_the_configured_bots_list_is_excluded_even_if_not_github_actions(self):
+        self.write_config(bots=["custom-ci[bot]"])  # deliberately NOT github-actions[bot]
+        reviews = [{"user": {"login": "custom-ci[bot]"}, "state": "APPROVED", "commit_id": FULL}]
+        r = self.run_watch(reviews=json.dumps(reviews), compare_behind=3, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} SYNCED with main", r.stdout)
+        self.assertNotIn("but APPROVED", r.stdout)
+
+    def test_github_actions_is_not_hardcoded_only_the_configured_list_is_excluded(self):
+        # bots list configured WITHOUT github-actions[bot]: a hardcoded exclusion would still sync here,
+        # which is exactly the bug the review thread flagged — the login must come from the config, not a literal.
+        self.write_config(bots=["some-other-bot[bot]"])
+        reviews = [{"user": {"login": "github-actions[bot]"}, "state": "APPROVED", "commit_id": FULL}]
+        r = self.run_watch(reviews=json.dumps(reviews), compare_behind=3, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("but APPROVED", r.stdout)
+        self.assertNotIn("SYNCED", r.stdout)
+
+    def test_a_missing_bots_key_is_a_startup_error_not_a_silent_empty_list(self):
+        (self.env_dir / "config.json").write_text(json.dumps({"github": {"review_bot": "", "sandbox_token_prefix": ""}}))
+        r = self.run_watch(identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("ERROR", r.stdout)
+        self.assertIn("github.bots", r.stdout)
 
 
 if __name__ == "__main__":

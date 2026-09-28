@@ -52,7 +52,7 @@ case "$*" in
   *"api graphql"*) echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}' ;;
   *"--jq .merged_at"*) echo "${STUB_MERGED_AT:-null}" ;;
   *"-X PUT"*"update-branch"*) exit 0 ;;
-  *"-X DELETE"*"requested_reviewers"*) exit 0 ;;
+  *"-X DELETE"*"requested_reviewers"*) if [ -n "${STUB_DELETE_FAIL:-}" ]; then echo "gh: HTTP 422 simulated (bot login refused as reviewer)" >&2; exit 1; fi; exit 0 ;;
   *"-X POST"*"requested_reviewers"*) exit 0 ;;
   *"pulls/7/reviews?per_page=100"*) echo "$STUB_REVIEWS" ;;
   "pr merge"*) echo "merged" ;;
@@ -179,6 +179,29 @@ class ForceReviewOnBehind(unittest.TestCase):
         self.assertIn("-X DELETE repos/o/r/pulls/7/requested_reviewers", calls)
         self.assertIn("-X POST repos/o/r/pulls/7/requested_reviewers", calls)
         self.assertNotIn("pr ready", calls)
+
+    def test_a_refused_re_request_stops_instead_of_waiting_out_the_verdict_timeout(self):
+        # `force_review` used to ignore both `gh api` calls' exit status, so a refused
+        # (DELETE 422) re-request went unreported and the script sat in `wait_verdict`'s up-to-40-minute
+        # loop before giving up with exit 3. A short `timeout=` here proves it: without the fix this test
+        # would hang/time out instead of failing fast.
+        reviews = json.dumps([{"user": {"login": "test-review-bot"}, "commit_id": FULL,
+                               "body": "### Assessment: 🟢 looks good"}])
+        env = {k: v for k, v in os.environ.items() if k not in ("PR_WATCH_BOT_LOGIN", "GH_TOKEN")}
+        env.update(PATH=f"{self.tmp / 'bin'}{os.pathsep}{os.environ['PATH']}", CONTEXT_ROOT=str(self.tmp / "ws" / ".context"),
+                   STUB_LOG=str(self.log), STUB_REVIEWS=reviews, FULL=FULL, STUB_RD="APPROVED",
+                   STUB_MERGED_AT="2026-01-01T12:00:00Z", STUB_DELETE_FAIL="1")
+        # pays the script's one real `sleep 30` (BEHIND -> update-branch -> re-check) like the sibling test above;
+        # 45s is still far short of the 40-minute `wait_verdict` timeout the unfixed code would run into.
+        r = subprocess.run(["bash", str(SCRIPT), "o/r", "7"], env=env, capture_output=True, text=True, timeout=45)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("ERROR o/r#7", r.stdout)
+        self.assertIn("re-request to test-review-bot failed", r.stdout)
+        self.assertNotIn("MERGED", r.stdout)
+        calls = self.calls()
+        # phase 1's wait_verdict runs once; a fixed force_review returns before phase 2 ever calls wait_verdict again
+        self.assertEqual(calls.count("pulls/7/reviews?per_page=100"), 1, calls)
+        self.assertNotIn("-X POST repos/o/r/pulls/7/requested_reviewers", calls)  # DELETE failed — POST never attempted
 
 
 if __name__ == "__main__":

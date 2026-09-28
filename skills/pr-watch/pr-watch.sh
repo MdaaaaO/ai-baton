@@ -38,6 +38,14 @@ else
   if [ $botrc -ne 0 ]; then msg=$(head -1 "$boterr" | tr -d '\r'); echo "ERROR $1 startup: kit_profile.py get github.review_bot: ${msg:-key absent from the env store — run kb.py config-set github.review_bot '' (or the bot login)}"; rm -f "$boterr"; exit 1; fi
   rm -f "$boterr"
 fi
+# The bot logins to exclude from a "human approval" count (github.bots — gh-cli SKILL.md: "never hardcode
+# either"). Same absent-vs-empty distinction as github.review_bot above: `get` exits 1 when the key itself is
+# missing (a real failure — never silently fall back to excluding nothing), 0 with "[]" when it is configured
+# empty. Printed as JSON (a list), read back with jq --argjson below.
+botserr=$(mktemp)
+bots=$(python3 "$KIT/context-db/bin/kit_profile.py" get github.bots 2>"$botserr"); botsrc=$?
+if [ $botsrc -ne 0 ]; then msg=$(head -1 "$botserr" | tr -d '\r'); echo "ERROR $1 startup: kit_profile.py get github.bots: ${msg:-key absent from the env store — run kb.py config-set github.bots '[]' (or the bot logins)}"; rm -f "$botserr"; exit 1; fi
+rm -f "$botserr"
 if [ -n "$bot" ]; then echo "pr-watch: bot mode — polling $bot Assessment + CI + human review" >&2
 else echo "pr-watch: no-bot mode (github.review_bot empty) — gating on CI + human review only" >&2; fi
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
@@ -120,13 +128,14 @@ while true; do
               echo "ERROR $repo#$pr $(head -1 "$D/.aerr" | tr -d '\r')"; rm -f "$D/.aerr"
             else
               rm -f "$D/.aerr"
-              # Neither the configured review bot's own approval nor the auto-merge workflow's approving identity
-              # (github-actions[bot], the review named by auto-merge.yml's REVIEWER — a different login than
-              # github.review_bot when the bot posts its Assessment under its own account) counts as the human
-              # approval that would make a push dismiss something worth keeping: without this exclusion a PR
-              # approved only by one of those two never gets synced while it sits BEHIND, and auto-merge — which
-              # requires a clean, non-BEHIND head — never runs.
-              appr=$(printf '%s' "$araw" | jq -s --arg bot "$bot" '[.[] | .[] | select(.state=="APPROVED" and .user.login!=$bot and .user.login!="github-actions[bot]")] | length')  # gh api --jq has no --arg (gh-cli skill)
+              # Neither the configured review bot's own approval nor a login in the configured `github.bots`
+              # list (which auto-merge.yml's REVIEWER — the identity its own approval carries, a different
+              # login than github.review_bot when the bot posts its Assessment under its own account —
+              # defaults into; never hardcode that login here, gh-cli SKILL.md) counts as the human approval
+              # that would make a push dismiss something worth keeping: without this exclusion a PR approved
+              # only by one of those never gets synced while it sits BEHIND, and auto-merge — which requires a
+              # clean, non-BEHIND head — never runs.
+              appr=$(printf '%s' "$araw" | jq -s --arg bot "$bot" --argjson bots "$bots" '[.[] | .[] | select(.state=="APPROVED" and .user.login!=$bot and ((.user.login as $l | ($bots | index($l))) == null))] | length')  # gh api --jq has no --arg (gh-cli skill)
               if [ "${appr:-0}" -gt 0 ] 2>/dev/null; then
                 if [ "$(getv appr_seen)" != "$cur" ]; then echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing (a push would dismiss the approval where dismiss_stale_reviews is on): merge now, or update-branch and ask for re-approval"; putv appr_seen "$cur"; fi
               else

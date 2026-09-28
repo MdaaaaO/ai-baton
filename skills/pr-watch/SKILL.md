@@ -77,9 +77,10 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
 - Every poll it reads `compare/<base>...<head>.behind_by`; when > 0 and **no human `APPROVED` review
   exists** (approvals on any head — a push would dismiss them where the ruleset says so) it runs
   `PUT pulls/N/update-branch` with `expected_head_sha` (GitHub-signed merge commit) and prints `SYNCED`.
-  An approval by the configured review bot (`github.review_bot`) or by `github-actions[bot]` (the
-  identity auto-merge.yml's own approval carries — a different login than the review bot's own account
-  when it posts its Assessment) does not count as that human approval: a PR approved only by one of
+  An approval by the configured review bot (`github.review_bot`) or by a login in the configured
+  `github.bots` list (which covers the identity auto-merge.yml's own approval carries — a different
+  login than the review bot's own account when it posts its Assessment; never hardcoded, gh-cli
+  SKILL.md) does not count as that human approval: a PR approved only by one of
   those still gets synced, since nothing would dismiss a bot's own review and the alternative is a
   BEHIND, bot-approved PR that never reaches auto-merge. One attempt per head; `PR_WATCH_SYNC_COOLDOWN`
   (default 3600 s) stops a busy `main` from restarting the PR's CI every two minutes; the cooldown is
@@ -185,10 +186,12 @@ Monitor({
 
 Phases: (1) wait for the review bot's **Assessment on the current head**, read from the review
 *object* (a green "PR Review" check is not a review); (2) if BEHIND, `update-branch`, force a full
-bot review on the merge head by removing then re-adding the bot as a requested reviewer (a plain
-re-request is a no-op on merge-commit heads; the draft-toggle fallback below is visible to every
-other reviewer and cancels a `ready_for_review`-triggered run, so `pr-merge.sh` no longer uses it),
-wait again; (3) squash-merge when `CLEAN` + `reviewDecision APPROVED` + zero unresolved threads,
+bot review on the merge head with a DELETE + POST re-request of the bot as a requested reviewer — a
+single, plain re-request (`POST` alone) is a no-op on a merge-commit head, and the draft-toggle
+fallback named above (§ Rules this encodes: `gh pr ready --undo && gh pr ready`) is visible to every
+other reviewer and cancels a `ready_for_review`-triggered run, so `pr-merge.sh` uses neither of
+those and does the DELETE+POST itself), wait again; (3) squash-merge when `CLEAN` +
+`reviewDecision APPROVED` + zero unresolved threads,
 **confirmed by re-reading the PR's `merged_at`** — a `gh pr merge` call that reports success but
 leaves `merged_at` unset is not read as merged. Exit 0 = confirmed merged; exit 1 = a gate failed,
 the merge call failed, or `merged_at` came back unset (one-line reason: head moved, open threads,

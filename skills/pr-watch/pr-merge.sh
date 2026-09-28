@@ -38,7 +38,13 @@ verdict_on(){ PR_WATCH_BOT_LOGIN=$bot bash "$KIT/skills/pr-watch/bot-verdict.sh"
 # (GitHub thinks it already asked). This replaced flipping the PR to draft and back (`gh pr ready --undo` then
 # `gh pr ready`): that toggle is visible to every other reviewer and cancels any `ready_for_review`-triggered
 # run for the few seconds the PR sits in draft, for no benefit pr-merge.sh needs.
-force_review(){ gh api -X DELETE "repos/$R/pulls/$PR/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$ERRF"; gh api -X POST "repos/$R/pulls/$PR/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$ERRF"; }
+# Each call's own exit status is checked (never assumed): a refused re-request (a 422 where the bot login
+# cannot be requested as a reviewer, or a 403) must be an ERROR line NOW, not a silent 40-minute wait_verdict
+# timeout ending in exit 3 — and each call gets its OWN err_line before the next call's `2>"$ERRF"` overwrites it.
+force_review(){
+  gh api -X DELETE "repos/$R/pulls/$PR/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$ERRF" || { err_line; return 1; }
+  gh api -X POST "repos/$R/pulls/$PR/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$ERRF" || { err_line; return 1; }
+}
 # reviewThreads, cursor-paginated (a PR with >100 threads otherwise hides an open one on page 2 forever).
 open_threads(){
   local o=${R%/*} r=${R#*/} cursor="" total=0 resp rc
@@ -106,7 +112,11 @@ if [ "$st" = "BEHIND" ]; then
   sleep 30
   H=$(head_of); [ -n "$H" ] || { err_line; exit 1; }
   echo "phase 2: updated to $H"
-  if [ -n "$bot" ]; then echo "forcing review"; force_review; wait_verdict "$H"; wvrc=$?; [ $wvrc -eq 0 ] || { [ $wvrc -eq 3 ] && exit 3; exit 1; }; fi
+  if [ -n "$bot" ]; then
+    echo "forcing review"
+    force_review || { echo "re-request to $bot failed — see ERROR line above"; exit 1; }
+    wait_verdict "$H"; wvrc=$?; [ $wvrc -eq 0 ] || { [ $wvrc -eq 3 ] && exit 3; exit 1; }
+  fi
   ot=$(open_threads); [ $? -eq 0 ] || { err_line; exit 1; }
   [ "$ot" = "0" ] || { echo "open threads on $H — resolve, then rerun"; exit 1; }
 fi
