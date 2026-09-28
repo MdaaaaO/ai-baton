@@ -1,7 +1,7 @@
 ---
 title: {{TITLE}}
 type: repo
-domain: repos
+domain: {{DOMAIN}}
 tags: []
 status: reference
 updated: {{DATE}}

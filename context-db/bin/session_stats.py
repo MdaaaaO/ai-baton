@@ -37,7 +37,7 @@ import os
 import re
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime
 
 import kit_profile as profile  # same dir — tracker regex, MCP tool names, tz default from the active profile
 import transcripts  # same dir — the shared transcript reader (usage de-dup, subagent dirs)
@@ -46,15 +46,6 @@ import transcripts  # same dir — the shared transcript reader (usage de-dup, s
 # zone so a session's stats block reads against their wall clock.
 LOCAL_TZ, LOCAL_TZ_NOTE = profile.zone()  # UTC + a note on the Window row when WORKSPACE_TZ is unknown (one stderr line, in kit_profile)
 
-
-def _local_str(iso_utc: str) -> str:
-    if not iso_utc:
-        return iso_utc
-    try:
-        t = datetime.strptime(iso_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        return iso_utc
-    return t.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p %Z")
 
 # One definition of "session spend", quoted verbatim wherever a number is shown (SESSION_INDEX.md's
 # footer, session-handoff, session-register): the row is the TOTAL (main + subagents) — what the
@@ -105,11 +96,6 @@ def _cost(u: dict, model: str | None) -> float:
         cw_1h = 0
     return ((u.get("input_tokens") or 0) * p_in + cw_5m * p_cw + cw_1h * p_cw1h
             + (u.get("cache_read_input_tokens") or 0) * p_cr + (u.get("output_tokens") or 0) * p_out) / 1e6
-
-
-def subagent_dir(path: str) -> str:
-    """<project>/<session-id>/subagents/ — one JSONL per Agent/fork child of this session."""
-    return transcripts.subagent_dir(path)
 
 
 def collect_subagents(path: str) -> dict:
@@ -383,7 +369,7 @@ def fmt_block(s: dict) -> str:
     tickets = ", ".join(s["tickets_touched"]) or "—"
     tools = ", ".join(f"{n} {c}" for n, c in s["tools_top"]) or "—"
     rows = [
-        ("Window", f"{_local_str(s['started'])} → {_local_str(s['last'])} ({s['wall_hours']}h){LOCAL_TZ_NOTE}"),
+        ("Window", f"{profile.local_str(s['started'], LOCAL_TZ)} → {profile.local_str(s['last'], LOCAL_TZ)} ({s['wall_hours']}h){LOCAL_TZ_NOTE}"),
         ("Turns / prompts", f"{s['turns']} API turns · {s['prompts']} user prompts · {s['compactions']} compactions · {s['api_errors']} API errors"),
         ("Context", f"peak {_k(ctx['peak'])} · avg prefix {_k(ctx['avg'])}"),
         ("Tokens", f"cache-read {_k(tk['cache_read'])} · cache-write {_k(tk['cache_write'])} · uncached in {_k(tk['input'])} · out {_k(tk['output'])} (thinking {_k(tk['thinking'])})"),

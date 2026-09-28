@@ -1,7 +1,7 @@
 ---
 title: {{TITLE}}
 type: pr-review
-domain: pr-reviews
+domain: {{DOMAIN}}
 tags: []
 status: reference
 updated: {{DATE}}
