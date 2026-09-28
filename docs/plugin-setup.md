@@ -106,9 +106,10 @@ claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@a
 Then restart Claude Code and run `/kit-health`: it re-stamps `HEALTH-<env>.md` with the new `kit_version`, and § 6
 lists the units that changed. `/kit-health` also warns when a newer release is out and prints the command above.
 `setup.sh` needs no re-run; the step 3 line with `--refresh-seeds` added shows how your seeded files differ from
-the current templates. The one exception so far: a workspace from before writes went through ctx-store adopts its
-store once, with `python3 $BATON/context-db/bin/ctx_adapter.py adopt` (or a `setup.sh` re-run); `/kit-health` § 5
-reports a store that is not adopted. `adopt` runs `ctx init --upgrade` with the kit's store settings and type
+the current templates. The exception: an update that moves the ctx-store pin (and the first update that brought
+ctx-store in) needs `python3 $BATON/context-db/bin/ctx_adapter.py install && python3 $BATON/context-db/bin/ctx_adapter.py adopt`
+once, or a `setup.sh` re-run. Until then the adapter finds no ctx at the new pin and the hooks do nothing;
+`/kit-health` § 5 reports it. `adopt` runs `ctx init --upgrade` with the kit's store settings and type
 schemas: a re-run after an update replaces a file that still holds what the last `init` wrote, and keeps and
 reports one edited here (exit 5); `adopt --replace` takes the kit's copy of those too, local edits included.
 
