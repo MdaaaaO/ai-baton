@@ -3,8 +3,8 @@ name: slack-draft
 description: "Lifecycle of every Slack message a session drafts for the user: create it as a draft (never paste text), record it, and READ the channel or thread before any follow-up, recreate or status claim, because the user edits drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
-  version: "4"
-  updated: "2026-09-27"
+  version: "5"
+  updated: "2026-09-28"
   reviewed: "2026-09-24"
   requires: "slack"
 ---
@@ -63,5 +63,6 @@ must discard it themselves in the thread reply box / "Drafts & Sent". Don't leav
 A summary's "draft pending" is a claim to re-verify per §3, not a fact. Do it before the first
 status line you give the user about that message.
 
-Related: `pr-open` § 6 (review-request drafts). Drafts add rather than replace and may vanish; a timed-out
-tracker write usually still lands — the same "verify the surface, not the tool result" discipline.
+Related: `pr-open` § 6 (review-request drafts). One draft per channel (§1) — it may still vanish (sent or
+discarded) without telling you, so verify the surface, not the tool result; a timed-out tracker write needs
+the same discipline (it usually still landed).

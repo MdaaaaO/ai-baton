@@ -887,6 +887,19 @@ def seed_wiring(r: Report) -> None:
         r.add(OK, "machine", "seeded files (.context/README.md, environment.md, CLAUDE.md, the self-assessment charter) are not older than their templates")
 
 
+def pr_review_example_edited(example: Path | None = None) -> list[str]:
+    """Keys in `pr-review/config.example.json` that no longer hold their placeholder shape (a leading `<`) —
+    a sign the file itself was hand-edited instead of the seeded `.context/state/pr-review/config.json`
+    (`docs/conventions.md`); editing the example changes nothing on this machine and shows up as a kit diff.
+    `example` defaults to the kit's own copy; a test passes a throw-away one."""
+    p = example if example is not None else KIT / "pr-review" / "config.example.json"
+    try:
+        cfg = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [k for k in ("login", "owner") if not str(cfg.get(k, "")).startswith("<")]
+
+
 def sandbox_detected(markers: list) -> bool:
     """True when any `kit.sandbox_markers` entry holds (#94): an absolute path that exists, or an environment variable
     that is set. The kit knows no sandbox product; a machine that runs in one names its own markers in the env store,
@@ -982,6 +995,11 @@ def sec_machine(r: Report) -> str:
             r.add(ERR, "machine", "`.context/state/pr-review/config.json` is not valid JSON")
     else:
         r.add(WARN, "machine", "`.context/state/pr-review/config.json` missing — `sh $BATON/setup.sh` seeds it")
+    edited = pr_review_example_edited()
+    if edited:
+        r.add(WARN, "machine", f"`pr-review/config.example.json` {', '.join(edited)} no longer look(s) like a "
+              "placeholder — editing the example changes nothing on this machine; edit "
+              "`.context/state/pr-review/config.json` instead (`docs/conventions.md`)")
     for tool in ("git", "make", "python3", "gh", "jq"):
         if shutil.which(tool):
             r.add(OK, "machine", f"CLI `{tool}` present")
