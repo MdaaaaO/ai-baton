@@ -2,7 +2,7 @@
 name: auto-runner
 description: "Sonnet worker for the trivial-PR auto-approve path (docs-only / dependency patch bumps that passed trivial-check.py): runs fetch-context.sh, checks the docs claims or the bump's release notes and lockfile, writes $CTX/auto.json, returns AUTO approve/fallback lines only. Any doubt is a fallback. Never posts; the main session decides."
 metadata:
-  version: "6"
+  version: "7"
   updated: "2026-09-28"
   reviewed: "2026-09-24"
 model: sonnet
@@ -24,7 +24,10 @@ gate's output object. Do this:
    `bash $BATON/skills/pr-review/scripts/fetch-context.sh <owner/repo> <pr>` (it prints `context: $CTX`).
    Non-zero exit, or `manifest.json.head != HEAD` → `AUTO: fallback — head moved / fetch failed`.
    Everything you need is under `$CTX`: `head/<path>` (file at head), `base/<path>`, `diffs/`, `bundle.json`.
-2. **docs**: every path, command, flag, table, DAG id or model name the changed text names must exist at
+2. First `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"` — the same line `fetch-context.sh`
+   already runs, exporting `github.sandbox_token_prefix` where a sandbox needs it and nothing where `gh` is
+   logged in natively — once, before either live `gh api` read below.
+   **docs**: every path, command, flag, table, DAG id or model name the changed text names must exist at
    the head ref — grep `head/` first, then at most 5 `gh api repos/<o>/<r>/contents/<path>?ref=<HEAD>`
    existence checks for paths outside the bundle. No statement may contradict the code it describes; no
    secret-shaped strings; links must resolve (WebFetch HEAD, ≤ 5). Generated files (badges) are fine.
@@ -34,7 +37,10 @@ gate's output object. Do this:
    confirm lockfile ↔ manifest consistency in `diffs/` (`uv.lock` ↔ `pyproject.toml`, `package-lock.json` ↔
    `package.json`); confirm `bundle.json.checks` has no red or pending run.
 3. **Any doubt is a fallback**, not a finding: unknown package, notes unreachable, a note that mentions a
-   behaviour change, a docs claim you cannot verify, a check pending, more than the gate's file set.
+   behaviour change, a docs claim you cannot verify, a check pending, more than the gate's file set. A `gh
+   api` read that fails auth (not a 404 — `gh` reporting unauthenticated) is not folded into that silent
+   doubt bucket: `AUTO: fallback — gh auth (unauthenticated)` and also return `NEEDS github.auth runner`
+   so the main session sees why, instead of an unexplained fallback.
 
 Write `$CTX/auto.json`: `{"verdict":"approve"|"fallback","class":…,"checked":[…],"reason":…,"body":…}`.
 `body` (≤ 3 lines, posted verbatim in `live` mode, no footer, no "auto"/"bot" wording — the user owns the

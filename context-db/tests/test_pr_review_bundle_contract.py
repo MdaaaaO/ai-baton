@@ -10,6 +10,9 @@ from pathlib import Path
 KIT = Path(__file__).resolve().parents[2]
 SKILL = KIT / "skills" / "pr-review" / "SKILL.md"
 RUNNER = KIT / "agents" / "review-runner.md"
+RUNNER_REF = KIT / "skills" / "pr-review" / "reference" / "runner.md"
+AUTO_RUNNER = KIT / "agents" / "auto-runner.md"
+GH_ENV_LINE = 'eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"'
 
 
 def norm(text: str) -> str:
@@ -54,6 +57,34 @@ class BundleContract(unittest.TestCase):
         self.assertIn("pr-review/SKILL.md", flat)
         self.assertIn("§ Contract", flat,
                       "agents/review-runner.md does not point back at the skill's § Contract")
+
+
+class GhEnvBeforeLiveReads(unittest.TestCase):
+    """A sandbox that needs `github.sandbox_token_prefix` (kit_profile.py gh-env) must not have its live
+    `gh` reads fail silently: both the agent definition the runner actually follows and the prompt template
+    the main session spawns it with carry the same setup line `fetch-context.sh` already runs, and an auth
+    failure on one of those reads is a `NEEDS` hand-back — never folded into an `unverified` trap."""
+
+    def test_review_runner_agent_runs_gh_env_before_its_live_reads(self):
+        runner = RUNNER.read_text(encoding="utf-8")
+        self.assertIn(GH_ENV_LINE, runner,
+                      "agents/review-runner.md does not eval kit_profile.py gh-env before its live `gh` reads")
+        self.assertIn("NEEDS github.auth runner", runner,
+                      "agents/review-runner.md does not turn a live-read auth failure into a NEEDS hand-back")
+
+    def test_prompt_template_carries_the_same_gh_env_line(self):
+        ref = RUNNER_REF.read_text(encoding="utf-8")
+        self.assertIn(GH_ENV_LINE, ref,
+                      "skills/pr-review/reference/runner.md § Prompt template does not carry the gh-env line")
+        self.assertIn("NEEDS github.auth runner", ref,
+                      "skills/pr-review/reference/runner.md does not document the github.auth NEEDS hand-back")
+
+    def test_auto_runner_agent_runs_gh_env_before_its_live_reads(self):
+        auto = AUTO_RUNNER.read_text(encoding="utf-8")
+        self.assertIn(GH_ENV_LINE, auto,
+                      "agents/auto-runner.md does not eval kit_profile.py gh-env before its live `gh api` reads")
+        self.assertIn("NEEDS github.auth runner", auto,
+                      "agents/auto-runner.md does not turn a live-read auth failure into a NEEDS hand-back")
 
 
 if __name__ == "__main__":

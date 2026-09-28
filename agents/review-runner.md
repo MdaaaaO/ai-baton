@@ -2,7 +2,7 @@
 name: review-runner
 description: "Opus worker for pr-review steps 1–4 (snapshot, repo trap KB, review pass incl. --deep lenses, independent verification) on one PR: writes the triage sheet to $CTX/triage.json, returns only the overview block (≤3K tokens) — the diff never enters a long-lived prefix. Never posts, never asks. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "13"
+  version: "14"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "tracker.mcp_tools.search"
@@ -39,7 +39,13 @@ so you spend them on judgment, not on fetching.
    Respect `mode`: `full` / `follow_up` (build the Addressed/Outstanding/Superseded/Reversed ledger of our
    previous review from `threads.json` first, then review only the delta) / `replies_only` (no new
    findings unless the user asked; the walk is about replies).
-2. Load only what the bundle cannot know: `kb-traps.md` (check every applicable trap, record hit/n/a/
+2. First `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"` — the same line `fetch-context.sh`
+   already runs, exporting `github.sandbox_token_prefix` where a sandbox needs it and nothing where `gh` is
+   logged in natively — once, before any of the four live `gh` reads below (this step's `head/AGENTS.md`
+   fallback; step 4's base blob and external-repo file; step 4b's `ref()` search). An auth failure on one of
+   them (not an empty result or a 404 — `gh` reporting unauthenticated) is not `unverified`: stop that read
+   and return `NEEDS github.auth runner` (see the Return block below) instead of listing the trap it would
+   have settled as unverified. Then load only what the bundle cannot know: `kb-traps.md` (check every applicable trap, record hit/n/a/
    unverified), the repo's own review rules if the KB names them (the repo's `CLAUDE.md` section on SQL
    semantics, say; `head/AGENTS.md` if the PR touched it, else one live `gh api contents` read — the same
    named exception as `pr-review/SKILL.md` § Contract), and the tracker ticket in the title/body — the tool
@@ -110,7 +116,7 @@ bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits
 …
 RECOMMEND: COMMENT | REQUEST_CHANGES | APPROVE-if-user-agrees
 CTX: <absolute path>
-NEEDS nothing | datalake reauth (findings #…) | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>`
+NEEDS nothing | datalake reauth (findings #…) | github.auth runner (a live `gh` read hit an auth failure) | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>`
 (kit-wide form, no colon — one spelling, docs/env-facts.md § Environment facts)
 IMPACT: <n> consumers (<kind:name owner …>) · <what changes, how many rows/values> | none found | not assessed (<why>)
 NOTE: ≤ 5 lines the walk needs (stacked base, human approval already present, prior-review ledger summary in follow_up mode, FF count)
