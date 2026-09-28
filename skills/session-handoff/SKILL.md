@@ -2,8 +2,8 @@
 name: session-handoff
 description: Flush durable knowledge before a session ends or a ticket/PR/epic step lands: the context doc, priorities, indexes, the session's stats (context doc, session file, cross-session ledger) and the paste-ready next-session prompt the successor starts from. Invoke when finishing a piece of work, before ending a session, or on "wrap up / hand off / update context".
 metadata:
-  version: "6"
-  updated: "2026-09-26"
+  version: "7"
+  updated: "2026-09-27"
   reviewed: "2026-09-24"
 user-invocable: true
 ---
@@ -93,6 +93,9 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 11. **Coordination** — if another active session owns follow-on work (check `SESSION_INDEX.md`),
    leave the handoff in the context doc; message a peer only for a lock/handoff, not to dump
    context (§ Cost & context hygiene).
+12. **Retro (optional, last)** — offer `/session-retro` in one line, above the step-10 code block: "Run a
+    retro of this session against the kit?". It forks, so the main session pays only for its ≤ 15-line result;
+    a yes runs it now, before the session ends. Skip the offer for a short read-only session.
 
 ## Done when
 

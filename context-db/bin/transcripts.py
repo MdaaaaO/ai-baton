@@ -9,6 +9,7 @@ keeping the LAST line seen, not the first. `session_stats.py` (one session's sta
 cost-report skill (every transcript in a window) both read usage this way — this module is the
 shared path, so the two never drift.
 
+  records(path)               → every parsed JSONL record of one file, in order (junk lines skipped)
   usage_records(path, seen)   → (record, message, usage, request_id) per new API request in one file
   tokens(usage)               → (input, cache_write, cache_read, output)
   subagent_dir(path)          → <project>/<session-id>/subagents/ — the session's Agent/fork children
@@ -28,6 +29,22 @@ def tokens(u: dict) -> tuple[int, int, int, int]:
     """(input, cache_write, cache_read, output) from a usage block; a missing field counts 0."""
     return (u.get("input_tokens") or 0, u.get("cache_creation_input_tokens") or 0,
             u.get("cache_read_input_tokens") or 0, u.get("output_tokens") or 0)
+
+
+def records(path: str) -> Iterator[dict]:
+    """Every JSON object line of `path`, in file order — the raw records `session_retro.py` walks (user prompts,
+    tool calls, tool results). Blank or unparsable lines and non-object values are skipped; an unreadable file
+    raises OSError for the caller to report."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(o, dict):
+                yield o
 
 
 def usage_records(path: str, seen: set[str] | None = None) -> Iterator[tuple[dict, dict, dict, str]]:

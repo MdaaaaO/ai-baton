@@ -43,6 +43,7 @@ TOOLS = (
     "personal.py",
     "session.py",
     "session_stats.py",
+    "session_retro.py",
     "gen_sessions.py",
     "gen_index.py",
     "verify.py",
