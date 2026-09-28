@@ -72,9 +72,11 @@ try:
     ARCHIVE_DAYS = max(0, int(os.environ.get("SESSION_ARCHIVE_DAYS") or 7))
 except ValueError:
     ARCHIVE_DAYS = 7
-# A session with no next-session prompt is not necessarily done: heartbeat.sh ends a crashed session
-# with `session-end` and no NEXT, and the resumed session refines the hand-off afterwards. So a
-# prompt-less session keeps a grace window (hours) before it is swept — never longer than ARCHIVE_DAYS.
+# A session with no next-session prompt is not necessarily done being wrapped up: it may be a crash —
+# heartbeat.sh ends a crashed session with `session-end` and no NEXT, and a resumed session refines the
+# hand-off afterwards — or it may be a clean end that intentionally left nothing to hand over
+# (session-handoff). Either way a prompt-less session keeps a grace window (hours) before it is swept —
+# never longer than ARCHIVE_DAYS.
 try:
     NOPROMPT_HOURS = max(0, int(os.environ.get("SESSION_ARCHIVE_NOPROMPT_HOURS") or 48))
 except ValueError:

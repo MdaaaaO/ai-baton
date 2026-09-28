@@ -60,6 +60,10 @@ corrupting the user's working tree or silently dropping files.
    commit B only picked up unrelated leftover scratch files. Fix: run
    `git diff --cached --stat` right before every commit and confirm it matches what
    you expect, every time — don't trust that staging state is what you last set it to.
+   The same rule applies to the `sign-queue` hand-off: always pass its `--files "<paths>"`
+   with the exact paths you already verified, never leave both `--files` and `--all` off —
+   that falls back to `add -A` on the host (flagged with a warning, but still not what you
+   verified). Pass `--all` only on the rare job that really should carry everything.
 3. **Write the commit message to a file, not an inline string.** Multi-paragraph
    messages explaining *why*, not just *what*, are the norm in these repos — an
    inline `-m` string is both unwieldy and easy to mis-paste. Write it to a file at an

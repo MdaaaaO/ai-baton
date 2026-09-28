@@ -12,7 +12,8 @@ Subcommands (each regenerates SESSION_INDEX.md):
   register  create/update this session's entry (upsert; preserves the free-text body — `--note` fills only `## Notes`)
   touch     refresh heartbeat + updated only — the <=12h keep-alive
   end       mark the session ended; writes the `## Session stats` block into the body and
-            (with --next FILE) the `## Next session` hand-off prompt, and
+            (with --next FILE) the `## Next session` hand-off prompt — omit --next when the session has
+            nothing to hand over, and pass --next none to withdraw a prompt already on file — and
             appends one row to sessions/_ledger.md (the cross-session cost/activity ledger)
   stats     print this session's stats (block) without touching the registry
 
@@ -214,7 +215,11 @@ def _replace_section(body: str, heading: str, content: str) -> str:
     """Replace (or append) a `## heading` section in the free-text body. Headings inside a fenced block (a pasted
     prompt that shows `## …`) are text, not sections: neither the heading nor the section end is matched there. Fences
     count only when they balance: stored free text with an odd number of ``` lines is read as before, fence-blind, so one
-    stray fence can never hide the heading and turn a replace into a duplicate section."""
+    stray fence can never hide the heading and turn a replace into a duplicate section.
+
+    An empty `content` withdraws the section instead of leaving an empty one behind: an existing section is dropped
+    entirely, and a missing one is left absent (a no-op) — used to clear a stored next-session prompt that has gone
+    stale (`--next none`) rather than writing a blank one the reader would still trip over."""
     lines = body.rstrip("\n").split("\n")
     track = sum(1 for ln in lines if ln.lstrip().startswith("```")) % 2 == 0
     out, i, replaced, fence = [], 0, False, False
@@ -223,7 +228,8 @@ def _replace_section(body: str, heading: str, content: str) -> str:
             fence = not fence
         if not fence and lines[i].strip() == heading:
             replaced = True
-            out += [heading, "", content, ""]
+            if content:
+                out += [heading, "", content, ""]
             i += 1
             inner = False
             while i < len(lines) and (inner or not lines[i].startswith("## ")):
@@ -232,7 +238,7 @@ def _replace_section(body: str, heading: str, content: str) -> str:
                 i += 1
             continue
         out.append(lines[i]); i += 1
-    if not replaced:
+    if not replaced and content:
         out += ["", heading, "", content]
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -303,14 +309,20 @@ def cmd_touch(a) -> None:
     meta["updated"] = today()
     write_doc(path, meta, body)
     record_name(meta["session"])
-    print(f"touched {os.path.relpath(path, CTX)} @ {local_str(meta['heartbeat'])}")
+    tail = " (+ next-session prompt)" if nxt else (" (next-session prompt withdrawn)" if nxt is not None else "")
+    print(f"touched {os.path.relpath(path, CTX)} @ {local_str(meta['heartbeat'])}" + tail)
 
 
 def _next_prompt(a) -> str | None:
-    """Contents of --next FILE: the paste-ready prompt for the successor session."""
+    """Contents of --next FILE: the paste-ready prompt for the successor session. `--next` left unset means
+    "leave whatever is stored alone" (None); the literal value `none` withdraws a stored prompt instead of
+    reading a file (returns "") — for a session that ends with nothing to hand over, or to clear an earlier
+    prompt that turned out wrong or went stale."""
     f = getattr(a, "next", "") or ""
     if not f:
         return None
+    if f.strip().lower() == "none":
+        return ""
     with open(f, encoding="utf-8") as fh:
         txt = fh.read().strip("\n")
     if not txt:
@@ -335,7 +347,8 @@ def cmd_end(a) -> None:
         if nxt is not None or a.working is not None:
             meta["updated"] = today()
             write_doc(path, meta, body)
-            print(f"updated hand-off fields in {os.path.relpath(path, CTX)}")
+            print(f"updated hand-off fields in {os.path.relpath(path, CTX)}"
+                  + (" (next-session prompt withdrawn)" if nxt == "" else ""))
         return
     meta["status"] = "ended"
     meta["heartbeat"] = now_iso()
@@ -348,8 +361,9 @@ def cmd_end(a) -> None:
     write_doc(path, meta, body)
     if st is not None:
         _ledger_append(meta, st)  # after the doc: a failed doc write must not leave a ledger row for an un-ended session
+    tail = " (+ next-session prompt)" if nxt else (" (next-session prompt withdrawn)" if nxt is not None else "")
     print(f"ended {os.path.relpath(path, CTX)}" + (" (+ stats block, ledger row)" if st is not None else " (no transcript found — no stats)")
-          + (" (+ next-session prompt)" if nxt is not None else ""))
+          + tail)
 
 
 def cmd_stats(a) -> None:
@@ -381,7 +395,8 @@ def main() -> int:
         sp.add_argument("--working", default=None)   # None = unchanged; "" allowed to clear
         sp.add_argument("--resp", default="")
         sp.add_argument("--note", default="", help="text for the body's `## Notes` section (replaces that section only)")
-        sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session (written to '## Next session')")
+        sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session "
+                        "(written to '## Next session'); 'none' withdraws a stored prompt instead")
     a = p.parse_args()
     # Empty --working means "leave unchanged" (so a bare keep-alive touch never
     # wipes the current focus). The other optional fields already use truthiness.
