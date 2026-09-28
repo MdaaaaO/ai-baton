@@ -48,7 +48,9 @@ free text on the same line — `context-db/bin/sizing.py format <model> "<decisi
 default branch before honoring it — a cited symptom that no longer reproduces, or a Plan step the default
 branch already implements, narrows the plan or changes the call; nothing changed, the call stands. A ticket
 with no Sizing line (or a malformed one) is sized now, the same way `ticket-open` would have, and written
-back so the next pickup reads it directly.
+back as a new comment so the next pickup reads it directly. A reader passes the description followed by the
+comments, oldest first; the **last** Sizing line wins, so a correction overrides the opening call without
+editing anyone's text.
 
 ## The worker brief
 
