@@ -181,6 +181,16 @@ class ScriptsNoLongerCarryGnuOnlyConstructs(unittest.TestCase):
         self.assertNotIn("mapfile", text)  # bash 4+ only; macOS ships bash 3.2 as /bin/bash
         self.assertIn("with_lock", text)   # replaces the bare `flock -n 8` with no macOS fallback
 
+    def test_pr_scan_never_calls_flock_without_a_guard(self):
+        # every `flock` call sits behind a `command -v flock` check (or inside with_lock), so a host
+        # without it still appends the surfaced rows instead of failing the whole ledger write
+        import re
+        text = (KIT / "skills" / "pr-scan" / "pr-scan.sh").read_text()
+        calls = [m.start() for m in re.finditer(r"\(\s*flock\b", text)]
+        for pos in calls:
+            before = text[max(0, pos - 200):pos]
+            self.assertIn("command -v flock", before, "a bare `( flock …` with no fallback for a host without flock")
+
     def test_pr_scan_has_no_gnu_only_relative_date(self):
         text = (KIT / "skills" / "pr-scan" / "pr-scan.sh").read_text()
         self.assertNotIn("date -u -d", text)  # BSD date has no -d

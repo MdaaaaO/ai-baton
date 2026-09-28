@@ -193,6 +193,16 @@ fi
 echo "summary: union=$total candidates=$cand shown=$shown new=$newc auto=$autoc auto_mode=$AUTO_MODE dropped(bots=$dropped_bot draft=$dropped_draft stale>${DAYS}d=$dropped_stale done=$dropped_done skipped=$dropped_skip approved=$dropped_approved cap=$dropped_cap failed=$dropped_fail) degraded=$degraded errors=$FAILS retries=$RETRIES out=$OUT"
 if [ "$MARK" = 1 ] && [ "$newc" -gt 0 ]; then
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  ( flock 9; jq -c --arg ts "$ts" --argjson m "$MAXROWS" '.[:$m][] | select(.surfaced|not) | {repo, pr, head, status:"surfaced", ts:$ts, src, kind, auto:(.auto.eligible // false)}' "$OUT/queue.json" >> "$LEDGER" ) 9>"$ROOT/.ledger.lock"
+  # the ledger is shared with pr-review's writers: flock where the host has it; without it (macOS/BSD) the
+  # rows are rendered first and land in ONE append, which a concurrent appender cannot interleave into
+  rows=$(jq -c --arg ts "$ts" --argjson m "$MAXROWS" '.[:$m][] | select(.surfaced|not) | {repo, pr, head, status:"surfaced", ts:$ts, src, kind, auto:(.auto.eligible // false)}' "$OUT/queue.json") \
+    || { echo "error: could not render the surfaced rows for $LEDGER" >&2; FAILS=$((FAILS+1)); rows=""; }
+  if [ -n "$rows" ]; then
+    if command -v flock >/dev/null 2>&1; then
+      ( flock 9; printf '%s\n' "$rows" >> "$LEDGER" ) 9>"$ROOT/.ledger.lock"
+    else
+      printf '%s\n' "$rows" >> "$LEDGER"
+    fi
+  fi
 fi
 [ "$FAILS" -eq 0 ]
