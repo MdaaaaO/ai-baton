@@ -11,6 +11,7 @@
     "memory/**",
     "bin/**",
     "_templates/**",
+    "**/_templates/**",
     "handoff/**",
     "on-call/handoff/**",
     "state/**"

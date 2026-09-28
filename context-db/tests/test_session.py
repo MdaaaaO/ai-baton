@@ -96,7 +96,7 @@ class RegistryDoc(unittest.TestCase):
         self.assertIn("working_on: x", text)
         self.assertEqual(text.count("session: t-two"), 1)
 
-    def test_ledger_row_tolerates_a_partial_stats_dict(self):
+    def _load_session_mod(self):
         # session.py computes CTX (and so the ledger path) from CONTEXT_ROOT at exec time — kit_profile is already
         # imported by earlier modules with the suite's store, which is fine: the ledger never goes through ENV_DIR.
         # The suite's CONTEXT_ROOT is restored afterwards, so later modules keep their throw-away store.
@@ -104,12 +104,60 @@ class RegistryDoc(unittest.TestCase):
             spec = importlib.util.spec_from_file_location("session_under_test", BIN / "session.py")
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+
+    def test_ledger_row_tolerates_a_partial_stats_dict(self):
+        mod = self._load_session_mod()
         (self.root / "sessions").mkdir(exist_ok=True)
         mod._ledger_append({"session": "t3", "heartbeat": "2026-09-26T10:00:00Z"}, {"turns": 3, "tokens": {"cache_read": 10}})
         row = (self.root / "sessions" / "_ledger.md").read_text(encoding="utf-8").splitlines()[-1]
         self.assertTrue(row.startswith("| "), row)
         self.assertIn("| `t3` | - | 3 |", row)
         self.assertEqual(row.count("|"), 15)  # every column present, missing fields as zeros
+
+    def test_a_new_ledger_starts_with_the_type_frontmatter(self):
+        # types/ledger.json's doc needs the frontmatter every ctx-store doc needs; a brand new ledger gets it up front.
+        mod = self._load_session_mod()
+        (self.root / "sessions").mkdir(exist_ok=True)
+        mod._ledger_append({"session": "new1", "heartbeat": "2026-09-26T10:00:00Z"}, {"turns": 1})
+        text = (self.root / "sessions" / "_ledger.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("---\ntitle: Session ledger\ntype: ledger\ndomain: sessions\n---\n\n"), text[:200])
+        self.assertIn("# Session ledger", text)
+        self.assertIn("| `new1` |", text)
+
+    def test_an_existing_ledger_without_frontmatter_gets_it_prepended_once(self):
+        # A ledger written before this fix has no frontmatter; the next append gives it one, in place, once — not
+        # on every subsequent append.
+        mod = self._load_session_mod()
+        (self.root / "sessions").mkdir(exist_ok=True)
+        ledger = self.root / "sessions" / "_ledger.md"
+        old_row = "| 2026-09-25 09:00 | `s0` | - | 1 | 0.0 | 0 | 0 | 0 | 0 (0+0) | 0 | 0 | 0 | 0 | 0 |\n"
+        ledger.write_text(mod.LEDGER_HEADER + old_row, encoding="utf-8")
+        mod._ledger_append({"session": "s1", "heartbeat": "2026-09-26T11:00:00Z"}, {"turns": 2})
+        text = ledger.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(mod.LEDGER_FRONTMATTER), text[:200])
+        self.assertIn("| `s0` |", text)
+        self.assertIn("| `s1` |", text)
+        self.assertEqual(text.count("title: Session ledger"), 1)  # prepended once
+        mod._ledger_append({"session": "s2", "heartbeat": "2026-09-26T12:00:00Z"}, {"turns": 3})  # a second append: idempotent
+        text2 = ledger.read_text(encoding="utf-8")
+        self.assertEqual(text2.count("title: Session ledger"), 1)
+        self.assertIn("| `s2` |", text2)
+
+    def test_an_existing_ledger_with_frontmatter_is_left_alone(self):
+        # The owner's live ledger already carries this frontmatter (added by hand): a session must not touch it,
+        # only append its row.
+        mod = self._load_session_mod()
+        (self.root / "sessions").mkdir(exist_ok=True)
+        ledger = self.root / "sessions" / "_ledger.md"
+        old_row = "| 2026-09-25 09:00 | `s0` | - | 1 | 0.0 | 0 | 0 | 0 | 0 (0+0) | 0 | 0 | 0 | 0 | 0 |\n"
+        original = mod.LEDGER_FRONTMATTER + mod.LEDGER_HEADER + old_row
+        ledger.write_text(original, encoding="utf-8")
+        mod._ledger_append({"session": "s1", "heartbeat": "2026-09-26T11:00:00Z"}, {"turns": 2})
+        text = ledger.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith(original), text[:200])  # the existing frontmatter+header+row untouched
+        self.assertEqual(text.count("title: Session ledger"), 1)
+        self.assertIn("| `s1` |", text)
 
 
 if __name__ == "__main__":

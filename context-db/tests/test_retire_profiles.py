@@ -111,8 +111,10 @@ class SetupSh(unittest.TestCase):
             (kit / "skills" / "gone-skill" / "__pycache__" / "x.pyc").write_bytes(b"\x00")
             (kit / "old-template" / "templates").mkdir(parents=True)
             (ws / "keep-empty").mkdir()  # the workspace is never touched
+            # KIT_NO_CTX_FETCH=1: this fake HOME has no pinned ctx install, so without it setup.sh would try a
+            # real network clone of ctx-store here.
             r = subprocess.run(["sh", str(kit / "setup.sh")], cwd=ws, capture_output=True, text=True,
-                               env={**os.environ, "HOME": str(home), "PROJECTS": str(ws)})
+                               env={**os.environ, "HOME": str(home), "PROJECTS": str(ws), "KIT_NO_CTX_FETCH": "1"})
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertFalse((kit / "skills" / "gone-skill").exists())
             self.assertFalse((kit / "old-template").exists())

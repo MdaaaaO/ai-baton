@@ -8,6 +8,7 @@
 # a scratch tree, and asserts on the resulting files. `make -C .claude/context-db test` runs it through
 # tests/test_setup_sh.py.
 set -eu
+export KIT_NO_CTX_FETCH=1  # no scenario below may clone ctx-store over the network
 
 KIT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"

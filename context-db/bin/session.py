@@ -62,6 +62,11 @@ LEDGER_HEADER = """# Session ledger — one row per ended session (stats for gee
 | Ended | Session | Epic | Turns | Hours | Ctx peak | Cache-read | Out | ~$ | Compactions | PRs | Tickets | Sign jobs | Drafts |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 """
+# The `ledger` type (types/ledger.json) is a doc like any other — it needs the frontmatter `ctx validate` requires
+# on a doc, even though the type declares no required fields of its own. A brand new ledger starts with this block;
+# an existing one written before this fix gets it prepended once (idempotent: a ledger that already starts with
+# `---` is left alone).
+LEDGER_FRONTMATTER = "---\ntitle: Session ledger\ntype: ledger\ndomain: sessions\n---\n\n"
 
 DEFAULT_BODY = """# Session: {name}
 
@@ -267,11 +272,15 @@ def _ledger_append(meta: dict, st) -> None:
            f"{g('wall_hours', default=0.0)} | {k(g('context', 'peak'))} | {k(g('tokens', 'cache_read'))} | {k(g('tokens', 'output'))} | "
            f"{g('spend_total_usd_est', default=0.0):.0f} ({g('spend_usd_est', default=0.0):.0f}+{g('subagents_cost', 'spend_usd_est', default=0.0):.0f}) | "
            f"{g('compactions')} | {len(g('prs_touched', default=[]))} | {len(g('tickets_touched', default=[]))} | {g('sign_jobs')} | {g('slack', 'drafts')} |")
-    with locked(LEDGER):  # two sessions ending at once must not interleave or both write the header
-        new = not os.path.exists(LEDGER)
+    with locked(LEDGER):  # two sessions ending at once must not interleave or both write the header/frontmatter
+        if not os.path.exists(LEDGER):
+            atomic_write(LEDGER, LEDGER_FRONTMATTER + LEDGER_HEADER + row + "\n")
+            return
+        with open(LEDGER, encoding="utf-8") as f:
+            existing = f.read()
+        if not existing.startswith("---"):  # a ledger from before this fix: give it frontmatter once
+            atomic_write(LEDGER, LEDGER_FRONTMATTER + existing)
         with open(LEDGER, "a", encoding="utf-8") as f:
-            if new:
-                f.write(LEDGER_HEADER)
             f.write(row + "\n")
 
 

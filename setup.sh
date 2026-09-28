@@ -44,8 +44,11 @@
 #      an existing machine by itself: `--refresh-seeds` prints the diff between each seeded copy and its
 #      template (kit-health warns when a copy predates its template), you merge what you want by hand.
 #      Removes the bytecode caches and empty directories git never tracks (what a removed skill leaves behind).
-#   5. Adopts .context/ as a ctx-store store once (`ctx_adapter.py adopt`, when the pinned ctx is installed; it never
-#      overwrites) and, on a clone, adds the ctx MCP server to the workspace .mcp.json.
+#   5. Fetches the pinned ctx-store tag (`ctx_adapter.py install`, a network git clone) when it is not already
+#      installed, then adopts .context/ as a ctx-store store (`ctx_adapter.py adopt`; it never overwrites) and, on a
+#      clone, adds the ctx MCP server to the workspace .mcp.json. KIT_NO_CTX_FETCH=1 skips the fetch (offline runs,
+#      the setup tests) and only prints the manual install command, as before; an install that fails (offline,
+#      network down) also falls back to printing the manual commands — setup itself never fails on it.
 #   6. Reports skill discovery.
 #
 # Nothing here is user- or machine-specific: the root is derived from this script's location when it is a
@@ -506,17 +509,36 @@ fi
 echo
 echo "== ctx-store =="
 # Adopt the content root as a ctx store (ctx_adapter.py adopt runs `ctx init --upgrade` with the kit's store settings
-# and type schemas: idempotent; a kit update replaces its own earlier files, and one edited here is kept, rc 5). Without the pinned ctx installed it names the commands instead of fetching over the
-# network. A clone also gets the ctx MCP server in the workspace .mcp.json (a plugin install ships it in plugin.json).
+# and type schemas: idempotent; a kit update replaces its own earlier files, and one edited here is kept, rc 5).
+# When the pinned ctx is missing, fetch it first (ctx_adapter.py install: a network git clone of the pinned tag) —
+# unless KIT_NO_CTX_FETCH=1 (offline runs, the setup tests), which keeps the old print-only behaviour. An
+# install failure (offline, network down) falls back to printing the manual commands and setup continues either way
+# — it must not fail offline. A clone also gets the ctx MCP server in the workspace .mcp.json (a plugin install
+# ships it in plugin.json).
 ADAPTER="$HERE/context-db/bin/ctx_adapter.py"
+MANUAL_CTX_INSTALL="  ctx-store not installed — once: python3 $KITREF/context-db/bin/ctx_adapter.py install && python3 $KITREF/context-db/bin/ctx_adapter.py adopt"
+if ! python3 "$ADAPTER" where >/dev/null 2>&1; then
+  if [ "${KIT_NO_CTX_FETCH:-}" = 1 ]; then
+    echo "$MANUAL_CTX_INSTALL"
+  else
+    echo "  ctx-store not installed — fetching the pinned tag (network; KIT_NO_CTX_FETCH=1 skips this and only prints the commands)"
+    if out="$(python3 "$ADAPTER" install 2>&1)"; then
+      printf '%s\n' "$out" | sed 's/^/  /'
+      echo "  installed"
+    else
+      rc=$?
+      printf '%s\n' "$out" | sed 's/^/  /' >&2
+      echo "  WARNING: ctx_adapter.py install failed (rc=$rc, offline?) — continuing without it" >&2
+      echo "$MANUAL_CTX_INSTALL"
+    fi
+  fi
+fi
 if python3 "$ADAPTER" where >/dev/null 2>&1; then
   if out="$(CONTEXT_ROOT="$CONTEXT" python3 "$ADAPTER" adopt 2>&1)"; then rc=0; else rc=$?; fi
   printf '%s\n' "$out" | sed 's/^/  /'
   if [ "$rc" -eq 3 ]; then echo "  WARNING: the store has validation findings (above) — fix them with the ctx tools" >&2
   elif [ "$rc" -eq 5 ]; then echo "  WARNING: store file(s) differ from the kit's (above) — kept; python3 $KITREF/context-db/bin/ctx_adapter.py adopt --replace takes the kit's" >&2
   elif [ "$rc" -ne 0 ]; then echo "  WARNING: ctx_adapter.py adopt failed (rc=$rc) — writes under .context/ stay direct until it runs" >&2; fi
-else
-  echo "  ctx-store not installed — once: python3 $KITREF/context-db/bin/ctx_adapter.py install && python3 $KITREF/context-db/bin/ctx_adapter.py adopt"
 fi
 if [ "$MODE" = clone ]; then
   if out="$(python3 "$ADAPTER" mcp-json "$PROJECTS/.mcp.json" 2>&1)"; then printf '%s\n' "$out" | sed 's/^/  /'
