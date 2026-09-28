@@ -108,11 +108,11 @@ kit_release_dry kit_release:
 	    if ! ( cd "$(_REL_WT)" && python3 context-db/bin/bump_marketplace_ref.py \
 	           && git add .claude-plugin/marketplace.json \
 	           && { git diff --cached --quiet || git commit -q -m "chore(release): pin marketplace ref"; } \
-	           && git push -q ); then \
+	           && git push -q origin HEAD ); then \
 	      echo "kit_release: pinning .claude-plugin/marketplace.json's ref failed on $$br — kept it and its worktree, the PR is open without the pin:"; \
 	      echo "  worktree  $(_REL_ABS)"; \
 	      echo "  branch    $$br"; \
-	      echo "  cd '$(_REL_ABS)' && python3 context-db/bin/bump_marketplace_ref.py && git add .claude-plugin/marketplace.json && git commit -m 'chore(release): pin marketplace ref' && git push"; \
+	      echo "  cd '$(_REL_ABS)' && python3 context-db/bin/bump_marketplace_ref.py && git add .claude-plugin/marketplace.json && git commit -m 'chore(release): pin marketplace ref' && git push origin HEAD"; \
 	      exit 1; \
 	    fi; \
 	  fi; \

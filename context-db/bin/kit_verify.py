@@ -246,7 +246,7 @@ def check_plugin_manifest(errors: list[str]) -> None:
     entry = next((e for e in entries if isinstance(e, dict) and e.get("name") == name), None)
     if entry is None:
         errors.append(f"{MARKETPLACE_MANIFEST}: no plugins[] entry with name {name!r}")
-    else:
+    elif (KIT / ".git").exists():  # the pin is a repo invariant: an installed copy (no .git) may be a local source
         source = entry.get("source")
         if not (isinstance(source, dict) and source.get("source") == "github" and source.get("repo")):
             errors.append(f"{MARKETPLACE_MANIFEST}: plugins[].source for {name!r} is not a github source "

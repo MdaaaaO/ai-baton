@@ -141,7 +141,7 @@ class KitReleaseMarketplaceRef(unittest.TestCase):
             "d=json.loads(p.read_text()); d['version']='0.2.0'; p.write_text(json.dumps(d))\"\n"
             "  git add VERSION .claude-plugin/plugin.json\n"
             '  git commit -q -m "chore(release): 0.2.0"\n'
-            "  git push -q --set-upstream origin release/v0.2.0\n"
+            "  git push -q origin release/v0.2.0  # no upstream, like a tool that pushes a refspec\n"
             '  echo "https://github.com/o/x/pull/1"\n'
             "fi\n"
         )

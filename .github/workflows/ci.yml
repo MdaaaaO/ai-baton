@@ -334,7 +334,8 @@ jobs:
   # The README's own install blocks, replayed on a runner that has never seen the kit (#98): the clone path and the
   # plugin path (a real `claude plugin marketplace add` + `install` from this checkout), each ending in kit-health. The
   # block is read from README.md, so a README change is tested as written; the few swaps (this checkout for the
-  # published source, the in-session `/kit-setup` / `/kit-health`) are printed in the log.
+  # published source, `./` for the marketplace's tag-pinned plugin entry, the in-session `/kit-setup` / `/kit-health`)
+  # are printed in the log.
   install-smoke:
     name: install-smoke (${{ matrix.path }})
     runs-on: ubuntu-latest

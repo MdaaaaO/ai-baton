@@ -3,7 +3,8 @@
 the kit, and check the workspace it leaves (#98). The block is read from README.md itself, so the test cannot drift
 from the docs; only what a runner cannot do is swapped, each swap printed:
 
-- the clone URL / marketplace source → this checkout (the change under test, not the published kit);
+- the clone URL / marketplace source → this checkout (the change under test, not the published kit), and the
+  marketplace's plugin entry, which pins a release tag, → `./` in the scratch copy, so the checkout's code is what installs;
 - `… && claude` (start a session) → dropped: there is no interactive session in CI;
 - `/kit-setup` → the command in skills/kit-setup/SKILL.md § 2, with the env the plugin's SessionStart hook exports
   (`BATON`, `CLAUDE_PROJECT_DIR`);
@@ -98,6 +99,20 @@ kit_health() {
 '''
 
 
+def local_plugin_source(src: Path, git_env: dict) -> str:
+    """Point every plugin entry of the scratch copy's marketplace at the checkout itself (`"./"`), committed so a
+    git-reading `marketplace add` sees it too. The real entry names a release tag, which on a release PR does not
+    exist yet and on any other PR is not the code under test."""
+    mp = src / ".claude-plugin" / "marketplace.json"
+    data = json.loads(mp.read_text(encoding="utf-8"))
+    for p in data.get("plugins", []):
+        p["source"] = "./"
+    mp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(src), "commit", "-q", "-am", "smoke: plugin source = this checkout"],
+                   check=True, env=git_env)
+    return "marketplace plugin source (a pinned release tag) → ./ (this checkout)"
+
+
 def main(argv: list[str]) -> int:
     require_cli = "--require-cli" in argv[2:]  # `make ci` and CI: a missing CLI is a failure, never a silent pass
     args = [x for x in argv[1:] if x != "--require-cli"]
@@ -127,6 +142,8 @@ def main(argv: list[str]) -> int:
         subprocess.run(["git", "clone", "-q", str(KIT), str(src)], check=True, env=git_env)
         subprocess.run(["git", "-C", str(src), "checkout", "-q", "-B", "main"], check=True, env=git_env)  # a clone lands on main
         lines, swaps = translate(path, readme_block(path))
+        if path == "plugin":  # the published entry pins a release tag; the smoke must install this checkout's code
+            swaps.append(local_plugin_source(src, git_env))
         print(f"== install smoke: {path} path, README block replayed ({len(lines)} commands)")
         for s in swaps:
             print(f"   swap: {s}")
