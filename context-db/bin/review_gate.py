@@ -14,7 +14,10 @@ locally):
          `metadata.version` (a higher integer than base) and sets `metadata.updated` to a later date; a new unit needs an
          integer version. What changed is the PR's squash commit, which the generated release log lists. Wording-only
          edits are exempt with `--skip-bump` (ci.yml passes it for the `wording` label or `[skip-bump]` in the PR
-         title/body — the exemption is the author's explicit claim, visible on the PR).
+         title/body — the exemption is the author's explicit claim, visible on the PR). A unit whose only changed
+         files are its npm manifest (`package.json` / `package-lock.json`) is exempt too — that is the shape a
+         dependency bot's own npm PR produces, and it cannot also touch SKILL.md to satisfy this rule; any other
+         changed file in the same unit still requires the bump.
 
 Every finding is one line in the review's fixed shape: `[STOP] path:line — claim (rule)` (docs/REVIEW.md § Findings).
 Exit 1 on any finding, 0 with a one-line summary otherwise; `--json` prints the findings as a list for
@@ -185,6 +188,17 @@ def unit_name(unit: str) -> str:
     return unit.split("/")[1] if unit.startswith("skills/") else Path(unit).stem
 
 
+NPM_MANIFESTS = ("package.json", "package-lock.json")
+
+
+def lockfile_only_change(unit: str, files: dict[str, str]) -> bool:
+    """True when every path the PR changed under `unit`'s directory is an npm manifest (`package.json` /
+    `package-lock.json`) — the shape a dependency bot's own npm PR produces. It cannot also bump SKILL.md's
+    `metadata.version`, so that unit is exempt from the bump check; any other changed file in the unit is not."""
+    unit_paths = [p for p in files if unit_of(p) == unit]
+    return bool(unit_paths) and all(Path(p).name in NPM_MANIFESTS for p in unit_paths)
+
+
 def show(ref: str, path: str, cwd: Path = KIT) -> str | None:
     r = subprocess.run(["git", "show", f"{ref}:{path}"], cwd=cwd, capture_output=True, text=True)
     return r.stdout if r.returncode == 0 else None
@@ -232,6 +246,8 @@ def bump_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] |
     out: list[str] = []
     for unit in units:
         name = unit_name(unit)
+        if lockfile_only_change(unit, files):
+            continue
         before, after = show(mb, unit, cwd), show(head, unit, cwd)
         if after is None:  # a removed unit needs nothing: the squash commit and the release log record it
             continue

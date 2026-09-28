@@ -304,6 +304,15 @@ class MermaidDepsPinned(unittest.TestCase):
         self.assertIn("package-ecosystem: npm", cfg)
         self.assertIn("directory: /skills/pr-open", cfg)
 
+    def test_dependabot_ignores_semver_major_for_mermaid_and_jsdom(self):
+        # the validator stays on the mermaid major GitHub renders diagrams with; jsdom only hosts mermaid so it
+        # follows the same rule. dompurify is not pinned to a major, so it is not expected in the ignore list.
+        cfg = (KIT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        npm_block = cfg[cfg.index("package-ecosystem: npm"):]
+        for name in ("mermaid", "jsdom"):
+            m = re.search(r'dependency-name:\s*"?' + name + r'"?\s*\n\s*update-types:\s*\[[^\]]*"version-update:semver-major"[^\]]*\]', npm_block)
+            self.assertIsNotNone(m, f"no semver-major ignore rule for {name} in the pr-open npm entry")
+
 
 class Hosting(unittest.TestCase):
     """A public repository runs every job on GitHub-hosted runners — no workflow names a self-hosted runner, so

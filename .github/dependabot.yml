@@ -13,6 +13,10 @@ updates:
 
   # skills/pr-open/mermaid-check.mjs's own three deps (mermaid, jsdom, dompurify) — installed into a
   # scratchpad with `npm ci`, never run in place; Dependabot still needs the manifest's directory to track them.
+  # mermaid and jsdom stay on the major line the validator is pinned to (kit lane decision): a diagram that
+  # validates under a newer mermaid major but renders under GitHub's older one is the false "OK" this check
+  # exists to prevent, and jsdom only hosts mermaid so it follows the same rule. Dependabot still proposes
+  # in-range (non-major) bumps for both, and any bump for dompurify.
   - package-ecosystem: npm
     directory: /skills/pr-open
     schedule:
@@ -20,3 +24,8 @@ updates:
     commit-message:
       prefix: "ci(deps)"
     labels: [enhancement, area:skills]
+    ignore:
+      - dependency-name: "mermaid"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]

@@ -242,6 +242,28 @@ class Bumps(unittest.TestCase):
             f = r.gate()
             self.assertTrue(any("files of `demo` changed but `metadata.version` is 1" in fx for fx in f), f)
 
+    def test_lockfile_only_change_needs_no_bump(self):
+        # a dependency bot's own npm PR touches only the manifest; it cannot also bump SKILL.md itself
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            r.write("skills/demo/package-lock.json", '{"name": "demo", "version": "1.0.0"}\n')
+            r.commit("lockfile bump")
+            self.assertEqual(r.gate(), [])
+            r.write("skills/demo/package.json", '{"name": "demo", "dependencies": {"x": "1.0.1"}}\n')
+            r.commit("manifest bump too")
+            self.assertEqual(r.gate(), [])
+
+    def test_lockfile_plus_skill_md_still_needs_a_bump(self):
+        # any other changed file in the same unit is not exempt, even alongside a manifest change
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Repo(tmp)
+            r.write("skills/demo/package-lock.json", '{"name": "demo", "version": "1.0.0"}\n')
+            r.write("skills/demo/SKILL.md", UNIT.format(v="1", u="2026-09-01", req="", body="2. Do more.\n"))
+            r.commit("lockfile + body change, no bump")
+            f = r.gate()
+            self.assertEqual(len(f), 1, f)
+            self.assertIn("skills/demo/SKILL.md:1 — files of `demo` changed but `metadata.version` is 1 (base 1)", f[0])
+
     def test_new_and_removed_units(self):
         with tempfile.TemporaryDirectory() as tmp:
             r = Repo(tmp)
