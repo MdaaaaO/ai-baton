@@ -9,6 +9,10 @@
     signq.py drop  <job>                delete a pending or parked job (its log is kept)
     signq.py meta  <wt> <branch> <msg> [--topic T] [--by S] [--ticket K] [--epic K] [--pr N] [--summary S]
                                         emit the META JSON line enqueue.sh embeds in a job
+    signq.py migrate-legacy             move jobs/logs a pre-workspace-queue kit queued under the kit dir
+                                        into the workspace queue and print what moved; a no-op otherwise.
+                                        Never runs as a side effect of another subcommand — setup.sh /
+                                        sync.sh call it once so a stray `list` or `meta` can't move files.
 
 <job> is the 1-based index from `list`, the topic, or the file name. Jobs are self-contained POSIX sh
 scripts under .context/state/sign-queue/ (written by enqueue.sh). A job carries one `# META {...}` line with
@@ -212,8 +216,10 @@ def build_meta(wt: str, branch: str, msg: str, topic: str = "", by: str = "", ti
     else:
         meta.update(epic_of(ticket))
     if pr:
-        meta["pr"] = int(re.sub(r"\D", "", pr)) if re.search(r"\d", pr) else pr
-        if repo and isinstance(meta["pr"], int):
+        if not re.match(r"^\d+$", pr):
+            raise ValueError(f"--pr expects a bare PR number, got {pr!r}")
+        meta["pr"] = int(pr)
+        if repo:
             meta["pr_url"] = f"https://github.com/{repo}/pull/{meta['pr']}"
     else:
         meta.update(pr_of(repo, branch))
@@ -433,27 +439,37 @@ def run_job(j: Job, verbose: bool, dry: bool) -> Dict[str, str]:
             log.write(line + "\n")
             tail.append(line); tail = tail[-25:]
             if verbose:
+                # tee the raw line to the console, but still parse it below — the milestones
+                # and the final "pushed <sha> <sig> <subject>" marker are the only evidence a
+                # push actually happened, verbose or not.
                 print("      " + dim("│ ") + line)
-                continue
             m = re.match(r"^pushed ([0-9a-f]+) (\S) (.*)", line)
             if m:
                 result.update(sha=m.group(1), sig=m.group(2), subject=m.group(3))
                 continue
-            for rx, fmt in MILESTONES:
-                mm = rx.match(line)
-                if mm and fmt:
-                    print("      " + dim("·") + " " + fmt(mm))
-                    break
+            if not verbose:
+                for rx, fmt in MILESTONES:
+                    mm = rx.match(line)
+                    if mm and fmt:
+                        print("      " + dim("·") + " " + fmt(mm))
+                        break
         rc = p.wait()
         log.write(f"===== exit {rc}\n")
     secs = int((_dt.datetime.now() - start).total_seconds())
-    if rc == 0:
+    # rc == 0 alone is not proof of a push: it only means the job script ran to its last line
+    # without error. The job's own last command prints "pushed <sha> <sig> <subject>" (parsed
+    # above); require that marker too, or a job that exits clean without ever reaching it (a
+    # malformed or truncated script) would be recorded as pushed on rc alone.
+    if rc == 0 and result["sha"]:
         result["status"] = "pushed"
         sig = SIG.get(result["sig"], result["sig"])
         sigtxt = green(sig) if result["sig"] == "G" else yellow(sig)
         print(f"      {green('✔')} {bold('pushed ' + result['sha'])}  {sigtxt}  {dim(f'{secs}s')}")
     else:
-        hint = next((h for rx, h in FAIL_HINTS if any(rx.search(t) for t in tail)), "")
+        if rc == 0:
+            hint = "job exited 0 but never printed its push confirmation — a truncated or edited job script?"
+        else:
+            hint = next((h for rx, h in FAIL_HINTS if any(rx.search(t) for t in tail)), "")
         print(f"      {red('✘ FAILED')} exit {rc}  {dim(f'{secs}s')}  → parked as {red(j.path.name + '.failed')}")
         if hint:
             print(f"      {yellow('hint:')} {hint}")
@@ -569,16 +585,23 @@ def cmd_meta(argv: List[str]) -> int:
     for a in it:
         if a.startswith("--"):
             opts[a[2:]] = next(it, "")
-    meta = build_meta(wt, br, msg, topic=opts.get("topic", ""), by=opts.get("by", ""), ticket=opts.get("ticket", ""),
-                      epic=opts.get("epic", ""), pr=opts.get("pr", ""), summary=opts.get("summary", ""),
-                      flags=[f for f in opts.get("flags", "").split(",") if f], files=int(opts.get("files", "-1") or -1))
+    try:
+        meta = build_meta(wt, br, msg, topic=opts.get("topic", ""), by=opts.get("by", ""), ticket=opts.get("ticket", ""),
+                          epic=opts.get("epic", ""), pr=opts.get("pr", ""), summary=opts.get("summary", ""),
+                          flags=[f for f in opts.get("flags", "").split(",") if f], files=int(opts.get("files", "-1") or -1))
+    except ValueError as e:
+        print(f"signq.py meta: {e}", file=sys.stderr)
+        return 2
     print(json.dumps(meta, ensure_ascii=False))
     return 0
 
 
 def migrate_legacy(legacy: Path = LEGACY_Q, q: Path = Q) -> int:
     """Move jobs and logs a pre-#7 kit queued under the kit dir into the workspace queue; returns how many files
-    moved. Never overwrites a job already in the new queue (it stays in place and is named)."""
+    moved. Never overwrites a job already in the new queue (it stays in place and is named). Explicit only —
+    called from the `migrate-legacy` subcommand (setup.sh / sync.sh run it once), never as a side effect of
+    another subcommand: a checkout that still holds a legacy `sign-queue/logs/` must not lose it to whatever
+    queue the current process happens to resolve just because someone ran `list` or `meta`."""
     if "SIGN_QUEUE_DIR" in os.environ or not legacy.is_dir() or legacy.resolve() == q.resolve():
         return 0
     moved = 0
@@ -595,14 +618,23 @@ def migrate_legacy(legacy: Path = LEGACY_Q, q: Path = Q) -> int:
     return moved
 
 
+def cmd_migrate_legacy(_: List[str]) -> int:
+    moved = migrate_legacy()
+    if moved:
+        print(f"moved {moved} file(s) from {LEGACY_Q} to {Q}")
+    else:
+        print("nothing to migrate" if not LEGACY_Q.is_dir() else f"{LEGACY_Q} and {Q} already the same directory, or nothing new to move")
+    return 0
+
+
 def main(argv: List[str]) -> int:
-    migrate_legacy()
     cmd, rest = (argv[0], argv[1:]) if argv else ("run", [])
     if cmd in ("-v", "--verbose", "--dry-run"):
         cmd, rest = "run", argv
     if cmd == "--list":
         cmd = "list"
-    table_ = {"run": cmd_run, "list": cmd_list, "show": cmd_show, "log": cmd_log, "retry": cmd_retry, "drop": cmd_drop, "meta": cmd_meta}
+    table_ = {"run": cmd_run, "list": cmd_list, "show": cmd_show, "log": cmd_log, "retry": cmd_retry, "drop": cmd_drop,
+              "meta": cmd_meta, "migrate-legacy": cmd_migrate_legacy}
     if cmd in ("-h", "--help", "help") or cmd not in table_:
         print(__doc__.strip())
         return 0 if cmd in ("-h", "--help", "help") else 2

@@ -1,12 +1,15 @@
 #!/bin/sh
 # enqueue.sh — put a commit+push job on the workspace owner's sign queue (run by any Claude session).
 #
-#   enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> [--rebase] [--new-branch] [--files "<paths>"]
+#   enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> [--rebase] [--new-branch] [--files "<paths>" | --all]
 #
 #   --rebase       fetch origin <branch> and rebase -S onto FETCH_HEAD before pushing (remote is ahead,
 #                  e.g. after a GitHub "Update branch" click). Default: plain push.
 #   --new-branch   first push of the branch (push -u).
-#   --files        stage only these paths (space separated, relative to the worktree) instead of -A.
+#   --files        stage only these paths (space separated, relative to the worktree) — the norm; explicit
+#                  paths are always what a commit should carry.
+#   --all          stage with `git add -A` on purpose. Exclusive with --files. Neither flag given falls back
+#                  to `git add -A` too, but prints a warning either way — `-A` should never be a silent default.
 #   --by <name>    your session name (as shown by ListAgents) so a failure can be routed back to you.
 #   --onto <upstream-branch>:<old-base-sha>
 #                  stacked branch: after the commit, fetch origin <upstream-branch> and
@@ -45,20 +48,27 @@ if [ -z "${SIGN_QUEUE_DIR:-}" ]; then
   ctx=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" context)
   [ -d "$ctx" ] || { echo "enqueue.sh: no workspace .context/ found ($ctx) — run from the workspace, or set SIGN_QUEUE_DIR" >&2; exit 2; }
   SIGN_QUEUE_DIR="$ctx/state/sign-queue"
+  SIGN_QUEUE_CONTEXT="$ctx"
 fi
+# exported once resolved: the `signq.py meta` call below, and any signq.py this shell goes on to run, must land
+# on the exact same queue directory this enqueue just resolved — never let a later call re-derive its own.
+export SIGN_QUEUE_DIR
+[ -n "${SIGN_QUEUE_CONTEXT:-}" ] && export SIGN_QUEUE_CONTEXT
 Q=$SIGN_QUEUE_DIR
 topic=$1; wt=$2; br=$3; msg=$4; shift 4
-rebase=0; newbr=0; files=""; explicit_files=""; by="${SIGN_QUEUE_BY:-${WORKSPACE_USER:-?}}"; onto=""; lease=""
+rebase=0; newbr=0; files=""; explicit_files=""; all=0; by="${SIGN_QUEUE_BY:-${WORKSPACE_USER:-?}}"; onto=""; lease=""
 ticket=""; epic=""; pr=""; summary=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --rebase) rebase=1;; --new-branch) newbr=1;; --files) files=$2; explicit_files=1; shift;; --by) by=$2; shift;;
+    --rebase) rebase=1;; --new-branch) newbr=1;; --files) files=$2; explicit_files=1; shift;; --all) all=1;;
+    --by) by=$2; shift;;
     --onto) onto=$2; shift;;
     --force-with-lease) lease=$2; shift;;
     --ticket) ticket=$2; shift;; --epic) epic=$2; shift;; --pr) pr=$2; shift;; --summary) summary=$2; shift;;
     *) echo "unknown flag $1" >&2; exit 2;;
   esac; shift
 done
+if [ -n "$files" ] && [ $all = 1 ]; then echo "--files and --all are exclusive" >&2; exit 2; fi
 no_nl worktree "$wt"; no_nl branch "$br"; no_nl "message path" "$msg"; no_nl --files "$files"; no_nl --onto "$onto"; no_nl --by "$by"
 [ -d "$wt/.git" ] || [ -f "$wt/.git" ] || { echo "no worktree at $wt" >&2; exit 2; }
 [ -f "$msg" ] || { echo "no message file at $msg" >&2; exit 2; }
@@ -110,15 +120,26 @@ if [ -n "$files" ]; then
   set +f
   files=$kept
 fi
-# overview metadata (ticket / epic / repo / PR / subject) for `make sign`; best effort — a job without it
-# still runs, signq.py then derives what it can from the header + worktree.
+# one staging rule: explicit paths are the norm (--files); `git add -A` is the fallback, always flagged so it is
+# never mistaken for a deliberate choice — the incident that motivated this (signed-git-commits skill, handoff-incidents.md)
+# was exactly a `git add -A` sweeping in a leftover file nobody meant to commit.
+if [ -z "$files" ]; then
+  if [ $all = 1 ]; then echo "enqueue.sh: --all — staging $wt with \`git add -A\`" >&2
+  else echo "enqueue.sh: no --files/--all given — staging $wt with \`git add -A\` (pass --files for explicit paths, or --all to make this intentional)" >&2
+  fi
+fi
+# overview metadata (ticket / epic / repo / PR / subject) for `make sign`. Not best-effort: a bad --ticket/--epic/--pr
+# is a mistake worth stopping on, so a failed `meta` call fails the enqueue instead of silently queuing a job
+# signq.py can only partly describe.
 flags=""
 [ $rebase = 1 ] && flags="$flags,rebase"; [ $newbr = 1 ] && flags="$flags,new-branch"
 [ -n "$onto" ] && flags="$flags,onto"; [ -n "$lease" ] && flags="$flags,force-with-lease"; [ -n "$files" ] && flags="$flags,files"
+[ $all = 1 ] && flags="$flags,all"
 nfiles=-1
 [ -n "$files" ] && nfiles=$(python3 -c 'import shlex,sys; print(len(shlex.split(sys.argv[1])))' "$files")
 meta=$(python3 "$(dirname "$0")/signq.py" meta "$wt" "$br" "$msg" --topic "$topic" --by "$by" --ticket "$ticket" \
-         --epic "$epic" --pr "$pr" --summary "$summary" --flags "${flags#,}" --files "$nfiles" 2>/dev/null || true)
+         --epic "$epic" --pr "$pr" --summary "$summary" --flags "${flags#,}" --files "$nfiles") \
+  || { echo "enqueue.sh: signq.py meta failed (see above) — fix the flag it rejected and re-run" >&2; exit 2; }
 mkdir -p "$Q"  # the workspace queue dir is created on first use (#7) — nothing ships or seeds it
 job="$Q/$(date -u +%Y%m%dT%H%M%SZ)-$topic.sh"
 tmp="$job.tmp"

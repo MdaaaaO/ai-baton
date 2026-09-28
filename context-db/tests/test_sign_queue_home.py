@@ -2,7 +2,9 @@
 cache on a plugin install; jobs a pre-#7 kit queued under the kit dir move over on first use, never overwriting.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import contextlib
 import importlib.util
+import io
 import os
 import subprocess
 import tempfile
@@ -61,7 +63,7 @@ class FirstEnqueue(unittest.TestCase):
             msg.write_text("fix: change a\n")
             env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
             r = subprocess.run(["sh", str(ENQUEUE), "topic-a", str(wt), "main", str(msg), "--files", "a.txt",
-                                "--ticket", "none", "--epic", "none", "--pr", "none", "--summary", "s", "--by", "t"],
+                                "--ticket", "none", "--epic", "none", "--pr", "1", "--summary", "s", "--by", "t"],
                                env={**env, "CONTEXT_ROOT": str(ctx)}, capture_output=True, text=True, timeout=60)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             jobs = list((ctx / "state" / "sign-queue").glob("*-topic-a.sh"))
@@ -131,7 +133,7 @@ class HostileValues(unittest.TestCase):
             text = "fix: don't $(touch PWNED-body) `id`\n\nsecond line; 'quoted'\n"
             msg.write_text(text)
             r = subprocess.run(["sh", str(ENQUEUE), "hostile", str(wt), branch, str(msg), "--new-branch",
-                                "--files", " ".join(names), "--ticket", "none", "--epic", "none", "--pr", "none",
+                                "--files", " ".join(names), "--ticket", "none", "--epic", "none", "--pr", "1",
                                 "--summary", "s", "--by", "t"], env=env, capture_output=True, text=True, timeout=60,
                                cwd=tmp)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -160,3 +162,149 @@ class HostileValues(unittest.TestCase):
                                env={**env, "CONTEXT_ROOT": str(Path(tmp) / ".context")}, capture_output=True, text=True)
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn("contains a newline", r.stderr)
+
+
+def _load_in(ctx: Path):
+    """load_signq() with CONTEXT_ROOT pointed at a temp workspace's .context, like the other tests here."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
+    with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(ctx)}, clear=True):
+        return load_signq()
+
+
+def _seed_repo(root: Path) -> Path:
+    wt = root / "repo"
+    wt.mkdir()
+    git = ["git", "-C", str(wt), "-c", "user.name=t", "-c", "user.email=t"]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True)
+    (wt / "a.txt").write_text("a\n")
+    subprocess.run([*git, "add", "a.txt"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "chore: seed"], check=True)
+    (wt / "a.txt").write_text("b\n")
+    return wt
+
+
+class LegacyMigrationIsExplicit(unittest.TestCase):
+    """the migration a pre-workspace-queue kit needs (jobs/logs it queued under the kit dir) must never run as a
+    side effect of some other subcommand — only an explicit `migrate-legacy` moves anything. A checkout that still
+    holds a legacy `sign-queue/logs/` must not lose it to whatever queue a plain `overview`/`list` happens to resolve."""
+
+    @staticmethod
+    def _kit(tmp: Path):
+        legacy = tmp / "kit" / "sign-queue"
+        ctx = tmp / "ws" / ".context"
+        q = ctx / "state" / "sign-queue"
+        legacy.mkdir(parents=True)
+        (legacy / "a.sh").write_text("job a\n")
+        ctx.mkdir(parents=True)
+        return legacy, ctx, q
+
+    def test_overview_does_not_migrate_legacy_jobs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            legacy, ctx, q = self._kit(tmp)
+            sq = _load_in(ctx)
+            sq.migrate_legacy.__defaults__ = (legacy, q)  # stand in for the real kit-dir / workspace-queue paths
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = sq.main(["list"])  # the overview `make sign_list` runs
+            self.assertEqual(rc, 0)
+            self.assertTrue((legacy / "a.sh").exists(), "an overview must not move a legacy job")
+            self.assertFalse(q.exists(), "an overview must not even create the new queue dir via a migration")
+
+    def test_migrate_legacy_subcommand_moves_and_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            legacy, ctx, q = self._kit(tmp)
+            sq = _load_in(ctx)
+            sq.migrate_legacy.__defaults__ = (legacy, q)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = sq.main(["migrate-legacy"])
+            self.assertEqual(rc, 0)
+            self.assertIn("moved 1 file", buf.getvalue())
+            self.assertTrue((q / "a.sh").exists())
+            self.assertFalse((legacy / "a.sh").exists())
+
+
+class RunJobPushConfirmation(unittest.TestCase):
+    """the drain must decide "pushed" from the job's own push confirmation, verbose or not — not from the exit
+    code alone (a job that exits 0 without ever confirming a push is not proof anything was pushed)."""
+
+    def test_verbose_still_parses_the_push_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            job = tmp / "job.sh"
+            job.write_text("#!/bin/sh\necho 'pushed abc1234 G subject text'\n")
+            r = sq.run_job(sq.Job(job), verbose=True, dry=False)
+            self.assertEqual(r["status"], "pushed")
+            self.assertEqual(r["sha"], "abc1234")
+            self.assertEqual(r["sig"], "G")
+
+    def test_exit_zero_without_a_push_confirmation_is_not_recorded_as_pushed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            job = tmp / "job2.sh"
+            job.write_text("#!/bin/sh\necho 'nothing to see here'\n")  # exits 0, never confirms a push
+            r = sq.run_job(sq.Job(job), verbose=False, dry=False)
+            self.assertNotEqual(r["status"], "pushed")
+
+
+class PrFlagValidation(unittest.TestCase):
+    """--pr must be a bare PR number — a malformed value (a stray letter, a URL fragment) used to be silently
+    digit-stripped into another PR's number instead of being refused."""
+
+    def test_build_meta_rejects_a_non_digit_pr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            with self.assertRaises(ValueError):
+                sq.build_meta(str(tmp), "b", str(tmp / "m"), pr="12a")
+            meta = sq.build_meta(str(tmp), "b", str(tmp / "m"), pr="12")
+            self.assertEqual(meta["pr"], 12)
+
+    def test_enqueue_fails_when_signq_meta_rejects_a_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            msg = tmp / "msg.txt"
+            msg.write_text("fix: change a\n")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
+            r = subprocess.run(["sh", str(ENQUEUE), "topic-b", str(wt), "main", str(msg), "--files", "a.txt",
+                                "--ticket", "none", "--epic", "none", "--pr", "12a", "--summary", "s", "--by", "t"],
+                               env={**env, "CONTEXT_ROOT": str(ctx)}, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("signq.py meta failed", r.stderr)
+            self.assertEqual(list((ctx / "state" / "sign-queue").glob("*.sh")), [], "a rejected flag must not queue a job")
+
+
+class StagingRuleIsExplicit(unittest.TestCase):
+    """one staging rule: explicit paths are the norm; `git add -A` only runs when asked for (`--all`) or as the
+    documented, warned fallback — `--all` itself did not exist before this fix."""
+
+    def test_all_flag_is_accepted_and_stages_everything_explicitly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            msg = tmp / "msg.txt"
+            msg.write_text("fix: change a\n")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
+            r = subprocess.run(["sh", str(ENQUEUE), "topic-c", str(wt), "main", str(msg), "--all",
+                                "--ticket", "none", "--epic", "none", "--pr", "1", "--summary", "s", "--by", "t"],
+                               env={**env, "CONTEXT_ROOT": str(ctx)}, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("staging", r.stderr)
+            jobs = list((ctx / "state" / "sign-queue").glob("*-topic-c.sh"))
+            self.assertEqual(len(jobs), 1, r.stdout + r.stderr)
+            self.assertIn("add -A", jobs[0].read_text())
