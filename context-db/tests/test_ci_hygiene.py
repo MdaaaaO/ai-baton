@@ -334,7 +334,10 @@ class DependabotManifestSkipBump(unittest.TestCase):
     def test_the_step_names_both_the_actor_and_the_path_check(self):
         job = self.job_text()
         step = job.split("Dependabot manifest-only diff", 1)[1].split("\n      - name:", 1)[0]
-        self.assertIn("dependabot[bot]", step)  # the actor condition
+        self.assertIn("dependabot[bot]", step)  # the author condition
+        # the PR's author, never github.actor: a re-run by a person would otherwise flip the decision
+        self.assertIn("github.event.pull_request.user.login", step)
+        self.assertNotIn("github.actor", step)
         self.assertIn("skills/[^/]+/package(-lock)?", step)  # the path check: only skills/*/package(-lock).json
         self.assertIn("git diff --name-only", step)  # computed from the diff, not claimed
         self.assertIn("bump check skipped: Dependabot manifest-only change", step)  # visible, not silent

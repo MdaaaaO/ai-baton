@@ -48,11 +48,11 @@ jobs:
         working-directory: .claude
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          ACTOR: ${{ github.actor }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}  # the PR author, not github.actor (whoever triggered this run, e.g. a re-run)
         run: |
           git fetch -q --no-tags origin "$BASE_REF"
           skip=false
-          if [ "$ACTOR" = "dependabot[bot]" ]; then
+          if [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
             files=$(git diff --name-only "origin/$BASE_REF...HEAD")
             if [ -n "$files" ] && [ -z "$(printf '%s\n' "$files" | grep -vE '^skills/[^/]+/package(-lock)?\.json$')" ]; then
               skip=true
