@@ -351,8 +351,8 @@ Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
 
 Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
-`context-db/ctx-store/` (idempotent; a store file whose content differs from the kit's — a user's edit, or a schema
-the kit has since changed; ctx cannot tell them apart — is kept and reported, exit 5, unless `--replace`), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
+`context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
+kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
 is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook

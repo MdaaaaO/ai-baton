@@ -13,8 +13,8 @@ Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
 
 Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
-`context-db/ctx-store/` (idempotent; a store file whose content differs from the kit's — a user's edit, or a schema
-the kit has since changed; ctx cannot tell them apart — is kept and reported, exit 5, unless `--replace`), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
+`context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
+kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
 is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
@@ -63,7 +63,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-CTX_VERSION = "v0.3.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
+CTX_VERSION = "v0.4.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
 CTX_REPO = "https://github.com/MdaaaaO/ctx-store"
 BRIEF_BUDGET = 2048     # bytes of a SessionStart brief (ctx's default is 4096; the start of a session is prime context)
 HOOK_TIMEOUT = 8        # seconds one ctx call may take inside a hook (the hook entries allow 10)
@@ -164,16 +164,17 @@ def adopt(check: bool = False, replace: bool = False) -> int:
             return 4
     else:
         r = _ctx(ctx, store, "init", "--settings", str(STORE_DATA / "ctx-store.json"),
-                 "--types", str(STORE_DATA / "types"), *(["--replace"] if replace else []), timeout=ADOPT_TIMEOUT)
-        differs = r.returncode == 3  # a store file differs from the kit's: it stays; validate and adopt still run
-        for f in _lines(r.stderr) if differs else []:
-            print(f"differs: {f} — kept; `ctx_adapter.py adopt --replace` takes the kit's (and drops local edits)")
-        if r.returncode not in (0, 3):
+                 "--types", str(STORE_DATA / "types"), "--replace" if replace else "--upgrade", timeout=ADOPT_TIMEOUT)
+        if r.returncode != 0:
             print(f"ctx_adapter.py adopt: ctx init failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
                   file=sys.stderr)
             return 2
-        if not differs:
-            print((_lines(r.stdout) or [f"ok: store {root}"])[0])
+        out = _lines(r.stdout)
+        print((out or [f"ok: store {root}"])[0])
+        kept = [ln.split(":", 1)[1].strip() for ln in out if ln.startswith("kept:")]  # edited here: it stays
+        differs = bool(kept)
+        for f in kept:
+            print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
         r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
     if r.returncode not in (0, 3):
         print(f"ctx_adapter.py adopt: ctx validate failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",

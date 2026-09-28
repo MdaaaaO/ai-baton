@@ -428,8 +428,8 @@ class StoreData(unittest.TestCase):
 
 
 class Adopt(Base):
-    """`adopt`: `ctx init` with the kit's settings and types (never a store file written by the kit itself), then
-    validate and adopt; a store file the user changed is a finding unless `--replace`."""
+    """`adopt`: `ctx init --upgrade` with the kit's settings and types (never a store file written by the kit itself),
+    then validate and adopt; a store file edited here is kept (exit 5) until `--replace`."""
 
     def data(self) -> dict[str, str]:
         d = KIT / "context-db" / "ctx-store"
@@ -454,7 +454,7 @@ class Adopt(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         data = KIT / "context-db" / "ctx-store"
         self.assertEqual([c["argv"][2:] for c in self.calls()],
-                         [["init", "--settings", str(data / "ctx-store.json"), "--types", str(data / "types")],
+                         [["init", "--settings", str(data / "ctx-store.json"), "--types", str(data / "types"), "--upgrade"],
                           ["validate"], ["validate", "--changed", "--adopt"]])
         self.assertEqual({c["argv"][1] for c in self.calls()}, {str(self.root)})
         self.assertFalse((self.root / "ctx-store.json").exists())
@@ -487,10 +487,26 @@ class Adopt(Base):
         (self.root / ".ctx" / "types" / "log.json").write_text(mine, encoding="utf-8")
         r = self.adapter("adopt", **env)
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)  # not 3: that code is validation findings
+        self.assertIn("differs: .ctx/types/log.json", r.stdout)
         self.assertIn("adopt --replace", r.stdout)
         self.assertIn("adopt: ok", r.stdout)  # validate and adopt still ran
         self.assertEqual((self.root / ".ctx" / "types" / "log.json").read_text(encoding="utf-8"), mine)
         self.assertEqual(self.adapter("adopt", "--replace", **env).returncode, 0)
+        self.assertEqual((self.root / ".ctx" / "types" / "log.json").read_text(encoding="utf-8"),
+                         self.data()[".ctx/types/log.json"])
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_schema_an_earlier_kit_wrote_takes_the_new_kits_copy(self):
+        """A kit update: the store holds what the previous kit's `init` wrote, so `adopt` replaces it, no --replace."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        old = self.t / "old-kit-types"
+        old.mkdir()
+        (old / "log.json").write_text('{"frontmatter": {"title": {"required": true}}}\n', encoding="utf-8")
+        subprocess.run([str(REAL_CTX), "--store", str(self.root), "init", "--types", str(old)], check=True,
+                       capture_output=True, env=dict(os.environ, CTX_NO_WALK="1"))
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("differs:", r.stdout)
         self.assertEqual((self.root / ".ctx" / "types" / "log.json").read_text(encoding="utf-8"),
                          self.data()[".ctx/types/log.json"])
 

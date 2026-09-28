@@ -505,8 +505,8 @@ fi
 
 echo
 echo "== ctx-store =="
-# Adopt the content root as a ctx store (ctx_adapter.py adopt runs `ctx init` with the kit's store settings and type
-# schemas: idempotent, and a store file that differs from the kit's is kept and reported, rc 5). Without the pinned ctx installed it names the commands instead of fetching over the
+# Adopt the content root as a ctx store (ctx_adapter.py adopt runs `ctx init --upgrade` with the kit's store settings
+# and type schemas: idempotent; a kit update replaces its own earlier files, and one edited here is kept, rc 5). Without the pinned ctx installed it names the commands instead of fetching over the
 # network. A clone also gets the ctx MCP server in the workspace .mcp.json (a plugin install ships it in plugin.json).
 ADAPTER="$HERE/context-db/bin/ctx_adapter.py"
 if python3 "$ADAPTER" where >/dev/null 2>&1; then
