@@ -120,10 +120,7 @@ def rules_from_base(base: str, cwd: Path = KIT) -> tuple[str, str]:
 
 
 def build(base: str, head: str, skip_bump: bool = False, cwd: Path = KIT) -> dict:
-    files = gate.changed_files(base, head, cwd)
-    findings = gate.leak_findings(base, head, cwd, files)
-    if not skip_bump:
-        findings += gate.bump_findings(base, head, cwd, files)
+    findings, files = gate.run(base, head, skip_bump, cwd)
     units = units_changed(base, head, files, cwd)
     return {"base": base, "head": head, "files": files, "units": units, "tier0": findings, "skip_bump": skip_bump,
             "swallowed": swallowed(base, head, files, cwd), "vocabulary": vocabulary(base, head, files, units, cwd)}
