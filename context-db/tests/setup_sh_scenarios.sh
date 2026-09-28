@@ -56,15 +56,21 @@ mkdir -p "$MEM/sub" "$DUR"
 printf 'fresh note\n' > "$MEM/new.md"
 printf 'nested note\n' > "$MEM/sub/deep.md"
 printf 'with space\n' > "$MEM/has space.md"
+printf 'same on both sides\n' > "$MEM/same.md"
+printf 'same on both sides\n' > "$DUR/same.md"
 printf 'harness copy\n' > "$MEM/both.md"
 printf 'durable copy\n' > "$DUR/both.md"
 run_setup
 check "exit 0" '[ "$RC" -eq 0 ]'
 check "new notes arrive in durable (incl. nested and a name with a space)" '[ "$(cat "$DUR/new.md")" = "fresh note" ] && [ "$(cat "$DUR/sub/deep.md")" = "nested note" ] && [ "$(cat "$DUR/has space.md")" = "with space" ]'
-check "a note both sides have keeps the durable copy" '[ "$(cat "$DUR/both.md")" = "durable copy" ]'
+check "an identical note on both sides is just kept, no conflict copy" '[ "$(cat "$DUR/same.md")" = "same on both sides" ] && [ ! -e "$DUR/same.from-harness.md" ]'
+check "a differing note keeps the durable copy under its name" '[ "$(cat "$DUR/both.md")" = "durable copy" ]'
+check "the differing harness copy is saved alongside it, not dropped" '[ -f "$DUR/both.from-harness.md" ] && [ "$(cat "$DUR/both.from-harness.md")" = "harness copy" ]'
 check "harness dir replaced by the symlink" '[ -L "$MEM" ]'
-check "report counts 4 verified, 3 new, 1 already durable" 'printf "%s" "$OUT" | grep -q "4 files verified, 3 new, 1 already durable"'
+check "report counts 5 verified, 3 new, 1 already durable, 1 conflicting" 'printf "%s" "$OUT" | grep -q "5 files verified, 3 new, 1 already durable, 1 conflicting"'
+check "summary names the conflicting file" 'printf "%s" "$OUT" | grep -q "both.md -> both.from-harness.md"'
 check "no staging dir left behind" '[ -z "$(ls -d "$WS/.context/.memory-migrate."* 2>/dev/null)" ]'
+check "the pre-migration dir is kept as a recoverable backup under durable, not deleted" 'b="$(ls -d "$DUR/.migrated-"* 2>/dev/null | head -1)"; [ -n "$b" ] && [ "$(cat "$b/both.md")" = "harness copy" ] && [ "$(cat "$b/new.md")" = "fresh note" ]'
 
 echo "== 3. a failed copy leaves the original untouched and exits non-zero =="
 scenario failcopy
