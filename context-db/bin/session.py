@@ -171,7 +171,10 @@ def restore_from_archive(name: str) -> str:
 
 
 def read_doc(path: str):
-    """Return (meta_dict, body_str), or (None, None) if the file does not exist."""
+    """Return (meta_dict, body_str), or (None, None) if the file does not exist. Values come back BARE
+    (frontmatter.unquote): `write_doc` quotes a value on the way out whenever it needs to (working_on /
+    responsibilities free text often contains ': '), and a value round-tripped through read → write must not
+    pick up a second layer of quotes each time."""
     if not os.path.exists(path):
         return None, None
     with open(path, encoding="utf-8") as f:
@@ -180,17 +183,28 @@ def read_doc(path: str):
     if parts is None:
         return {}, text
     fm, body = parts
-    return frontmatter.parse_flat(fm), body.lstrip("\n")
+    meta = {k: frontmatter.unquote(v) for k, v in frontmatter.parse_flat(fm).items()}
+    return meta, body.lstrip("\n")
+
+
+def quoted_value(v) -> str:
+    """`one_line(v)`, double-quoted when the bare value would not be a valid YAML plain scalar
+    (frontmatter.plain_scalar_problem — covers a `: `, a leading `#` or a ` #` anywhere, a leading indicator
+    character) — every field here goes through this on write, so free text (working_on, responsibilities,
+    e.g. "fix the PR review comments") that happens to mention an issue reference never produces a
+    frontmatter block a real YAML parser refuses or truncates."""
+    s = one_line(v)
+    return frontmatter.quote(s) if s and frontmatter.plain_scalar_problem(s) else s
 
 
 def write_doc(path: str, meta: dict, body: str) -> None:
     os.makedirs(SESS_DIR, exist_ok=True)
     lines = ["---"]
     for k in FIELDS:
-        lines.append(f"{k}: {one_line(meta.get(k, ''))}")
+        lines.append(f"{k}: {quoted_value(meta.get(k, ''))}")
     for k, v in meta.items():  # a key this version does not know (a newer kit, a hand-added note) survives the next touch
         if k not in FIELDS:
-            lines.append(f"{k}: {one_line(v)}")
+            lines.append(f"{k}: {quoted_value(v)}")
     lines.append("---")
     # atomic: the heartbeat and the session write the same file; a reader never sees a torn one
     atomic_write(path, "\n".join(lines) + "\n\n" + body.strip() + "\n")

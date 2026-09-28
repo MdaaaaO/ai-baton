@@ -1,6 +1,6 @@
 ---
 name: slack-draft
-description: Lifecycle of every Slack message a session drafts for the user: create it as a draft (never paste text), record it, and READ the channel or thread before any follow-up, recreate or status claim, because the user edits drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft "pending", and when resuming one.
+description: "Lifecycle of every Slack message a session drafts for the user: create it as a draft (never paste text), record it, and READ the channel or thread before any follow-up, recreate or status claim, because the user edits drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
   version: "4"
