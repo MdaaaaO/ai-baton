@@ -189,6 +189,22 @@ class Hosting(unittest.TestCase):
         self.assertGreater(seen, 0)
 
 
+class VersionsEnvIntoGithubEnv(unittest.TestCase):
+    def test_no_workflow_appends_the_raw_file(self):
+        # $GITHUB_ENV accepts only NAME=value (or heredoc) lines; versions.env carries comments, so `cat` into it fails
+        # the step — a release push would never tag
+        for wf in workflows():
+            text = Hosting.code(wf)
+            self.assertIsNone(re.search(r"cat\s+[^|;&\n]*versions\.env[^|;&\n]*>>\s*\"?\$GITHUB_ENV", text),
+                              f"{wf.name}: appends versions.env raw to $GITHUB_ENV — copy only the NAME=value lines")
+
+    def test_the_assignment_filter_keeps_every_pin(self):
+        env = (WORKFLOWS.parent / "versions.env").read_text(encoding="utf-8").splitlines()
+        pins = [l for l in env if re.match(r"^[A-Z_][A-Z0-9_]*=", l)]
+        self.assertTrue(pins)
+        self.assertEqual(len(pins), len([l for l in env if "=" in l and not l.startswith("#")]))
+
+
 class EngineMakefile(unittest.TestCase):
     def test_t_selects_one_module_else_full_discovery(self):
         """`make test T=<module>` runs one file instead of the whole suite (docs/contributing.md § Testing)."""

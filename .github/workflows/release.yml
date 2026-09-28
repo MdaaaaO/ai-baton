@@ -36,7 +36,8 @@ jobs:
           fetch-depth: 0  # detect needs the tags
       # An exact version, not a floating range — one pin, .github/versions.env, bumped there via PR.
       - name: Load pinned tool versions
-        run: cat .github/versions.env >> "$GITHUB_ENV"
+        # only the NAME=value lines: $GITHUB_ENV rejects the file's comment lines, which would fail every release run
+        run: grep -E '^[A-Z_][A-Z0-9_]*=' .github/versions.env >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       # released=true: a release commit without its tag. released=false with a tag: the tag already marks
