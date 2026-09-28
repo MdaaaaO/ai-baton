@@ -53,6 +53,45 @@ class Readme(unittest.TestCase):
         stats = rc.parse(GOOD.replace("It turns", "- " + "item " * 100 + "\n\nIt turns", 1))
         self.assertLess(stats["pitch_words"], 20)
 
+    def test_paragraph_band_is_ok_warn_fail_not_ok_twice(self):
+        # a paragraph right at the warn floor is ok, one word over is warn (not "ok" again), one word
+        # past the fail ceiling is FAIL — the band used to collapse the whole warn range into "ok".
+        def status_for(n):
+            body = GOOD.replace(
+                "It turns a thing into another thing for you.", " ".join(["word"] * n), 1
+            )
+            return results(body)["paragraphs"]
+
+        self.assertEqual(status_for(90), "ok")
+        self.assertEqual(status_for(91), "warn")
+        self.assertEqual(status_for(150), "warn")
+        self.assertEqual(status_for(151), "FAIL")
+
+    def test_badge_from_another_host_and_unlinked_image_are_counted(self):
+        # an <img> badge from a host other than shields.io, and a plain (unlinked) markdown image,
+        # both used to be read as prose instead of as a badge.
+        other_host_img = '<img alt="cov" src="https://badges.example.invalid/cov.svg">'
+        unlinked_md_image = "![build](https://ci.example.invalid/badge.svg)"
+        text = "\n".join([
+            "# tool", "", "**One line on what it is.**", "",
+            other_host_img, unlinked_md_image, BADGE, "",
+            "It does a thing.", "",
+            "```sh", "pip install tool", "```", "",
+        ])
+        self.assertEqual(rc.parse(text)["badges"], 3)
+
+    def test_heading_indented_inside_a_details_block_starts_a_section(self):
+        # a `## ` heading indented (as authors commonly do inside <details>) used to be invisible to
+        # the section detector, which only matched a heading at column 0.
+        text = "\n".join([
+            "# tool", "", "Pitch.", "",
+            "<details>", "<summary>Alternate install</summary>", "",
+            "  ## Via conda", "", "conda install thing", "</details>", "",
+            "## License", "", "MIT.", "",
+        ])
+        titles = [t for t, _ in rc.parse(text)["sections"]]
+        self.assertIn("Via conda", titles)
+
 
 class Contributing(unittest.TestCase):
     def test_short_version_in_the_intro_counts(self):
