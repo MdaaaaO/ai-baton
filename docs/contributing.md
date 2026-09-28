@@ -89,9 +89,10 @@ skill bound to one environment. Every `requires` skill carries a `README.md` (�
 does on a machine without it, one example exchange.
 
 **Layout.** `SKILL.md` — the procedure as numbered imperative sections (`## 1. Detect …`, `## 2. Do …`), 70–130
-lines as the target, 500 the hard cap; `reference.md` / `references/` — rationale, worked scripts, history, loaded
-on demand; `scripts/` — stdlib Python or POSIX shell; `README.md` — capability tier. Evals live **outside** the
-skill in `evals/<skill>-<case>/` (`prompt.md` + `graders/*.md`, the format `claude plugin eval` runs and
+lines as the target (`kit-verify` warns past it), 300 the hard cap — a unit that genuinely needs more is named
+in `BODY_LINES_ALLOW` (kit_verify.py) with a reason; `reference.md` / `references/` — rationale, worked scripts,
+history, loaded on demand; `scripts/` — stdlib Python or POSIX shell; `README.md` — capability tier. Evals live
+**outside** the skill in `evals/<skill>-<case>/` (`prompt.md` + `graders/*.md`, the format `claude plugin eval` runs and
 `claude plugin eval init --bare` scaffolds; `evals/results/` is the runner's output and is not committed), so the
 installed skill stays lean. `make -C $BATON/context-db eval-check` is the token-free gate on every PR (each suite
 ≥ 10 cases, both kinds, every case loads); the token-spending run is `make … eval SKILL=<name>` or the manual `evals`
@@ -154,8 +155,8 @@ pre-2026-09-26 unit under `metadata:` and adds `compatibility` (idempotent).
 --no-env`) runs everything that needs no environment — the schema above, `name` = directory, the description caps,
 `metadata.requires` ∈ the capability flags, every `metadata.facts` entry has a discovery manifest, no bare scalar
 that YAML would cut at a `#` comment, no frontmatter key repeated at one level, no numbered list that repeats a
-step number or a step's text, the body ≤ 500
-lines, every `scripts/…` / `references/…` path the body cites exists, no `skills/<x>/SKILL.md` path literal
+step number or a step's text, the body ≤ 300 lines (BODY_LINES_ALLOW-exempt units aside; a warn past 130),
+every `scripts/…` / `references/…` path the body cites exists, no `skills/<x>/SKILL.md` path literal
 (§ Skills: cross-reference by name), and no fact-shaped literal (Slack id,
 custom-field id, account id, ticket key, org host, tz literal — `context-db/bin/leak_shapes.py`) — and prints
 the checks it skipped (the env-store ones). Both scanners read the one allow-list `skills/kit-health/allow.txt`

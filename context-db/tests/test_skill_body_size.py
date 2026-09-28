@@ -1,5 +1,6 @@
-"""docs/authoring.md § 2 Body sets a 70-130 line target for a skill body (BODY_MAX_LINES=500 is only the
-hard cap `kit_verify.py` errors on) — reference detail (tables, worked scripts, incident histories) is
+"""docs/authoring.md § 2 Body sets a 70-130 line target for a skill body (`kit_verify.py` warns past
+BODY_WARN_LINES=130 and errors past BODY_MAX_LINES=300, unless the unit is named in BODY_LINES_ALLOW with a
+reason) — reference detail (tables, worked scripts, incident histories) is
 meant to move into `reference/*.md`, loaded on demand, never the always-loaded body. Seven skills drifted
 well past the target (up to 263 body lines) with no reference/ material to show for it. This locks the
 fix in: each of the seven now stays under a size comfortably between its old and its restructured line

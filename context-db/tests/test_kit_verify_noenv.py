@@ -258,6 +258,13 @@ class BodyChecks(unittest.TestCase):
         kit_verify.check_body(p, p.relative_to(KIT), body, errors, is_agent=is_agent)
         return errors
 
+    def check_warn(self, body: str, unit_dir: Path | None = None) -> tuple[list[str], list[str]]:
+        errors: list[str] = []
+        warn: list[str] = []
+        p = (unit_dir or FIX / "good-skill") / "SKILL.md"
+        kit_verify.check_body(p, p.relative_to(KIT), body, errors, warn=warn)
+        return errors, warn
+
     def test_agent_body_needs_colon_fails_but_skill_body_is_untouched(self):
         # the fork hand-back line is `NEEDS <system>.<kind> <name>`, never a colon — a main session
         # matching on one spelling misses the other. kit-verify only enforces this on an agent body.
@@ -293,8 +300,40 @@ class BodyChecks(unittest.TestCase):
 
     def test_body_length_cap(self):
         errors = self.check("x\n" * (kit_verify.BODY_MAX_LINES + 1))
-        self.assertTrue(any("lines > 500" in e for e in errors), errors)
+        self.assertTrue(any(f"lines > {kit_verify.BODY_MAX_LINES}" in e for e in errors), errors)
         self.assertEqual(self.check("x\n" * kit_verify.BODY_MAX_LINES), [])
+
+    def test_body_length_cap_is_300_with_a_130_line_warn(self):
+        # a follow-up on the size-and-references work: the hard cap moved down from evolve's old 500-line Tier 0
+        # cap to 300, with a new warn from 130 (docs/authoring.md's target) for a unit not named in
+        # BODY_LINES_ALLOW. Pinned by the literal numbers, not just the symbols, so a change to either constant's
+        # value is caught here even if it forgets to update the docs that quote it.
+        self.assertEqual(kit_verify.BODY_MAX_LINES, 300)
+        self.assertEqual(kit_verify.BODY_WARN_LINES, 130)
+        errors = self.check("x\n" * 301)
+        self.assertTrue(any("lines > 300" in e for e in errors), errors)
+        self.assertEqual(self.check("x\n" * 300), [])
+        errors, warn = self.check_warn("x\n" * 131)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("lines > 130" in w for w in warn), warn)
+        errors, warn = self.check_warn("x\n" * 130)
+        self.assertEqual(warn, [])
+
+    def test_body_lines_allow_exempts_the_named_unit_from_warn_and_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, over in (("pr-review", True), ("self-assessment", True), ("some-other-skill", False)):
+                unit_dir = Path(tmp) / name
+                unit_dir.mkdir()
+                p = unit_dir / "SKILL.md"
+                p.write_text("body\n", encoding="utf-8")  # leak_shapes reads this file directly; irrelevant here
+                errors: list[str] = []
+                warn: list[str] = []
+                kit_verify.check_body(p, p, "x\n" * (kit_verify.BODY_MAX_LINES + 50), errors, warn=warn)
+                if over:
+                    self.assertEqual(errors, [], name)
+                    self.assertEqual(warn, [], name)
+                else:
+                    self.assertTrue(any(f"lines > {kit_verify.BODY_MAX_LINES}" in e for e in errors), (name, errors))
 
     def test_shape_scan_uses_the_shared_list_and_skip_rule(self):
         import leak_shapes

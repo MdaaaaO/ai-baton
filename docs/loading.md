@@ -29,8 +29,9 @@ does: a procedure, an example exchange, a rationale, an environment value.
 
 - **`SKILL.md` bodies** load when the skill is invoked (by trigger or `/name`): <!-- kit-verify:bodies -->26<!-- /kit-verify:bodies --> bodies,
   <!-- kit-verify:body-bytes -->197,589 B<!-- /kit-verify:body-bytes --> together, so the
-  layer is roughly ten times the always-on one and is paid only by the session that uses it. Cap `BODY_MAX_LINES` = 500
-  lines per body; target 70–130 (`docs/contributing.md` § Skills).
+  layer is roughly ten times the always-on one and is paid only by the session that uses it. Cap `BODY_MAX_LINES` = 300
+  lines per body (a warn past `BODY_WARN_LINES` = 130); target 70–130 (`docs/contributing.md` § Skills). A unit that
+  genuinely needs more is named in `BODY_LINES_ALLOW` (kit_verify.py) with a reason.
 - **`reference.md` / `references/`** beside a skill load only when a step cites them — rationale, worked scripts,
   history go there, not into the body. `scripts/` are run, never read into context.
 - **Agent bodies** (`agents/*.md`) load into the fork they run; `omitClaudeMd: true` keeps layer 1 out of a cheap
