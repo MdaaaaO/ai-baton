@@ -31,4 +31,5 @@ the kit shells out to, or in a system the kit only reads from — report those t
 ## Supported versions
 
 Only the latest released version is supported; there is no long-term maintenance branch. Update with
-`claude plugin update ai-baton@ai-baton-kit` (plugin) or `make claude_sync` (clone).
+`claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@ai-baton-kit` (plugin —
+refresh the marketplace first, or the update can stay on the old release) or `make claude_sync` (clone).

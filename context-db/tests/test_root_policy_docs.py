@@ -53,6 +53,11 @@ class NoStaleNoLicenceClaim(unittest.TestCase):
         contributing = (KIT / "docs" / "contributing.md").read_text(encoding="utf-8")
         self.assertIn("MIT", authoring)
         self.assertIn("MIT", contributing)
+        # and neither doc turns the key into a requirement
+        self.assertIn("none does yet", authoring)
+        self.assertIn("accepted but not required", contributing)
+        for text in (authoring, contributing):
+            self.assertNotRegex(text, r"(?i)`license`[^\n|]*\b(is )?required\b(?! it)")
 
 
 if __name__ == "__main__":
