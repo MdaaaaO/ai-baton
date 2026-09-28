@@ -16,11 +16,13 @@ Agent Skills spec's "Claude Code profile" (docs/contributing.md § Skill frontma
   - optional metadata.requires (comma-separated known capability flags) — the only gate a unit carries —
     with a `compatibility:` line naming every flag, so a spec-only reader sees the gate too,
   - optional metadata.facts (comma-separated `<system>.<kind>[ <name>]` / `<config.key>` entries, each covered
-    by a discovery manifest in context-db/discovery/ — the manifests themselves are validated too),
+    by a discovery manifest in context-db/discovery/ — the manifests themselves are validated too), and every
+    fact the body itself reads via `kit_profile.py get` / `kb.py get` must be named there too — a body that
+    reads an undeclared fact fails here, not the first time a session hits it mid-skill,
   - no `environments:` tag and no "(<name>) " description prefix: the kit never names an
     environment (retired 2026-09-25; which machine has which capability is its local env store),
-  - description ≤ 60 whitespace-separated tokens and ≤ 400 B, all descriptions ≤ 9,500 B together —
-    every description loads into every session's prefix.
+  - description ≤ 60 whitespace-separated tokens and ≤ 400 B, all descriptions ≤ 9,500 B together (warns past
+    90% of the total budget, naming the largest) — every description loads into every session's prefix.
 And the env store (`.context/reference/env/config.json`, see kb.py — one per machine, not in the
 kit) for every top-level key `environment-template/config.json` has, `systems.*` covering every
 flag a skill may `require` as booleans, a compiling one-group `tracker.key_regex`, and no rows left
@@ -28,7 +30,12 @@ under a renamed kind (`kb.py migrate` moves them).
   - the body: ≤ 500 lines (evolve's Tier 0 cap), every `scripts/…` / `references/…` / `$BATON/skills/<name>/…`
     path it cites exists, and no generic environment-fact shape (Slack id, custom-field id, account id, ticket
     key, org host, tz literal — `leak_shapes.py`, shared with kit-health) in the file.
-With --stale N also lists units whose `reviewed` is older than N days (warning, not an error).
+  - docs/loading.md's `<!-- kit-verify:<key> -->` numbers must match what this run just computed (`--loading-table`
+    prints them without running the rest of the checks).
+With --stale N also lists units whose `reviewed` is older than N days (warning, not an error). Two more
+non-blocking notes, always on: a description that names no trigger ("Use when …", or plain "when …") or reads
+in the first person, and a `reviewed:` date older than the file's last committed edit (`--no-git` skips the
+latter — no git history to compare against).
 
 `--no-env` is the ENVIRONMENT-FREE validator: everything above except the env-store checks, which are
 skipped and listed — it passes on a bare `git clone` with no `.context/` at all, so a contributor's PR (and CI,
@@ -40,6 +47,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -73,11 +81,16 @@ NO_ENV_STORE = Path("/nonexistent-env-store")
 def load_json_file(p: Path) -> tuple[dict | None, str | None]:
     """Read + parse one JSON file that is not guaranteed to be well-formed or even reachable — returns
     (data, None) or (None, reason). Every way a file can misbehave (bad JSON, a non-UTF-8 byte, an unreadable
-    or dangling path) is one finding, never a traceback that looks like a real failure in CI logs."""
+    or dangling path) is one finding, never a traceback that looks like a real failure in CI logs. The reason
+    is pre-labelled — `unreadable` for a path that could not even be opened (OSError: missing, dangling
+    symlink, permissions), `invalid JSON` for a path that opened but did not parse (bad JSON, a non-UTF-8
+    byte) — so a caller never has to guess which kind of failure it is passing on."""
     try:
         return json.loads(p.read_text(encoding="utf-8")), None
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
-        return None, str(e)
+    except OSError as e:
+        return None, f"unreadable — {e}"
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        return None, f"invalid JSON — {e}"
 
 
 def check_env_store(errors: list[str]) -> str:
@@ -91,7 +104,7 @@ def check_env_store(errors: list[str]) -> str:
     rel = f"{p.parent.name}/{p.name}"
     cfg, err = load_json_file(p)
     if err is not None:
-        errors.append(f"{rel}: invalid JSON — {err}")
+        errors.append(f"{rel}: {err}")
         return ""
     # optional keys: absent means the kit default (commit_style.py falls back to `conventional`)
     for k in sorted(want_keys - set(cfg) - {"environment"} - OPTIONAL):
@@ -197,7 +210,7 @@ def check_plugin_manifest(errors: list[str]) -> None:
         return
     man, err = load_json_file(mp)
     if err is not None:
-        errors.append(f"{PLUGIN_MANIFEST}: invalid JSON — {err}")
+        errors.append(f"{PLUGIN_MANIFEST}: {err}")
         return
     name = str(man.get("name") or "")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
@@ -216,7 +229,7 @@ def check_plugin_manifest(errors: list[str]) -> None:
         return
     market, err = load_json_file(mk)
     if err is not None:
-        errors.append(f"{MARKETPLACE_MANIFEST}: invalid JSON — {err}")
+        errors.append(f"{MARKETPLACE_MANIFEST}: {err}")
         return
     entries = market.get("plugins") if isinstance(market.get("plugins"), list) else []
     if not any(isinstance(e, dict) and e.get("name") == name and e.get("source") in ("./", ".") for e in entries):
@@ -251,7 +264,7 @@ def check_identity_options(errors: list[str], man: dict) -> None:
         return
     hooks, err = load_json_file(hp)
     if err is not None:
-        errors.append(f"{PLUGIN_HOOKS}: invalid JSON — {err}")
+        errors.append(f"{PLUGIN_HOOKS}: {err}")
         return
     cmds = [h.get("command", "") for grp in (hooks.get("hooks", {}).get("SessionStart") or []) if isinstance(grp, dict)
             for h in (grp.get("hooks") or []) if isinstance(h, dict)]
@@ -358,6 +371,58 @@ def check_readme_install(errors: list[str], kit: Path = KIT) -> None:
             errors.append(f"README.md:{n}: the plugin install looks up the plugin root with a python3 one-liner — use `/kit-setup` (#97)")
 
 
+LOADING_MD = KIT / "docs" / "loading.md"
+LOADING_MARKER = re.compile(r"<!-- kit-verify:(\w[\w-]*) -->(.*?)<!-- /kit-verify:\1 -->", re.S)
+
+
+def loading_numbers() -> dict[str, int]:
+    """The numbers `docs/loading.md` § Layer 1 / Layer 2 quotes: every unit and its description bytes (layer 1),
+    every skill body and its bytes (layer 2) — one source both `--loading-table` and the drift check read, so
+    the two can never say something different from what kit-verify itself just computed."""
+    units = fmt.units(KIT)
+    desc_bytes = 0
+    body_bytes = 0
+    bodies = 0
+    for p in units:
+        parts = fmt.split(p.read_text(encoding="utf-8", errors="replace"))
+        fm = fmt.parse_lines(parts[0]) if parts else None
+        d = fmt.unquote(fm.get("description", "")) if fm else ""
+        desc_bytes += len(d.encode())
+        if p.parent.name != "agents":
+            bodies += 1
+            body_bytes += len((parts[1] if parts else "").encode())
+    return {"units": len(units), "desc_bytes": desc_bytes, "bodies": bodies, "body_bytes": body_bytes}
+
+
+def loading_table_values(n: dict[str, int] | None = None) -> dict[str, str]:
+    """The exact text each `<!-- kit-verify:<key> -->` marker in docs/loading.md must hold."""
+    n = n or loading_numbers()
+    return {
+        "units": str(n["units"]),
+        "desc-bytes": f"{n['desc_bytes']:,} B",
+        "bodies": str(n["bodies"]),
+        "body-bytes": f"{n['body_bytes']:,} B",
+    }
+
+
+def check_loading_table_drift(errors: list[str]) -> None:
+    """docs/loading.md quotes these numbers in prose; `<!-- kit-verify:<key> --><!-- /kit-verify:<key> -->` marks
+    the exact span so a later PR's description or a new skill's body cannot leave it stale — the same
+    discipline `pr-open`'s diagram set uses against the diff. Missing markers are reported once, not
+    silently accepted (a doc that has not adopted the markers yet still needs updating by hand)."""
+    if not LOADING_MD.is_file():
+        return
+    text = LOADING_MD.read_text(encoding="utf-8")
+    have = {m.group(1): m.group(2) for m in LOADING_MARKER.finditer(text)}
+    for key, want in loading_table_values().items():
+        if key not in have:
+            errors.append(f"docs/loading.md: no <!-- kit-verify:{key} --> marker — add one around the number and "
+                          "re-run `kit_verify.py --loading-table`")
+        elif have[key] != want:
+            errors.append(f"docs/loading.md: <!-- kit-verify:{key} --> says {have[key]!r}, kit-verify now computes "
+                          f"{want!r} — re-measure (`kit_verify.py --loading-table`) and update the doc")
+
+
 def check_always_on_budget(errors: list[str]) -> None:
     for rel, cap in ALWAYS_ON_BUDGET.items():
         p = KIT / rel
@@ -376,6 +441,7 @@ def check_always_on_budget(errors: list[str]) -> None:
 DESC_MAX_WORDS = 60
 DESC_MAX_BYTES = 400
 DESC_TOTAL_BYTES = 9_500
+DESC_TOTAL_WARN_RATIO = 0.90  # warn this far into the budget so a new skill's description does not fail the gate as a surprise
 
 
 def check_description(rel, fm, errors: list[str]) -> int:
@@ -387,6 +453,73 @@ def check_description(rel, fm, errors: list[str]) -> int:
     if size > DESC_MAX_BYTES:
         errors.append(f"{rel}: description is {size} bytes > {DESC_MAX_BYTES}")
     return size
+
+
+# A description is what loads into every session's prefix; a reader (human or the trigger evals) must be able
+# to tell WHEN a unit fires from it alone. Warn only for now — 15 of 18 units predate this rule (see the PR body
+# for the list) and a wording pass on every one of them is a separate, editorial piece of work; the next release
+# turns this into a failure (docs/authoring.md).
+FIRST_PERSON = re.compile(r"\b(I|I'm|I've|my|our|myself)\b")
+
+
+def check_description_shape(rel, fm, warn: list[str]) -> None:
+    d = fmt.unquote(fm.get("description", ""))
+    if "when" not in d.lower():
+        warn.append(f"{rel}: description names no trigger (\"Use when …\", \"Invoke when …\", or plain \"when …\") — "
+                     "a reader cannot tell when to load this unit from the description alone")
+    if FIRST_PERSON.search(d):
+        warn.append(f"{rel}: description reads in the first person — write it as the unit's own trigger, not prose about writing one")
+
+
+def check_reviewed_freshness(kit: Path, rel, reviewed: str, warn: list[str]) -> None:
+    """`reviewed:` is a claim that someone read the unit as of that date — stale the moment the file changes
+    after it without a bump. `git log -1` on the committed history is the only source that is not itself
+    `reviewed:` (a unit cannot attest its own freshness); a path git has never heard of (a new file, or no
+    repository at all — a temp fixture in a test) answers nothing, so it is silently skipped, never guessed at."""
+    try:
+        out = subprocess.run(["git", "-C", str(kit), "log", "-1", "--format=%cs", "--", str(rel)],
+                              capture_output=True, text=True, timeout=10)
+    except OSError:
+        return
+    last = out.stdout.strip()
+    if out.returncode != 0 or not last:
+        return
+    if last > reviewed:
+        warn.append(f"{rel}: reviewed {reviewed} predates the last edit {last} — bump metadata.reviewed "
+                     "(or metadata.version too, if the content itself changed)")
+
+
+# `kit_profile.py get <key>` / `kb.py get <key>` — the one read API every unit body uses (docs/env-facts.md):
+# a body that reads a fact the reader never sees named in `metadata.facts` hits it for the first time mid-skill,
+# not at kit-verify time. `[\w.]*` stops at the first character that is neither a word char nor a dot, so
+# a placeholder like `get systems.<x>` or `get tracker.close_reasons.<done|wont_do|cancelled>` is captured up to
+# the dot before the `<` — exactly the prefix a caller needs to declare.
+GET_CALL = re.compile(r"(?:kit_profile|kb)\.py\s+get\s+([A-Za-z][\w.]*\.?)")
+SYSTEMS_FLAG_MENTION = re.compile(r"`systems\.([a-z_]+)`")
+
+
+def audit_facts_read(rel, body: str, declared: set[str], errors: list[str]) -> None:
+    seen_dynamic = False
+    reported: set[str] = set()
+    for gm in GET_CALL.finditer(body):
+        line = body.count("\n", 0, gm.start()) + 1
+        key = gm.group(1).rstrip(".")
+        if "." not in key:
+            if key != "systems" or seen_dynamic:
+                continue  # a bare whole-section read (`get self_assessment`) — nothing single to declare
+            seen_dynamic = True  # `get systems.<x>` — a dynamic gate; every concrete flag it names elsewhere must be declared
+            for fm2 in SYSTEMS_FLAG_MENTION.finditer(body):
+                fkey = f"systems.{fm2.group(1)}"
+                if fkey not in declared and fkey not in reported:
+                    reported.add(fkey)
+                    errors.append(f"{rel}: reads `{fkey}` (env-gated behind a dynamic `get systems.<x>`, body line {line}) "
+                                  "but does not declare it in metadata.facts")
+            continue
+        if key in declared or key in reported:
+            continue
+        reported.add(key)
+        errors.append(f"{rel}: body line {line} reads env fact `{key}` (`kit_profile.py get` / `kb.py get`) "
+                      "but does not declare it in metadata.facts")
 
 
 BODY_MAX_LINES = 500  # evolve Tier 0's cap on a skill body
@@ -474,10 +607,12 @@ def check_body(p: Path, rel, body: str, errors: list[str]) -> None:
                       "verbatim: skills/kit-health/allow.txt, the one allow-list both scanners read)")
 
 
-def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: int = 0, today: date | None = None) -> int:
+def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: int = 0, today: date | None = None,
+               warn: list[str] | None = None, no_git: bool = False) -> int:
     """Every frontmatter check for one skill/agent file; appends problems to `errors` (and stale notes to
-    `stale`), returns the description size in bytes."""
+    `stale`, non-blocking notes to `warn`), returns the description size in bytes."""
     today = today or date.today()
+    warn = warn if warn is not None else []
     desc_total = 0
     is_agent = p.parent.name == "agents"
     parts = fmt.split(p.read_text(encoding="utf-8", errors="replace"))  # one read + split, reused below
@@ -487,7 +622,8 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
     if fm is None:
         errors.append(f"{rel}: no frontmatter block")
         return 0
-    check_body(p, rel, parts[1] if parts else "", errors)
+    body = parts[1] if parts else ""
+    check_body(p, rel, body, errors)
     for line in (parts[0] if parts else []):  # YAML reads ` #` in a bare scalar as a comment: the value is cut there
         km = fmt.KEY.match(line) or fmt.SUBKEY.match(line)
         val = (km.group(2) or "").lstrip() if km else ""
@@ -536,9 +672,12 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
                 d = datetime.strptime(m[k], DATE).date()
                 if k == "reviewed" and stale_days and (today - d).days > stale_days:
                     stale.append(f"{rel}: reviewed {m[k]} ({(today - d).days}d ago)")
+                if k == "reviewed" and not no_git:
+                    check_reviewed_freshness(KIT, rel, m[k], warn)
             except ValueError:
                 errors.append(f"{rel}: metadata.{k} '{m[k]}' is not YYYY-MM-DD")
     desc_total += check_description(rel, fm, errors)
+    check_description_shape(rel, fm, warn)
     pm = re.match(r"\(([a-z][a-z0-9-]*)\) ", fmt.unquote(fm.get("description", "")))
     if pm:
         errors.append(f"{rel}: description starts with '({pm.group(1)}) ' — drop the environment prefix; "
@@ -561,17 +700,26 @@ def check_unit(p: Path, rel, errors: list[str], stale: list[str], stale_days: in
                     errors.append(f"{rel}: compatibility does not name the required flag '{r}'")
     if "compatibility" in fm and len(fmt.unquote(fm["compatibility"])) > 500:
         errors.append(f"{rel}: compatibility is longer than the spec's 500 characters")
+    declared: set[str] = set()
     if "facts" in m:
         entries = fmt.parse_csv(m["facts"])
         if not entries:
             errors.append(f"{rel}: metadata.facts must be a comma-separated list of `<system>.<kind>[ <name>]` / `<config.key>` entries")
         for e in entries:
             key, _, nm = e.partition(" ")
+            declared.add(key)
             if not kb.FACT_KEY.match(e):
                 errors.append(f"{rel}: facts entry '{e}' is not `<system>.<kind>[ <name>]` or a dotted config key")
+            elif key.startswith("systems.") and key.count(".") == 1:
+                # a `systems.*` capability flag is not discovered through a manifest — every store carries the
+                # whole set (check_env_store) — so declaring one only has to name a real flag
+                flag = key.split(".", 1)[1]
+                if flag not in SYSTEMS:
+                    errors.append(f"{rel}: facts entry '{e}' names unknown capability flag '{flag}' {sorted(SYSTEMS)}")
             elif kb.find_fact(key, nm.strip()) is None:
                 errors.append(f"{rel}: facts entry '{e}' has no discovery manifest — add it to "
                               "context-db/discovery/<system>.json (see its README.md) so sessions know how to find it")
+    audit_facts_read(rel, body, declared, errors)
     return desc_total
 
 
@@ -579,8 +727,15 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="kit_verify.py", description=__doc__.split("\n\n")[0])
     ap.add_argument("--stale", type=int, default=0, metavar="N", help="also list units whose reviewed is older than N days")
     ap.add_argument("--no-env", action="store_true", help="environment-free: skip the env-store checks (a bare clone, a contributor's PR)")
+    ap.add_argument("--no-git", action="store_true", help="skip the reviewed-vs-last-edit check (no git history to compare against)")
+    ap.add_argument("--loading-table", action="store_true",
+                    help="print the numbers docs/loading.md quotes (units, description bytes, bodies, body bytes) and exit")
     ap.add_argument("units", nargs="*", type=Path, help="skill/agent files or dirs to verify (default: every unit; skips the kit-wide totals)")
     a = ap.parse_args(argv)
+    if a.loading_table:
+        for key, val in loading_table_values().items():
+            print(f"{key}: {val}")
+        return 0
     saved_kb_env = kb.ENV
     if a.no_env:
         kb.ENV = NO_ENV_STORE  # environment-free for the whole run: `check_unit`'s facts-declared check and the
@@ -605,6 +760,7 @@ def main(argv: list[str] | None = None) -> int:
             units = fmt.units(KIT)
         errors: list[str] = []
         stale: list[str] = []
+        warn: list[str] = []
         skipped: list[str] = []
         if partial:
             skipped.append("always-on budget and description total (kit-wide; run without paths)")
@@ -615,11 +771,15 @@ def main(argv: list[str] | None = None) -> int:
             check_plugin_manifest(errors)
             check_make_targets(errors)
             check_issue_refs(errors)
+            check_loading_table_drift(errors)
         desc_total = 0
+        desc_sizes: list[tuple[int, str]] = []
         today = date.today()
         for p in units:
             rel = p.relative_to(KIT) if p.is_relative_to(KIT) else p
-            desc_total += check_unit(p, rel, errors, stale, a.stale, today)
+            size = check_unit(p, rel, errors, stale, a.stale, today, warn, a.no_git)
+            desc_total += size
+            desc_sizes.append((size, str(rel)))
         errors += validate_manifests_kit()
         errors += [f"environment-template/config.json vs kb.blank_config(): {d}" for d in kb.config_key_drift()]
         if a.no_env:
@@ -627,12 +787,18 @@ def main(argv: list[str] | None = None) -> int:
             skipped.append("env store (config.json keys, systems.*, renamed kinds, tracker.key_regex) — needs this machine's .context/")
         else:
             envname = check_env_store(errors)
-        for s_ in stale:
-            print(f"  ~ stale: {s_}", file=sys.stderr)
-        for s_ in skipped:
-            print(f"  ~ skipped: {s_}", file=sys.stderr)
         if not partial and desc_total > DESC_TOTAL_BYTES:
             errors.append(f"descriptions total {desc_total} bytes > {DESC_TOTAL_BYTES} always-on budget across {len(units)} units")
+        elif not partial and desc_total > DESC_TOTAL_BYTES * DESC_TOTAL_WARN_RATIO:
+            largest = ", ".join(f"{r} ({s} B)" for s, r in sorted(desc_sizes, reverse=True)[:3])
+            warn.append(f"descriptions total {desc_total} B — past {int(DESC_TOTAL_WARN_RATIO * 100)}% of the {DESC_TOTAL_BYTES} B "
+                        f"budget; largest: {largest}")
+        for s_ in stale:
+            print(f"  ~ stale: {s_}", file=sys.stderr)
+        for s_ in warn:
+            print(f"  ~ warn: {s_}", file=sys.stderr)
+        for s_ in skipped:
+            print(f"  ~ skipped: {s_}", file=sys.stderr)
         if errors:
             print(f"KIT VERIFY FAILED — {len(errors)} problem(s):", file=sys.stderr)
             for e in errors:
@@ -640,7 +806,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         store = f"env store `{envname}` complete" if not a.no_env else "env store not checked (--no-env)"
         print(f"OK — {len(units)} skills/agents verified, {len(kb.fact_entries())} discoverable facts, {store}, "
-              f"descriptions {desc_total} B" + (f", {len(stale)} stale" if stale else ""))
+              f"descriptions {desc_total} B" + (f", {len(stale)} stale" if stale else "") + (f", {len(warn)} warn" if warn else ""))
         return 0
     finally:
         kb.ENV = saved_kb_env

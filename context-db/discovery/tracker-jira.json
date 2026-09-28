@@ -96,6 +96,50 @@
       "note": "transitions differ per status — the plan lists what is reachable from the probe issue's status; probe from To Do for the common set"
     },
     {
+      "key": "tracker.mcp_tools.create",
+      "target": "config",
+      "tool": "roster",
+      "args": {
+        "tool": "createJiraIssue"
+      },
+      "verify": "the tool is callable in this session's roster and returns a new issue key",
+      "ttl_days": 0,
+      "purpose": "MCP tool name suffix ticket-open uses to create a ticket"
+    },
+    {
+      "key": "tracker.mcp_tools.comment",
+      "target": "config",
+      "tool": "roster",
+      "args": {
+        "tool": "addCommentToJiraIssue"
+      },
+      "verify": "the tool is callable in this session's roster and a posted comment appears on a real issue",
+      "ttl_days": 0,
+      "purpose": "MCP tool name suffix ticket-open/-update/-close use to comment"
+    },
+    {
+      "key": "tracker.mcp_tools.transition",
+      "target": "config",
+      "tool": "roster",
+      "args": {
+        "tool": "transitionJiraIssue"
+      },
+      "verify": "the tool is callable in this session's roster and moves a real issue between the ids `tracker.transition` names",
+      "ttl_days": 0,
+      "purpose": "MCP tool name suffix ticket-update/-close use to change status"
+    },
+    {
+      "key": "tracker.mcp_tools.search",
+      "target": "config",
+      "tool": "roster",
+      "args": {
+        "tool": "searchJiraIssuesUsingJql"
+      },
+      "verify": "the tool is callable in this session's roster and a JQL query returns the expected issues",
+      "ttl_days": 0,
+      "purpose": "MCP tool name suffix cost-report uses for the resolved-by-me query"
+    },
+    {
       "key": "tracker.user",
       "target": "row",
       "tool": "lookupJiraAccountId",
