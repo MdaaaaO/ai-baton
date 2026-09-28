@@ -3,7 +3,7 @@
 # request FILE: {"replies":[{"thread_id":"PRRT_…","body":"…","resolve":false}]}
 # Replies inside existing review threads (GraphQL). `resolve:true` is honoured ONLY for threads whose
 # root comment is ours AND whose last comment is by us or the PR author — never resolve a thread that waits
-# on a named third party (CLAUDE.md § Rules). Thread state is cursor-paginated; the `replied` ledger row is
+# on a named third party (WORKSPACE.md § Rules). Thread state is cursor-paginated; the `replied` ledger row is
 # written only when at least one reply actually landed. Bodies get the same local-path / bare-Jira-key lint as reviews.
 set -uo pipefail
 KIT="$(cd "$(dirname "$0")/../../.." && pwd)"

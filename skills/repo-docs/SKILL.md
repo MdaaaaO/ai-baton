@@ -4,9 +4,9 @@ description: Write or restructure a repo's README.md and CONTRIBUTING.md in the 
 user-invocable: true
 argument-hint: "<repo-dir> [readme|contributing|both]"
 metadata:
-  version: "2"
-  updated: "2026-09-26"
-  reviewed: "2026-09-26"
+  version: "3"
+  updated: "2026-09-28"
+  reviewed: "2026-09-28"
 ---
 
 # repo-docs — a front page a stranger understands in one screen

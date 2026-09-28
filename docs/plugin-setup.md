@@ -111,7 +111,9 @@ A machine that ran the clone keeps its `.context/` (env store, DB, memory) as it
 it shadows the plugin: the SessionStart hook stays quiet while `<root>/.claude/WORKSPACE.md` exists.
 
 1. Steps 1–2 above.
-2. On a machine with `systems.signed_commits`, drain the sign-queue first (`make sign`): its jobs live in the clone.
+2. On a machine with `systems.signed_commits`, drain the sign-queue first (`make sign`): the jobs themselves live in
+   `.context/state/sign-queue/` (untouched by the clone move below), but step 4 removes the Makefile's only path
+   to them.
 3. From the workspace root, move the clone aside: `mv .claude .claude.bak && mkdir .claude`. Copy your identity
    file back when you have one (`cp .claude.bak/settings.local.json .claude/`), and anything else of yours that
    lived in `.claude/`.

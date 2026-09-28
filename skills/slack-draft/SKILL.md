@@ -3,8 +3,8 @@ name: slack-draft
 description: "Lifecycle of every Slack message a session drafts for the user: create it as a draft (never paste text), record it, and READ the channel or thread before any follow-up, recreate or status claim, because the user edits drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
-  version: "4"
-  updated: "2026-09-27"
+  version: "5"
+  updated: "2026-09-28"
   reviewed: "2026-09-24"
   requires: "slack"
 ---
@@ -20,7 +20,7 @@ answered.
 ## 1. Create
 
 - `slack_send_message_draft` into the target channel / DM / thread (`thread_ts` for replies).
-  Never paste draft text in the terminal (CLAUDE.md § Rules). Formatting: `reference/formatting.md`
+  Never paste draft text in the terminal (WORKSPACE.md § Rules). Formatting: `reference/formatting.md`
   beside this file (`**bold**`, `<url|label>`, ≤55-char code-block lines).
 - **One attached draft per channel.** If the tool returns `draft_already_exists`, that pending
   draft is the one to update — do not create a second. A thread draft counts against the same

@@ -24,8 +24,16 @@ PARAGRAPH_WORDS = (90, 150)   # warn / fail: a paragraph past these is a wall �
 TABLE_ROW_CHARS = 400  # a table row past this is a paragraph hiding in a cell
 LINE_CHARS = 200       # a source line longer than this is unreadable in a diff (tables and badge lines exempt)
 FENCE = re.compile(r"^\s*(```|~~~)")
-BADGE = re.compile(r"\[!\[[^\]]*\]\([^)]+\)\]\([^)]+\)|<img [^>]*src=\"https://img\.shields\.io")
-HEADING = re.compile(r"^(#{1,6})\s+(.*)")
+IMAGE = re.compile(r"!\[[^\]]*\]\([^)]+\)|<img\s[^>]*\bsrc=[\"'][^\"']+[\"']")
+# a badge is an image whose source looks like a badge, not a logo/hero screenshot/GIF (SKILL.md § 2 row 1
+# allows those under the title too) — shields.io, badgen.net, or "badge"/"badges" anywhere in the URL,
+# which also covers a workflow-status badge (".../workflows/.../badge.svg") and a codecov graph badge.
+BADGE = re.compile(
+    r"!\[[^\]]*\]\([^)]*(?:shields\.io|badgen\.net|badges?)[^)]*\)"
+    r"|<img\s[^>]*\bsrc=[\"'][^\"']*(?:shields\.io|badgen\.net|badges?)[^\"']*[\"']",
+    re.I,
+)
+HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.*)")
 WORD = re.compile(r"[\w`'’-]+")
 INSTALL_CMD = re.compile(r"\b(pip|pipx|uv|uvx|npm|npx|brew|cargo|go|claude|git)\s+(install|i|add|tool|clone|plugin)\b|curl .*\|\s*(ba)?sh")
 README_NEEDS = {
@@ -65,8 +73,11 @@ def parse(text: str) -> dict:
             sections[-1][1] += words(line)
     # the pitch: prose between the title/badges and the first code block or H2, whichever comes first
     stop = min(x for x in (first_code, first_h2, len(lines)) if x is not None)
-    intro = [l for i, l in prose if i < stop and not HEADING.match(l) and not BADGE.search(l)]
-    pitch = [l for l in intro if not re.match(r"\s*([-*]|\d+\.)\s|\s{2,}\S", l)]
+    head_block = "\n".join(l for i, l in prose if i < stop)  # title + badge row, before the pitch runs into a section
+    intro = [l for i, l in prose if i < stop and not HEADING.match(l)]
+    # an image (badge or not) is never pitch prose, but a line that mixes real prose with an inline logo/badge
+    # keeps its prose — only the image markup itself is stripped, not the whole line.
+    pitch = [IMAGE.sub("", l) for l in intro if not re.match(r"\s*([-*]|\d+\.)\s|\s{2,}\S", l)]
     first_block = []
     if first_code is not None:
         for l in lines[first_code + 1:]:
@@ -83,12 +94,12 @@ def parse(text: str) -> dict:
         cur.append(l.strip())
     if cur:
         paragraphs.append(" ".join(cur))
-    long_lines = [i + 1 for i, l in prose if len(l) > LINE_CHARS and not l.lstrip().startswith("|") and not BADGE.search(l)]
+    long_lines = [i + 1 for i, l in prose if len(l) > LINE_CHARS and not l.lstrip().startswith("|") and not IMAGE.search(l)]
     fat_rows = [i + 1 for i, l in prose if l.lstrip().startswith("|") and len(l) > TABLE_ROW_CHARS]
     return {
         "total_words": sum(words(l) for _, l in prose),
         "pitch_words": words(" ".join(pitch)),
-        "badges": len(BADGE.findall(text)),
+        "badges": len(BADGE.findall(head_block)),
         "first_code_line": None if first_code is None else first_code + 1,
         "first_screen_code": first_code is not None and first_code < 40,
         "sections": sections,
@@ -119,7 +130,13 @@ def check(stats: dict, kind: str) -> list[tuple[str, str, str]]:
     rule(not big, "section size", ", ".join(big) or f"every section ≤ {lim['section_words']} words", soft=True)
     warn_at, fail_at = PARAGRAPH_WORDS
     lp = stats["longest_paragraph"]
-    rule(lp <= fail_at, "paragraphs", f"longest {lp} words (aim ≤ {warn_at}, fail > {fail_at})", soft=warn_at < lp <= fail_at) if lp > warn_at else rule(True, "paragraphs", f"longest {lp} words (≤ {warn_at})")
+    para_detail = f"longest {lp} words (aim ≤ {warn_at}, fail > {fail_at})"
+    if lp <= warn_at:
+        rule(True, "paragraphs", f"longest {lp} words (≤ {warn_at})")
+    elif lp <= fail_at:
+        rule(False, "paragraphs", para_detail, soft=True)
+    else:
+        rule(False, "paragraphs", para_detail)
     rule(not stats["fat_rows"], "table rows", f"{len(stats['fat_rows'])} row(s) over {TABLE_ROW_CHARS} chars, first at line {stats['fat_rows'][0]} — a cell is not a paragraph" if stats["fat_rows"] else f"all ≤ {TABLE_ROW_CHARS}")
     rule(not stats["long_lines"], "line length", f"{len(stats['long_lines'])} prose line(s) over {LINE_CHARS} chars, first at line {stats['long_lines'][0]}" if stats["long_lines"] else f"all ≤ {LINE_CHARS}", soft=True)
     needs = README_NEEDS if kind == "readme" else CONTRIB_NEEDS

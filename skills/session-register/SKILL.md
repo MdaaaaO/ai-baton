@@ -1,9 +1,9 @@
 ---
 name: session-register
-description: Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree.
+description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "14"
-  updated: "2026-09-27"
+  version: "15"
+  updated: "2026-09-28"
   reviewed: "2026-09-24"
 user-invocable: true
 ---
@@ -86,7 +86,7 @@ and `kit_profile.py footer` prints the attribution line with it — `🤖 Genera
 
 Your entry must show a heartbeat within the last 12h or it is treated as stale.
 
-- **On every flush** (per-step, per `CLAUDE.md` § Cost & context hygiene) also run:
+- **On every flush** (per-step, per `WORKSPACE.md` § Cost & context hygiene) also run:
   ```sh
   make -C $BATON/context-db session-touch NAME=<name> WORKING="<what you're on now>"
   ```
@@ -117,8 +117,9 @@ jobs · Slack drafts`
 
 - Turns are **API requests** (deduped per `requestId`), not transcript lines — a multi-block reply is
   one turn. Spend is a list-price floor at `SESSION_STATS_PRICES` (default Opus-4-class
-  `15,18.75,1.5,75` $/Mtok in/cache-write/cache-read/out) for the **main session only** — subagents
-  are their own transcripts. PRs/tickets are *referenced in tool inputs* (touched), not "owned".
+  `15,18.75,1.5,75` $/Mtok in/cache-write/cache-read/out) for the **TOTAL** — main session + every
+  subagent transcript summed in, same figure the ledger and cost-report use; `session-stats`'s full
+  block (below) breaks the two back out. PRs/tickets are *referenced in tool inputs* (touched), not "owned".
 - `make -C $BATON/context-db session-stats` prints the full block (window, prompts, token split,
   top tools, delegation, PR/ticket lists, hand-offs) — what `session-handoff` pastes into the wind-down
   entry. `NOSTATS=1` skips the refresh; `SESSION_ID=<uuid>` derives stats for another session.

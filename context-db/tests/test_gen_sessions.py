@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parents[1] / "bin"
+sys.path.insert(0, str(BIN))
+import session_stats  # noqa: E402 — same dir; the one spend-basis wording, quoted here too
 
 
 def session_file(root: Path, name: str, status: str, ended_days_ago: float, next_prompt: str, hb: str = "") -> Path:
@@ -318,6 +320,24 @@ class EndedTablePromptPointer(unittest.TestCase):
         self.assertIn("| `old-blank` | E-1 |", aidx)
         # old-blank's row still ends in a bare "-" for the Prompt column, not a link
         self.assertRegex(aidx, r"\| `old-blank` \| E-1 \| [^|]+ \| `old-blank\.md` \| - \|")
+
+
+class SpendBasisWordingMatchesSessionStats(unittest.TestCase):
+    """One definition of "session spend" (main + subagents), stated once (`session_stats.SPEND_BASIS`)
+    and repeated verbatim wherever a number is shown — the footer must quote that constant, not its own
+    hardcoded wording that can drift from what `session_stats.py` actually computes."""
+
+    def setUp(self):
+        self.tmp, self.root = blank_root()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_footer_quotes_the_shared_spend_basis_constant(self):
+        run(self.root)
+        idx = (self.root / "SESSION_INDEX.md").read_text()
+        self.assertIn(session_stats.SPEND_BASIS, idx)
+        self.assertNotIn("main session only", idx)
 
 
 if __name__ == "__main__":
