@@ -280,15 +280,18 @@ class NameConventionAndFooter(unittest.TestCase):
             r = run("session.py", "register", "--name", bad, "--no-stats", root=self.root, env=self.env)
             self.assertNotEqual(r.returncode, 0, bad)
             self.assertIn("naming convention", r.stderr)
-        for good in ("kit-hardening", "kit-216-changelog", "igbot-weekly-2"):
+        for good in ("kit-hardening", "kit-216-changelog", "kit-weekly-2"):
             r = run("session.py", "register", "--name", good, "--no-stats", root=self.root, env=self.env)
             self.assertEqual(r.returncode, 0, (good, r.stderr))
 
     def test_an_existing_name_outside_the_convention_keeps_working(self):
-        (self.root / "sessions" / "projects56.md").write_text("---\nsession: projects56\nstatus: active\n---\n\nbody\n",
+        (self.root / "sessions" / "legacy1.md").write_text("---\nsession: legacy1\nstatus: active\n---\n\nbody\n",
                                                               encoding="utf-8")
-        r = run("session.py", "register", "--name", "projects56", "--no-stats", root=self.root, env=self.env)
+        r = run("session.py", "register", "--name", "legacy1", "--no-stats", root=self.root, env=self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
+        # a grandfathered name keeps working but never reaches the public footer
+        self.assertEqual(run("kit_profile.py", "session-name", root=self.root, env=self.env).returncode, 1)
+        self.assertNotIn("legacy1", run("kit_profile.py", "footer", root=self.root, env=self.env).stdout)
 
     def test_the_footer_names_the_registered_session(self):
         r = run("kit_profile.py", "footer", root=self.root, env=self.env)

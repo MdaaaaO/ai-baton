@@ -104,13 +104,17 @@ def check_convention(name: str) -> None:
     if not CONVENTION_RE.match(name) or len(name) > CONVENTION_MAX:
         sys.exit(f"session.py: {name!r} does not follow the session naming convention `<lane>-<topic>[-n]` — lower-case "
                  f"kebab-case, at least two parts, at most {CONVENTION_MAX} characters (e.g. `kit-hardening`, "
-                 f"`kit-216-changelog`, `igbot-weekly-2`); a successor on the same lane adds -2, -3")
+                 f"`kit-216-changelog`, `kit-weekly-2`); a successor on the same lane adds -2, -3")
 
 
 def record_name(name: str) -> None:
     """Remember this session's registry name in its own scratch dir, so `kit_profile.py session-name` / `footer`
     can say which session wrote a PR or a comment. Per session (`CLAUDE_CODE_SESSION_ID` keys the scratch dir);
-    a failure only costs the footer its session part, so it is reported, never fatal."""
+    a failure only costs the footer its session part, so it is reported, never fatal. Only a name that follows the
+    convention is recorded: the footer is public, and a grandfathered name was never chosen to be (it gets the bare
+    footer until the lane re-registers under a conforming name)."""
+    if not CONVENTION_RE.match(name) or len(name) > CONVENTION_MAX:
+        return
     try:
         (profile.scratch() / "session-name").write_text(name + "\n", encoding="utf-8")
     except (OSError, profile.ScratchError) as e:
