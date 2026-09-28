@@ -424,6 +424,14 @@ class DescriptionShape(unittest.TestCase):
         kit_verify.check_description_shape("skills/x/SKILL.md", {"description": "I format a report when asked."}, warn)
         self.assertTrue(any("first person" in w for w in warn), warn)
 
+    def test_a_when_only_in_the_not_for_clause_still_warns(self):
+        # a near miss can itself be conditional ("Not for … when …") — that "when" names what the unit does
+        # NOT do, not when it fires, so it must not silence the no-trigger warning.
+        warn: list[str] = []
+        kit_verify.check_description_shape(
+            "skills/x/SKILL.md", {"description": "Formats a report. Not for a draft, even when it looks final."}, warn)
+        self.assertTrue(any("no trigger" in w for w in warn), warn)
+
 
 class ReviewedFreshness(unittest.TestCase):
     """`reviewed:` older than the file's last committed edit is a warning; --no-git and an unknown path

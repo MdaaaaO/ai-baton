@@ -258,6 +258,16 @@ class Coverage(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertTrue(any("without a recognized trigger phrase (1): foo" in n for n in notes), notes)
 
+    def test_a_when_only_in_the_not_for_clause_does_not_count(self):
+        # the trigger clause is the text BEFORE "Not for …" (docs/authoring.md's `<what>. Use when
+        # <situations>. Not for <near misses>.` shape); a near miss can itself be conditional ("Not for … when
+        # …"), and that "when" names what the unit does NOT do, not when it fires.
+        kit = Kit(Path(self.tmp.name), desc="Does foo. Not for bar, even when bar looks like foo.")
+        kit.suite()
+        errors, notes, _ = kit.run()
+        self.assertEqual(errors, [])
+        self.assertTrue(any("without a recognized trigger phrase (1): foo" in n for n in notes), notes)
+
     def test_use_whenever_counts(self):
         kit = Kit(Path(self.tmp.name), desc="Does foo. Use whenever foo happens.")
         kit.suite()

@@ -22,7 +22,7 @@ proof cases (`docs/REVIEW.md`), not a trigger suite.
 
 | run | what | tokens |
 |---|---|---|
-| `make -C $BATON/context-db eval-check` | every case loads (prompt keys, grader types), every trigger suite has ≥ 10 cases with both kinds; skills without a suite and descriptions without "Use when" are notes (`REQUIRE_ALL=1` fails on them). Part of `make ci` and `ci.yml` | none |
+| `make -C $BATON/context-db eval-check` | every case loads (prompt keys, grader types), every trigger suite has ≥ 10 cases with both kinds; skills without a suite and descriptions with no recognized trigger phrase (`TRIGGER_WHEN` / `TRIGGER_OTHER`) are notes on a bare run, but `ci.yml` runs `REQUIRE_ALL=1`, so both are a failure there. Part of `make ci` and `ci.yml` | none |
 | `make -C $BATON/context-db eval SKILL=<skill> [MODEL=<id>] [RUNS=<n>]` | `claude plugin eval . --ablation none --case '<skill>-*' --no-publish` — the trigger rate on your machine | yes |
 | `evals` workflow (Actions → evals → Run workflow; inputs `skill`, `models`) | the same run on a hosted runner with the `CLAUDE_CODE_OAUTH_TOKEN` secret, one pass per model; the output is the job summary | yes |
 

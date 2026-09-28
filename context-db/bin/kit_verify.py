@@ -528,9 +528,10 @@ FIRST_PERSON = re.compile(r"\b(I|I'm|I've|my|our|myself)\b")
 
 def check_description_shape(rel, fm, warn: list[str]) -> None:
     d = fmt.unquote(fm.get("description", ""))
-    if "when" not in d.lower():
+    if "when" not in fmt.trigger_clause(d).lower():
         warn.append(f"{rel}: description names no trigger (\"Use when …\", \"Invoke when …\", or plain \"when …\") — "
-                     "a reader cannot tell when to load this unit from the description alone")
+                     "a reader cannot tell when to load this unit from the description alone (a \"when\" only in "
+                     "its \"Not for …\" clause does not count)")
     if FIRST_PERSON.search(d):
         warn.append(f"{rel}: description reads in the first person — write it as the unit's own trigger, not prose about writing one")
 

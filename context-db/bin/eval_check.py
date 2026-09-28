@@ -65,8 +65,12 @@ SKIP_DIRS = frozenset({"results", "mocks"})
 
 
 def has_trigger_phrase(description: str) -> bool:
-    """Whether a description states a recognized trigger — see TRIGGER_WHEN / TRIGGER_OTHER above."""
-    return bool(TRIGGER_WHEN.search(description) or TRIGGER_OTHER.search(description))
+    """Whether a description states a recognized trigger — see TRIGGER_WHEN / TRIGGER_OTHER above. Only the
+    text before a "Not for <near misses>" clause counts (frontmatter.trigger_clause, shared with kit_verify's
+    check_description_shape): a "when" inside the near-miss clause ("Not for … when …") names what the unit
+    does NOT do, not when it fires."""
+    clause = frontmatter.trigger_clause(description)
+    return bool(TRIGGER_WHEN.search(clause) or TRIGGER_OTHER.search(clause))
 
 
 def eval_dir(kit: Path) -> Path:

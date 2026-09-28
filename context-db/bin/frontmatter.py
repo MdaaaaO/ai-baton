@@ -179,6 +179,19 @@ def load(path: Path) -> Frontmatter | None:
     return parse(path.read_text(encoding="utf-8", errors="replace"))
 
 
+NOT_FOR = re.compile(r"\bNot for\b")
+
+
+def trigger_clause(description: str) -> str:
+    """The trigger portion of a description, before its "Not for <near misses>" clause — docs/authoring.md's
+    shape is `<what>. Use when <situations>. Not for <near misses>.` A "when" inside the near-miss clause (a
+    near miss can itself be conditional: "Not for … when …") names what the unit does NOT do, not when it
+    fires, so a shape check — kit_verify's check_description_shape, eval_check's has_trigger_phrase — must
+    look here, not at the whole description, or a near-miss "when" would wrongly count as the trigger."""
+    m = NOT_FOR.search(description)
+    return description[:m.start()] if m else description
+
+
 def unquote(v) -> str:
     """The plain string behind a raw value: matching surrounding quotes removed, else as is. The inverse of
     `quote()` for a double-quoted value: `\\"` and `\\\\` are unescaped back to `"` and `\\` — the only two
