@@ -189,7 +189,7 @@ def unquote(v) -> str:
     v = v.strip()
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
         inner = v[1:-1]
-        return re.sub(r'\\(["\\])', r"\1", inner) if v[0] == '"' else inner
+        return re.sub(r'\\(["\\])', r"\1", inner) if v[0] == '"' else inner.replace("''", "'")  # YAML's one single-quote escape
     return v
 
 
