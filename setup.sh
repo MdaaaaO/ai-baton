@@ -204,7 +204,7 @@ elif [ -d "$HARNESS_MEM" ]; then
   while IFS= read -r f; do
     cfn=1
     cf="$(conflict_name "$f")"
-    while [ -e "$DURABLE_MEM/$cf" ] || grep -qxF "$cf" "$reserved"; do
+    while [ -e "$DURABLE_MEM/$cf" ] || grep -qxF -e "$cf" "$reserved"; do
       cfn=$((cfn + 1))
       cf="$(conflict_name "$f" "$cfn")"
     done
