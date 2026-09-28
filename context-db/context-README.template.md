@@ -21,8 +21,8 @@ of reading everything into context every session.
 - **The `Makefile` is the CLI** (see below). Claude creates, indexes, verifies, finds, and
   archives docs through it, then "manages however it wants" within these conventions. The
   engine (`Makefile` + `bin/` + `_templates/`) lives **outside** this dir, at
-  `.claude/context-db/`, so `.context/` holds only content. The canonical command is
-  therefore `make -C .claude/context-db <target>` (run from the workspace root); bare
+  `$BATON/context-db/` (`.claude/context-db/` on a clone), so `.context/` holds only content.
+  The canonical command is therefore `make -C $BATON/context-db <target>` (run from the workspace root); bare
   `make <target>` below is shorthand for it. The engine operates on this dir as its content
   root via a `CONTEXT` var that defaults to the sibling `../../.context`.
 
@@ -31,19 +31,19 @@ of reading everything into context every session.
 ```
 # find what exists
 cat .context/INDEX.md                 # the catalog
-make -C .claude/context-db find DOMAIN=<domain>  # docs in a domain
-make -C .claude/context-db find TAG=pii          # docs carrying a tag
+make -C $BATON/context-db find DOMAIN=<domain>  # docs in a domain
+make -C $BATON/context-db find TAG=pii          # docs carrying a tag
 
 # create durable knowledge
-make -C .claude/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
+make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
 #   … edit the scaffolded doc …        # index regenerates automatically on `new`
 
 # after editing any doc by hand
-make -C .claude/context-db index                 # refresh the catalog
-make -C .claude/context-db verify                # schema + freshness gate (use before finishing)
+make -C $BATON/context-db index                 # refresh the catalog
+make -C $BATON/context-db verify                # schema + freshness gate (use before finishing)
 
 # retire a doc
-make -C .claude/context-db archive SLUG=opine    # flips status: archived (stays queryable)
+make -C $BATON/context-db archive SLUG=opine    # flips status: archived (stays queryable)
 ```
 
 ## Frontmatter schema (every doc)
@@ -113,11 +113,11 @@ preview, `ARCHIVE_DAYS=<n>`, `NOARCHIVE=1` to skip), listed in the generated `se
 ## Engine files (not content)
 
 The engine — `Makefile`, `bin/` (index generator, verifier, scaffolder, session registry) and
-`_templates/` — lives at `.claude/context-db/`, **not** here, so `.context/` is pure
-per-engineer content: portable kit (`.claude/`) separate from content (`.context/`). This dir
-therefore holds only docs, the two generated catalogs (`INDEX.md`, `SESSION_INDEX.md`), the
+`_templates/` — lives at `$BATON/context-db/` (`.claude/context-db/` on a clone), **not** here, so
+`.context/` is pure per-engineer content: portable kit (`$BATON`) separate from content (`.context/`).
+This dir therefore holds only docs, the two generated catalogs (`INDEX.md`, `SESSION_INDEX.md`), the
 `sessions/` registry, the harness auto-memory `memory/` (symlinked from `~/.claude/projects/<slug>/memory`
-by `.claude/setup.sh`) and per-user tool state under `state/` (e.g. `state/pr-review/`) — all four
+by `setup.sh`) and per-user tool state under `state/` (e.g. `state/pr-review/`) — all four
 operational, excluded from `make index`/`verify` (only `SESSION_INDEX.md`'s size is checked — `verify`
 warns past 10 KB). Nothing executable
 lives in `.context/`. The engine finds this dir via `CONTEXT` (default sibling `../../.context`,

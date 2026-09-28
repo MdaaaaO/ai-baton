@@ -44,7 +44,7 @@ run on a throw-away store under the temp dir (`docs/contributing.md` § Testing)
 | `environment-template/` | Skeleton of a new environment: `config.json` (the env store's structural switches — every top-level key the store knows; `kb.py config` prints the live ones, `docs/env-facts.md` § The store explains them) and `environment.md` (the prose doc); `setup.sh` seeds both when they are missing and never again (`sh $BATON/setup.sh --refresh-seeds` shows what a later template change would add). See `docs/new-environment.md`. |
 | `CLAUDE.md` | The kit's own memory file (≤ 600 B, `kit-verify` caps it): what this directory is, where the contributor and review rules live. On a clone Claude Code loads `.claude/CLAUDE.md` into a workspace session next to `WORKSPACE.md` (a plugin install has no such file, so it loads nowhere), and the review action restores it from the base branch in CI. |
 | `CLAUDE.example.md` | Skeleton of the root `CLAUDE.md` (preamble + the two imports + personal additions); `setup.sh` seeds it when none exists. |
-| `workspace.mk` | Shared Make targets for the root `Makefile` of a clone (`include .claude/workspace.mk`; a plugin install has no include): `sign*` (drain the sign queue on the host), `claude_sync` (fast-forward the kit), `kit_release` / `kit_release_dry` (a kit release PR, CONTRIBUTING.md § Releases), `ctx_index` / `ctx_verify` / `ctx_find`. |
+| `workspace.mk` | Shared Make targets for the root `Makefile` of a clone (`include .claude/workspace.mk`; a plugin install has no include): `sign*` (drain the sign queue on the host), `claude_sync` (fast-forward the kit), `kit_release` / `kit_release_dry` (a kit release PR, docs/contributing.md § Releases), `ctx_index` / `ctx_verify` / `ctx_find`. |
 | `settings.json` | Project-level harness settings on a clone (compact window, subagent model, `BATON=.claude`, the `SessionEnd` sync hook). Shared; not shipped by the plugin, whose `hooks/hooks.json` SessionStart hook exports `BATON` and injects `WORKSPACE.md` instead. |
 | `settings.local.example.json` | Template for the ignored `settings.local.json` (clone path): your identity as `env` (`WORKSPACE_USER`, `WORKSPACE_GITHUB_LOGIN`, `WORKSPACE_TZ`, `WORKSPACE_SLACK_SELF_DM`, `WORKSPACE_SLACK_LATTICE_DM`). On a plugin install the same five are `userConfig` options (`/plugin configure ai-baton`), which win over the file. |
 | `setup.sh` | Idempotent first-run / post-recreate setup, safe to re-run — details below. |
@@ -101,7 +101,7 @@ The four fattest cells above, unabridged:
   (the full contributor reference — issue → PR → review → release, one section per topic), `CHANGELOG.md` (one
   line per skill/agent version bump). Every `SKILL.md`/agent carries `version`/`updated`/`reviewed` (+ optional
   `requires`, `facts`) as strings under `metadata:` — the Claude Code profile of the Agent Skills spec,
-  `CONTRIBUTING.md` § Skill frontmatter; `make -C $BATON/context-db kit-verify [STALE=90]` enforces it and checks
-  this machine's env store is complete. Writing a skill: `docs/authoring.md` (the checklist), `CONTRIBUTING.md`
+  `docs/contributing.md` § Skill frontmatter; `make -C $BATON/context-db kit-verify [STALE=90]` enforces it and checks
+  this machine's env store is complete. Writing a skill: `docs/authoring.md` (the checklist), `docs/contributing.md`
   § Skills (the two tiers, the `NEEDS` return, layout, evals) and the scaffold `docs/templates/skill/` +
   `docs/templates/evals/`.

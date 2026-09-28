@@ -31,8 +31,10 @@ Closes #
 
 ## Verified how
 
-- [ ] `make -C context-db kit-verify` green locally (CI runs it against a blank env store)
-- [ ] versions + `updated` bumped for every changed skill/agent — or wording only
+- [ ] `make -C context-db ci` green locally (every gate CI runs; `ALLOW_SKIP=1` for a missing tool)
+- [ ] one type label (`enhancement`/`bug`/`documentation`) and one `area:*` label applied — `wording` too, if wording-only
+- [ ] versions + `updated` bumped for every changed skill/agent — or the `wording` label / `[skip-bump]`, and no bump needed
+- [ ] evals touched (`evals/<skill>-<case>/`) when a skill's `description:` or trigger wording changed
 - [ ] no environment-specific value (ids, orgs, channels, hosts, token prefixes) added to a core file
 - [ ] capabilities affected (every machine, or the `systems.*` flags involved) named, and § Machines filled
 - [ ] `/kit-health` run on at least one machine after the change

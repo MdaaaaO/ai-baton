@@ -17,7 +17,7 @@ env store (`docs/env-facts.md`); the file map is `docs/layout.md`.
   secure storage, never in a JSON file) and a SessionStart hook re-exports them as `WORKSPACE_*` for Bash; on a
   clone they are the `env` of the ignored `settings.local.json`, merged into every Bash, hook and subagent
   environment. `kit_profile.identity()` reads the option first, then the variable, so a value typed into
-  `/plugin configure ai-baton` wins over a stale file. Tokens go in neither (CONTRIBUTING § Secrets). `pr-watch.sh` drops your own events via `WORKSPACE_GITHUB_LOGIN`,
+  `/plugin configure ai-baton` wins over a stale file. Tokens go in neither (docs/contributing.md § Secrets). `pr-watch.sh` drops your own events via `WORKSPACE_GITHUB_LOGIN`,
   `enqueue.sh` stamps `--by "$WORKSPACE_USER"`, the session registry renders times in
   `WORKSPACE_TZ`. Skill prose says "the user", never a name.
 - **Environment facts come from the env store, never from a skill.** Anything that differs between

@@ -69,7 +69,7 @@ environment's name, a lowercase slug) and `domains` (extra `.context/` folders).
 key: `.claude/environment-template/config.json`; `kit-verify` checks the store against it.
 Everything that is an id or a name is a table row, not a config key.
 
-## The CLI — `context-db/bin/kb.py` (stdlib, also `make -C .claude/context-db kb ARGS="…"`)
+## The CLI — `context-db/bin/kb.py` (stdlib, also `make -C $BATON/context-db kb ARGS="…"`)
 
 ```
 kb.py get <system>.<kind> <name>                      # prints the value; exit 1 + hint when missing; a stale-row
@@ -123,7 +123,7 @@ store's `_discovery/`, same file name wins). `kit-verify` validates the kit's ma
 
 ## How a skill resolves a fact
 
-1. **Look it up:** `python3 .claude/context-db/bin/kb.py get slack.channel eng-help`. Found → done (a
+1. **Look it up:** `python3 $BATON/context-db/bin/kb.py get slack.channel eng-help`. Found → done (a
    stderr hint means the row is past its ttl: re-verify when the task can afford it, never block on it).
 2. **Plan the discovery** when missing: `kb.py discover slack.channel eng-help` prints the tool call, the
    verify step and the exact write-back command (or *NOT APPLICABLE here*, or *no manifest* → step 3).
