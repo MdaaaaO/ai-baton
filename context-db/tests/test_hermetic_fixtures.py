@@ -130,19 +130,36 @@ def _target_key(node: ast.AST) -> str | None:
     return None
 
 
-def _calls_hermetic_env(node: ast.AST) -> bool:
-    """True when somewhere under `node` there is a call to hermetic_env() by name."""
-    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "hermetic_env"
+def _imported_hermetic_env_name(tree: ast.Module) -> str | None:
+    """The local name hermetic_env is bound to, if — and only if — this file actually imports the real one from
+    the tests package (`from tests import hermetic_env`, or the relative `from . import hermetic_env`); None
+    otherwise. A file that defines its own `def hermetic_env(...):` (never imported) must NOT be trusted just
+    because the name matches — that shadow is exactly the look-alike this guard exists to catch (#288 review)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module == "tests" or (node.module is None and node.level >= 1)):
+            for alias in node.names:
+                if alias.name == "hermetic_env":
+                    return alias.asname or alias.name
+    return None
+
+
+def _calls_hermetic_env(node: ast.AST, name: str) -> bool:
+    """True when somewhere under `node` there is a call to `name` (the locally-imported hermetic_env)."""
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name
                for n in ast.walk(node))
 
 
 def _trusted_funcs(tree: ast.Module) -> tuple[str, ...]:
-    """The function names this file's calls may use as a hermetic env source: hermetic_env() always: a local
-    `_env` only if ITS OWN BODY calls hermetic_env() — trusting the name alone would let a fixture's `_env` that
-    never actually isolates anything (no hermetic_env() call in it) pass the guard by coincidence of naming."""
-    trusted = ["hermetic_env"]
+    """The function names this file's calls may use as a hermetic env source: the imported hermetic_env() (never
+    a same-named local def — see _imported_hermetic_env_name), plus a local `_env` only if ITS OWN BODY calls
+    that imported hermetic_env() — trusting either name alone would let a look-alike that never actually
+    isolates anything pass the guard by coincidence of naming."""
+    imported = _imported_hermetic_env_name(tree)
+    if imported is None:
+        return ()
+    trusted = [imported]
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "_env" and _calls_hermetic_env(node):
+        if isinstance(node, ast.FunctionDef) and node.name == "_env" and _calls_hermetic_env(node, imported):
             trusted.append("_env")
             break
     return tuple(trusted)
@@ -243,9 +260,10 @@ def _git_subprocess_problems(path: Path) -> list[str]:
 class NoUnhermeticGitCallsGuard(unittest.TestCase):
     """Static guard against reintroducing the bug this file regression-tests: every subprocess.run / check_output
     / Popen in context-db/tests/*.py whose argv starts with "git" must pass env= built from hermetic_env() —
-    directly, through a file's own `_env()` wrapper (trusted only when ITS OWN BODY calls hermetic_env() — the
-    name alone earns nothing), or a dict merged from one (`{**hermetic_base, ...}`) — never a bare dict(os.environ)
-    copy or no env= at all. A call that genuinely needs the host's own git config (there are none today) can be
+    trusted only when the file actually imports it from the tests package (never a same-named local def), used
+    directly, through a file's own `_env()` wrapper (trusted only when ITS OWN BODY calls that imported
+    hermetic_env()), or a dict merged from one (`{**hermetic_base, ...}`) — never a bare dict(os.environ) copy or
+    no env= at all. A call that genuinely needs the host's own git config (there are none today) can be
     allowlisted with a `# hermetic-exempt: <reason>` comment on its own source line(s)."""
 
     def test_every_git_subprocess_call_uses_a_hermetic_env(self):
@@ -277,13 +295,46 @@ class GuardDoesNotTrustAnEnvWrapperByNameAlone(unittest.TestCase):
 
     def test_a_env_wrapper_that_does_call_hermetic_env_is_trusted(self):
         src = (
-            "import subprocess\n\n"
-            "def hermetic_env(tmp):\n"  # stands in for the real tests.hermetic_env, imported in every real file
-            "    return {'HOME': str(tmp)}\n\n"
+            "import subprocess\n"
+            "from tests import hermetic_env\n\n"  # the real import every fixture uses; never executed, only parsed
             "def _env(home):\n"
             "    return hermetic_env(home)\n\n"
             "def seed(repo):\n"
             "    subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=_env(repo))\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test_scratch_env.py"
+            path.write_text(src, encoding="utf-8")
+            problems = _git_subprocess_problems(path)
+        self.assertEqual(problems, [], problems)
+
+
+class GuardRequiresHermeticEnvToBeImportedFromTests(unittest.TestCase):
+    """#288 review: the guard used to trust any call named `hermetic_env`, so a file that shadowed it with its
+    own `def hermetic_env(...):` (never actually importing the real, isolating one) would still pass. A call
+    must only be trusted when the file imports hermetic_env from the tests package."""
+
+    def test_a_local_hermetic_env_redefinition_is_flagged(self):
+        src = (
+            "import subprocess\n\n"
+            "def hermetic_env(tmp):\n"  # a local shadow, not `from tests import hermetic_env` — never trusted
+            "    return {'HOME': str(tmp)}\n\n"
+            "def seed(repo):\n"
+            "    subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=hermetic_env(repo))\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test_scratch_env.py"
+            path.write_text(src, encoding="utf-8")
+            problems = _git_subprocess_problems(path)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(f"{path.name}:", problems[0])
+
+    def test_the_relative_import_form_is_recognized_too(self):
+        src = (
+            "import subprocess\n"
+            "from . import hermetic_env\n\n"
+            "def seed(repo):\n"
+            "    subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=hermetic_env(repo))\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "test_scratch_env.py"
