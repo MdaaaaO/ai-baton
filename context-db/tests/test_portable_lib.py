@@ -254,7 +254,7 @@ class FakePathsAreCleanedUp(unittest.TestCase):
         # link-scan would pass there without ever exercising the skip)
         for entry in ("/mnt/c/Windows/System32", "/mnt/c", "/mnt/d/tools/", "/mnt/z/x"):
             self.assertTrue(_is_windows_drive(entry), entry)
-        for entry in ("/usr/bin", "/mnt/data/bin", "/mnt", "/home/u/mnt/c/bin"):
+        for entry in ("/usr/bin", "/mnt/data/bin", "/mnt", "/opt/tools/mnt/c/bin"):
             self.assertFalse(_is_windows_drive(entry), entry)
 
 
