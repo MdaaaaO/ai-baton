@@ -89,6 +89,85 @@ class NoEnv(unittest.TestCase):
         self.assertIn("no such file", err)
 
 
+class NoEnvOverlay(unittest.TestCase):
+    """--no-env must never consult a real store's `_discovery/` overlay — a bare clone has none, but a
+    contributor's own machine (or CI running the same checkout) does, and its business is kit-health's, not
+    the environment-free validator's."""
+
+    def store(self, tmp: str) -> Path:
+        root = Path(tmp) / ".context"
+        env = dict(os.environ, CONTEXT_ROOT=str(root))
+        subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env, check=True, capture_output=True)
+        return root
+
+    def test_a_valid_overlay_does_not_change_the_discoverable_facts_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.store(tmp)
+            baseline_rc, baseline_out, baseline_err = run("--no-env", env_root=str(root))
+            self.assertEqual(baseline_rc, 0, baseline_err)
+            discovery = root / "reference" / "env" / "_discovery"
+            discovery.mkdir(parents=True, exist_ok=True)
+            (discovery / "zzz-extra.json").write_text(json.dumps({
+                "system": "widget",
+                "facts": [{"key": "widget.thing", "target": "row", "tool": "cli", "args": {"cmd": "true"},
+                           "verify": "one clause", "ttl_days": 0}],
+            }), encoding="utf-8")
+            rc, out, err = run("--no-env", env_root=str(root))
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(out, baseline_out)  # the overlay's extra fact must not be counted
+
+    def test_a_poisoned_overlay_does_not_crash_or_change_the_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.store(tmp)
+            baseline_rc, baseline_out, baseline_err = run("--no-env", env_root=str(root))
+            discovery = root / "reference" / "env" / "_discovery"
+            discovery.mkdir(parents=True, exist_ok=True)
+            # a dangling symlink: `_discovery/*.json` globs it by name, but reading it raises OSError, not
+            # json.JSONDecodeError — under --no-env it must never even be opened
+            (discovery / "poison.json").symlink_to(discovery / "does-not-exist.json")
+            rc, out, err = run("--no-env", env_root=str(root))
+            self.assertEqual(rc, baseline_rc, err)
+            self.assertEqual(out, baseline_out)
+            self.assertNotIn("Traceback", err)
+
+
+class LoadJsonFile(unittest.TestCase):
+    """`load_json_file()` is the one place every JSON-reading check in kit_verify.py goes through — bad JSON,
+    a non-UTF-8 byte, or an unreadable/dangling path must all come back as (None, reason), never a traceback."""
+
+    def test_valid_json_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "ok.json"
+            p.write_text('{"a": 1}', encoding="utf-8")
+            data, err = kit_verify.load_json_file(p)
+            self.assertEqual(data, {"a": 1})
+            self.assertIsNone(err)
+
+    def test_invalid_json_is_reported_not_raised(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "bad.json"
+            p.write_text("{not json", encoding="utf-8")
+            data, err = kit_verify.load_json_file(p)
+            self.assertIsNone(data)
+            self.assertIsNotNone(err)
+
+    def test_non_utf8_bytes_are_reported_not_raised(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "bad-encoding.json"
+            p.write_bytes(b"\xff\xfe{not utf-8")
+            data, err = kit_verify.load_json_file(p)
+            self.assertIsNone(data)
+            self.assertIsNotNone(err)
+
+    def test_a_dangling_symlink_is_reported_not_raised(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "dangling.json"
+            p.symlink_to(Path(tmp) / "does-not-exist.json")
+            data, err = kit_verify.load_json_file(p)
+            self.assertIsNone(data)
+            self.assertIsNotNone(err)
+
+
 class PluginManifest(unittest.TestCase):
     """plugin.json version == VERSION, kebab name, the marketplace entry points at the root — env-free."""
 

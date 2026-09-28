@@ -63,6 +63,22 @@ AGENT_KEYS = {"tools", "disallowedTools", "color", "omitClaudeMd", "maxTurns"}  
 META_REQUIRED = ("version", "updated", "reviewed")
 RETIRED_KEYS = ("environments", "profiles")
 
+# `kb.ENV` override for --no-env: a path that is never a directory, so `load_manifests()` (and everything built
+# on it — `fact_entries()`, `find_fact()`) only sees the kit's own `context-db/discovery/*.json` and never a
+# machine's `_discovery/` overlay — a store's overlay is that machine's business, reported by kit-health, never
+# by the environment-free validator (a bare clone, a contributor's PR, CI).
+NO_ENV_STORE = Path("/nonexistent-env-store")
+
+
+def load_json_file(p: Path) -> tuple[dict | None, str | None]:
+    """Read + parse one JSON file that is not guaranteed to be well-formed or even reachable — returns
+    (data, None) or (None, reason). Every way a file can misbehave (bad JSON, a non-UTF-8 byte, an unreadable
+    or dangling path) is one finding, never a traceback that looks like a real failure in CI logs."""
+    try:
+        return json.loads(p.read_text(encoding="utf-8")), None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        return None, str(e)
+
 
 def check_env_store(errors: list[str]) -> str:
     """Validate this machine's env store config against the template's key set. Returns the
@@ -73,10 +89,9 @@ def check_env_store(errors: list[str]) -> str:
         errors.append(f"no configuration: env store {p} missing — run `python3 $BATON/context-db/bin/kb.py init --blank`")
         return ""
     rel = f"{p.parent.name}/{p.name}"
-    try:
-        cfg = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        errors.append(f"{rel}: invalid JSON — {e}")
+    cfg, err = load_json_file(p)
+    if err is not None:
+        errors.append(f"{rel}: invalid JSON — {err}")
         return ""
     # optional keys: absent means the kit default (commit_style.py falls back to `conventional`)
     for k in sorted(want_keys - set(cfg) - {"environment"} - OPTIONAL):
@@ -152,7 +167,7 @@ def validate_manifests_kit() -> list[str]:
     the machine's business — reported by kit-health, not here)."""
     saved = kb.ENV
     try:
-        kb.ENV = Path("/nonexistent-env-store")  # only the kit's own manifests
+        kb.ENV = NO_ENV_STORE  # only the kit's own manifests
         return [e.replace(str(KIT) + "/", "") for e in kb.validate_manifests()]
     finally:
         kb.ENV = saved
@@ -180,10 +195,9 @@ def check_plugin_manifest(errors: list[str]) -> None:
     if not mp.is_file():
         errors.append(f"{PLUGIN_MANIFEST}: missing — the kit is a plugin (docs/packaging.md)")
         return
-    try:
-        man = json.loads(mp.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        errors.append(f"{PLUGIN_MANIFEST}: invalid JSON — {e}")
+    man, err = load_json_file(mp)
+    if err is not None:
+        errors.append(f"{PLUGIN_MANIFEST}: invalid JSON — {err}")
         return
     name = str(man.get("name") or "")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
@@ -200,10 +214,9 @@ def check_plugin_manifest(errors: list[str]) -> None:
     if not mk.is_file():
         errors.append(f"{MARKETPLACE_MANIFEST}: missing — the repo is its own marketplace (docs/packaging.md)")
         return
-    try:
-        market = json.loads(mk.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        errors.append(f"{MARKETPLACE_MANIFEST}: invalid JSON — {e}")
+    market, err = load_json_file(mk)
+    if err is not None:
+        errors.append(f"{MARKETPLACE_MANIFEST}: invalid JSON — {err}")
         return
     entries = market.get("plugins") if isinstance(market.get("plugins"), list) else []
     if not any(isinstance(e, dict) and e.get("name") == name and e.get("source") in ("./", ".") for e in entries):
@@ -236,10 +249,9 @@ def check_identity_options(errors: list[str], man: dict) -> None:
     if not hp.is_file():
         errors.append(f"{PLUGIN_HOOKS}: missing — the SessionStart hook that exports plugin options as WORKSPACE_*")
         return
-    try:
-        hooks = json.loads(hp.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        errors.append(f"{PLUGIN_HOOKS}: invalid JSON — {e}")
+    hooks, err = load_json_file(hp)
+    if err is not None:
+        errors.append(f"{PLUGIN_HOOKS}: invalid JSON — {err}")
         return
     cmds = [h.get("command", "") for grp in (hooks.get("hooks", {}).get("SessionStart") or []) if isinstance(grp, dict)
             for h in (grp.get("hooks") or []) if isinstance(h, dict)]
@@ -569,61 +581,69 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-env", action="store_true", help="environment-free: skip the env-store checks (a bare clone, a contributor's PR)")
     ap.add_argument("units", nargs="*", type=Path, help="skill/agent files or dirs to verify (default: every unit; skips the kit-wide totals)")
     a = ap.parse_args(argv)
-    units: list[Path] = []
-    for u in a.units:
-        u = u if u.is_absolute() else Path.cwd() / u
-        if u.is_dir():
-            cand = u / "SKILL.md"
-            if not cand.is_file():
-                print(f"kit-verify: {u} is neither a skill dir (SKILL.md) nor a unit file", file=sys.stderr)
-                return 2
-            u = cand
-        if not u.is_file():
-            print(f"kit-verify: {u}: no such file", file=sys.stderr)
-            return 2
-        units.append(u.resolve())
-    partial = bool(units)
-    if not partial:
-        units = fmt.units(KIT)
-    errors: list[str] = []
-    stale: list[str] = []
-    skipped: list[str] = []
-    if partial:
-        skipped.append("always-on budget and description total (kit-wide; run without paths)")
-    else:
-        check_always_on_budget(errors)
-        check_workspace_kit_paths(errors)
-        check_readme_install(errors)
-        check_plugin_manifest(errors)
-        check_make_targets(errors)
-        check_issue_refs(errors)
-    desc_total = 0
-    today = date.today()
-    for p in units:
-        rel = p.relative_to(KIT) if p.is_relative_to(KIT) else p
-        desc_total += check_unit(p, rel, errors, stale, a.stale, today)
-    errors += validate_manifests_kit()
-    errors += [f"environment-template/config.json vs kb.blank_config(): {d}" for d in kb.config_key_drift()]
+    saved_kb_env = kb.ENV
     if a.no_env:
-        envname = ""
-        skipped.append("env store (config.json keys, systems.*, renamed kinds, tracker.key_regex) — needs this machine's .context/")
-    else:
-        envname = check_env_store(errors)
-    for s_ in stale:
-        print(f"  ~ stale: {s_}", file=sys.stderr)
-    for s_ in skipped:
-        print(f"  ~ skipped: {s_}", file=sys.stderr)
-    if not partial and desc_total > DESC_TOTAL_BYTES:
-        errors.append(f"descriptions total {desc_total} bytes > {DESC_TOTAL_BYTES} always-on budget across {len(units)} units")
-    if errors:
-        print(f"KIT VERIFY FAILED — {len(errors)} problem(s):", file=sys.stderr)
-        for e in errors:
-            print(f"  - {e}", file=sys.stderr)
-        return 1
-    store = f"env store `{envname}` complete" if not a.no_env else "env store not checked (--no-env)"
-    print(f"OK — {len(units)} skills/agents verified, {len(kb.fact_entries())} discoverable facts, {store}, "
-          f"descriptions {desc_total} B" + (f", {len(stale)} stale" if stale else ""))
-    return 0
+        kb.ENV = NO_ENV_STORE  # environment-free for the whole run: `check_unit`'s facts-declared check and the
+        # final discoverable-facts count must see the kit's own manifests only, exactly like `validate_manifests_kit()` —
+        # a machine's `_discovery/` overlay is never consulted under --no-env, poisoned or not
+    try:
+        units: list[Path] = []
+        for u in a.units:
+            u = u if u.is_absolute() else Path.cwd() / u
+            if u.is_dir():
+                cand = u / "SKILL.md"
+                if not cand.is_file():
+                    print(f"kit-verify: {u} is neither a skill dir (SKILL.md) nor a unit file", file=sys.stderr)
+                    return 2
+                u = cand
+            if not u.is_file():
+                print(f"kit-verify: {u}: no such file", file=sys.stderr)
+                return 2
+            units.append(u.resolve())
+        partial = bool(units)
+        if not partial:
+            units = fmt.units(KIT)
+        errors: list[str] = []
+        stale: list[str] = []
+        skipped: list[str] = []
+        if partial:
+            skipped.append("always-on budget and description total (kit-wide; run without paths)")
+        else:
+            check_always_on_budget(errors)
+            check_workspace_kit_paths(errors)
+            check_readme_install(errors)
+            check_plugin_manifest(errors)
+            check_make_targets(errors)
+            check_issue_refs(errors)
+        desc_total = 0
+        today = date.today()
+        for p in units:
+            rel = p.relative_to(KIT) if p.is_relative_to(KIT) else p
+            desc_total += check_unit(p, rel, errors, stale, a.stale, today)
+        errors += validate_manifests_kit()
+        errors += [f"environment-template/config.json vs kb.blank_config(): {d}" for d in kb.config_key_drift()]
+        if a.no_env:
+            envname = ""
+            skipped.append("env store (config.json keys, systems.*, renamed kinds, tracker.key_regex) — needs this machine's .context/")
+        else:
+            envname = check_env_store(errors)
+        for s_ in stale:
+            print(f"  ~ stale: {s_}", file=sys.stderr)
+        for s_ in skipped:
+            print(f"  ~ skipped: {s_}", file=sys.stderr)
+        if not partial and desc_total > DESC_TOTAL_BYTES:
+            errors.append(f"descriptions total {desc_total} bytes > {DESC_TOTAL_BYTES} always-on budget across {len(units)} units")
+        if errors:
+            print(f"KIT VERIFY FAILED — {len(errors)} problem(s):", file=sys.stderr)
+            for e in errors:
+                print(f"  - {e}", file=sys.stderr)
+            return 1
+        store = f"env store `{envname}` complete" if not a.no_env else "env store not checked (--no-env)"
+        print(f"OK — {len(units)} skills/agents verified, {len(kb.fact_entries())} discoverable facts, {store}, "
+              f"descriptions {desc_total} B" + (f", {len(stale)} stale" if stale else ""))
+        return 0
+    finally:
+        kb.ENV = saved_kb_env
 
 
 if __name__ == "__main__":
