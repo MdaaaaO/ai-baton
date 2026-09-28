@@ -257,7 +257,10 @@ def _project_tables(cfg: dict) -> None:
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import kb  # noqa: E402  (kb imports kit_profile for the root only)
-        facts = kb.all_facts()
+        warn: list[str] = []
+        facts = kb.all_facts(warn)
+        for w in warn:
+            print(f"kit_profile: {w}", file=sys.stderr)
     except Exception as e:  # a malformed table must not take every script down
         print(f"kit_profile: env store fact tables unreadable ({e}) — dotted-key aliases "
               "(slack.channels, tracker.transitions, …) are empty this run", file=sys.stderr)

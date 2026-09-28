@@ -470,6 +470,27 @@ class Projection(StoreCase):
         self.assertEqual(cfg["tracker"]["transitions"], {"in_review": "007", "done": 31})
         self.assertEqual(cfg["slack"]["channels"]["zero"], "0123")
 
+    def test_an_unreadable_doc_warns_on_stderr_but_other_systems_still_project(self):
+        # _project_tables() must pass a `warn` list into kb.all_facts() (its docstring already promises
+        # "a warning on stderr") — without one, a doc that cannot even be read (bad encoding) is dropped
+        # silently, and the caller has no way to tell "not set" from "store unreadable"
+        kb.set_fact("slack", "channel", "eng-help", "C1")
+        bad = self.env / "tracker.md"
+        bad.write_bytes(b"---\ntitle: x\ntype: reference\ndomain: reference\nstatus: reference\n"
+                         b"updated: 2026-01-01\n---\n## setting\n\n" + kb.table_header().encode() +
+                         b"\n| bad | \xff\xfe | x | user 2026-01-01 |\n")
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+        err = io.StringIO()
+        try:
+            with redirect_stderr(err):
+                cfg = kit_profile.load()
+        finally:
+            kit_profile.env_config.cache_clear()
+            kit_profile.load.cache_clear()
+        self.assertEqual(cfg["slack"]["channels"], {"eng-help": "C1"})  # the other system still projects
+        self.assertIn("tracker.md: cannot read", err.getvalue())
+
 
 class Discover(StoreCase):
     def test_cli_plan_provenance_is_always_valid(self):

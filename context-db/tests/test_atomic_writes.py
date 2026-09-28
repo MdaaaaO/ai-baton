@@ -136,5 +136,24 @@ class MigrateFrontmatterWrite(unittest.TestCase):
         self.assertEqual(self.p.read_text(encoding="utf-8"), before)
 
 
+class ModePreservation(unittest.TestCase):
+    """atomic_write() must not settle an existing file at mkstemp's 0600 — a doc rewritten over and over
+    (set_fact, save_config, migrate_file, …) keeps whatever mode it already had."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.p = Path(self.tmp.name) / "doc.md"
+        self.p.write_text("before\n", encoding="utf-8")
+        self.p.chmod(0o644)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_an_existing_0644_file_stays_0644_after_a_rewrite(self):
+        fsutil.atomic_write(str(self.p), "after\n")
+        self.assertEqual(self.p.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.p.read_text(encoding="utf-8"), "after\n")
+
+
 if __name__ == "__main__":
     unittest.main()
