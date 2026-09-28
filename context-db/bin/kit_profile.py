@@ -19,7 +19,9 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py context        # the .context/ root
                         python3 kit_profile.py source         # env | none
                         python3 kit_profile.py list            # the environments this machine knows (exactly one, kept for callers that iterate)
-                        python3 kit_profile.py get tracker.kind   # a dotted key (JSON for non-scalars)
+                        python3 kit_profile.py get tracker.kind   # a dotted key (JSON for non-scalars); a deprecated
+                                                                   #   alias (DEPRECATED_ALIASES) answers with the
+                                                                   #   systems.* value it now means, and warns once on stderr
                         python3 kit_profile.py get --nonempty tracker.close_reasons.done  # exit 1 on unset OR "" / [] / {}, not just unset
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
@@ -354,6 +356,18 @@ def get(path: str, default=None):
             return default
         cur = cur[part]
     return copy.deepcopy(cur) if isinstance(cur, (dict, list)) else cur
+
+
+# One flag per capability (a skill and the engine must never read two switches that may disagree): a machine's
+# `systems.*` is the single source, `kb.py`'s schema and blank store no longer carry these two. `get` still
+# answers them for one release — the value comes from the `systems.*` flag it now means, with a one-line stderr
+# warning (never stdout, so a caller piping the value sees nothing extra) — so an old caller (a stray skill body,
+# a hand-typed command) is not a hard break. kb.py, kit_verify.py and kit-health.py read the same map so the
+# alias, the template check and the machine warning never drift apart.
+DEPRECATED_ALIASES: dict[str, str] = {
+    "slack.enabled": "systems.slack",
+    "github.signed_commits": "systems.signed_commits",
+}
 
 
 def is_empty(value: object) -> bool:
@@ -809,7 +823,12 @@ def main(argv: list[str]) -> int:
         if not rest:
             print(f"kit_profile: `get` needs {NEEDS_ARG['get']} — kit_profile.py get [--nonempty] {NEEDS_ARG['get']}", file=sys.stderr)
             return 2
-        v = get(rest[0])
+        key = rest[0]
+        alias = DEPRECATED_ALIASES.get(key)
+        if alias:
+            print(f"kit_profile: {key} is deprecated — read {alias}", file=sys.stderr)
+            key = alias
+        v = get(key)
         if v is None or (nonempty and is_empty(v)):
             return 1
         print(v if isinstance(v, (str, int, float)) and not isinstance(v, bool) else json.dumps(v))

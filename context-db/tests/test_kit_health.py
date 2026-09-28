@@ -18,6 +18,7 @@ BIN = KIT / "context-db" / "bin"
 sys.path.insert(0, str(BIN))
 
 import kb  # noqa: E402
+import kit_profile  # noqa: E402
 import leak_shapes  # noqa: E402
 
 LEAK = "C0" + "AB12CD3EF"  # a Slack-shaped id, assembled so no scanner reads this file as a leak
@@ -210,6 +211,67 @@ class ReadOnlyRun(unittest.TestCase):
             # a real schema problem is the ERR
             (root / "repos" / "bad.md").write_text("---\ntitle: Bad\ntype: novel\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n", encoding="utf-8")
             self.assertIn("❌ `make verify` failed", self.engine_section(root))
+
+
+class ConfigSection(unittest.TestCase):
+    """kit-health § 3 (config) on a throw-away store — never the live one (kb.ENV / kit_profile.ENV_DIR
+    patched directly, the StoreCase pattern test_kb_store.py uses)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = Path(self.tmp.name) / "reference" / "env"
+        self._saved = (kb.ENV, kit_profile.ENV_DIR)
+        kb.ENV = self.env
+        kit_profile.ENV_DIR = self.env
+        kb.init_blank()
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+
+    def tearDown(self):
+        kb.ENV, kit_profile.ENV_DIR = self._saved
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+        self.tmp.cleanup()
+
+    def config_report(self) -> str:
+        # sec_config reads through `kit_profile.get` (cached, zero-arg) — clear so it sees this test's store,
+        # never a prior test's cached one, and clear again after so the next test starts clean too.
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+        try:
+            kh = load_kit_health()
+            r = kh.Report()
+            kh.sec_config(r)
+            return "\n".join(r.lines)
+        finally:
+            kit_profile.env_config.cache_clear()
+            kit_profile.load.cache_clear()
+
+    def test_disagreeing_deprecated_slack_enabled_warns_loudly(self):
+        # one flag per capability: `systems.slack` is the single source pr-open and every other reader gate on now — a store that
+        # still carries the retired `slack.enabled` and disagrees with `systems.slack` is exactly the split read
+        # this refactor closes; kit-health must say so loudly, not just note the leftover key.
+        cfg = kb.load_config()
+        cfg["slack"]["enabled"] = True
+        cfg["systems"]["slack"] = False
+        kb.save_config(cfg)
+        report = self.config_report()
+        self.assertIn("slack.enabled", report)
+        self.assertIn("systems.slack", report)
+        self.assertIn("DISAGREE", report)
+
+    def test_agreeing_deprecated_key_still_warns_but_not_loudly(self):
+        cfg = kb.load_config()
+        cfg["github"]["signed_commits"] = True
+        cfg["systems"]["signed_commits"] = True
+        kb.save_config(cfg)
+        report = self.config_report()
+        self.assertIn("github.signed_commits", report)
+        self.assertIn("systems.signed_commits", report)
+        self.assertNotIn("DISAGREE", report)
+
+    def test_clean_store_has_no_deprecated_key_warning(self):
+        self.assertNotIn("deprecated", self.config_report())
 
 
 class ReviewFindings(unittest.TestCase):

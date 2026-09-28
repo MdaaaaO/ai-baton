@@ -425,6 +425,23 @@ class MigrateConfig(StoreCase):
         self.assertTrue(any("template key 'labels' missing from kb.blank_config()" in d for d in drift), drift)
         self.assertTrue(any("key 'extra' is not in environment-template" in d for d in drift), drift)
 
+    def test_deprecated_key_in_template_fails_drift(self):
+        # one flag per capability — `systems.slack` / `systems.signed_commits` are the single source now;
+        # environment-template/config.json must never bring `slack.enabled` / `github.signed_commits` back, even
+        # if kb.blank_config() carried it too (a set-equality check alone would miss that — both sides regressing
+        # together still "agree").
+        tmpl = json.loads(kb.TEMPLATE_CONFIG.read_text(encoding="utf-8"))
+        tmpl["slack"]["enabled"] = False
+        tmp_tmpl = Path(self.tmp.name) / "config.json"
+        tmp_tmpl.write_text(json.dumps(tmpl), encoding="utf-8")
+        saved = kb.TEMPLATE_CONFIG
+        kb.TEMPLATE_CONFIG = tmp_tmpl
+        try:
+            drift = kb.config_key_drift()
+        finally:
+            kb.TEMPLATE_CONFIG = saved
+        self.assertTrue(any("slack.enabled" in d and "systems.slack" in d for d in drift), drift)
+
     def test_renamed_flag_moves_and_missing_flags_seed(self):
         cfg = {"systems": {"snowflake": True, "slack": True}, "self_assessment": {"sources": ["snowflake"]}}
         done = kb.migrate_config(cfg)

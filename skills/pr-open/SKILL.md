@@ -5,7 +5,7 @@ metadata:
   version: "12"
   updated: "2026-09-28"
   reviewed: "2026-09-25"
-  facts: "slack.enabled,slack.review-venue,slack.channel,github.review_bot,github.owner_teams,github.signed_commits,tracker.kind,tracker.url_template"
+  facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
 ---
 
 # pr-open — what "the PR is open" means here
@@ -16,15 +16,15 @@ only where the environment has Slack (`systems.slack`); everything else holds in
 
 **Read the config first** (from the workspace root; `K=python3 $BATON/context-db/bin/kit_profile.py`):
 `$K get tracker.kind`, `tracker.url_template`, `github.review_bot`, `github.owner_teams`,
-`github.signed_commits`, `labels.shared`, `labels.repos.<repo>` (may be absent), `slack.enabled`,
+`systems.signed_commits`, `labels.shared`, `labels.repos.<repo>` (may be absent), `systems.slack`,
 `slack.repo_channels.<owner/repo>`, `commits.default` / `commits.repos.<owner/repo>` (§ Commit style). Never hardcode any of these values.
 
 0. **Branch & push**: work in a worktree under `.worktrees/`. **Commit style first**: `python3
    $BATON/context-db/bin/commit_style.py resolve --dir <worktree>` names the convention (Conventional Commits
    unless the repo overrides it — § Commit style); every commit subject passes `commit_style.py check --dir
    <worktree> <msg-file>` before it is made or enqueued, and the PR title passes `commit_style.py title --dir
-   <worktree> "<title>"` — same shape as the (squash) commit subject. If `github.signed_commits` (=
-   `systems.signed_commits`) is true, the commit + push go through `/sign-queue` — enqueue, tell the user in
+   <worktree> "<title>"` — same shape as the (squash) commit subject. If `systems.signed_commits` is true,
+   the commit + push go through `/sign-queue` — enqueue, tell the user in
    one line, create the PR once the branch is on the remote. Otherwise commit and `git push -u origin <branch>`
    directly.
 1. **Create** with a body file (`gh pr create --body-file …`): Overview with the tracker link (§ Links),
@@ -71,7 +71,7 @@ only where the environment has Slack (`systems.slack`); everything else holds in
 5. **Tracker**: comment the PR link on the ticket (`ticket-update`). Where `tracker.kind` is `jira` and the
    PR is the ticket's deliverable, move it to *In Review* (`tracker.transitions.in_review`). Where it is
    `github`, the `Closes #<n>` in the body is the link; add the issue's in-review label if the repo uses one.
-6. **Slack review request — as a DRAFT, never sent — only when `slack.enabled` is true.** When it is false,
+6. **Slack review request — as a DRAFT, never sent — only when `systems.slack` is true.** When it is false,
    skip the step and say so in one line ("no Slack in this environment — reviewer request on GitHub is the ask").
    Channel = `slack.repo_channels.<owner/repo>` (the env fact `slack.review-venue <owner/repo>`, a channel
    handle; its id via `slack.channels.<name>` = `slack.channel <name>`). No entry → `/env-init slack.review-venue
@@ -239,4 +239,4 @@ A follow-up nudge is the user's decision, not the session's.
 ## Not in scope
 Merging, re-requesting the bot after pushes, thread handling — those are `/pr-watch` + the repo's
 Coordination rules (`.context/repos/<repo>.md`). Signing mechanics are `/sign-queue` (only where
-`github.signed_commits` is true).
+`systems.signed_commits` is true).

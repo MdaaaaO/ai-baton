@@ -15,7 +15,8 @@ Sections:
                   (the env store's tables + config.json: org, repos, domains) and the user's identity
                   (WORKSPACE_USER / WORKSPACE_GITHUB_LOGIN from the plugin options or settings.local.json — matched, never printed).
                   No unit is exempt: the kit never names an environment, so no unit owns its values.
-  3. config     — the env fact store (`.context/reference/env/`): config completeness, renamed flags
+  3. config     — the env fact store (`.context/reference/env/`): config completeness, renamed flags,
+                  a retired capability key (`slack.enabled`, `github.signed_commits`) still in config.json
   4. machine    — this machine's wiring: environment name, CLAUDE.md imports, Makefile include, memory
                   symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell;
                   one legacy line: a leftover `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
@@ -801,6 +802,23 @@ def sec_config(r: Report) -> None:
     if renamed:
         r.add(WARN, "config", f"renamed capability flag(s) still in config.json: {', '.join('systems.' + o for o in renamed)} — "
                               "run `python3 $BATON/context-db/bin/kb.py migrate` (keeps the value)")
+    # one flag per capability: `slack.enabled` / `github.signed_commits` are retired — every reader now
+    # gates on `systems.slack` / `systems.signed_commits` (`kit_profile.DEPRECATED_ALIASES`). A store that still
+    # carries the old key is not a kit-verify failure (an extra key kit-verify never checked for), so this is
+    # the one place a machine hears about it — loudly when the two disagree, since that is exactly the split
+    # read this refactor closes.
+    _absent = object()
+    for old, new in kit_profile.DEPRECATED_ALIASES.items():
+        old_val = kit_profile.get(old, _absent)
+        if old_val is _absent:
+            continue
+        new_val = bool(kit_profile.get(new))
+        old_val = bool(old_val)
+        disagree = (f" — THEY DISAGREE: `{old}` = {str(old_val).lower()}, `{new}` = {str(new_val).lower()}, "
+                    f"and `{new}` is what's read" if old_val != new_val else "")
+        r.add(WARN, "config", f"config.json still carries the deprecated `{old}`; `{new}` is what every skill/script "
+                              f"reads now{disagree} — no `kb.py` command removes a config key yet: delete `{old}` "
+                              "from config.json by hand")
 
 
 # ── 4. machine ──────────────────────────────────────────────────────────────────────────────

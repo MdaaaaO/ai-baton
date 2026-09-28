@@ -80,7 +80,7 @@ itself as the kit is used (discover → ask → `kb set`) and that nobody has to
 Layout (all under `.context/reference/env/`, created by `kb.py init`):
   config.json          the few STRUCTURAL switches scripts branch on: `environment` (this machine's
                        environment name), tracker.kind / key_regex / url_template / mcp_tools,
-                       github.org / review_bot / bots / owner_teams, slack.enabled / domain, systems.*,
+                       github.org / review_bot / bots / owner_teams, slack.domain, systems.*,
                        tz_default, domains, labels, self_assessment, diagrams, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
   _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
@@ -159,7 +159,9 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py context        # the .context/ root
                         python3 kit_profile.py source         # env | none
                         python3 kit_profile.py list            # the environments this machine knows (exactly one, kept for callers that iterate)
-                        python3 kit_profile.py get tracker.kind   # a dotted key (JSON for non-scalars)
+                        python3 kit_profile.py get tracker.kind   # a dotted key (JSON for non-scalars); a deprecated
+                                                                   #   alias (DEPRECATED_ALIASES) answers with the
+                                                                   #   systems.* value it now means, and warns once on stderr
                         python3 kit_profile.py get --nonempty tracker.close_reasons.done  # exit 1 on unset OR "" / [] / {}, not just unset
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
