@@ -63,11 +63,10 @@ class ThisKit(unittest.TestCase):
             self.assertGreaterEqual(min(n.values()), eval_check.MIN_EACH, skill)
 
     def test_every_skill_has_a_trigger_suite(self):
-        # #186: 21 of 24 skills shipped with no trigger suite at all, so a description edit that broke a skill's
-        # trigger went unnoticed by anyone. This pins that every skill listed under skills/ now has one, meeting the
-        # same >= MIN_CASES / >= MIN_EACH bar as the suites eval-check already knew about (not just a handful of them).
-        # (A description without a "Use when" phrase is a separate, pre-existing gap in most of these same skills —
-        # left as the note it already was; folding it into this pin would fail on unrelated wording, not on #186.)
+        # a follow-up on the eval suite's own coverage work: most skills shipped with no trigger suite at all, so a
+        # description edit that broke a skill's trigger went unnoticed by anyone. This pins that every skill listed
+        # under skills/ now has one, meeting the same >= MIN_CASES / >= MIN_EACH bar the suites eval-check already
+        # knew about (not just a handful of them).
         errors, notes, suites = eval_check.check(KIT)
         self.assertEqual(errors, [], errors)
         self.assertFalse(any(n.startswith("no trigger suite yet") for n in notes), notes)
@@ -77,6 +76,13 @@ class ThisKit(unittest.TestCase):
             n = suites[skill]
             self.assertGreaterEqual(sum(n.values()), eval_check.MIN_CASES, skill)
             self.assertGreaterEqual(min(n.values()), eval_check.MIN_EACH, skill)
+
+    def test_require_all_passes_on_the_real_kit(self):
+        # the gate ci.yml now runs on every PR (REQUIRE_ALL=1): a trigger suite for every skill (pinned above) and a
+        # recognized trigger phrase in every description. Widening the phrase check (this follow-up) is what makes
+        # the second half true — on the old, narrower regex this failed on most of the kit's own descriptions.
+        errors, _notes, _suites = eval_check.check(KIT, require_all=True)
+        self.assertEqual(errors, [], errors)
 
     def test_the_manifest_names_the_eval_dir(self):
         manifest = json.loads((KIT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
@@ -245,17 +251,59 @@ class Coverage(unittest.TestCase):
         errors, _, _ = kit.run(require_all=True)
         self.assertTrue(any("no trigger suite yet (1): bar" in e for e in errors), errors)
 
-    def test_a_description_without_use_when_is_a_note(self):
-        kit = Kit(Path(self.tmp.name), desc="Does foo. Invoke when foo happens.")
+    def test_a_description_without_any_trigger_phrase_is_a_note(self):
+        kit = Kit(Path(self.tmp.name), desc="Does foo, quietly, without saying why.")
         kit.suite()
         errors, notes, _ = kit.run()
         self.assertEqual(errors, [])
-        self.assertTrue(any('without a "Use when" phrase (1): foo' in n for n in notes), notes)
+        self.assertTrue(any("without a recognized trigger phrase (1): foo" in n for n in notes), notes)
 
     def test_use_whenever_counts(self):
         kit = Kit(Path(self.tmp.name), desc="Does foo. Use whenever foo happens.")
         kit.suite()
         self.assertEqual(kit.run(require_all=True)[0], [])
+
+    def test_invoke_when_counts(self):
+        # a follow-up on the eval suite's own coverage work: most of the kit's forked or background skills say
+        # "Invoke when/as/at/for …", not "Use when …" — the old regex matched only the latter, so requiring the
+        # full gate failed most of the kit's own descriptions even though kit_verify's own (more lenient) shape
+        # check already accepted them.
+        kit = Kit(Path(self.tmp.name), desc="Does foo. Invoke when foo happens.")
+        kit.suite()
+        self.assertEqual(kit.run(require_all=True)[0], [])
+
+    def test_invoke_as_at_for_count(self):
+        for phrase in ('Invoke as "do foo".', "Invoke at the start of foo.", "Invoke for every foo."):
+            with self.subTest(phrase=phrase), tempfile.TemporaryDirectory() as d:
+                kit = Kit(Path(d), desc=f"Does foo. {phrase}")
+                kit.suite()
+                self.assertEqual(kit.run(require_all=True)[0], [])
+
+    def test_arm_with_counts(self):
+        kit = Kit(Path(self.tmp.name), desc="Does foo. Arm with `/loop 5m /foo`.")
+        kit.suite()
+        self.assertEqual(kit.run(require_all=True)[0], [])
+
+    def test_use_once_and_use_for_count(self):
+        for phrase in ("Use once, right after install.", "Use for every foo you see."):
+            with self.subTest(phrase=phrase), tempfile.TemporaryDirectory() as d:
+                kit = Kit(Path(d), desc=f"Does foo. {phrase}")
+                kit.suite()
+                self.assertEqual(kit.run(require_all=True)[0], [])
+
+    def test_load_before_and_run_after_count(self):
+        for phrase in ("Load before non-trivial foo work.", "Run after every foo."):
+            with self.subTest(phrase=phrase), tempfile.TemporaryDirectory() as d:
+                kit = Kit(Path(d), desc=f"Does foo. {phrase}")
+                kit.suite()
+                self.assertEqual(kit.run(require_all=True)[0], [])
+
+    def test_for_every_and_for_prs_count(self):
+        for phrase in ("For every foo your session owns.", "For PRs the queue surfaces."):
+            with self.subTest(phrase=phrase), tempfile.TemporaryDirectory() as d:
+                kit = Kit(Path(d), desc=f"Does foo. {phrase}")
+                kit.suite()
+                self.assertEqual(kit.run(require_all=True)[0], [])
 
     def test_the_longest_skill_prefix_wins(self):
         self.assertEqual(eval_check.skill_of("session-register-start", ["session", "session-register"]), "session-register")
@@ -312,6 +360,13 @@ class Wiring(unittest.TestCase):
         mk = (KIT / "context-db" / "Makefile").read_text(encoding="utf-8")
         self.assertRegex(mk, r"(?m)^ci:.*\beval-check\b")
         self.assertIn("make -C .claude/context-db eval-check", (KIT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+
+    def test_ci_runs_the_full_require_all_gate(self):
+        # a follow-up on the eval suite's own coverage work: eval-check also gates a trigger suite for every skill
+        # and a recognized trigger phrase in every description, but only under --require-all — CI must pass
+        # REQUIRE_ALL=1 (the Makefile's own switch for it), not just run the bare check.
+        ci = (KIT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertRegex(ci, r"make -C \.claude/context-db eval-check REQUIRE_ALL=1")
 
     def test_the_token_spending_workflow_is_manual_only(self):
         text = (KIT / ".github" / "workflows" / "evals.yml").read_text(encoding="utf-8")

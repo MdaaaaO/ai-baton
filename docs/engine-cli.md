@@ -267,7 +267,7 @@ Static check of the eval suite (no tokens): case format, trigger suites of >=
 options:
   -h, --help     show this help message and exit
   --require-all  also fail on a skill without a trigger suite or a description
-                 without "Use when"
+                 without a recognized trigger phrase
   --kit KIT      the kit root (default: this checkout)
 ```
 

@@ -12,9 +12,9 @@ reads the eval dir the plugin manifest names (`experimental.evals`, else `evals/
     under ablation (`arm: both`), or points the wrong way (a positive needs `min` >= 1, a near miss `min: 0` + `max: 0`);
   - a skill that HAS a trigger suite with fewer than MIN_CASES cases or fewer than MIN_EACH positives or near misses.
 
-Skills without a suite yet, and descriptions without a "Use when" phrase, are printed as notes — not failures —
-until every skill has one (`--require-all` turns both into failures; the eventual gate). Stdlib only; frontmatter
-is read with the kit's one parser (`frontmatter.py`).
+Skills without a suite yet, and descriptions without a recognized trigger phrase, are printed as notes — not
+failures — until every skill has one (`--require-all` turns both into failures; the eventual gate). Stdlib only;
+frontmatter is read with the kit's one parser (`frontmatter.py`).
 
 Usage: eval_check.py [--require-all] [--kit DIR]   exit 0 = OK, 1 = a failure above.
 """
@@ -44,8 +44,29 @@ PROMPT_KEYS = frozenset({
 })
 GRADER_TYPES = frozenset({"regex", "tool_used", "tool_order", "file_exists", "llm", "baseline"})
 KINDS = ("positive", "near-miss")
-USE_WHEN = re.compile(r"\bUse when(?:ever)?\b")
+# docs/authoring.md's canonical shape is `<what>. Use when <situations>. Not for <near misses>.`, and
+# kit_verify's own description-shape check (check_description_shape) only requires the word "when" to appear
+# anywhere — TRIGGER_WHEN reuses that same, deliberately lenient test so this gate agrees with kit_verify's
+# notes instead of failing a description kit_verify itself accepts. A handful of skills are invoked by
+# something other than a direct "Use" (a `/loop` arm, a fork, a reference doc loaded ahead of other work) and
+# spell the trigger without "when" at all — TRIGGER_OTHER lists those actual forms ("Arm with `/loop …`",
+# "Invoke as/at/for/on/right …", "Use once/for …", "Load before …", "Run after …", "For every/PRs …").
+TRIGGER_WHEN = re.compile(r"\bwhen(?:ever)?\b", re.IGNORECASE)
+TRIGGER_OTHER = re.compile(
+    r"\bArm with\b"
+    r"|\bInvoke\s+(?:when|as|at|for|on|right)\b"
+    r"|\bUse\s+(?:once|for)\b"
+    r"|\bLoad before\b"
+    r"|\bRun after\b"
+    r"|\bFor (?:every|PRs?)\b",
+    re.IGNORECASE,
+)
 SKIP_DIRS = frozenset({"results", "mocks"})
+
+
+def has_trigger_phrase(description: str) -> bool:
+    """Whether a description states a recognized trigger — see TRIGGER_WHEN / TRIGGER_OTHER above."""
+    return bool(TRIGGER_WHEN.search(description) or TRIGGER_OTHER.search(description))
 
 
 def eval_dir(kit: Path) -> Path:
@@ -199,13 +220,14 @@ def check(kit: Path, require_all: bool = False) -> tuple[list[str], list[str], d
     missing = [s for s in skills if s not in suites]
     if missing:
         (errors if require_all else notes).append(f"no trigger suite yet ({len(missing)}): {', '.join(missing)}")
-    no_use_when = []
+    no_trigger = []
     for s in skills:
         fm = frontmatter.load(kit / "skills" / s / "SKILL.md") or {}
-        if not USE_WHEN.search(frontmatter.unquote(fm.get("description"))):
-            no_use_when.append(s)
-    if no_use_when:
-        (errors if require_all else notes).append(f'description without a "Use when" phrase ({len(no_use_when)}): {", ".join(no_use_when)}')
+        if not has_trigger_phrase(frontmatter.unquote(fm.get("description"))):
+            no_trigger.append(s)
+    if no_trigger:
+        (errors if require_all else notes).append(
+            f'description without a recognized trigger phrase ({len(no_trigger)}): {", ".join(no_trigger)}')
     if other:
         notes.append("other cases (not trigger cases): " + ", ".join(f"{p}-* ({n})" for p, n in sorted(other.items())))
     return errors, notes, suites
@@ -215,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Static check of the eval suite (no tokens): case format, trigger "
                                  "suites of >= 10 cases with positives and near misses, and notes on coverage.")
     ap.add_argument("--require-all", action="store_true",
-                    help='also fail on a skill without a trigger suite or a description without "Use when"')
+                    help="also fail on a skill without a trigger suite or a description without a recognized trigger phrase")
     ap.add_argument("--kit", type=Path, default=KIT, help="the kit root (default: this checkout)")
     a = ap.parse_args(argv)
     errors, notes, suites = check(a.kit.resolve(), a.require_all)
