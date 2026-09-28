@@ -3,8 +3,8 @@ name: alerts-sweep
 description: "Sonnet-forked sweep of the airflow-alerts Slack channel: reads new messages, classifies each against the pattern KB, advances the timestamp, returns exactly NO-OP when nothing needs the main session, or `NEEDS <system>.<kind> <name>` for a missing fact (`/env-init`). Arm with `/loop 20m /alerts-sweep`; never acts on an alert."
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
-  version: "9"
-  updated: "2026-09-27"
+  version: "10"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
   requires: "airflow,slack"
   facts: "slack.channel airflow-alerts,airflow.path alerts-state,airflow.path alerts-kb"
@@ -27,7 +27,7 @@ you may edit only `STATE` and `KB`.
    → `CHANNEL`, `airflow.path alerts-state` → `STATE`, `airflow.path alerts-kb` → `KB`. Both paths are relative
    to the workspace root and must start with `.context/` — that is the whole write scope of this fork. If any
    `get` exits non-zero, or a path is absolute, contains a `..` segment or is not under `.context/`, return `NEEDS <system>.<kind> <name>`
-   for the first such fact (see Return value) and stop; never grep or `sed -i` a path that failed this check.
+   for the first such fact (see Return value) and stop; never grep or `sed` a path that failed this check.
 1. `grep -n 'Last swept through' "$STATE"` → `LAST_TS`.
 2. `slack_read_channel(channel_id: CHANNEL, oldest: LAST_TS, response_format: concise)`.
    Drop the message equal to `LAST_TS` itself. If nothing newer: go to step 6 with no changes.
@@ -40,7 +40,9 @@ you may edit only `STATE` and `KB`.
    - **NEW** — anything else (a DAG/task pair not in the KB, or a known pair with a different error).
 4. For each KNOWN alert append one line under `## Recurrence log` at the end of `KB`
    (create the heading if missing): `- <YYYY-MM-DD> <slack ts> <dag>/<task> — <KB entry title>`.
-5. Advance the state: `sed -i -E 's/(\*\*Last swept through:\*\* ts `)[0-9.]+/\1<newest ts>/' "$STATE"`
+5. Advance the state (a temp file + `mv`, never `sed -i`: BSD `sed -i` needs a backup-suffix argument,
+   so the same invocation silently means something different on macOS):
+   `sed -E 's/(\*\*Last swept through:\*\* ts `)[0-9.]+/\1<newest ts>/' "$STATE" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"`
    and set its frontmatter `updated:` to today. Then `make -C $BATON/context-db index >/dev/null`.
 6. Return.
 

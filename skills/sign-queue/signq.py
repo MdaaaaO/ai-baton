@@ -31,8 +31,10 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -430,45 +432,71 @@ def run_job(j: Job, verbose: bool, dry: bool) -> Dict[str, str]:
         print(dim("      (dry run — not executed)"))
         return result
     start = _dt.datetime.now()
+    # A job script chains git fetch/rebase/push (and sometimes gh); none of that has its own
+    # timeout once it is inside "sh <job>". A hung remote or a credential prompt would otherwise
+    # block this read loop forever. JOB_TIMEOUT bounds the whole job. `sh <job>` may itself fork
+    # (git, gh): killing only that top process leaves a grandchild running with the same stdout
+    # pipe held open, so the read below would never see EOF — start_new_session=True puts the
+    # whole tree in its own process group and the Timer signals that group, not just the one pid.
+    JOB_TIMEOUT = int(os.environ.get("SIGN_QUEUE_JOB_TIMEOUT", "300"))
+    timed_out = threading.Event()
+
+    def _kill_group(pid: int) -> None:
+        timed_out.set()
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # already gone
+
     with j.log.open("a") as log:
         log.write(f"\n===== {now_z()} run {j.name}\n")
         p = subprocess.Popen(["sh", str(j.path)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             text=True, env=env, bufsize=1, stdin=subprocess.DEVNULL)
+                             text=True, env=env, bufsize=1, stdin=subprocess.DEVNULL, start_new_session=True)
+        timer = threading.Timer(JOB_TIMEOUT, _kill_group, args=(p.pid,))
+        timer.start()
         tail: List[str] = []
-        assert p.stdout is not None
-        for raw in p.stdout:
-            line = raw.rstrip("\n")
-            log.write(line + "\n")
-            tail.append(line); tail = tail[-25:]
-            if verbose:
-                # tee the raw line to the console, but still parse it below — the milestones
-                # and the final "pushed <sha> <sig> <subject>" marker are the only evidence a
-                # push actually happened, verbose or not.
-                print("      " + dim("│ ") + line)
-            m = re.match(r"^pushed ([0-9a-f]+) (\S) (.*)", line)
-            if m:
-                result.update(sha=m.group(1), sig=m.group(2), subject=m.group(3))
-                continue
-            if not verbose:
-                for rx, fmt in MILESTONES:
-                    mm = rx.match(line)
-                    if mm and fmt:
-                        print("      " + dim("·") + " " + fmt(mm))
-                        break
-        rc = p.wait()
-        log.write(f"===== exit {rc}\n")
+        try:
+            assert p.stdout is not None
+            for raw in p.stdout:
+                line = raw.rstrip("\n")
+                log.write(line + "\n")
+                tail.append(line); tail = tail[-25:]
+                if verbose:
+                    # tee the raw line to the console, but still parse it below — the milestones
+                    # and the final "pushed <sha> <sig> <subject>" marker are the only evidence a
+                    # push actually happened, verbose or not.
+                    print("      " + dim("│ ") + line)
+                m = re.match(r"^pushed ([0-9a-f]+) (\S) (.*)", line)
+                if m:
+                    result.update(sha=m.group(1), sig=m.group(2), subject=m.group(3))
+                    continue
+                if not verbose:
+                    for rx, fmt in MILESTONES:
+                        mm = rx.match(line)
+                        if mm and fmt:
+                            print("      " + dim("·") + " " + fmt(mm))
+                            break
+            rc = p.wait()
+        finally:
+            timer.cancel()
+        if timed_out.is_set():
+            log.write(f"===== timed out after {JOB_TIMEOUT}s, killed\n")
+        else:
+            log.write(f"===== exit {rc}\n")
     secs = int((_dt.datetime.now() - start).total_seconds())
     # rc == 0 alone is not proof of a push: it only means the job script ran to its last line
     # without error. The job's own last command prints "pushed <sha> <sig> <subject>" (parsed
     # above); require that marker too, or a job that exits clean without ever reaching it (a
     # malformed or truncated script) would be recorded as pushed on rc alone.
-    if rc == 0 and result["sha"]:
+    if not timed_out.is_set() and rc == 0 and result["sha"]:
         result["status"] = "pushed"
         sig = SIG.get(result["sig"], result["sig"])
         sigtxt = green(sig) if result["sig"] == "G" else yellow(sig)
         print(f"      {green('✔')} {bold('pushed ' + result['sha'])}  {sigtxt}  {dim(f'{secs}s')}")
     else:
-        if rc == 0:
+        if timed_out.is_set():
+            hint = f"job timed out after {JOB_TIMEOUT}s (a hung git/gh call?) — killed"
+        elif rc == 0:
             hint = "job exited 0 but never printed its push confirmation — a truncated or edited job script?"
         else:
             hint = next((h for rx, h in FAIL_HINTS if any(rx.search(t) for t in tail)), "")

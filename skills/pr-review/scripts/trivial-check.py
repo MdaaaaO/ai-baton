@@ -46,7 +46,12 @@ ME = CFG["login"]
 
 def gh(*args, paginate=False, allow_fail=False):
     cmd = ["gh", "api"] + (["--paginate"] if paginate else []) + list(args)
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        if allow_fail: return None
+        print(json.dumps({"eligible": False, "error": True, "reasons": [f"gh api timed out after 60s: {' '.join(args)}"]}))
+        sys.exit(2)
     if p.returncode != 0:
         if allow_fail: return None
         print(json.dumps({"eligible": False, "error": True, "reasons": [f"gh api failed: {' '.join(args)}: {p.stderr.strip()[:200]}"]}))
@@ -283,7 +288,11 @@ def main():
             json.dump(reviews, tf); tf.close()
             env = dict(os.environ)
             if REVIEW_BOT: env["PR_WATCH_BOT_LOGIN"] = REVIEW_BOT
-            p = subprocess.run(["bash", bot_script, repo, pr, head, tf.name], capture_output=True, text=True, env=env)
+            try:
+                p = subprocess.run(["bash", bot_script, repo, pr, head, tf.name], capture_output=True, text=True, env=env, timeout=60)
+            except subprocess.TimeoutExpired:
+                print(json.dumps({"eligible": False, "error": True, "reasons": ["bot-verdict.sh timed out after 60s"]}))
+                sys.exit(2)
         finally:
             os.unlink(tf.name)
         if p.returncode == 0:

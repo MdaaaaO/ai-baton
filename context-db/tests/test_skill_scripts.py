@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
+from unittest import mock
 
 KIT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
@@ -189,6 +190,23 @@ class TrivialCheck(unittest.TestCase):
         self.assertTrue(g("src/pkg/README.md", ["**/README.md"]))
         self.assertFalse(g("src/main.py", ["docs/**", "*.md"]))
 
+    def test_gh_timeout_is_bounded_and_exits_2(self):
+        # a hung `gh api` used to block trivial-check.py forever; it must now fail closed with a
+        # distinct exit code and a clear reason, not hang the auto-approve gate.
+        with mock.patch.object(self.tc.subprocess, "run",
+                                side_effect=self.tc.subprocess.TimeoutExpired(cmd=["gh"], timeout=60)):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                with self.assertRaises(SystemExit) as cm:
+                    self.tc.gh("repos/acme/widgets/pulls/1")
+            self.assertEqual(cm.exception.code, 2)
+        self.assertIn("timed out after 60s", buf.getvalue())
+
+    def test_gh_timeout_with_allow_fail_returns_none_not_raises(self):
+        with mock.patch.object(self.tc.subprocess, "run",
+                                side_effect=self.tc.subprocess.TimeoutExpired(cmd=["gh"], timeout=60)):
+            self.assertIsNone(self.tc.gh("repos/acme/widgets/pulls/1", allow_fail=True))
+
 
 class DiagramPlan(unittest.TestCase):
     @classmethod
@@ -268,6 +286,40 @@ class DiagramPlan(unittest.TestCase):
                 self.assertIn(f"  {facet:<13}", r.stdout)
             for facet in self.dp.MATRIX:
                 self.assertIn(f"  {facet}\n    WHERE", r.stdout)
+
+    def test_sh_timeout_is_bounded_and_exits_2(self):
+        # a hung `gh`/`git` call inside sh() used to block diagram-plan.py forever; it must now
+        # fail closed with a distinct exit code instead of hanging pr-open.
+        with mock.patch.object(self.dp.subprocess, "run",
+                                side_effect=self.dp.subprocess.TimeoutExpired(cmd=["gh"], timeout=60)):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                with self.assertRaises(SystemExit) as cm:
+                    self.dp.sh(["gh", "api", "repos/acme/widgets"])
+            self.assertEqual(cm.exception.code, 2)
+        self.assertIn("timed out after 60s", buf.getvalue())
+
+    def test_repo_slug_timeout_is_bounded_and_exits_2(self):
+        with mock.patch.object(self.dp.subprocess, "run",
+                                side_effect=self.dp.subprocess.TimeoutExpired(cmd=["git"], timeout=60)):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                with self.assertRaises(SystemExit) as cm:
+                    self.dp.repo_slug(Path("/tmp"))
+            self.assertEqual(cm.exception.code, 2)
+        self.assertIn("timed out after 60s", buf.getvalue())
+
+    def test_files_from_git_timeout_is_bounded_and_exits_2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)  # not a .git dir, so files_from_git probes it via `git rev-parse --git-dir`
+            with mock.patch.object(self.dp.subprocess, "run",
+                                    side_effect=self.dp.subprocess.TimeoutExpired(cmd=["git"], timeout=60)):
+                buf = io.StringIO()
+                with contextlib.redirect_stderr(buf):
+                    with self.assertRaises(SystemExit) as cm:
+                        self.dp.files_from_git("main", cwd)
+                self.assertEqual(cm.exception.code, 2)
+            self.assertIn("timed out after 60s", buf.getvalue())
 
     def test_variants_and_match(self):
         self.assertIn("dags/*.py", self.dp.variants("**/dags/**/*.py"))

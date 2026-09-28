@@ -5,7 +5,7 @@
 # Run it ONCE from the owning Claude session as a plain Bash tool call:
 #     bash $BATON/skills/session-register/heartbeat.sh <name> "<focus>"
 # It resolves the owning `claude` process from its own ancestry, then re-executes itself detached
-# (setsid + nohup — the Bash tool kills its process group after ~10 min otherwise) and returns.
+# (skills/_lib/portable.sh's detach — the Bash tool kills its process group after ~10 min otherwise) and returns.
 # The detached copy touches the registry row every INTERVAL (default 6h) while that claude process
 # is alive, checks liveness every 60 s, and marks the row `ended` the minute the session is gone —
 # so a heartbeat never outlives its session and the registry never lies about liveness.
@@ -16,16 +16,22 @@
 # environment and hands to the detached copy explicitly. The final `session-end` on session death
 # writes the `## Session stats` block into the session file and a row into sessions/_ledger.md,
 # so even a session that never ran session-handoff leaves its numbers behind.
-# Log: /tmp/heartbeat-<name>.log · pidfile: /tmp/heartbeat-<name>.pid (second start = no-op).
+# Log: $TMPDIR/ai-baton-<uid>/heartbeat-<name>.log · pidfile: same dir, heartbeat-<name>.pid (second
+# start = no-op). Namespaced under TMPDIR (a per-user dir on macOS already; `ai-baton-<uid>` makes it
+# one on Linux too, where TMPDIR is usually unset and bare /tmp is shared between users).
 TZ_DEFAULT=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" tz 2>/dev/null || echo UTC)  # identity-aware: plugin option, else WORKSPACE_TZ, else the store
 set -u
 NAME=${1:?usage: heartbeat.sh <session-name> ["<working on>"] [interval-seconds]}
 WORKING=${2:-}
 INTERVAL=${3:-21600}
 KITDIR=$(cd "$(dirname "$0")/../.." && pwd)  # the kit itself: a .claude/ clone or the plugin root (#3)
+# shellcheck source=../_lib/portable.sh
+. "$KITDIR/skills/_lib/portable.sh"  # detach — GNU/Linux and macOS/BSD (no setsid) alike
 MK="make -s -C $KITDIR/context-db"
-LOG=/tmp/heartbeat-$NAME.log
-PIDFILE=/tmp/heartbeat-$NAME.pid
+BATON_TMP=${TMPDIR:-/tmp}/ai-baton-$(id -u 2>/dev/null || echo 0)
+mkdir -p "$BATON_TMP" 2>/dev/null
+LOG=$BATON_TMP/heartbeat-$NAME.log
+PIDFILE=$BATON_TMP/heartbeat-$NAME.pid
 SESSION_ID=${CLAUDE_CODE_SESSION_ID:-}
 
 if [ -z "${HEARTBEAT_DETACHED:-}" ]; then
@@ -41,8 +47,8 @@ if [ -z "${HEARTBEAT_DETACHED:-}" ]; then
   done
   [ -n "$CLAUDE_PID" ] || { echo "heartbeat: could not find the owning claude process" >&2; exit 1; }
   [ -n "$SESSION_ID" ] || echo "heartbeat: CLAUDE_CODE_SESSION_ID unset — the row will carry no stats" >&2
-  HEARTBEAT_DETACHED=1 CLAUDE_PID=$CLAUDE_PID CLAUDE_CODE_SESSION_ID=$SESSION_ID \
-    setsid nohup bash "$0" "$NAME" "$WORKING" "$INTERVAL" >>"$LOG" 2>&1 < /dev/null &
+  export HEARTBEAT_DETACHED=1 CLAUDE_PID CLAUDE_CODE_SESSION_ID=$SESSION_ID
+  detach "$LOG" bash "$0" "$NAME" "$WORKING" "$INTERVAL"
   echo "heartbeat for $NAME started (owner claude pid $CLAUDE_PID, every ${INTERVAL}s, stats ${SESSION_ID:+on}${SESSION_ID:-off}, log $LOG)"
   exit 0
 fi

@@ -2,6 +2,8 @@
 torn-write-free JSON output. Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import argparse
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -54,6 +56,21 @@ class LocalDayForWorkUnits(unittest.TestCase):
         self.assertEqual(cost_report._day(ts), "2026-09-28")           # old behaviour: naive UTC slice
         self.assertEqual(cost_report._local_day(ts, self.zone), "2026-09-27")  # correct: owner's local day
         self.assertNotEqual(cost_report._day(ts), cost_report._local_day(ts, self.zone))
+
+
+class GhTimeout(unittest.TestCase):
+    """A hung `gh` call used to block cost_report.py forever (no `timeout=`); it must now fail closed
+    with a distinct exit code and a clear reason instead of hanging the report."""
+
+    def test_gh_timeout_is_bounded_and_exits_2(self):
+        with unittest.mock.patch.object(cost_report.subprocess, "run",
+                                         side_effect=cost_report.subprocess.TimeoutExpired(cmd=["gh"], timeout=60)):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                with self.assertRaises(SystemExit) as cm:
+                    cost_report._gh(["repos/acme/widgets/pulls", "--jq", ".[]"])
+            self.assertEqual(cm.exception.code, 2)
+        self.assertIn("timed out after 60s", buf.getvalue())
 
 
 class IngestRobustness(unittest.TestCase):

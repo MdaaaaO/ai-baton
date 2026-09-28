@@ -426,7 +426,11 @@ def cmd_collect_private(a) -> int:
 # ----------------------------------------------------------------------------- work units
 def _gh(args: list[str]) -> str:
     env = profile.gh_env(dict(os.environ))
-    r = subprocess.run(["gh", *args], capture_output=True, text=True, env=env)
+    try:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True, env=env, timeout=60)
+    except subprocess.TimeoutExpired:
+        print(f"gh {' '.join(args[:3])} timed out after 60s", file=sys.stderr)
+        raise SystemExit(2)
     if r.returncode != 0:
         raise SystemExit(f"gh {' '.join(args[:3])} failed ({r.returncode}): {r.stderr.strip()[:300]}")
     return r.stdout

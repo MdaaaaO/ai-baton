@@ -8,6 +8,7 @@ import io
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -311,3 +312,37 @@ class StagingRuleIsExplicit(unittest.TestCase):
             jobs = list((ctx / "state" / "sign-queue").glob("*-topic-c.sh"))
             self.assertEqual(len(jobs), 1, r.stdout + r.stderr)
             self.assertIn("add -A", jobs[0].read_text())
+
+
+class RunJobTimeout(unittest.TestCase):
+    """A job script that hangs (a stuck `git push`/network call inside "sh <job>") used to block
+    `run_job` forever; it must now be killed after SIGN_QUEUE_JOB_TIMEOUT and reported as a timeout
+    instead of holding the drain open indefinitely."""
+
+    def test_a_hung_job_is_killed_not_left_to_hang(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("SIGN_QUEUE_")}
+            with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(ctx)}, clear=True):
+                sq = load_signq()
+            job_path = tmp / "20260101T000000Z-topic-t.sh"
+            job_path.write_text('# META {"topic": "t"}\nsleep 5\necho "pushed deadbeefdeadbeef G subject"\n')
+            j = sq.Job(job_path)
+            os.environ["SIGN_QUEUE_JOB_TIMEOUT"] = "1"
+            try:
+                start = time.monotonic()
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    result = sq.run_job(j, verbose=False, dry=False)
+                elapsed = time.monotonic() - start
+            finally:
+                os.environ.pop("SIGN_QUEUE_JOB_TIMEOUT", None)
+            self.assertLess(elapsed, 4, "run_job did not return until the job's own 5s sleep finished — no timeout enforced")
+            self.assertNotEqual(result["status"], "pushed")
+            self.assertIn("timed out after 1s", buf.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

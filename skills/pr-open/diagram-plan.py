@@ -174,8 +174,12 @@ SECONDARY_SHARE = 0.25  # a secondary facet fills a question only at ≥ this sh
 
 
 # ── inputs ──────────────────────────────────────────────────────────────────────────────────
-def sh(cmd: list[str], env: dict | None = None) -> str:
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env)
+def sh(cmd: list[str], env: dict | None = None, timeout: int = 60) -> str:
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"FAIL {' '.join(cmd[:3])}… timed out after {timeout}s", file=sys.stderr)
+        raise SystemExit(2)
     if p.returncode != 0:
         raise SystemExit(f"FAIL {' '.join(cmd[:3])}…: {p.stderr.strip()[:300]}")
     return p.stdout
@@ -207,7 +211,11 @@ def files_from_pr(repo: str, n: int) -> tuple[list[tuple[str, int]], list[str], 
 
 def repo_slug(d: Path) -> str:
     """`owner/repo` from the clone's origin remote, "" when there is none."""
-    p = subprocess.run(["git", "-C", str(d), "remote", "get-url", "origin"], capture_output=True, text=True)
+    try:
+        p = subprocess.run(["git", "-C", str(d), "remote", "get-url", "origin"], capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        print(f"FAIL git -C {d} remote get-url origin timed out after 60s", file=sys.stderr)
+        raise SystemExit(2)
     m = re.search(r"[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", p.stdout.strip()) if p.returncode == 0 else None
     return m.group(1) if m else ""
 
@@ -226,8 +234,14 @@ def resolve_repo(arg: str | None) -> tuple[Path | None, str | None]:
 
 
 def files_from_git(base: str, cwd: Path | None = None) -> list[tuple[str, int]]:
-    if cwd is not None and not (cwd / ".git").exists() and subprocess.run(["git", "-C", str(cwd), "rev-parse", "--git-dir"], capture_output=True).returncode != 0:
-        raise SystemExit(f"FAIL {cwd} is not a git repo")
+    if cwd is not None and not (cwd / ".git").exists():
+        try:
+            is_repo = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--git-dir"], capture_output=True, timeout=60).returncode == 0
+        except subprocess.TimeoutExpired:
+            print(f"FAIL git -C {cwd} rev-parse --git-dir timed out after 60s", file=sys.stderr)
+            raise SystemExit(2)
+        if not is_repo:
+            raise SystemExit(f"FAIL {cwd} is not a git repo")
     out = sh(["git", *(["-C", str(cwd)] if cwd else []), "diff", "--numstat", f"{base}...HEAD"])
     files = []
     for line in out.splitlines():

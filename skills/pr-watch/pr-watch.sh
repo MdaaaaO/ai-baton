@@ -26,6 +26,8 @@
 #   holds this head (default: a re-arm on a known head is silent about what it already reported; the state dir is
 #   ${TMPDIR:-/tmp}/pr-watch-<owner>-<repo>-<pr>/ and is shared by every session on the same machine).
 KIT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=../_lib/portable.sh
+. "$KIT/skills/_lib/portable.sh"  # iso_to_epoch — GNU/Linux and macOS/BSD alike
 # The review bot's login comes from the env config (github.review_bot); PR_WATCH_BOT_LOGIN overrides (skips the
 # lookup). `kit_profile.py get` exits 1 when the key is ABSENT (a real failure) and exits 0 printing an empty
 # line when the value is merely "" — capture the exit status separately: a failed lookup is an error (it would
@@ -94,7 +96,7 @@ while [ $# -gt 0 ]; do
   if [ -n "$seed" ]; then
     seed_info=$(gh api "repos/$repo/commits/$seed" --jq '"\(.parents|length) \(.committer.login // "") \(.commit.committer.date)"' 2>/dev/null)
     case "$seed_info" in
-      2\ web-flow\ *) putv last_sync "$(date -d "${seed_info##* }" +%s 2>/dev/null || echo 0)" ;;
+      2\ web-flow\ *) putv last_sync "$(iso_to_epoch "${seed_info##* }" 2>/dev/null || echo 0)" ;;
     esac
   fi
   prs="$prs $pr"
