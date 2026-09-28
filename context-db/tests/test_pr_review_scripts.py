@@ -83,6 +83,10 @@ esac
 
 EMPTY_THREADS_GRAPHQL = json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
     "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []}}}}})
+MATCHING_THREAD_GRAPHQL = json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
+    "pageInfo": {"hasNextPage": False, "endCursor": None},
+    "nodes": [{"id": "PRRT_x", "isResolved": False, "path": "a.txt", "line": 1,
+               "comments": {"nodes": [{"author": {"login": "author"}, "body": "orig"}]}}]}}}}})
 
 
 @unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
@@ -231,9 +235,31 @@ class TrackerKeyLint(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("bare tracker key", r.stderr)
 
+    # --- a GitHub tracker auto-links `#123` — the lint must not fire there, no matter what key_regex says ---
+
+    def test_submit_review_does_not_refuse_a_github_hash_reference(self):
+        key_regex = r"(?:^|[^\w/])#(\d+)\b"  # matches a bare #123 too — the kind must gate it out on GitHub
+        self.write_env_config(kind="github", key_regex=key_regex)
+        req = self.write_request("req.json", {"event": "COMMENT", "body": "see #123 for details", "comments": []})
+        r = subprocess.run(["bash", str(SUBMIT), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                            "--request", req], env=self.base_env(), capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("digest:", r.stdout)
+
+    def test_reply_threads_does_not_refuse_a_github_hash_reference(self):
+        key_regex = r"(?:^|[^\w/])#(\d+)\b"
+        self.write_env_config(kind="github", key_regex=key_regex)
+        req = self.write_request("req.json", {"replies": [
+            {"thread_id": "PRRT_x", "body": "see #123 for details", "resolve": False}]})
+        env = self.base_env(); env["STUB_GRAPHQL_JSON"] = MATCHING_THREAD_GRAPHQL
+        r = subprocess.run(["bash", str(REPLY), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                            "--request", req], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("digest:", r.stdout)
+
     # --- item 1: an unreadable lookup (not just "absent") must stop the script, never post unlinted ---
 
-    def _python_shim(self, intercept_keys):
+    def _python_shim(self, intercept_keys, rc=2, stderr_msg="kit_profile: simulated store I/O error (test)"):
         real = sys.executable
         shim_dir = self.tmp / "pyshim"
         shim_dir.mkdir(exist_ok=True)
@@ -241,8 +267,8 @@ class TrackerKeyLint(unittest.TestCase):
         conds = " || ".join(f'[[ "$*" == *"get {k}"* ]]' for k in intercept_keys)
         shim.write_text(f"""#!/usr/bin/env bash
 if {conds}; then
-  echo "kit_profile: simulated store I/O error (test)" >&2
-  exit 2
+  printf '%s\\n' "{stderr_msg}" >&2
+  exit {rc}
 fi
 exec "{real}" "$@"
 """)
@@ -268,6 +294,32 @@ exec "{real}" "$@"
         shim_dir = self._python_shim(["tracker.kind", "tracker.key_regex"])
         env = self.base_env()
         env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
+        r = subprocess.run(["bash", str(REPLY), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                            "--request", req], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertNotIn("digest:", r.stdout)
+        self.assertIn("unreadable", r.stderr)
+
+    # --- rc 1 is ambiguous: kit_profile.py also exits 1 on its Python-floor guard and on an uncaught traceback.
+    # rc 1 with stderr must be treated as a real failure, not folded into "absent" the way an empty-stderr rc 1 is. ---
+
+    def test_submit_review_treats_rc1_with_stderr_as_fatal(self):
+        self.write_env_config(kind="jira", key_regex="[A-Z]{3,}-[0-9]+", url_template="https://tracker.example/{key}")
+        req = self.write_request("req.json", {"event": "COMMENT", "body": "see ABC-123 for details", "comments": []})
+        shim_dir = self._python_shim(["tracker.kind"], rc=1, stderr_msg="Traceback (most recent call last):\nSomeError: boom")
+        env = self.base_env(); env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
+        r = subprocess.run(["bash", str(SUBMIT), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                            "--request", req], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertNotIn("digest:", r.stdout)
+        self.assertIn("unreadable", r.stderr)
+
+    def test_reply_threads_treats_rc1_with_stderr_as_fatal(self):
+        self.write_env_config(kind="jira", key_regex="[A-Z]{3,}-[0-9]+", url_template="https://tracker.example/{key}")
+        req = self.write_request("req.json", {"replies": [
+            {"thread_id": "PRRT_x", "body": "see ABC-123 for details", "resolve": False}]})
+        shim_dir = self._python_shim(["tracker.kind"], rc=1, stderr_msg="Traceback (most recent call last):\nSomeError: boom")
+        env = self.base_env(); env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
         r = subprocess.run(["bash", str(REPLY), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
                             "--request", req], env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
