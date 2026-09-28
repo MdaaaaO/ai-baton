@@ -245,6 +245,21 @@ class TableGrammar(StoreCase):
         self.assertNotIn("README", out)
         self.assertIn("README.md", err)  # skipped, and said so
 
+    def test_one_unreadable_doc_never_blanks_out_the_other_systems(self):
+        # `all_facts()` fed every matching file straight to `parse_doc`, unguarded: a single doc that could
+        # not even be decoded (bad bytes, a permission error) raised out of the whole loop, so `list`/
+        # `values`/`stale` — and kit_profile's dotted-key projection, which calls `all_facts()` too — lost
+        # every OTHER system's facts as well, not just the broken one's.
+        kb.set_fact("slack", "channel", "eng-help", "C1")
+        bad = self.env / "tracker.md"
+        bad.write_bytes(b"---\ntitle: x\ntype: reference\ndomain: reference\nstatus: reference\n"
+                         b"updated: 2026-01-01\n---\n## setting\n\n" + kb.table_header().encode() +
+                         b"\n| bad | \xff\xfe | x | user 2026-01-01 |\n")
+        rc, out, err = self.cli("list")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("slack.channel\teng-help\tC1", out)  # slack's facts survive tracker.md's decode error
+        self.assertIn("tracker.md: cannot read", err)
+
     def test_all_facts_reads_a_hyphenated_system_doc(self):
         # `doc_path()` accepts a hyphen in a system name (its own error message says so: "lowercase,
         # digits, -/_"), so a fact written to e.g. `google-drive.md` round-trips through `get`/`set` —

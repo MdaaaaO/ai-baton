@@ -275,10 +275,15 @@ session-archive:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) gen_sessions.py $(if $(DRY),--dry-run,) $(if $(NOARCHIVE),--no-archive,)
 
 # make archive SLUG=<file-slug>  — flip status to archived in place (kept in INDEX).
+# Atomic: sed writes a temp copy in the same directory, `mv` replaces the doc in one rename — a reader
+# (or a second `make archive`/`make index` racing this one) sees the old doc or the new one, never a
+# half-written one; the temp copy is removed if the sed or the mv fails, so nothing is left behind.
 archive:
 	@test -n "$(SLUG)" || { echo "usage: make archive SLUG=<file-slug>"; exit 2; }
 	@f=$$(find $(CONTEXT) -name '$(SLUG).md' -not -path '*/_templates/*' | head -1); \
 	 test -n "$$f" || { echo "no doc named $(SLUG).md"; exit 1; }; \
-	 sed -i.bak -E 's|^status:.*|status: archived|' "$$f" && rm -f "$$f.bak" && \
-	 echo "archived $$f (still indexed; move to archive/ by hand if you want it out of the domain view)"; \
+	 tmp=$$(mktemp "$$f.XXXXXX"); \
+	 if sed -E 's|^status:.*|status: archived|' "$$f" > "$$tmp" && mv -f "$$tmp" "$$f"; then \
+	   echo "archived $$f (still indexed; move to archive/ by hand if you want it out of the domain view)"; \
+	 else rm -f "$$tmp"; exit 1; fi; \
 	 $(MAKE) --no-print-directory -f $(lastword $(MAKEFILE_LIST)) index

@@ -249,12 +249,18 @@ def source() -> str:
 
 
 def _project_tables(cfg: dict) -> None:
-    """Project the env tables onto the legacy dotted keys (in place)."""
+    """Project the env tables onto the legacy dotted keys (in place). `kb.all_facts()` already isolates a
+    single unreadable doc (bad encoding, a permission error) to that one system, with a warning on stderr —
+    so an exception reaching here is something else entirely (a missing/unreadable env directory, a bug).
+    It is still reported (one stderr line, naming the error) rather than swallowed: a caller silently
+    getting `None` back for `slack.channels` etc. must be able to tell "not set" from "store unreadable"."""
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import kb  # noqa: E402  (kb imports kit_profile for the root only)
         facts = kb.all_facts()
-    except Exception:  # a malformed table must not take every script down
+    except Exception as e:  # a malformed table must not take every script down
+        print(f"kit_profile: env store fact tables unreadable ({e}) — dotted-key aliases "
+              "(slack.channels, tracker.transitions, …) are empty this run", file=sys.stderr)
         return
     # every kind is read through its canonical name, so rows a session filed under a renamed heading
     # (`## channels` for `channel`) are visible until `kb.py migrate` moves them

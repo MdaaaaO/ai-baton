@@ -160,7 +160,7 @@ class Migration(unittest.TestCase):
             (kit_copy / "skills" / "demo").mkdir(parents=True)
             (kit_copy / "skills" / "demo" / "SKILL.md").write_text(LEGACY, encoding="utf-8")
             (kit_copy / "context-db" / "bin").mkdir(parents=True)
-            for name in ("frontmatter.py", "migrate_frontmatter.py"):
+            for name in ("frontmatter.py", "fsutil.py", "migrate_frontmatter.py"):
                 (kit_copy / "context-db" / "bin" / name).write_bytes((KIT / "context-db" / "bin" / name).read_bytes())
             r = subprocess.run([sys.executable, ".claude/context-db/bin/migrate_frontmatter.py", "--check", ".claude/skills/demo/SKILL.md"],
                                cwd=tmp, capture_output=True, text=True, env={**os.environ})
