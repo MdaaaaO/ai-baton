@@ -2,8 +2,8 @@
 name: pr-open
 description: Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`.
 metadata:
-  version: "9"
-  updated: "2026-09-26"
+  version: "10"
+  updated: "2026-09-27"
   reviewed: "2026-09-25"
   facts: "slack.enabled,slack.review-venue,slack.channel,github.review_bot,github.owner_teams,github.signed_commits,tracker.kind,tracker.url_template"
 ---
@@ -30,7 +30,9 @@ only where the environment has Slack (`systems.slack`); everything else holds in
 1. **Create** with a body file (`gh pr create --body-file …`): Overview with the tracker link (§ Links),
    Changes, **Diagrams** (§ Diagrams below — the set `diagram-plan.py` derives from the diff, plus its marker),
    Rollout/Test plan. Detail lives here, not in chat. Where `tracker.kind` is `github`, add
-   `Closes #<n>` (or `Refs #<n>` for a partial step) so the issue links itself.
+   `Closes #<n>` (or `Refs #<n>` for a partial step) so the issue links itself. The body's last line is
+   `python3 $BATON/context-db/bin/kit_profile.py footer` — the attribution with the session that wrote it
+   (`session-register` records the name); every comment you post on this PR ends with it too.
 2. **Reviewers**: the code owner(s) who must approve (CODEOWNERS for the touched paths; the user's teams
    are `github.owner_teams`) — plus `github.review_bot` **only when it is non-empty**. Request via
    `gh api -X POST repos/<o>/<r>/pulls/<n>/requested_reviewers -f 'reviewers[]=…'` (teams:

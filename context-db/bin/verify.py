@@ -8,8 +8,8 @@ Checks every content doc for:
   - an ISO `updated` date that parses,
   - INDEX.md being up to date (regenerate and diff).
 
-Operates on the content root gen_index resolves from CONTEXT_ROOT (default the
-sibling ../../.context). Run via `make -C $BATON/context-db verify`. Stdlib only.
+Operates on the content root gen_index takes from kit_profile.context_root() (docs/layout.md's
+"Content root" paragraph). Run via `make -C $BATON/context-db verify`. Stdlib only.
 """
 from __future__ import annotations
 import os
@@ -22,12 +22,9 @@ import kit_profile as profile  # same dir — the active profile's extra domains
 TYPES = {"epic", "reference", "repo", "meeting", "1on1", "oncall",
          "self-assessment", "pr-review", "log"}  # what new.sh scaffolds; INDEX.md itself is generated, never a doc
 STATUSES = {"active", "closed", "reference", "archived"}
-# domain is free-ish but should be one of the known folders' vocab: the core set every
-# environment has, plus whatever the env config lists under `domains`.
-# `on-call` is here because the engine itself owns it: `new.sh TYPE=oncall` writes to `$CTX/on-call/`
-# (an environment without on-call simply never uses the type).
-CORE_DOMAINS = {"reference", "repos", "meetings", "1on1", "self-assessment",
-                "pr-reviews", "onboarding", "archive", "kit-health", "on-call"}
+# domain is free-ish but should be one of the known folders' vocab: the engine's core set (kit_profile.CORE_DOMAINS,
+# the one list) plus whatever the env store lists under `domains`.
+CORE_DOMAINS = set(profile.CORE_DOMAINS)
 DOMAINS = CORE_DOMAINS | set(profile.domains())
 
 # Size guardrail: an *active* context doc must stay lean enough that a cold

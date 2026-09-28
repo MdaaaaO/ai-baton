@@ -21,8 +21,8 @@ spend, PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's
 discoverable via $CLAUDE_CODE_SESSION_ID / --session-id; `--no-stats` skips it. Stats are
 derived from the transcript with zero model turns, so the live registry row is always current.
 
-The content root is CONTEXT_ROOT (set by the Makefile from CONTEXT, default the
-sibling ../../.context of the engine dir). Empty CLI values are treated as "leave
+The content root is kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets
+from CONTEXT, else docs/layout.md's "Content root" default). Empty CLI values are treated as "leave
 unchanged" so the Makefile can pass every flag unconditionally. Stdlib only.
 """
 from __future__ import annotations
@@ -49,11 +49,7 @@ def local_str(iso_utc: str) -> str:
         return iso_utc
     return t.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p %Z")
 
-# Content root: the Makefile passes CONTEXT_ROOT; fall back to the sibling .context/
-# of the engine dir (../../.context relative to this bin/) for a direct invocation.
-CTX = os.environ.get("CONTEXT_ROOT") or os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".context")
-)
+CTX = str(profile.context_root())  # the one content-root resolver
 SESS_DIR = os.path.join(CTX, "sessions")
 
 # Frontmatter fields, in emit order.
@@ -91,6 +87,34 @@ def today() -> str:
 
 # A session name is a file stem under sessions/ (#132): `--name ../INDEX` must not write outside it.
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+# The naming convention for a NEW registration (owner decision 2026-09-27): `<lane>-<topic>[-n]` — lower-case
+# kebab-case, at least two parts, at most 32 characters; the lane is the repo or area, the topic what the session
+# owns, `-2`/`-3` a successor on the same lane. Names registered before the convention keep working.
+CONVENTION_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)+$")
+CONVENTION_MAX = 32
+
+
+def check_convention(name: str) -> None:
+    if not CONVENTION_RE.match(name) or len(name) > CONVENTION_MAX:
+        sys.exit(f"session.py: {name!r} does not follow the session naming convention `<lane>-<topic>[-n]` — lower-case "
+                 f"kebab-case, at least two parts, at most {CONVENTION_MAX} characters (e.g. `kit-hardening`, "
+                 f"`kit-216-changelog`, `kit-weekly-2`); a successor on the same lane adds -2, -3")
+
+
+def record_name(name: str) -> None:
+    """Remember this session's registry name in its own scratch dir, so `kit_profile.py session-name` / `footer`
+    can say which session wrote a PR or a comment. Per session (`CLAUDE_CODE_SESSION_ID` keys the scratch dir);
+    a failure only costs the footer its session part, so it is reported, never fatal. Only a name that follows the
+    convention is recorded: the footer is public, and a grandfathered name was never chosen to be (it gets the bare
+    footer until the lane re-registers under a conforming name)."""
+    if not CONVENTION_RE.match(name) or len(name) > CONVENTION_MAX:
+        return
+    try:
+        (profile.scratch() / "session-name").write_text(name + "\n", encoding="utf-8")
+    except (OSError, profile.ScratchError) as e:
+        print(f"session.py: could not record the session name for the PR footer ({e})", file=sys.stderr)
 
 
 def check_name(name: str) -> str:
@@ -241,7 +265,8 @@ def _ledger_append(meta: dict, st) -> None:
 def cmd_register(a) -> None:
     path = restore_from_archive(a.name)  # a successor re-registering a swept name continues that doc, not a new one
     meta, body = read_doc(path)
-    if meta is None:
+    if meta is None:  # a new registration: the name must follow the convention (existing ones are grandfathered)
+        check_convention(a.name)
         meta, body = {}, DEFAULT_BODY.format(name=a.name)
     meta["session"] = a.name
     if a.ref:    meta["ref"] = a.ref
@@ -257,6 +282,7 @@ def cmd_register(a) -> None:
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
     write_doc(path, meta, body)
+    record_name(a.name)
     print(f"registered {os.path.relpath(path, CTX)}")
 
 
@@ -276,6 +302,7 @@ def cmd_touch(a) -> None:
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
     write_doc(path, meta, body)
+    record_name(meta["session"])
     print(f"touched {os.path.relpath(path, CTX)} @ {local_str(meta['heartbeat'])}")
 
 
