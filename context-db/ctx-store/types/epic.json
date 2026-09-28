@@ -1,0 +1,41 @@
+{
+  "frontmatter": {
+    "title": {
+      "required": true
+    },
+    "type": {
+      "const": "epic"
+    },
+    "domain": {
+      "required": true
+    },
+    "status": {
+      "required": true,
+      "enum": [
+        "active",
+        "reference",
+        "archived",
+        "closed",
+        "paused",
+        "done"
+      ]
+    },
+    "tags": {
+      "kind": "list"
+    },
+    "updated": {
+      "required": true,
+      "kind": "date"
+    }
+  },
+  "sections": [
+    "Goal",
+    "Key decisions & gotchas",
+    "Remaining work",
+    "Session log"
+  ],
+  "log": {
+    "section": "Session log",
+    "order": "newest-first"
+  }
+}

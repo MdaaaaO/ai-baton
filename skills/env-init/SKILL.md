@@ -2,8 +2,8 @@
 name: env-init
 description: "Fill or refresh this machine's env fact store from the discovery manifests: run the named tool per missing or stale fact, verify, write back with provenance, and ask the user once for what no tool settles. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact."
 metadata:
-  version: "8"
-  updated: "2026-09-27"
+  version: "9"
+  updated: "2026-09-28"
   reviewed: "2026-09-26"
 user-invocable: true
 ---
@@ -84,7 +84,7 @@ secret, and asks the user only for what no tool can settle — once, batched.
    named in the report — a drifted id is worth the user's eye. Never `kb.py rm` from here.
 6. **Close.** `$K stale` (should be empty after `--refresh`), `make -C $BATON/context-db kit-verify`,
    then the report to the user: a ≤ 15-line table `fact | before → after | source` plus one line per fact
-   left unset and why. Then `make -C $BATON/context-db session-touch NAME=<name>` (§ Cost & context hygiene). Nothing here changes a skill, the
+   left unset and why. Nothing here changes a skill, the
    kit, or `.context/reference/environment.md` — prose stays the user's.
 
 ## Rules

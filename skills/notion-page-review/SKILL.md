@@ -3,7 +3,7 @@ name: notion-page-review
 description: "Reviews a Notion page tree (page, sub-pages, every comment thread) against the user's position, walks each proposed comment (Comment, Update wording, Skip, batches of 4), posts only approved ones as thread replies or inline comments. Invoke when the user asks to \"go through\", \"catch up on\" or \"comment on\" a Notion page."
 compatibility: "Designed for Claude Code; needs notion (systems.*)"
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-09-28"
   reviewed: "2026-09-28"
   requires: "notion"
@@ -79,10 +79,9 @@ Rules for the proposals:
 
 ## 5. Flush (same session)
 
-- Meeting/context doc: a "Notion comments posted" section — per item: `#n page/section → comment id`,
+- Meeting/context doc (through the ctx tools): a "Notion comments posted" section — per item: `#n page/section → comment id`,
   skipped items with the reason, redirected items (recipient + the Slack draft id where `systems.slack`).
-- Update the thread-id map in the context doc if the page will be revisited.
-- `make -C $BATON/context-db index && … verify && … session-touch NAME=<name>`.
+- Update the thread-id map in the context doc if the page will be revisited. The hooks re-index.
 
 ## Gotchas seen
 

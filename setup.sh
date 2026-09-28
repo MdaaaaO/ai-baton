@@ -44,7 +44,9 @@
 #      an existing machine by itself: `--refresh-seeds` prints the diff between each seeded copy and its
 #      template (kit-health warns when a copy predates its template), you merge what you want by hand.
 #      Removes the bytecode caches and empty directories git never tracks (what a removed skill leaves behind).
-#   5. Reports skill discovery.
+#   5. Adopts .context/ as a ctx-store store once (`ctx_adapter.py adopt`, when the pinned ctx is installed; it never
+#      overwrites) and, on a clone, adds the ctx MCP server to the workspace .mcp.json.
+#   6. Reports skill discovery.
 #
 # Nothing here is user- or machine-specific: the root is derived from this script's location when it is a
 # `.claude/` clone, else from CLAUDE_PROJECT_DIR / the current directory (a plugin install or a dev checkout —
@@ -499,6 +501,25 @@ if [ "$PERSONAL" = 1 ]; then
   else
     echo "  WARNING: could not index .context/ — run: make -C $KITREF/context-db index" >&2
   fi
+fi
+
+echo
+echo "== ctx-store =="
+# Adopt the content root as a ctx store, once (ctx_adapter.py adopt writes the kit's store settings only where there
+# is no store, never over a file). Without the pinned ctx installed it names the commands instead of fetching over the
+# network. A clone also gets the ctx MCP server in the workspace .mcp.json (a plugin install ships it in plugin.json).
+ADAPTER="$HERE/context-db/bin/ctx_adapter.py"
+if python3 "$ADAPTER" where >/dev/null 2>&1; then
+  if out="$(CONTEXT_ROOT="$CONTEXT" python3 "$ADAPTER" adopt 2>&1)"; then rc=0; else rc=$?; fi
+  printf '%s\n' "$out" | sed 's/^/  /'
+  if [ "$rc" -eq 3 ]; then echo "  WARNING: the store has validation findings (above) — fix them with the ctx tools" >&2
+  elif [ "$rc" -ne 0 ]; then echo "  WARNING: ctx_adapter.py adopt failed (rc=$rc) — writes under .context/ stay direct until it runs" >&2; fi
+else
+  echo "  ctx-store not installed — once: python3 $KITREF/context-db/bin/ctx_adapter.py install && python3 $KITREF/context-db/bin/ctx_adapter.py adopt"
+fi
+if [ "$MODE" = clone ]; then
+  if out="$(python3 "$ADAPTER" mcp-json "$PROJECTS/.mcp.json" 2>&1)"; then printf '%s\n' "$out" | sed 's/^/  /'
+  else echo "  WARNING: the ctx MCP server is not in $PROJECTS/.mcp.json: $out" >&2; fi
 fi
 
 echo

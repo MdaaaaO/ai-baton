@@ -213,6 +213,37 @@ class ReadOnlyRun(unittest.TestCase):
             self.assertIn("❌ `make verify` failed", self.engine_section(root))
 
 
+class CtxStoreCheck(unittest.TestCase):
+    """§ 5 reports whether `.context/` is an adopted ctx store, from `ctx_adapter.py adopt --check` (read-only)."""
+
+    def check(self, rc: int, out: str) -> tuple[str, str]:
+        kh = load_kit_health()
+        calls = []
+        def fake_sh(cmd, **kw):
+            calls.append(cmd)
+            return rc, out, ""
+        r = kh.Report()
+        with mock.patch.object(kh, "sh", fake_sh):
+            kh.ctx_store(r)
+        self.assertEqual(calls[0][-2:], ["adopt", "--check"])  # the probe, never the bootstrap itself
+        [level] = [k for k, n in r.counts.items() if n]
+        return level, r.lines[-1]
+
+    def test_each_answer_maps_to_a_finding_with_its_fix(self):
+        self.assertEqual(self.check(0, "store /x: ok: 3 docs checked")[0], "OK")
+        level, line = self.check(4, "not adopted: /x is not a ctx store")
+        self.assertEqual(level, "WARN")
+        self.assertIn("store not adopted", line)
+        self.assertIn("ctx_adapter.py adopt`", line)
+        self.assertEqual(self.check(1, "")[0], "WARN")
+        self.assertIn("ctx_adapter.py install", self.check(1, "")[1])
+        level, line = self.check(3, "store /x: …\nfinding: SCHEMA_VIOLATION d/bad status: schema violation")
+        self.assertEqual(level, "WARN")
+        self.assertIn("1 finding(s)", line)
+        self.assertIn("SCHEMA_VIOLATION d/bad", line)
+        self.assertEqual(self.check(2, "")[0], "ERR")
+
+
 class ConfigSection(unittest.TestCase):
     """kit-health § 3 (config) on a throw-away store — never the live one (kb.ENV / kit_profile.ENV_DIR
     patched directly, the StoreCase pattern test_kb_store.py uses)."""

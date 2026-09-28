@@ -127,7 +127,9 @@ flowchart LR
 This setup needs no questions. Run the block for your path above, from your workspace root. `--personal` takes
 your login and name from `gh`, your repos from the clones under the workspace root, and the timezone from the OS.
 It sets every `systems.*` flag to false. A skill that needs Jira, Slack or a warehouse stops with one "not
-applicable here" line. It is safe to re-run.
+applicable here" line. It is safe to re-run. Fetch the pinned ctx-store first
+(`python3 <kit>/context-db/bin/ctx_adapter.py install`) and setup also adopts `.context/` as a ctx store, so every
+write to a context doc goes through ctx's validated, audited verbs.
 
 On the plugin path `/kit-setup` runs the plugin's own `setup.sh` from inside the session, which knows where the
 plugin lives (its root moves on every update). That seeds `.context/` and the root `CLAUDE.md`, but no `Makefile` include:

@@ -19,7 +19,7 @@ Each *.md doc carries YAML frontmatter (its "row"); INDEX.md is the generated ca
 These targets create, index, verify, and find docs.
 
   make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
-  make -C $BATON/context-db index          # regenerate INDEX.md (run after any change)
+  make -C $BATON/context-db index          # regenerate INDEX.md (the PostToolUse hook runs it after every change)
   make -C $BATON/context-db verify         # validate frontmatter + INDEX freshness (CI-style gate)
   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
   make -C $BATON/context-db find DOMAIN=<domain>    # docs in a domain
@@ -28,7 +28,7 @@ These targets create, index, verify, and find docs.
 Live session registry (who is working on what, right now — see SESSION_INDEX.md):
   make -C $BATON/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
-  make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat (also on every flush)
+  make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
@@ -334,13 +334,14 @@ options:
 ## `ctx_adapter.py`
 
 ```text
-usage: ctx_adapter.py [-h] {version,where,install,hook} ...
+usage: ctx_adapter.py [-h]
+                      {version,where,install,adopt,mcp,mcp-json,ctx,hook} ...
 
 ctx_adapter.py — the kit's one adapter to ctx-store, the context-store CLI `ctx`.
 
 The kit talks to ctx through its verbs only: it never reads or writes the store's own files (`ctx-store.json`,
 `.ctx/`, `.audit/`), and `CTX_STORE` is an opaque locator it passes through, never a path it inspects. Whether a
-store exists is ctx's answer (`NO_STORE`), not a file test here.
+store exists is ctx's answer (`NO_STORE`), not a file test here. The one exception is `adopt` (below).
 
 Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against. It is
 fetched, not vendored: `install` clones exactly that tag (`git clone --depth 1 --branch <tag>`) into a per-user
@@ -349,33 +350,56 @@ cache directory whose path carries the tag, so a bumped pin never picks up an ol
 Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
 
+Adopt — makes the content root a store, once: when `ctx validate` answers NO_STORE it writes the kit's store
+settings and type schemas (`context-db/ctx-store/`) into the content root, never over a file that exists, then runs
+`ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the
+read-only probe kit-health runs. Writing those files is the documented bootstrap exception to verbs-only, until a
+ctx release with `ctx init` replaces it.
+
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
 or found, or when anything in the adapter itself fails, so a machine that has not adopted ctx-store sees nothing:
 
+  pre-tool-use         a Write/Edit/MultiEdit/NotebookEdit of a `*.md` doc under an adopted content root → deny,
+                       naming the ctx tool to use instead; exempt: the index's skip dirs (bin _templates sessions
+                       handoff memory state), dot dirs, the generated catalogs and what the kit's store settings
+                       ignore. Anything else, or any error: no decision
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
                        comes back as `{"systemMessage": …}`; any exit but 0 or
                        NO_STORE (or a timeout) comes back as `ctx validate did not run: …`
-  post-tool-use-async  the same trigger → `ctx touch --session <session_id>` (the registry row `session register`
-                       stamped with the harness session id); output ignored
+  post-tool-use-async  the same trigger, or a write through a ctx MCP tool → `ctx touch --session <session_id>` (the
+                       registry row `session register` stamped with the harness session id), then the kit's
+                       catalogs INDEX.md (gen_index.py) and SESSION_INDEX.md (gen_sessions.py --no-archive) are
+                       regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
   brief-session        SessionStart compact → `ctx brief --session <session_id>`, byte-budgeted
 
-The store a hook names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
-(kit_profile.context_root()) — a write always names its store.
+The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
+(kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
   python3 ctx_adapter.py version          # the pinned tag
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
+  python3 ctx_adapter.py adopt [--check]  # make the content root a store (once); --check only reports
+  python3 ctx_adapter.py mcp              # the ctx MCP server on the store; audit actor `claude` unless CTX_ACTOR is set
+  python3 ctx_adapter.py mcp-json <file>  # add that server to a .mcp.json (clone installs; never replaces an entry)
+  python3 ctx_adapter.py ctx <verb> …     # run one ctx verb on the store (the Bash route when the MCP tools are absent)
   python3 ctx_adapter.py hook <name>      # one of the hooks above; hook JSON on stdin
 
-Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line). A hook always exits 0. Stdlib only.
+Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
+4 not adopted (`adopt --check`). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
 
 positional arguments:
-  {version,where,install,hook}
+  {version,where,install,adopt,mcp,mcp-json,ctx,hook}
     version             print the pinned ctx-store tag
     where               print the ctx executable; exit 1 when not installed
     install             fetch the pinned tag into the pinned location
+    adopt               make the content root a ctx store (once; never
+                        overwrites)
+    mcp                 run the ctx MCP server on the store (stdio)
+    mcp-json            add the ctx MCP server to a project .mcp.json
+    ctx                 run one ctx verb on the store: ctx_adapter.py ctx
+                        <verb> [arguments]
     hook                run one Claude Code hook (hook JSON on stdin); always
                         exit 0
 
@@ -487,8 +511,9 @@ Generate INDEX.md — the materialized catalog of the context DB.
 
 Walks every *.md doc under the content root (except the engine files), reads its
 YAML frontmatter "row" (title/type/domain/tags/status/updated), and emits a
-grouped, sorted catalog. INDEX.md is generated — never hand-edit it; run
-`make -C $BATON/context-db index`.
+grouped, sorted catalog. INDEX.md is generated — never hand-edit it; the kit's
+PostToolUse hook (ctx_adapter.py post-tool-use-async) reruns this after every change
+under the content root, and `make -C $BATON/context-db index` runs it by hand.
 
 The content root is kit_profile.context_root() (CONTEXT_ROOT, which the Makefile
 sets from CONTEXT, else the default in docs/layout.md's "Content root" paragraph).

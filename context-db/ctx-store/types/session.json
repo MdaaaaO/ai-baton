@@ -1,0 +1,23 @@
+{
+  "paths": [
+    "sessions/*.md",
+    "sessions/archive/*.md"
+  ],
+  "frontmatter": {
+    "session": {
+      "required": true
+    },
+    "status": {
+      "required": true,
+      "enum": [
+        "active",
+        "idle",
+        "ended"
+      ]
+    },
+    "heartbeat": {
+      "kind": "timestamp"
+    }
+  },
+  "owner": "session"
+}

@@ -3,8 +3,9 @@
 
 Walks every *.md doc under the content root (except the engine files), reads its
 YAML frontmatter "row" (title/type/domain/tags/status/updated), and emits a
-grouped, sorted catalog. INDEX.md is generated — never hand-edit it; run
-`make -C $BATON/context-db index`.
+grouped, sorted catalog. INDEX.md is generated — never hand-edit it; the kit's
+PostToolUse hook (ctx_adapter.py post-tool-use-async) reruns this after every change
+under the content root, and `make -C $BATON/context-db index` runs it by hand.
 
 The content root is kit_profile.context_root() (CONTEXT_ROOT, which the Makefile
 sets from CONTEXT, else the default in docs/layout.md's "Content root" paragraph).
@@ -84,8 +85,8 @@ def render(rows: list[dict]) -> str:
     out.append("# `.context/` — INDEX")
     out.append("")
     out.append(
-        "> **Generated file — do not hand-edit.** Regenerate with "
-        "`make -C $BATON/context-db index` after adding or changing any doc. This is the "
+        "> **Generated file — do not hand-edit.** The kit's PostToolUse hook regenerates it after "
+        "every change under `.context/` (by hand: `make -C $BATON/context-db index`). This is the "
         "queryable catalog of the context DB; each row is one doc's frontmatter. Read this "
         "first (cheap), then open only the leaf docs your task needs."
     )

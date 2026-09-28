@@ -20,6 +20,15 @@
   "experimental": {
     "evals": "evals"
   },
+  "mcpServers": {
+    "ctx": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py",
+        "mcp"
+      ]
+    }
+  },
   "userConfig": {
     "user_name": {
       "type": "string",

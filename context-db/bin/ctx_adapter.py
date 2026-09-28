@@ -3,7 +3,7 @@
 
 The kit talks to ctx through its verbs only: it never reads or writes the store's own files (`ctx-store.json`,
 `.ctx/`, `.audit/`), and `CTX_STORE` is an opaque locator it passes through, never a path it inspects. Whether a
-store exists is ctx's answer (`NO_STORE`), not a file test here.
+store exists is ctx's answer (`NO_STORE`), not a file test here. The one exception is `adopt` (below).
 
 Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against. It is
 fetched, not vendored: `install` clones exactly that tag (`git clone --depth 1 --branch <tag>`) into a per-user
@@ -12,32 +12,51 @@ cache directory whose path carries the tag, so a bumped pin never picks up an ol
 Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
 
+Adopt — makes the content root a store, once: when `ctx validate` answers NO_STORE it writes the kit's store
+settings and type schemas (`context-db/ctx-store/`) into the content root, never over a file that exists, then runs
+`ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the
+read-only probe kit-health runs. Writing those files is the documented bootstrap exception to verbs-only, until a
+ctx release with `ctx init` replaces it.
+
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
 or found, or when anything in the adapter itself fails, so a machine that has not adopted ctx-store sees nothing:
 
+  pre-tool-use         a Write/Edit/MultiEdit/NotebookEdit of a `*.md` doc under an adopted content root → deny,
+                       naming the ctx tool to use instead; exempt: the index's skip dirs (bin _templates sessions
+                       handoff memory state), dot dirs, the generated catalogs and what the kit's store settings
+                       ignore. Anything else, or any error: no decision
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
                        comes back as `{"systemMessage": …}`; any exit but 0 or
                        NO_STORE (or a timeout) comes back as `ctx validate did not run: …`
-  post-tool-use-async  the same trigger → `ctx touch --session <session_id>` (the registry row `session register`
-                       stamped with the harness session id); output ignored
+  post-tool-use-async  the same trigger, or a write through a ctx MCP tool → `ctx touch --session <session_id>` (the
+                       registry row `session register` stamped with the harness session id), then the kit's
+                       catalogs INDEX.md (gen_index.py) and SESSION_INDEX.md (gen_sessions.py --no-archive) are
+                       regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
   brief-session        SessionStart compact → `ctx brief --session <session_id>`, byte-budgeted
 
-The store a hook names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
-(kit_profile.context_root()) — a write always names its store.
+The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
+(kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
   python3 ctx_adapter.py version          # the pinned tag
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
+  python3 ctx_adapter.py adopt [--check]  # make the content root a store (once); --check only reports
+  python3 ctx_adapter.py mcp              # the ctx MCP server on the store; audit actor `claude` unless CTX_ACTOR is set
+  python3 ctx_adapter.py mcp-json <file>  # add that server to a .mcp.json (clone installs; never replaces an entry)
+  python3 ctx_adapter.py ctx <verb> …     # run one ctx verb on the store (the Bash route when the MCP tools are absent)
   python3 ctx_adapter.py hook <name>      # one of the hooks above; hook JSON on stdin
 
-Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line). A hook always exits 0. Stdlib only.
+Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
+4 not adopted (`adopt --check`). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
 """
 from __future__ import annotations
 import argparse
+import fnmatch
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -51,6 +70,15 @@ HOOK_TIMEOUT = 8        # seconds one ctx call may take inside a hook (the hook 
 LOCK_TIMEOUT = "3"      # CTX_LOCK_TIMEOUT for a hook's ctx call unless the user set one: a held lock must not stall a tool
 MESSAGE_MAX = 1000      # characters of validate findings returned as the systemMessage
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
+BIN = Path(__file__).resolve().parent
+STORE_DATA = BIN.parent / "ctx-store"  # the kit's store settings + type schemas, written by `adopt` (data, not code)
+ADOPT_TIMEOUT = 300     # seconds `adopt` gives one ctx call (a whole-store validate; not a hook)
+MCP_ACTOR = "claude"    # CTX_ACTOR of the MCP server unless the user set one: the audit rows of the model's writes
+# A write through the ctx MCP server's tools (plugin: mcp__plugin_<plugin>_ctx__…, a clone's .mcp.json: mcp__ctx__…).
+CTX_WRITE_TOOL = re.compile(r"^mcp__(?:\w[\w-]*_)?ctx__ctx_(?:create|str_replace|insert|delete|rename|log|fm|new|move|maintain|migrate)$")
+DENY_HINT = ("write it through the ctx tools instead: `ctx_str_replace` (one exact string), `ctx_insert` (after a line), "
+             "`ctx_log` (a Session-log line), `ctx_fm` (a frontmatter field), `ctx_create` (the whole text), `ctx_new` "
+             "(a new doc) — from Bash: `python3 $BATON/context-db/bin/ctx_adapter.py ctx <verb> …` (`ctx help <verb>`)")
 
 
 def pinned_dir(version: str = CTX_VERSION) -> Path:
@@ -107,6 +135,137 @@ def install(url: str = CTX_REPO, version: str = CTX_VERSION, dest: Path | None =
     return dest
 
 
+# ── adopt (the bootstrap exception) ─────────────────────────────────────────────────────────────────────────────
+def _code(r: subprocess.CompletedProcess) -> str:
+    """The error code of a failed ctx call (`NO_STORE`, `NO_SUCH_DOC`, …), "" when there is none."""
+    m = re.match(r"[A-Z_]+", r.stderr.strip())
+    return m.group(0) if m and r.returncode != 0 else ""
+
+
+def _lines(text: str) -> list[str]:
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
+def _seed(root: Path) -> list[str]:
+    """Write the kit's store settings and type schemas into `root`; an existing file is kept, never replaced. The
+    settings file is the store's marker, so it goes last: an interrupted run leaves no half-adopted store behind.
+    This is the one place kit code writes a store's own files — `ctx init` replaces it once the pin reaches it."""
+    wrote = []
+    for src in [*sorted((STORE_DATA / "types").glob("*.json")), STORE_DATA / "ctx-store.json"]:
+        dest = root / (src.name if src.parent == STORE_DATA else Path(".ctx", "types", src.name))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(dest, "x", encoding="utf-8") as f:
+                f.write(src.read_text(encoding="utf-8"))
+            wrote.append(str(dest.relative_to(root)))
+        except FileExistsError:
+            pass
+    return wrote
+
+
+def adopt(check: bool = False) -> int:
+    ctx, why = resolve()
+    if ctx is None:
+        print(why, file=sys.stderr)
+        return 1
+    root = _context_root()
+    if not root.is_dir():
+        print(f"ctx_adapter.py adopt: no content root at {root} — run setup.sh first", file=sys.stderr)
+        return 2
+    store = ["--store", str(root)]
+    r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
+    if _code(r) == "NO_STORE":
+        if check:
+            print(f"not adopted: {root} is not a ctx store — run `python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
+            return 4
+        wrote = _seed(root)
+        print(f"adopted {root}: wrote {', '.join(wrote) or 'nothing'}")
+        r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
+    if r.returncode not in (0, 3):
+        print(f"ctx_adapter.py adopt: ctx validate failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
+              file=sys.stderr)
+        return 2
+    findings = _lines(r.stderr) if r.returncode == 3 else []
+    print(f"store {root}: " + (_lines(r.stdout) or ["ok"])[0])
+    for f in findings:
+        print(f"finding: {f}")
+    if not check:
+        a = _ctx(ctx, store, "validate", "--changed", "--adopt", timeout=ADOPT_TIMEOUT)
+        print("adopt: " + ((_lines(a.stdout) or ["ok"])[0] if a.returncode in (0, 3) else
+                           (_lines(a.stderr) or [f"exit {a.returncode}"])[0]))
+        if a.returncode not in (0, 3):
+            return 2
+    return 3 if findings else 0
+
+
+# ── the MCP server and the Bash route ──────────────────────────────────────────────────────────────────────────
+def _null_mcp(why: str) -> int:
+    """An MCP server with no tools, for a project without a ctx or a content root: the plugin's server is started in
+    every project, and a failed server there would be noise. It answers initialize, tools/list and ping."""
+    for line in sys.stdin:
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(m, dict) or "id" not in m:
+            continue  # a notification
+        method = m.get("method")
+        if method == "initialize":
+            params = m.get("params") if isinstance(m.get("params"), dict) else {}
+            res: dict = {"protocolVersion": params.get("protocolVersion", "2025-06-18"), "capabilities": {"tools": {}},
+                         "serverInfo": {"name": "ctx", "version": "none"}, "instructions": why}
+            out = {"jsonrpc": "2.0", "id": m["id"], "result": res}
+        elif method in ("tools/list", "ping"):
+            out = {"jsonrpc": "2.0", "id": m["id"], "result": {"tools": []} if method == "tools/list" else {}}
+        else:
+            out = {"jsonrpc": "2.0", "id": m["id"], "error": {"code": -32601, "message": f"{why}"}}
+        sys.stdout.write(json.dumps(out) + "\n")
+        sys.stdout.flush()
+    return 0
+
+
+def run_ctx(args: list[str], mcp: bool = False) -> int:
+    """Exec ctx on the store (`CTX_STORE`, else `--store <content root>`); the MCP server writes as MCP_ACTOR."""
+    ctx, why = resolve()
+    root = _context_root()
+    store = _store_args(root)
+    if ctx is None or store is None:
+        why = why or f"no content root at {root}"
+        if mcp:
+            return _null_mcp(f"ctx-store is not available here: {why}")
+        print(f"ctx_adapter.py ctx: {why}", file=sys.stderr)
+        return 1
+    env = dict(os.environ)
+    if mcp:
+        env.setdefault("CTX_ACTOR", MCP_ACTOR)
+    sys.stdout.flush()
+    os.execve(str(ctx), [str(ctx), *store, *args], env)
+    return 0  # not reached
+
+
+def mcp_json(path: Path) -> int:
+    """Add the ctx server to a project `.mcp.json` (a clone's workspace root; a plugin install ships it in plugin.json).
+    An existing `ctx` entry is the user's and is kept."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError) as e:
+        print(f"ctx_adapter.py mcp-json: cannot read {path}: {e}", file=sys.stderr)
+        return 2
+    servers = data.setdefault("mcpServers", {}) if isinstance(data, dict) else None
+    if not isinstance(servers, dict):
+        print(f"ctx_adapter.py mcp-json: {path} has no mcpServers object", file=sys.stderr)
+        return 2
+    if "ctx" in servers:
+        print(f"{path}: the ctx server is already there")
+        return 0
+    servers["ctx"] = {"command": "python3", "args": [str(Path(__file__).resolve()), "mcp"]}
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    print(f"{path}: added the ctx server")
+    return 0
+
+
 # ── hooks ─────────────────────────────────────────────────────────────────────────────────────────────────────
 def _payload() -> dict:
     if sys.stdin is None or sys.stdin.isatty():
@@ -119,8 +278,8 @@ def _payload() -> dict:
 
 
 def _context_root() -> Path:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import kit_profile  # same dir; imported only once ctx is known to be installed
+    sys.path.insert(0, str(BIN))
+    import kit_profile  # same dir
     return kit_profile.context_root()
 
 
@@ -132,27 +291,89 @@ def _store_args(root: Path) -> list[str] | None:
     return ["--store", str(root)] if root.is_dir() else None
 
 
-def _ctx(ctx: Path, store: list[str], *args: str) -> subprocess.CompletedProcess:
+def _ctx(ctx: Path, store: list[str], *args: str, timeout: int = HOOK_TIMEOUT) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env.setdefault("CTX_LOCK_TIMEOUT", LOCK_TIMEOUT)
-    return subprocess.run([str(ctx), *store, *args], env=env, capture_output=True, text=True, timeout=HOOK_TIMEOUT,
+    return subprocess.run([str(ctx), *store, *args], env=env, capture_output=True, text=True, timeout=timeout,
                           stdin=subprocess.DEVNULL)
 
 
-def _changed_under(payload: dict, root: Path) -> bool:
-    """True when the tool call changed a file under the content root."""
+def _targets(payload: dict, root: Path) -> list[str]:
+    """The files the tool call names that lie under the content root, as paths relative to it (symlinks resolved:
+    `memory/`, the harness auto-memory symlink, resolves outside the root)."""
     ti = payload.get("tool_input")
     if not isinstance(ti, dict):
-        return False
+        return []
     base = payload.get("cwd") if isinstance(payload.get("cwd"), str) else os.getcwd()
     real_root = os.path.realpath(root)
+    out = []
     for field in CONTEXT_TOOLS:
         f = ti.get(field)
         if isinstance(f, str) and f:
             p = os.path.realpath(os.path.join(base, os.path.expanduser(f)))
             if os.path.commonpath([p, real_root]) == real_root:
-                return True
-    return False
+                out.append(os.path.relpath(p, real_root).replace(os.sep, "/"))
+    return out
+
+
+def _changed_under(payload: dict, root: Path) -> bool:
+    """True when the tool call changed a file under the content root."""
+    return bool(_targets(payload, root))
+
+
+def _exempt(rel: str) -> bool:
+    """A path under the content root a model tool may write: not a `*.md` doc, a dot dir, one of the index's skip
+    dirs, a generated catalog, or a pattern the kit's store settings mark `generated` or `ignore` (no ctx verb
+    writes those)."""
+    import gen_index  # same dir (on sys.path via _context_root): the index's skip dirs are the one list
+    parts = rel.split("/")
+    if not rel.endswith(".md") or rel == "." or any(x.startswith(".") for x in parts):
+        return True
+    if set(parts[:-1]) & gen_index.SKIP_DIRS or rel in ("INDEX.md", "SESSION_INDEX.md"):
+        return True
+    settings = json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8"))
+    return any(fnmatch.fnmatch(rel, g) for g in [*settings.get("generated", []), *settings.get("ignore", [])])
+
+
+def _deny(payload: dict, ctx: Path, root: Path) -> str:
+    docs = [t for t in _targets(payload, root) if not _exempt(t)]
+    if not docs:
+        return ""
+    key = docs[0][:-3]
+    r = _ctx(ctx, ["--store", str(root)], "get", key)
+    if r.returncode != 0 and _code(r) != "NO_SUCH_DOC":
+        return ""  # NO_STORE (not adopted) or any other answer: no decision — fail open
+    tool = payload.get("tool_name") if isinstance(payload.get("tool_name"), str) else "this tool"
+    reason = (f"`{docs[0]}` is a doc in the adopted ctx store (key `{key}`), so {tool} may not write it — "
+              f"{DENY_HINT}. Direct writes stay open under sessions/, state/, memory/ and the other index skip dirs.")
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                              "permissionDecisionReason": reason}})
+
+
+def _log(line: str) -> None:
+    """One line to the scratch dir's hooks.log (the SessionStart hook's log); never raises."""
+    try:
+        import kit_profile
+        log = kit_profile.scratch() / "hooks.log"
+        if not log.is_symlink():
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"ctx_adapter.py: {line}\n")
+    except Exception:  # noqa: BLE001 — the log is best effort
+        pass
+
+
+def refresh_catalogs(root: Path) -> None:
+    """Regenerate the kit's catalogs (INDEX.md, SESSION_INDEX.md) after a change under the content root. The sweep of
+    ended sessions into the archive is left to `session-*`; a failure is logged, never shown."""
+    env = dict(os.environ, CONTEXT_ROOT=str(root))
+    for args in (["gen_index.py"], ["gen_sessions.py", "--no-archive"]):
+        try:
+            r = subprocess.run([sys.executable, str(BIN / args[0]), *args[1:]], env=env, cwd=BIN, capture_output=True,
+                               text=True, timeout=HOOK_TIMEOUT, stdin=subprocess.DEVNULL)
+            if r.returncode != 0:
+                _log(f"{args[0]} exit {r.returncode}: {(_lines(r.stderr) or [''])[-1][:300]}")
+        except (OSError, subprocess.SubprocessError) as e:
+            _log(f"{args[0]}: {e}")
 
 
 def _session_id(payload: dict) -> str:
@@ -164,33 +385,44 @@ def hook(name: str) -> str:
     """What the hook prints (maybe nothing). Raises nothing the caller must handle beyond Exception."""
     payload = _payload()
     ctx, _ = resolve()
+    if name == "post-tool-use-async":
+        root = _context_root()
+        via_ctx = bool(CTX_WRITE_TOOL.match(str(payload.get("tool_name", ""))))
+        if not root.is_dir() or not (via_ctx or _changed_under(payload, root)):
+            return ""
+        store = _store_args(root)
+        sid = _session_id(payload)
+        if ctx is not None and store is not None and sid:
+            try:
+                _ctx(ctx, store, "touch", "--session", sid)
+            except (OSError, subprocess.SubprocessError) as e:
+                _log(f"ctx touch: {e}")
+        refresh_catalogs(root)
+        return ""
     if ctx is None:
         return ""
     root = _context_root()
+    if name == "pre-tool-use":
+        return _deny(payload, ctx, root) if root.is_dir() else ""
     store = _store_args(root)
     if store is None:
         return ""
-    if name in ("post-tool-use", "post-tool-use-async"):
+    if name == "post-tool-use":
         if not _changed_under(payload, root):
-            return ""
-        if name == "post-tool-use":
-            try:
-                r = _ctx(ctx, store, "validate", "--changed", "--adopt")
-            except subprocess.TimeoutExpired:
-                return json.dumps({"systemMessage": f"ctx validate did not run: no answer within {HOOK_TIMEOUT}s"})
-            lines = [ln.strip() for ln in r.stderr.splitlines() if ln.strip()]
-            if r.returncode == 3:  # validation findings
-                return json.dumps({"systemMessage": f"ctx validate: {' · '.join(lines)[:MESSAGE_MAX]}"})
-            if r.returncode == 0 or (lines and lines[0].split()[0] == "NO_STORE"):
-                return ""  # clean, or the content root is not a store yet (not adopted): nothing to say
-            # Any other exit (usage, lock timeout, read-only, a ctx that changed its verbs) means validation did
-            # not happen; staying silent would read exactly like "no findings".
-            first = lines[0] if lines else f"exit {r.returncode}"
-            return json.dumps({"systemMessage": f"ctx validate did not run: {first[:MESSAGE_MAX]}"})
-        sid = _session_id(payload)
-        if sid:
-            _ctx(ctx, store, "touch", "--session", sid)
-        return ""
+            return ""  # a write through a ctx tool was validated by ctx itself
+        try:
+            r = _ctx(ctx, store, "validate", "--changed", "--adopt")
+        except subprocess.TimeoutExpired:
+            return json.dumps({"systemMessage": f"ctx validate did not run: no answer within {HOOK_TIMEOUT}s"})
+        lines = _lines(r.stderr)
+        if r.returncode == 3:  # validation findings
+            return json.dumps({"systemMessage": f"ctx validate: {' · '.join(lines)[:MESSAGE_MAX]}"})
+        if r.returncode == 0 or _code(r) == "NO_STORE":
+            return ""  # clean, or the content root is not a store yet (not adopted): nothing to say
+        # Any other exit (usage, lock timeout, read-only, a ctx that changed its verbs) means validation did
+        # not happen; staying silent would read exactly like "no findings".
+        first = lines[0] if lines else f"exit {r.returncode}"
+        return json.dumps({"systemMessage": f"ctx validate did not run: {first[:MESSAGE_MAX]}"})
     if name == "brief-registry":
         r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
     elif name == "brief-session":
@@ -203,16 +435,25 @@ def hook(name: str) -> str:
     return r.stdout if r.returncode == 0 else ""
 
 
-HOOKS = ("post-tool-use", "post-tool-use-async", "brief-registry", "brief-session")
+HOOKS = ("pre-tool-use", "post-tool-use", "post-tool-use-async", "brief-registry", "brief-session")
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["ctx"]:  # everything after `ctx` is ctx's own command line, options included
+        return run_ctx(argv[1:])
     p = argparse.ArgumentParser(prog="ctx_adapter.py", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("version", help="print the pinned ctx-store tag")
     sub.add_parser("where", help="print the ctx executable; exit 1 when not installed")
     sub.add_parser("install", help="fetch the pinned tag into the pinned location")
+    ap = sub.add_parser("adopt", help="make the content root a ctx store (once; never overwrites)")
+    ap.add_argument("--check", action="store_true", help="report only: exit 4 when not adopted, 3 on findings")
+    sub.add_parser("mcp", help="run the ctx MCP server on the store (stdio)")
+    mp = sub.add_parser("mcp-json", help="add the ctx MCP server to a project .mcp.json")
+    mp.add_argument("file", type=Path)
+    sub.add_parser("ctx", help="run one ctx verb on the store: ctx_adapter.py ctx <verb> [arguments]")
     hp = sub.add_parser("hook", help="run one Claude Code hook (hook JSON on stdin); always exit 0")
     hp.add_argument("name", choices=HOOKS)
     a = p.parse_args(argv)
@@ -234,10 +475,16 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(ctx)
         return 0
+    if a.cmd == "mcp":
+        return run_ctx(["mcp"], mcp=True)
+    if a.cmd == "mcp-json":
+        return mcp_json(a.file)
     try:
+        if a.cmd == "adopt":
+            return adopt(a.check)
         print(install())
     except (OSError, subprocess.SubprocessError) as e:
-        print(f"ctx_adapter.py install: {e}", file=sys.stderr)
+        print(f"ctx_adapter.py {a.cmd}: {e}", file=sys.stderr)
         return 2
     return 0
 

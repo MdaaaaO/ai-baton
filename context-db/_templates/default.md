@@ -9,4 +9,4 @@ updated: {{DATE}}
 
 # {{TITLE}}
 
-<!-- Body. Link related docs with [[slug]]. Run `make index` after editing frontmatter. -->
+<!-- Body. Link related docs with [[slug]]. -->

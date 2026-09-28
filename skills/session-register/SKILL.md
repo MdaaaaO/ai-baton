@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "17"
+  version: "18"
   updated: "2026-09-28"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -60,7 +60,7 @@ worktree.
    Then open `.context/sessions/<name>.md` and fill the body with anything another session
    needs (what you own vs. don't, in-flight worktrees/PRs). **Override it whenever your
    responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
-   edit the body directly and `make -C $BATON/context-db session-index`.
+   edit the body directly (`sessions/` stays writable; the hook regenerates `SESSION_INDEX.md`).
 4. **Re-arm the PR watches.** `Monitor`s die with the session that armed them, so a restarted or
    successor session owns PRs that nobody is watching. For **every open PR you now own** (the
    `## Open PRs` list in the predecessor's session file, the context doc's *What was built* /
@@ -86,11 +86,12 @@ and `kit_profile.py footer` prints the attribution line with it — `🤖 Genera
 
 Your entry must show a heartbeat within the last 12h or it is treated as stale.
 
-- **On every flush** (per-step, per `WORKSPACE.md` § Cost & context hygiene) also run:
+- **Every write under `.context/` touches your row** — the ctx-store `PostToolUse` hook, keyed by the harness
+  session id `session-register` stamped — so an active session stays fresh without a call. When your
+  focus changes, record it:
   ```sh
   make -C $BATON/context-db session-touch NAME=<name> WORKING="<what you're on now>"
   ```
-  Active sessions stay fresh automatically this way.
 - **Backstop heartbeat — pure shell, zero model turns.** Right after registering, run once:
   ```sh
   bash $BATON/skills/session-register/heartbeat.sh <name> "<current focus>"
@@ -104,7 +105,7 @@ Your entry must show a heartbeat within the last 12h or it is treated as stale.
   a no-op (pidfile `$TMPDIR/ai-baton-<uid>/heartbeat-<name>.pid`; log `…heartbeat-<name>.log` beside
   it — namespaced per user, never a bare `/tmp/heartbeat-<name>.*` shared by everyone on the host).
   Later focus changes still go
-  through `session-touch … WORKING=` on each flush — the script only sets the focus you gave it once.
+  through `session-touch … WORKING=` — the script only sets the focus you gave it once.
   Run it from the session's own Bash tool (not a subagent): it captures `$CLAUDE_CODE_SESSION_ID`
   there, which is what the stats line (below) is derived from.
 
@@ -149,7 +150,7 @@ lane that continues with follow-on work always leaves a prompt. `session-end` al
 `## Session stats` block into your session file and appends the `_ledger.md` row (§ 2b). Before that,
 refresh the `## Open PRs` list in your session file (repo#n, current head, what each waits on) — your
 `Monitor`s stop with you, and that list is what the successor's startup step 4 re-arms from.
-Then do the rest of the `session-handoff` close-out (flush to the context doc, priorities, index).
+Then do the rest of the `session-handoff` close-out (flush to the context doc through the ctx tools, priorities).
 
 ## Fields
 

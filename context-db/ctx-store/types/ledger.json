@@ -1,0 +1,8 @@
+{
+  "paths": [
+    "sessions/_ledger.md"
+  ],
+  "log": {
+    "ledger": true
+  }
+}

@@ -35,5 +35,5 @@ is still the charter's fixed format; what changes is provenance and honesty abou
   initiative context docs (`TYPE=epic`) from a back-fill — those belong to the sessions that do the work.
 - Steps 5–10 run unchanged, with one frontmatter addition: the week file carries **`provenance: back-fill`**
   (that key, not prose, is what tags the ledger card `back-filled <date>`). Then `status: archived` for a
-  completed week, index row, drops, `make index && verify`, the report block, and — where the ledger is on —
+  completed week, index row, drops, `make verify`, the report block, and — where the ledger is on —
   the card.

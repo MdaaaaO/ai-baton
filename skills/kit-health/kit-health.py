@@ -1126,6 +1126,29 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
                 r.add(OK, "engine", f"`{label}`: new.sh scaffolds all 9 doc types")
     rc, out, err = sh([sys.executable, str(BIN / "kb.py"), "list"])
     r.add(OK if rc == 0 else ERR, "engine", "`kb.py list` " + ("reads the env store" if rc == 0 else f"failed: {both(out, err)[-300:]}"))
+    ctx_store(r)
+
+
+def ctx_store(r: Report) -> None:
+    """Is `.context/` an adopted ctx store? Read-only (`ctx_adapter.py adopt --check`): the hooks validate, audit and
+    deny direct writes only on an adopted store, so a store that is not is a finding with the one-time fix."""
+    adapter = "python3 $BATON/context-db/bin/ctx_adapter.py"
+    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "adopt", "--check"], timeout=300)
+    first = (out.splitlines() or [""])[0]
+    if rc == 0:
+        r.add(OK, "engine", f"ctx-store: `.context/` is an adopted store ({first.split(': ', 1)[-1]})")
+    elif rc == 1:
+        r.add(WARN, "engine", f"ctx-store is not installed, so writes under `.context/` are neither validated nor audited — "
+                              f"`{adapter} install && {adapter} adopt`")
+    elif rc == 4:
+        r.add(WARN, "engine", f"store not adopted: `.context/` is not a ctx store, so the hooks neither validate nor route "
+                              f"writes through ctx — `{adapter} adopt` (once; it never overwrites)")
+    elif rc == 3:
+        found = [ln[len("finding: "):] for ln in out.splitlines() if ln.startswith("finding: ")]
+        r.add(WARN, "engine", f"ctx validate: {len(found)} finding(s) in the store — fix each with the ctx tools:\n```\n"
+                              + "\n".join(found[:10]) + "\n```")
+    else:
+        r.add(ERR, "engine", f"`ctx_adapter.py adopt --check` failed: {both(out, err)[-300:]}")
 
 
 # ── 6. stamp ────────────────────────────────────────────────────────────────────────────────

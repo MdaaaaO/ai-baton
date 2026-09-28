@@ -1,9 +1,11 @@
 """ctx_adapter.py — the kit's adapter to ctx-store: one pin, a resolver that says "not installed" cleanly, a pinned
-fetch, and the Claude Code hooks (PostToolUse validate/heartbeat, SessionStart briefs) that stay silent no-ops on a
-machine without ctx or without a store; plus `session register` stamping the harness session id a hook matches on.
+fetch, the Claude Code hooks (PreToolUse deny, PostToolUse validate/heartbeat/catalog refresh, SessionStart briefs)
+that stay silent no-ops on a machine without ctx or without a store, `adopt` (the one-time store bootstrap), the MCP
+server and the Bash route; plus `session register` stamping the harness session id a hook matches on.
 
-The hooks run against a fake `ctx` (KIT_CTX) that logs its argv, so no test needs the real tool or the network; every
-store, cache and scratch path is a temp dir. Session ids and paths are assembled at run time. Stdlib unittest.
+Most tests run against a fake `ctx` (KIT_CTX) that logs its argv, so they need neither the real tool nor the network;
+the end-to-end ones use the pinned install when this machine has it and skip cleanly otherwise. Every store, cache
+and scratch path is a temp dir. Session ids and paths are assembled at run time. Stdlib unittest.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import json
@@ -29,13 +31,14 @@ FAKE_CTX = f"""#!{sys.executable}
 import json, os, sys
 with open(os.environ["FAKE_CTX_LOG"], "a", encoding="utf-8") as f:
     f.write(json.dumps({{"argv": sys.argv[1:], "store": os.environ.get("CTX_STORE"),
-                         "lock": os.environ.get("CTX_LOCK_TIMEOUT")}}) + "\\n")
+                         "lock": os.environ.get("CTX_LOCK_TIMEOUT"), "actor": os.environ.get("CTX_ACTOR")}}) + "\\n")
 sys.stdout.write(os.environ.get("FAKE_CTX_OUT", ""))
 sys.stderr.write(os.environ.get("FAKE_CTX_ERR", ""))
 sys.exit(int(os.environ.get("FAKE_CTX_RC", "0")))
 """
 
-SCRUB = ("KIT_CTX", "CTX_STORE", "CTX_LOCK_TIMEOUT", "CLAUDE_CODE_SESSION_ID", "XDG_CACHE_HOME", "WORKSPACE_TZ")
+SCRUB = ("KIT_CTX", "CTX_STORE", "CTX_LOCK_TIMEOUT", "CTX_ACTOR", "CLAUDE_CODE_SESSION_ID", "XDG_CACHE_HOME",
+         "WORKSPACE_TZ")
 
 
 def load_adapter():
@@ -184,7 +187,7 @@ class HooksAreSilentWithoutCtxOrStore(Base):
 
     def all_hooks(self, **env) -> None:
         under = self.payload(tool_name="Write", tool_input={"file_path": str(self.root / "a.md")})
-        for name in ("post-tool-use", "post-tool-use-async", "brief-registry", "brief-session"):
+        for name in ("pre-tool-use", "post-tool-use", "post-tool-use-async", "brief-registry", "brief-session"):
             r = self.adapter("hook", name, stdin=under, **env)
             self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), name)
 
@@ -221,7 +224,7 @@ class HooksAreSilentWithoutCtxOrStore(Base):
         (self.t / "proj").mkdir()
         (self.t / "proj" / ".claude").symlink_to(KIT)
         cmds = Wiring.adapter_commands()
-        self.assertEqual(len(cmds), 8)  # four hooks on each install path
+        self.assertEqual(len(cmds), 12)  # six hook entries on each install path
         for cmd in cmds:
             r = subprocess.run(["sh", "-c", cmd], input=self.payload(), env=env, capture_output=True, text=True, timeout=60)
             self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), cmd)
@@ -351,14 +354,14 @@ class Wiring(unittest.TestCase):
         return [h["command"] for p in (KIT / "hooks" / "hooks.json", KIT / "settings.json")
                 for groups in cls.events(p).values() for g in groups for h in g["hooks"] if "ctx_adapter.py" in h["command"]]
 
-    def wired(self, path: Path) -> dict[str, tuple[str, bool]]:
-        out = {}
+    def wired(self, path: Path) -> dict[str, list[tuple[str, bool]]]:
+        out: dict[str, list[tuple[str, bool]]] = {}
         for event, groups in self.events(path).items():
             for g in groups:
                 for h in g["hooks"]:
                     m = re.search(r"ctx_adapter\.py\"? hook ([a-z-]+)", h["command"])
                     if m:
-                        out[m.group(1)] = (f"{event}:{g.get('matcher', '')}", bool(h.get("async")))
+                        out.setdefault(m.group(1), []).append((f"{event}:{g.get('matcher', '')}", bool(h.get("async"))))
                         self.assertTrue(h["command"].rstrip().endswith("|| true"), h["command"])
         return out
 
@@ -366,17 +369,359 @@ class Wiring(unittest.TestCase):
         plugin = self.wired(KIT / "hooks" / "hooks.json")
         clone = self.wired(KIT / "settings.json")
         self.assertEqual(plugin, clone)
-        edits = plugin["post-tool-use"][0]
+        [(edits, sync)] = plugin["post-tool-use"]
         self.assertTrue(edits.startswith("PostToolUse:"))
-        for tool in ("Write", "Edit"):
+        for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
             self.assertRegex(edits.split(":", 1)[1], rf"(^|\|){tool}(\||$)")
-        self.assertEqual(plugin["post-tool-use"][1], False)   # validate is synchronous: its finding must surface
-        self.assertEqual(plugin["post-tool-use-async"], (edits, True))
-        self.assertEqual(plugin["brief-registry"], ("SessionStart:startup|resume|clear", False))
-        self.assertEqual(plugin["brief-session"], ("SessionStart:compact", False))
+        self.assertEqual(sync, False)   # validate is synchronous: its finding must surface
+        self.assertEqual(plugin["pre-tool-use"], [(edits.replace("PostToolUse", "PreToolUse"), False)])  # a deny must block
+        [(on_edit, a1), (on_ctx, a2)] = plugin["post-tool-use-async"]
+        self.assertEqual((on_edit, a1, a2), (edits, True, True))
+        mcp_matcher = on_ctx.split(":", 1)[1]
+        mod = load_adapter()
+        for tool in ("mcp__plugin_ai-baton_ctx__ctx_log", "mcp__ctx__ctx_str_replace", "mcp__ctx__ctx_create"):
+            self.assertRegex(tool, rf"^(?:{mcp_matcher})$")
+            self.assertTrue(mod.CTX_WRITE_TOOL.match(tool), tool)
+        for tool in ("mcp__ctx__ctx_get", "mcp__ctx__ctx_find", "mcp__ctx__ctx_touch", "mcp__other__ctx_log"):
+            self.assertFalse(mod.CTX_WRITE_TOOL.match(tool), tool)  # a read (or a touch) refreshes nothing
+        self.assertEqual(plugin["brief-registry"], [("SessionStart:startup|resume|clear", False)])
+        self.assertEqual(plugin["brief-session"], [("SessionStart:compact", False)])
         first = self.events(KIT / "hooks" / "hooks.json")["SessionStart"][0]  # the session-env hook keeps its place
         self.assertNotIn("matcher", first)
         self.assertIn("session-env", first["hooks"][0]["command"])
+
+
+def real_ctx() -> Path | None:
+    """The pinned ctx this machine has installed (its real cache, not a test's), else None: the end-to-end tests skip."""
+    mod = load_adapter()
+    cache = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    p = Path(cache) / "ai-baton-kit" / "ctx-store" / mod.CTX_VERSION / "ctx"
+    return p if p.is_file() and os.access(p, os.X_OK) else None
+
+
+REAL_CTX = real_ctx()
+EPIC = ("---\ntitle: A\ntype: epic\ndomain: d\nstatus: active\nupdated: 2026-01-05\n---\n# A\n\n## Goal\n\ng\n\n"
+        "## Key decisions & gotchas\n\n## Remaining work\n\n## Session log\n\n- 2026-01-05 — first\n")
+
+
+class StoreData(unittest.TestCase):
+    """The kit ships the store settings and type schemas `adopt` writes: data the deny and the catalogs agree with."""
+
+    def test_settings_and_schemas_parse(self):
+        data = KIT / "context-db" / "ctx-store"
+        settings = json.loads((data / "ctx-store.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["schema_version"], 1)
+        self.assertTrue({"INDEX.md", "SESSION_INDEX.md"} <= set(settings["generated"]))  # the kit's generators write them
+        self.assertIn("memory/**", settings["ignore"])  # the harness auto-memory is never a store doc
+        types = sorted(p.stem for p in (data / "types").glob("*.json"))
+        self.assertTrue({"epic", "session", "ledger", "log", "self-assessment"} <= set(types), types)
+        for t in types:
+            self.assertIsInstance(json.loads((data / "types" / f"{t}.json").read_text(encoding="utf-8")), dict, t)
+        epic = json.loads((data / "types" / "epic.json").read_text(encoding="utf-8"))
+        self.assertEqual(epic["log"], {"section": "Session log", "order": "newest-first"})  # ctx_log keeps the rule
+
+    def test_the_plugin_ships_the_mcp_server(self):
+        servers = json.loads((KIT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["mcpServers"]
+        self.assertEqual(servers["ctx"], {"command": "python3",
+                                          "args": ["${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py", "mcp"]})
+        self.assertEqual(json.loads((KIT / "settings.json").read_text(encoding="utf-8"))["enabledMcpjsonServers"], ["ctx"])
+
+
+class Adopt(Base):
+    """`adopt`: the one-time bootstrap. It writes the kit's settings only where ctx answers NO_STORE, never over a file."""
+
+    def data(self) -> dict[str, str]:
+        d = KIT / "context-db" / "ctx-store"
+        out = {"ctx-store.json": (d / "ctx-store.json").read_text(encoding="utf-8")}
+        out.update({f".ctx/types/{p.name}": p.read_text(encoding="utf-8") for p in (d / "types").glob("*.json")})
+        return out
+
+    def test_not_installed_is_exit_1_and_writes_nothing(self):
+        for args in (("adopt",), ("adopt", "--check")):
+            r = self.adapter(*args)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("not installed", r.stderr)
+        self.assertFalse((self.root / "ctx-store.json").exists())
+
+    def test_no_content_root_is_exit_2(self):
+        r = self.adapter("adopt", KIT_CTX=str(self.fake), CONTEXT_ROOT=str(self.t / "nowhere"))
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(self.calls(), [])
+
+    def test_an_existing_store_gets_no_file_from_the_kit(self):
+        """ctx says the store exists (no NO_STORE): adopt validates and adopts, and writes no settings of its own."""
+        r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c["argv"][2:] for c in self.calls()], [["validate"], ["validate", "--changed", "--adopt"]])
+        self.assertEqual({c["argv"][1] for c in self.calls()}, {str(self.root)})
+        self.assertFalse((self.root / "ctx-store.json").exists())
+        self.assertFalse((self.root / ".ctx").exists())
+
+    def test_check_never_adopts(self):
+        r = self.adapter("adopt", "--check", KIT_CTX=str(self.fake), FAKE_CTX_RC="2",
+                         FAKE_CTX_ERR=f"NO_STORE {self.root}: no store found\n")
+        self.assertEqual(r.returncode, 4)
+        self.assertIn("ctx_adapter.py adopt", r.stdout)
+        self.assertEqual([c["argv"][2:] for c in self.calls()], [["validate"]])
+        self.assertFalse((self.root / "ctx-store.json").exists())
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_adopt_writes_the_kit_settings_once_and_never_overwrites(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        (self.root / "d" / "a.md").write_text(EPIC, encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", "--check", **env).returncode, 4)
+        self.assertFalse((self.root / "ctx-store.json").exists())
+        mine = '{"schema_version": 1}\n'  # a type schema the user already had is kept as it is
+        (self.root / ".ctx" / "types").mkdir(parents=True)
+        (self.root / ".ctx" / "types" / "log.json").write_text(mine, encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("1 adopted", r.stdout)
+        for rel, text in self.data().items():
+            want = mine if rel.endswith("/log.json") else text
+            self.assertEqual((self.root / rel).read_text(encoding="utf-8"), want, rel)
+        # a second run: the store exists, so nothing is written, whatever the files hold now
+        (self.root / "ctx-store.json").write_text('{"schema_version": 1}\n', encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.root / "ctx-store.json").read_text(encoding="utf-8"), '{"schema_version": 1}\n')
+        self.assertEqual(self.adapter("adopt", "--check", **env).returncode, 0)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_findings_are_printed_and_exit_3(self):
+        (self.root / "d").mkdir()
+        (self.root / "d" / "bad.md").write_text(EPIC.replace("status: active", "status: someday"), encoding="utf-8")
+        r = self.adapter("adopt", KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertRegex(r.stdout, r"(?m)^finding: SCHEMA_VIOLATION d/bad")
+        self.assertTrue((self.root / "ctx-store.json").exists())
+
+
+class PreToolUseDeny(Base):
+    """A direct Write/Edit of a store doc is denied on an adopted store; everything else gets no decision."""
+
+    def setUp(self):
+        super().setUp()
+        self.env["KIT_CTX"] = str(self.fake)
+        self.env.update(FAKE_CTX_RC="2", FAKE_CTX_ERR="NO_SUCH_DOC x: no such doc\n")  # ctx: a store, a new doc
+
+    def decide(self, path: Path | str, tool: str = "Edit", field: str = "file_path", **env) -> dict | None:
+        payload = self.payload(hook_event_name="PreToolUse", tool_name=tool, tool_input={field: str(path)})
+        r = self.adapter("hook", "pre-tool-use", stdin=payload, **env)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+    def test_a_store_doc_is_denied_with_the_ctx_tool_to_use(self):
+        for tool in ("Write", "Edit", "MultiEdit"):
+            out = self.decide(self.root / "d" / "a.md", tool=tool)
+            self.assertEqual((out["hookEventName"], out["permissionDecision"]), ("PreToolUse", "deny"), tool)
+            for word in ("key `d/a`", "ctx_str_replace", "ctx_create", "ctx_log", "ctx_adapter.py ctx"):
+                self.assertIn(word, out["permissionDecisionReason"])
+        self.assertEqual(self.calls()[-1]["argv"], ["--store", str(self.root), "get", "d/a"])
+
+    def test_an_existing_doc_and_a_subdir_readme_are_store_docs_too(self):
+        self.assertIsNotNone(self.decide(self.root / "d" / "a.md", FAKE_CTX_RC="0", FAKE_CTX_ERR=""))
+        self.assertIsNotNone(self.decide(self.root / "pr-reviews" / "README.md"))
+
+    def test_a_relative_path_resolves_against_the_payload_cwd(self):
+        payload = json.dumps({"cwd": str(self.root.parent), "tool_name": "Write",
+                              "tool_input": {"file_path": ".context/d/x.md"}})
+        r = self.adapter("hook", "pre-tool-use", stdin=payload)
+        self.assertIn('"deny"', r.stdout)
+
+    def test_exempt_paths_get_no_decision_and_no_ctx_call(self):
+        memory = self.t / "harness" / "memory"
+        memory.mkdir(parents=True)
+        (self.root / "memory").symlink_to(memory)
+        allowed = ["sessions/lane-topic.md", "sessions/archive/old.md", "state/pr-review/notes.md", "bin/x.md",
+                   "reference/env/_templates/t.md", "on-call/handoff/page.md", "handoff/x.md", "memory/MEMORY.md",
+                   "INDEX.md", "SESSION_INDEX.md", "README.md", "d/notes.txt", "d/n.ipynb", ".ctx/types/epic.json",
+                   ".audit/seq"]
+        for rel in allowed:
+            self.assertIsNone(self.decide(self.root / rel), rel)
+        self.assertIsNone(self.decide(memory / "note.md"))  # the symlink's target, named directly
+        self.assertIsNone(self.decide(self.root / "d" / "n.ipynb", tool="NotebookEdit", field="notebook_path"))
+        self.assertIsNone(self.decide(self.t / "ws" / "repo" / "README.md"))  # outside the content root
+        self.assertEqual(self.calls(), [])
+
+    def test_a_real_memory_dir_is_exempt_too(self):
+        (self.root / "memory").mkdir()
+        self.assertIsNone(self.decide(self.root / "memory" / "note.md"))
+
+    def test_no_decision_unless_ctx_says_it_is_a_store(self):
+        doc = self.root / "d" / "a.md"
+        self.assertIsNone(self.decide(doc, FAKE_CTX_ERR=f"NO_STORE {self.root}: no store found\n"))  # not adopted
+        self.assertIsNone(self.decide(doc, FAKE_CTX_RC="4", FAKE_CTX_ERR="LOCK_TIMEOUT x: lock timeout\n"))
+        self.assertIsNone(self.decide(doc, FAKE_CTX_RC="3", FAKE_CTX_ERR="SCHEMA_VIOLATION .ctx/types/x.json: bad\n"))
+        self.assertIsNone(self.decide(doc, KIT_CTX=str(self.t / "missing")))  # not installed
+        self.assertIsNone(self.decide(self.t / "none" / ".context" / "a.md",
+                                      CONTEXT_ROOT=str(self.t / "none" / ".context")))  # no content root on disk
+
+    def test_ctx_store_does_not_redirect_the_check(self):
+        self.decide(self.root / "d" / "a.md", CTX_STORE="memory://elsewhere")
+        self.assertEqual(self.calls()[-1]["argv"][:2], ["--store", str(self.root)])
+
+    def test_fails_open_on_any_adapter_error(self):
+        broken = self.t / "bin" / "broken"
+        broken.write_text("#!/nonexistent/interpreter\n", encoding="utf-8")
+        broken.chmod(0o755)
+        self.assertIsNone(self.decide(self.root / "d" / "a.md", KIT_CTX=str(broken)))  # ctx cannot even start
+        for bad in ("{not json", json.dumps({"tool_name": "Edit", "tool_input": ["x"]}), json.dumps([1])):
+            r = self.adapter("hook", "pre-tool-use", stdin=bad)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), bad)
+        import contextlib
+        import io
+        mod = load_adapter()
+        mod.STORE_DATA = self.t / "no-such-data"  # the kit's own settings unreadable: an exception inside the hook
+        out = io.StringIO()
+        payload = self.payload(tool_name="Edit", tool_input={"file_path": str(self.root / "d" / "a.md")})
+        with mock.patch.dict(os.environ, {"CONTEXT_ROOT": str(self.root), "KIT_CTX": str(self.fake),
+                                          "FAKE_CTX_LOG": str(self.log)}), \
+             mock.patch.object(sys, "stdin", io.StringIO(payload)), contextlib.redirect_stdout(out):
+            rc = mod.main(["hook", "pre-tool-use"])
+        self.assertEqual((rc, out.getvalue()), (0, ""))
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_end_to_end_with_the_pinned_ctx(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1", FAKE_CTX_RC="0", FAKE_CTX_ERR="")
+        (self.root / "d").mkdir()
+        (self.root / "d" / "a.md").write_text(EPIC, encoding="utf-8")
+        self.assertIsNone(self.decide(self.root / "d" / "a.md", **env))  # not adopted yet: nothing changes
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        self.assertEqual(self.decide(self.root / "d" / "a.md", **env)["permissionDecision"], "deny")
+        self.assertEqual(self.decide(self.root / "d" / "new.md", **env)["permissionDecision"], "deny")
+        self.assertIsNone(self.decide(self.root / "sessions" / "x.md", **env))
+
+
+class McpServer(Base):
+    def mcp(self, *msgs: dict, **env) -> list[dict]:
+        r = self.adapter("mcp", stdin="".join(json.dumps(m) + "\n" for m in msgs), **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return [json.loads(ln) for ln in r.stdout.splitlines() if ln.strip()]
+
+    def test_execs_the_pinned_ctx_on_the_content_root_as_a_stable_actor(self):
+        self.adapter("mcp", KIT_CTX=str(self.fake))
+        [call] = self.calls()
+        self.assertEqual((call["argv"], call["actor"]), (["--store", str(self.root), "mcp"], "claude"))
+
+    def test_a_set_actor_and_store_pass_through(self):
+        self.adapter("mcp", KIT_CTX=str(self.fake), CTX_ACTOR="someone", CTX_STORE="memory://x")
+        [call] = self.calls()
+        self.assertEqual((call["argv"], call["actor"], call["store"]), (["mcp"], "someone", "memory://x"))
+
+    def test_without_ctx_it_is_a_server_with_no_tools(self):
+        init = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}
+        note = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+        call = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "ctx_log"}}
+        a, b, c = self.mcp(init, note, listing, call)
+        self.assertEqual((a["id"], a["result"]["protocolVersion"]), (1, "2025-06-18"))
+        self.assertIn("not installed", a["result"]["instructions"])
+        self.assertEqual(b, {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}})
+        self.assertEqual(c["error"]["code"], -32601)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_the_pinned_ctx_serves_the_write_tools(self):
+        init = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}
+        listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+        replies = self.mcp(init, listing, KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        names = {t["name"] for t in replies[-1]["result"]["tools"]}
+        self.assertTrue({"ctx_log", "ctx_str_replace", "ctx_insert", "ctx_fm", "ctx_create", "ctx_new", "ctx_move"} <= names)
+
+
+class BashRoute(Base):
+    def test_ctx_passes_every_argument_through_naming_the_store(self):
+        r = self.adapter("ctx", "str_replace", "d/a", "--old", "x", "--new", "y", KIT_CTX=str(self.fake))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        [call] = self.calls()
+        self.assertEqual(call["argv"], ["--store", str(self.root), "str_replace", "d/a", "--old", "x", "--new", "y"])
+        self.assertIsNone(call["actor"])  # ctx's own default: whoever runs it
+
+    def test_ctx_exits_as_ctx_does_and_says_when_it_is_missing(self):
+        self.assertEqual(self.adapter("ctx", "get", "x", KIT_CTX=str(self.fake), FAKE_CTX_RC="2").returncode, 2)
+        r = self.adapter("ctx", "get", "x")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not installed", r.stderr)
+
+
+class McpJson(Base):
+    def test_adds_the_server_and_keeps_everything_else(self):
+        f = self.t / "ws" / ".mcp.json"
+        r = self.adapter("mcp-json", str(f))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        entry = json.loads(f.read_text(encoding="utf-8"))["mcpServers"]["ctx"]
+        self.assertEqual(entry, {"command": "python3", "args": [str(ADAPTER.resolve()), "mcp"]})
+        f.write_text(json.dumps({"mcpServers": {"other": {"command": "x"}}}), encoding="utf-8")
+        self.adapter("mcp-json", str(f))
+        self.assertEqual(set(json.loads(f.read_text(encoding="utf-8"))["mcpServers"]), {"other", "ctx"})
+
+    def test_never_replaces_an_existing_entry(self):
+        f = self.t / ".mcp.json"
+        mine = {"mcpServers": {"ctx": {"command": "/my/ctx", "args": ["mcp"]}}}
+        f.write_text(json.dumps(mine), encoding="utf-8")
+        r = self.adapter("mcp-json", str(f))
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(json.loads(f.read_text(encoding="utf-8")), mine)
+
+    def test_an_unreadable_file_is_exit_2_and_untouched(self):
+        f = self.t / ".mcp.json"
+        f.write_text("{not json", encoding="utf-8")
+        self.assertEqual(self.adapter("mcp-json", str(f)).returncode, 2)
+        self.assertEqual(f.read_text(encoding="utf-8"), "{not json")
+
+
+class CatalogRefresh(Base):
+    """After a change under the content root the async hook regenerates INDEX.md and SESSION_INDEX.md, with or
+    without ctx — the bookkeeping the skills no longer do."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "d").mkdir()
+        (self.root / "d" / "a.md").write_text(EPIC, encoding="utf-8")
+
+    def run_async(self, **kw) -> subprocess.CompletedProcess:
+        env = kw.pop("env", {})
+        r = self.adapter("hook", "post-tool-use-async", stdin=self.payload(**kw), **env)
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        return r
+
+    def catalogs(self) -> tuple[bool, bool]:
+        return (self.root / "INDEX.md").exists(), (self.root / "SESSION_INDEX.md").exists()
+
+    def test_a_write_under_the_root_refreshes_both_catalogs_without_ctx(self):
+        self.run_async(tool_name="Write", tool_input={"file_path": str(self.root / "d" / "a.md")})
+        self.assertEqual(self.catalogs(), (True, True))
+        self.assertIn("d/a.md", (self.root / "INDEX.md").read_text(encoding="utf-8"))
+
+    def test_a_ctx_tool_write_touches_and_refreshes(self):
+        self.run_async(tool_name="mcp__plugin_ai-baton_ctx__ctx_log", tool_input={"doc": "d/a", "text": "x"},
+                       env={"KIT_CTX": str(self.fake)})
+        [call] = self.calls()
+        self.assertEqual(call["argv"], ["--store", str(self.root), "touch", "--session", self.sid])
+        self.assertEqual(self.catalogs(), (True, True))
+
+    def test_a_ctx_read_or_a_write_elsewhere_refreshes_nothing(self):
+        self.run_async(tool_name="mcp__ctx__ctx_get", tool_input={"doc": "d/a"}, env={"KIT_CTX": str(self.fake)})
+        self.run_async(tool_name="Write", tool_input={"file_path": str(self.t / "elsewhere.md")})
+        self.assertEqual((self.calls(), self.catalogs()), ([], (False, False)))
+
+    def test_the_sync_hook_does_not_revalidate_a_ctx_tool_write(self):
+        r = self.adapter("hook", "post-tool-use", KIT_CTX=str(self.fake),
+                         stdin=self.payload(tool_name="mcp__ctx__ctx_str_replace", tool_input={"doc": "d/a"}))
+        self.assertEqual((r.returncode, r.stdout, self.calls()), (0, "", []))
+
+    def test_a_generator_failure_is_logged_not_shown(self):
+        mod = load_adapter()
+        def boom(*a, **k):
+            raise OSError("no python")
+        scratch = self.t / "scratch"
+        with mock.patch.dict(os.environ, {"KIT_SCRATCH": str(scratch)}), mock.patch.object(mod.subprocess, "run", boom):
+            mod.refresh_catalogs(self.root)
+        log = (scratch / "hooks.log").read_text(encoding="utf-8")
+        self.assertIn("gen_index.py: no python", log)
+        self.assertIn("gen_sessions.py: no python", log)
 
 
 class SessionIdStamp(Base):

@@ -38,7 +38,8 @@ flowchart TB
     H1["settings.json SessionEnd → sync.sh (clone)"]
     H2["hooks/hooks.json SessionStart → kit_profile.py session-env + workspace-rules (plugin)"]
     H3["git hooks: pre-push (main guard) · commit-msg (commit style)"]
-    H4["PostToolUse + SessionStart → ctx_adapter.py → ctx verbs (both paths; silent until ctx-store is adopted)"]
+    H4["PreToolUse deny + PostToolUse + SessionStart → ctx_adapter.py → ctx verbs (both paths; silent until the store is adopted)"]
+    MC["ctx MCP server (plugin.json / the workspace .mcp.json) → ctx_adapter.py mcp → ctx mcp"]
   end
   H1 --> SY["sync.sh — fast-forward the kit, install the git hooks"]
   SY -.->|".sync-status, read by sync-check.sh at session-register"| EN
@@ -47,7 +48,8 @@ flowchart TB
   H2 -->|"workspace-rules: WORKSPACE.md on stdout (plugin)"| W
   PU["claude plugin update — the next release into the plugin cache"] -.-> K
   H3 --> K
-  H4 -.->|"validate --changed --adopt · touch · brief"| EN
+  H4 -.->|"validate --changed --adopt · touch · brief · catalog refresh"| EN
+  MC -->|"every model write to a .context/ doc"| D1
 ```
 
 ## Reading the picture
@@ -74,6 +76,14 @@ flowchart TB
   `sync.sh` (`core.hooksPath`). On a plugin install `hooks/hooks.json` runs at `SessionStart`: `session-env`
   re-exports plugin `userConfig` identity as `WORKSPACE_*`, plus `CLAUDE_PROJECT_DIR` and `BATON`, and
   `workspace-rules` injects `WORKSPACE.md`. On both paths the ctx-store adapter (`context-db/bin/ctx_adapter.py`) runs
-  at `PostToolUse` and `SessionStart`, a silent no-op until ctx-store is installed and a store is named
-  (`docs/troubleshooting.md` § ctx-store hooks). A plugin install has no `sync.sh`: the kit moves with
+  at `PreToolUse`, `PostToolUse` and `SessionStart`, a silent no-op until ctx-store is installed and a store is named
+  (`docs/troubleshooting.md` § ctx-store hooks).
+- **Writes to the context DB go through ctx**: on an adopted store (`ctx_adapter.py adopt`, run once by `setup.sh`)
+  the model writes a `.context/` doc with the ctx MCP server's tools (`ctx_str_replace`, `ctx_insert`, `ctx_log`,
+  `ctx_fm`, `ctx_create`, `ctx_new`, `ctx_move`) — validated, locked and audited by ctx — and the `PreToolUse` hook
+  denies a direct `Write`/`Edit` of one. The index's skip dirs (`sessions/`, `state/`, `memory/`, …) stay directly
+  writable: `session.py` and the scripts own them. After every write the hooks touch the session's registry row and
+  regenerate `INDEX.md` and `SESSION_INDEX.md`, so no skill runs `make index` as bookkeeping. The server is the
+  plugin's `mcpServers` entry, or on a clone the workspace root's `.mcp.json` (`setup.sh` adds it,
+  `settings.json` approves it); both start `ctx_adapter.py mcp`, which runs the pinned `ctx mcp` on the content root. A plugin install has no `sync.sh`: the kit moves with
   `claude plugin update` (`docs/sync.md`).

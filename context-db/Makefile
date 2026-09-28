@@ -6,7 +6,7 @@
 # These targets create, index, verify, and find docs.
 #
 #   make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
-#   make -C $BATON/context-db index          # regenerate INDEX.md (run after any change)
+#   make -C $BATON/context-db index          # regenerate INDEX.md (the PostToolUse hook runs it after every change)
 #   make -C $BATON/context-db verify         # validate frontmatter + INDEX freshness (CI-style gate)
 #   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
 #   make -C $BATON/context-db find DOMAIN=<domain>    # docs in a domain
@@ -15,7 +15,7 @@
 # Live session registry (who is working on what, right now — see SESSION_INDEX.md):
 #   make -C $BATON/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
 #                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
-#   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat (also on every flush)
+#   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
 #   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
 #   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
 #   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)

@@ -18,10 +18,10 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't lo
 
 1. **Find first:** read `.context/INDEX.md` (the generated catalog) and open only the leaf docs the
    task needs. Narrow with `make -C $BATON/context-db find DOMAIN=<domain>` or `find TAG=<tag>`.
-2. **Persist:** `make -C $BATON/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug> TITLE="…"`
-   (types: `.context/README.md`), edit the
-   scaffold, then `make -C $BATON/context-db index` (also after any hand edit); `make -C
-   $BATON/context-db verify` is the schema/freshness gate.
+2. **Persist:** new doc `make -C $BATON/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug>
+   TITLE="…"` (types: `.context/README.md`). **Writes to `.context/` docs go through ctx tools** —
+   `ctx_str_replace`, `ctx_insert`, `ctx_log`, `ctx_fm`, `ctx_create` (Bash: `ctx_adapter.py ctx
+   <verb>`); `Write`/`Edit` is denied. Hooks validate and re-index.
 3. **Domains are folders:** core `reference/`, `repos/`, `pr-reviews/`, `meetings/`, `1on1/`,
    `self-assessment/`, `on-call/`, `archive/`; the environment adds its own (`domains` in the env
    config). Repo deep-dives are `.context/repos/<repo>.md` (links + TLDRs; the repo's own `CLAUDE.md`
@@ -130,8 +130,7 @@ or the tool list re-bills every open session in full next turn — **batch alway
   read/classify, Sonnet for a specified fix, Opus for judgment/security. The main model reviews
   each diff and keeps every PR, post, merge and flush. Brief: `docs/delegation.md`. Heartbeats: shell, no `/loop`.
 - **Flush at every step.** When a ticket/PR/epic step lands: context doc (Session log + section), tick
-  `.context/reference/priorities.md` where it exists, `make -C $BATON/context-db index`, then
-  `session-touch NAME=<name>`; the `MEMORY.md` index if a memory note changed.
+  `.context/reference/priorities.md` where it exists; the `MEMORY.md` index if a memory note changed.
 - **Scope → flush → end.** Work a ticket/PR, flush, end the session. Don't wake other sessions
   needlessly — coordinate through the registry and context doc.
 

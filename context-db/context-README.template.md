@@ -17,7 +17,7 @@ of reading everything into context every session.
   is the row's columns.
 - **[`INDEX.md`](INDEX.md) is the materialized catalog** — generated from all frontmatter,
   grouped by domain. **Read it first** (it's cheap), then open only the leaf docs your task
-  needs. Never hand-edit it; regenerate with `make index`.
+  needs. Never hand-edit it: the kit's hook regenerates it after every change (`make index` by hand).
 - **The `Makefile` is the CLI** (see below). Claude creates, indexes, verifies, finds, and
   archives docs through it, then "manages however it wants" within these conventions. The
   engine (`Makefile` + `bin/` + `_templates/`) lives **outside** this dir, at
@@ -36,11 +36,11 @@ make -C $BATON/context-db find TAG=pii          # docs carrying a tag
 
 # create durable knowledge
 make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
-#   … edit the scaffolded doc …        # index regenerates automatically on `new`
+#   … fill it through the ctx tools …   # ctx_str_replace · ctx_insert · ctx_log · ctx_fm · ctx_create
 
-# after editing any doc by hand
+# the kit's hooks validate every write and refresh the catalog; by hand:
 make -C $BATON/context-db index                 # refresh the catalog
-make -C $BATON/context-db verify                # schema + freshness gate (use before finishing)
+make -C $BATON/context-db verify                # schema + freshness gate
 
 # retire a doc
 make -C $BATON/context-db archive SLUG=opine    # flips status: archived (stays queryable)

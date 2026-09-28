@@ -31,6 +31,18 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py\" hook pre-tool-use 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit",
@@ -40,6 +52,17 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py\" hook post-tool-use 2>/dev/null || true",
             "timeout": 10
           },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py\" hook post-tool-use-async 2>/dev/null || true",
+            "timeout": 30,
+            "async": true
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*ctx__ctx_.*",
+        "hooks": [
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py\" hook post-tool-use-async 2>/dev/null || true",

@@ -36,8 +36,8 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Evidence (tier 1)** — `.review/evidence.md`, written by `review_evidence.py` for the CI reviewer: the changed
   units with their `requires` sets, the tier-0 verdict and the pre-flagged lines; the rules beside it are copied
   from the base branch.
-- **Flush** — writing durable state to disk when a step lands: the context doc's Session log and section,
-  `make -C $BATON/context-db index`, `session-touch`, the memory index if a note changed. The guard against
+- **Flush** — writing durable state to disk when a step lands: the context doc's Session log and section
+  (through the ctx tools; the hooks re-index and touch the registry row), the memory index if a note changed. The guard against
   compaction drift (`WORKSPACE.md` § Cost & context hygiene).
 - **Fork** — a skill with `context: fork` runs its body in a subagent under the agent its `agent:` key names
   (`triage`, `review-runner`, `auto-runner`); it returns a brief and never acts, so its reading stays out of the main

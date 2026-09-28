@@ -41,15 +41,16 @@ the next `session-register` so a refused pull is never silent for long. `docs/sy
 the full state table; to see a failure immediately rather than at the next registration, run
 `sh $BATON/sync.sh` yourself from the workspace root.
 
-### ctx-store hooks (`PostToolUse`, `SessionStart` briefs — both install paths)
+### ctx-store hooks (`PreToolUse` deny, `PostToolUse`, `SessionStart` briefs — both install paths)
 
 `hooks/hooks.json` (plugin) and `settings.json` (clone) also run the ctx-store adapter,
 `context-db/bin/ctx_adapter.py` (`docs/engine-cli.md`), which calls ctx-store's `ctx` through its verbs only:
 
 | Event | Call |
 |---|---|
+| `PreToolUse` on `Write`/`Edit`/`MultiEdit`/`NotebookEdit` of a `*.md` doc under an adopted content root | deny, with a reason that names the ctx tool to use; exempt: the index's skip dirs (`bin _templates sessions handoff memory state`), dot dirs, `INDEX.md`/`SESSION_INDEX.md` and what the store settings ignore (`README.md`). Not adopted, ctx missing, or any adapter error: no decision |
 | `PostToolUse` on `Write`/`Edit`/`MultiEdit`/`NotebookEdit` of a file under the content root | `ctx validate --changed --adopt`, synchronous; findings come back as the hook's `systemMessage` (a `ctx validate: …` line); any other failure except `NO_STORE`, a timeout included, comes back as `ctx validate did not run: <first error line>`, so validation never stops unnoticed |
-| the same, `async` | `ctx touch --session <session_id>`: the heartbeat of the registry row `session register` stamped with the harness session id |
+| the same, `async`, and a write through a ctx MCP tool | `ctx touch --session <session_id>`: the heartbeat of the registry row `session register` stamped with the harness session id; then `INDEX.md` and `SESSION_INDEX.md` are regenerated (`gen_index.py`, `gen_sessions.py --no-archive` — with or without ctx; a failure is logged to `hooks.log` in the scratch dir) |
 | `SessionStart` `startup`/`resume`/`clear` | `ctx brief --registry`, byte-budgeted, into the session's context |
 | `SessionStart` `compact` | `ctx brief --session <session_id>`, byte-budgeted |
 
@@ -58,6 +59,15 @@ that has not adopted ctx-store sees nothing. The adapter names the store with `C
 `--store <content root>`. To check it: `python3 $BATON/context-db/bin/ctx_adapter.py where` (exit 1 says what is
 missing), `… install` fetches the pinned tag, `KIT_CTX` points at another `ctx` (`docs/env-vars.md`). Changes made
 through `Bash` are not seen by the hook; the next hooked write's `validate --changed` picks them up.
+
+**"`<doc>` is a doc in the adopted ctx store … may not write it"** — the `PreToolUse` deny. Nothing is broken: write
+the doc through the ctx MCP tools the reason names (`ctx_str_replace` for an `Edit`, `ctx_create` or `ctx_new` for
+a `Write`, `ctx_log` for a Session-log line, `ctx_fm` for a frontmatter field), keyed by the path without `.md`.
+When the session has no ctx tools (`/mcp` does not list `ctx` — restart after a plugin update, or on a clone
+re-run `setup.sh`, which adds the server to the workspace `.mcp.json`), the same verbs run from Bash:
+`python3 $BATON/context-db/bin/ctx_adapter.py ctx str_replace <key> --old "…" --new "…"` (`ctx help <verb>`). A
+ctx tool answering `NO_STORE` means the store is not adopted: `python3 $BATON/context-db/bin/ctx_adapter.py adopt`
+(once; it writes the kit's store settings where there are none and never overwrites; `/kit-health` § 5 reports it).
 
 ## 2. Start here: `/kit-health`
 

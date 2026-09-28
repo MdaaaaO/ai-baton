@@ -2,7 +2,7 @@
 name: self-assessment
 description: "Composes the user's weekly self-assessment for a past ISO week or range from `.context/` and the systems of record, never live sessions: the week file plus the report block and ledger card the env config asks for, back-filled where `.context/` lacks coverage. Invoke as \"self-assessment for last week\" or \"for W37\"."
 metadata:
-  version: "16"
+  version: "17"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "self_assessment.ledger,self_assessment.ledger_url,self_assessment.sections"
@@ -123,8 +123,10 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      statement beats a precise wrong one.
 5. **Compose `weeks/YYYY-Wnn.md`** in the charter's fixed format
    (`make -C $BATON/context-db new TYPE=self-assessment DOMAIN=self-assessment SLUG=YYYY-Wnn` if the file is
-   new — it always scaffolds into `weeks/`, creating that folder the first time — else edit). Set **`status: archived`** in the
-   frontmatter once the week is reconciled — a completed week is a closed record and this self-exempts it from
+   new — it always scaffolds into `weeks/`, creating that folder the first time), then write it through the ctx
+   tools (doc key `self-assessment/weeks/YYYY-Wnn`: `ctx_str_replace` / `ctx_insert`, or `ctx_create` with the
+   whole text; a direct `Write`/`Edit` is denied). Set **`status: archived`** (`ctx_fm <key> status archived`)
+   once the week is reconciled — a completed week is a closed record and this self-exempts it from
    the 30KB verify guardrail. A mid-week compose stays `status: active` and says **"week in progress — re-run
    Mon <date>"** in its banner; the Monday re-run folds the weekend, re-verifies every status claim and flips it.
    - **The report block's sections, in order and with their headings verbatim, come from
@@ -138,10 +140,10 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      week.") rather than dropping the heading — the ledger card and the form both expect it.
 6. **Index + initiatives.** Add/refresh the week's row in the README index; update (or, for
    initiatives no live session owns, gap-fill) the `initiatives/<slug>.md` arcs the week touched; a
-   new multi-week effort gets a new initiative doc.
-7. **Move processed drops** to `inbox/archive/`.
-8. **`make -C $BATON/context-db index && make -C $BATON/context-db verify`** (the week file should NOT appear in the
-   >30KB warning — it's `status: archived`).
+   new multi-week effort gets a new initiative doc — all through the ctx tools, as in step 5.
+7. **Move processed drops** to `inbox/archive/` (`ctx_move <key> <new key>`).
+8. **`make -C $BATON/context-db verify`** — the final gate; the hooks already re-indexed (the week file should
+   NOT appear in the >30KB warning — it's `status: archived`).
 9. **Deliver per `self_assessment.report`:**
    - `lattice` (needs `systems.lattice`) — hand the user the paste-ready block at the end of the week file (the
      review tool has no connector; they paste it into the form its bot DM (`WORKSPACE_SLACK_LATTICE_DM`) links

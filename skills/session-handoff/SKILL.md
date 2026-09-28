@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -20,12 +20,17 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 1. **Context doc** — the initiative's local living doc in its domain folder (the `.context/` file,
    *not* the tracker epic; e.g. `.context/<domain>/<key>-<slug>.md` or `.context/<domain>/epics/<slug>.md`) — find it in
    `.context/INDEX.md` or with `make -C $BATON/context-db find DOMAIN=<domain>`:
-   - Add a dated one-liner to the **Session log** (newest first).
+   Every write below goes through the ctx tools (`WORKSPACE.md` § The `.context/` DB; a direct `Write`/`Edit`
+   of a context doc is denied), keyed by the doc's path without `.md`:
+   - Add a dated one-liner to the **Session log**: `ctx_log` with the doc key and the text (the epic type
+     puts it first — newest first — and dates it).
    - Update the relevant fixed section (*What was built* — PRs per repo; *Key decisions & gotchas*;
-     *Infra/secrets locations*; *Remaining work*) with anything durable you learned or shipped. Keep
+     *Infra/secrets locations*; *Remaining work*) with anything durable you learned or shipped
+     (`ctx_str_replace` of the exact old text, or `ctx_insert` after a line). Keep
      the doc lean — long history goes to `.context/archive/<slug>-log.md`.
    - **Cap the Session log.** Keep only the newest entries in the doc (roughly the last few days,
-     ~6 max); move the older tail verbatim to `.context/archive/<slug>-log.md` (newest-first).
+     ~6 max); move the older tail verbatim to `.context/archive/<slug>-log.md` (newest-first):
+     `ctx_insert` it there (`ctx_create` when the archive doc is new), then `ctx_str_replace` it out.
      `make -C $BATON/context-db verify` warns when an active doc tops **30KB** — an oversized doc thrashes
      any session that re-reads it after a compact, so split it when you see the warning (or before).
    - Reference every ticket/PR as a clickable link (§ Rules).
@@ -33,13 +38,14 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    and add the next step if one emerged (an environment without that file skips this step).
 3. **Task-specific docs** — if you did a PR review, update `.context/pr-reviews/<repo>.md`
    and its README; if on-call, append `.context/on-call/rotations/<week>.md`; if it's Thursday and
-   you're the self-assessment session, append `.context/self-assessment/weeks/<week>.md`. New docs
-   are created with `make -C $BATON/context-db new TYPE=… DOMAIN=… SLUG=…`.
+   you're the self-assessment session, append `.context/self-assessment/weeks/<week>.md` — through the ctx
+   tools as in step 1. New docs are created with `make -C $BATON/context-db new TYPE=… DOMAIN=… SLUG=…`.
 4. **Memory** — only if a *situational* fact worth recalling emerged (not an always-on rule — those
    go to `WORKSPACE.md` § Rules). Write or update the note **and** add or fix its one-line entry in
    `MEMORY.md`. Prefer updating an existing note over adding a duplicate; delete notes proven wrong.
-5. **Index integrity** — after adding or editing any `.context/` doc, run `make -C $BATON/context-db index`
-   (regenerates `INDEX.md`) and `make -C $BATON/context-db verify` (schema + freshness gate). If you added a
+5. **Index integrity** — nothing to run: after every `.context/` write the kit's hooks validate the doc,
+   regenerate `INDEX.md` and `SESSION_INDEX.md` and touch your registry row. A `ctx validate: …` system
+   message after a write is a finding — fix it now. If you added a
    skill, add its trigger to `WORKSPACE.md` § Skills. If you added a memory note, confirm it has a
    `MEMORY.md` line (no orphans). Every `[[wikilink]]` should resolve.
 6. **Signing** — only where the env config has `systems.signed_commits: true`: pending commits go through

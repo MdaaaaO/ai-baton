@@ -46,11 +46,14 @@ step 3 fills your identity and your repos without a question.
    GitHub-only machine: GitHub issues as the tracker, your clones as the tracked repos, every `systems.*` false),
    `.context/` with its README and index, the memory symlink, `.context/state/pr-review/config.json`,
    `<root>/.claude/settings.local.json` and a root `CLAUDE.md` that imports `.context/reference/environment.md`. It
-   writes no `Makefile` and no `@.claude/WORKSPACE.md` import. Existing files are reported, never changed; the command
+   writes no `Makefile` and no `@.claude/WORKSPACE.md` import. When the pinned ctx-store is installed
+   (`python3 $BATON/context-db/bin/ctx_adapter.py install`) it also adopts `.context/` as a ctx store
+   (`ctx_adapter.py adopt`), after which writes to `.context/` docs go through the plugin's `ctx` MCP tools; without it,
+   it prints those two commands. Existing files are reported, never changed; the command
    is safe to re-run. When the workspace root is a git repository, add `.claude/settings.local.json` to its
    `.gitignore` (the script warns until you do).
 
-4. **Restart Claude Code in the workspace root.** Skills, agents and the plugin's SessionStart hook load at startup.
+4. **Restart Claude Code in the workspace root.** Skills, agents, the plugin's hooks and its `ctx` MCP server load at startup.
    The hook exports `BATON` (the plugin root), `CLAUDE_PROJECT_DIR` and your identity to every Bash command, and
    prints `WORKSPACE.md` into the session — only in a workspace that has an env store.
 
@@ -103,7 +106,9 @@ claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@a
 Then restart Claude Code and run `/kit-health`: it re-stamps `HEALTH-<env>.md` with the new `kit_version`, and § 6
 lists the units that changed. `/kit-health` also warns when a newer release is out and prints the command above.
 `setup.sh` needs no re-run; the step 3 line with `--refresh-seeds` added shows how your seeded files differ from
-the current templates.
+the current templates. The one exception so far: a workspace from before writes went through ctx-store adopts its
+store once, with `python3 $BATON/context-db/bin/ctx_adapter.py adopt` (or a `setup.sh` re-run); `/kit-health` § 5
+reports a store that is not adopted.
 
 ## Switching from a clone
 
