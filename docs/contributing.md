@@ -180,6 +180,11 @@ Three kinds of value, three homes — never a fourth:
   manager. A `userConfig` entry is never a token, `sensitive: true` or not; a settings file is never a token.
   `kit-health` § 2 scans the kit for the shapes; the leak scan covers identity values from both sources.
 
+A script that starts reading a new environment variable, or a new `config.json` key through `kit_profile.py
+get`, updates `docs/env-vars.md` (a row: name, default, reader, purpose, scope) and, for a config key, the
+shape in `environment-template/config.json` or a discovery manifest. `context-db/tests/test_env_vars.py`
+enforces both — an undocumented read or a stale row fails CI.
+
 ## Releases
 
 The kit is released with [conventional-release](https://github.com/MdaaaaO/conventional-release) — no
