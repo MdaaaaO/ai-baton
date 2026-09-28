@@ -34,7 +34,7 @@ creates it on first use. Job logs live alongside it, at
 
 ## Sources
 
-- `skills/sign-queue/signq.py` lines ~42–55 (`KIT`, `Q`, `LEGACY_Q` — the location and the (#7) migration
+- `skills/sign-queue/signq.py` (`KIT`, `Q`, `LEGACY_Q` — the location and the (#7) migration
   comment) and the `migrate`-on-run logic
 - `skills/sign-queue/README.md` (**Needs** / queue location paragraph)
 - `skills/sign-queue/SKILL.md` § User side — drain (job-file location, `logs/`) and § Why (the owner
