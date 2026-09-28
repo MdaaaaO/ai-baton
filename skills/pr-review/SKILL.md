@@ -5,6 +5,7 @@ metadata:
   version: "16"
   updated: "2026-09-27"
   reviewed: "2026-09-26"
+  facts: "systems.jira,systems.datalake,systems.slack"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
 ---
 

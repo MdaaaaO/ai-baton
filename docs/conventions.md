@@ -3,7 +3,8 @@
 Six rules that let one kit run on any machine without a fork. The values they keep out of the kit live in the
 env store (`docs/env-facts.md`); the file map is `docs/layout.md`.
 
-- **Kit paths are `$BATON/…`, workspace paths are relative to the workspace root.** The kit lives in
+- **Kit paths are `$BATON/…`, workspace paths are relative to the workspace root.** (`$BATON` — the kit root,
+  `docs/glossary.md`.) The kit lives in
   `.claude/` on a clone and in Claude Code's plugin cache on a plugin install, so docs and unit bodies say
   `$BATON/skills/pr-watch/pr-watch.sh`, never `.claude/…` and never an absolute path (`docs/packaging.md`
   § Kit root). Sessions run in the workspace root, so its own files are plain relative paths
@@ -16,7 +17,7 @@ env store (`docs/env-facts.md`); the file map is `docs/layout.md`.
   secure storage, never in a JSON file) and a SessionStart hook re-exports them as `WORKSPACE_*` for Bash; on a
   clone they are the `env` of the ignored `settings.local.json`, merged into every Bash, hook and subagent
   environment. `kit_profile.identity()` reads the option first, then the variable, so a value typed into
-  `/config` wins over a stale file. Tokens go in neither (docs/contributing.md § Secrets). `pr-watch.sh` drops your own events via `WORKSPACE_GITHUB_LOGIN`,
+  `/plugin configure ai-baton` wins over a stale file. Tokens go in neither (docs/contributing.md § Secrets). `pr-watch.sh` drops your own events via `WORKSPACE_GITHUB_LOGIN`,
   `enqueue.sh` stamps `--by "$WORKSPACE_USER"`, the session registry renders times in
   `WORKSPACE_TZ`. Skill prose says "the user", never a name.
 - **Environment facts come from the env store, never from a skill.** Anything that differs between

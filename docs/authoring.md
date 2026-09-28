@@ -12,13 +12,13 @@ bookkeeping goes under `metadata:` as **double-quoted strings** (`migrate_frontm
 | key | who | rule (`kit_verify.py`) |
 |---|---|---|
 | `name` | required | equals the skill's directory name / the agent's file stem |
-| `description` | required | the trigger: `<what>. Use when <situations>. Not for <near misses>.` — ≤ 60 whitespace tokens (`DESC_MAX_WORDS`), ≤ 400 B (`DESC_MAX_BYTES`), all units ≤ 9,500 B together (`DESC_TOTAL_BYTES`); no `(<env>) ` prefix |
+| `description` | required | the trigger: `<what>. Use when <situations>. Not for <near misses>.` — ≤ 60 whitespace tokens (`DESC_MAX_WORDS`), ≤ 400 B (`DESC_MAX_BYTES`), all units ≤ 9,500 B together (`DESC_TOTAL_BYTES`, warns past 90%); no `(<env>) ` prefix. Warns (an error from the next release) when it names no trigger (`when`) or reads in the first person |
 | `metadata.version` | required | an integer string, bumped on every behaviour change |
 | `metadata.updated` | required | `YYYY-MM-DD` of that change (`review_gate.py`: on or after the base's when a file of the unit changed) |
-| `metadata.reviewed` | required | `YYYY-MM-DD` the unit was last re-read; `kit-verify --stale N` warns past N days |
+| `metadata.reviewed` | required | `YYYY-MM-DD` the unit was last re-read; `kit-verify --stale N` warns past N days; always warns when older than the file's last committed edit (`--no-git` skips) |
 | `metadata.requires` | capability tier | comma-separated `systems.*` flags from `kb.SYSTEMS` (`jira slack notion datalake airflow dbt aws_sso incident_io lattice signed_commits`) — the only gate a unit carries |
 | `compatibility` | with `requires` | `"Designed for Claude Code; needs <flag>[, <flag>] (systems.*)"` — names every required flag, ≤ 500 chars |
-| `metadata.facts` | when the body reads a fact | comma-separated `<system>.<kind>[ <name>]` or `<config.key>` entries, each covered by a manifest in `context-db/discovery/` (a fact without one fails) |
+| `metadata.facts` | when the body reads a fact | comma-separated `<system>.<kind>[ <name>]` or `<config.key>` entries, each covered by a manifest in `context-db/discovery/` (a fact without one fails); a `systems.<flag>` entry needs no manifest, only a real flag. Every `kit_profile.py get` / `kb.py get` in the body must be declared here, or `kit-verify` fails |
 | `license` `allowed-tools` | spec | accepted; `license` is added once the repo has one |
 | `user-invocable` | Claude Code | `true` offers `/name`; absent = auto-trigger only |
 | `argument-hint` `arguments` | Claude Code | the `/name` argument line (`<owner/repo> <pr>`) and the named positionals the body reads as `$repo` |

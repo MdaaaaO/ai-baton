@@ -746,7 +746,7 @@ def discover_plan(key: str, name: str, cfg: dict) -> str:
         out.append(f"check:   is `{args.get('tool')}` among this session's tools → true / false")
         prov = "tool:roster"
     elif tool == "settings":
-        out.append(f"read:    `{args.get('key')}` from the shell environment (WORKSPACE_* identity: plugin /config option, else .claude/settings.local.json)")
+        out.append(f"read:    `{args.get('key')}` from the shell environment (WORKSPACE_* identity: `/plugin configure ai-baton`, else .claude/settings.local.json)")
         prov = "tool:settings"
     elif tool == "derive":
         out.append(f"derive:  from `{args.get('from')}`" + (f" with template {args['template']}" if args.get("template") else ""))
