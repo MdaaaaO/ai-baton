@@ -11,8 +11,8 @@
                                         emit the META JSON line enqueue.sh embeds in a job
     signq.py migrate-legacy             move jobs/logs a pre-workspace-queue kit queued under the kit dir
                                         into the workspace queue and print what moved; a no-op otherwise.
-                                        Never runs as a side effect of another subcommand — setup.sh /
-                                        sync.sh call it once so a stray `list` or `meta` can't move files.
+                                        Never runs as a side effect of another subcommand — `make sign` /
+                                        `make sign_list` run it first (`-q`: silent unless files move).
 
 <job> is the 1-based index from `list`, the topic, or the file name. Jobs are self-contained POSIX sh
 scripts under .context/state/sign-queue/ (written by enqueue.sh). A job carries one `# META {...}` line with
