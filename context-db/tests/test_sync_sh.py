@@ -8,6 +8,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -15,13 +16,14 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parents[2]
 SH = shutil.which("sh") or "/bin/sh"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tests import hermetic_env  # noqa: E402
 
 
 def _env(home: Path, path: str | None = None) -> dict:
-    env = {k: v for k, v in os.environ.items() if "proxy" not in k.lower() and not k.startswith("GIT_")}
-    env.update(HOME=str(home), GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0",
-               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t",
-               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t")
+    """hermetic_env(home) with any inherited proxy variable stripped too — sync.sh's own concern, not
+    hermetic_env's — and PATH pinned when a caller (the "no `timeout` binary" scenario) needs one without it."""
+    env = {k: v for k, v in hermetic_env(home).items() if "proxy" not in k.lower()}
     if path is not None:
         env["PATH"] = path
     return env

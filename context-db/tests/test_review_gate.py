@@ -18,8 +18,10 @@ HERE = Path(__file__).resolve().parent
 BIN = HERE.parent / "bin"
 KIT = HERE.parents[1]
 sys.path.insert(0, str(BIN))
+sys.path.insert(0, str(HERE.parent))
 import review_evidence as evidence  # noqa: E402
 import review_gate as gate  # noqa: E402
+from tests import hermetic_env  # noqa: E402
 
 LEAK = "C0" + "AB12CD3EF"  # Slack-shaped, assembled
 TOKEN = "ghp_" + "A" * 24
@@ -41,7 +43,9 @@ metadata:
 
 
 def sh(cwd: Path, *args: str) -> str:
-    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    # env=hermetic_env(cwd): every fixture repo commits against its own throw-away HOME, never the host's real
+    # one, so a host's own commit.gpgsign / gpg.format can never fail this suite.
+    r = subprocess.run(args, cwd=cwd, env=hermetic_env(cwd), capture_output=True, text=True)
     if r.returncode != 0:
         raise AssertionError(f"{args}: {r.stderr}")
     return r.stdout
