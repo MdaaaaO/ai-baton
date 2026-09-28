@@ -110,7 +110,8 @@ class ContextRoot(unittest.TestCase):
             (ws / ".context" / "reference" / "env").mkdir(parents=True)
             (ws / ".context" / "reference" / "env" / "config.json").write_text("{}", encoding="utf-8")
             (ws / "repo" / "src").mkdir(parents=True)
-            self.assertEqual(self.resolve(kit, ws / "repo" / "src", {}), ws / ".context")  # walks up from a repo dir
+            # the walk-up resolves cwd (symlinks, and macOS's /var -> /private/var) before comparing ancestors
+            self.assertEqual(self.resolve(kit, ws / "repo" / "src", {}), (ws / ".context").resolve())  # walks up from a repo dir
             self.assertEqual(self.resolve(kit, Path(tmp), {"CLAUDE_PROJECT_DIR": str(ws)}), ws / ".context")  # the hook's export
             self.assertEqual(self.resolve(kit, Path(tmp), {}), kit.parent / ".context")  # nothing found: the old fallback
 
