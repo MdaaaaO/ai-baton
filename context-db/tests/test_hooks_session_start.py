@@ -1,9 +1,11 @@
-"""hooks/hooks.json's SessionStart command: idempotent against $CLAUDE_ENV_FILE across repeated
-runs — a hook fires on every session start and the file is not recreated between them, so a plain
-append accumulates one export block per start over weeks — and it logs a failing session-env or
-workspace-rules call instead of discarding it: a write that fails must say so on stdout, not vanish
-behind `2>/dev/null`. Fact-shaped literals are assembled at run time. Stdlib unittest.
-Run: make -C .claude/context-db test."""
+"""hooks/hooks.json's SessionStart command: its `# ai-baton session-env begin/end` block in
+$CLAUDE_ENV_FILE is replaced whole on every start (not skipped once written — a persisted env file
+must still pick up a changed CLAUDE_PROJECT_DIR, BATON or plugin option) while every other line in
+that file survives untouched, and a session-env failure leaves the file exactly as it was rather
+than writing a stale or half-written block. Its `hooks.log` never follows a symlink and never falls
+back to a $TMPDIR write when `kit_profile.py scratch` fails; nothing about any of that logging can
+stop `workspace-rules` — the always-on session rules — from running. Fact-shaped literals are
+assembled at run time. Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import json
 import os
@@ -18,7 +20,11 @@ KIT = HERE.parents[1]
 
 CMD = json.loads((KIT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]["SessionStart"][0]["hooks"][0]["command"]
 
-LOGIN = "octo-" + "tester"
+LOGIN_A = "octo-" + "tester"
+LOGIN_B = "octo-" + "tester-two"
+
+BEGIN = "# ai-baton session-env begin"
+END = "# ai-baton session-env end"
 
 
 def run(cmd: str, **env: str) -> subprocess.CompletedProcess:
@@ -26,23 +32,39 @@ def run(cmd: str, **env: str) -> subprocess.CompletedProcess:
     return subprocess.run(["sh", "-c", cmd], env={**base, **env}, capture_output=True, text=True)
 
 
-class SessionStartIsIdempotent(unittest.TestCase):
-    def test_running_twice_on_the_same_env_file_appends_the_block_once(self):
+class SessionStartReplacesItsBlock(unittest.TestCase):
+    def test_running_twice_with_the_same_value_leaves_one_block(self):
         with tempfile.TemporaryDirectory() as tmp:
             envfile = Path(tmp) / "env"
             kwargs = {"CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_ENV_FILE": str(envfile),
                       "CONTEXT_ROOT": "/nonexistent/.context", "KIT_SCRATCH": str(Path(tmp) / "scratch"),
-                      "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN}
-            r1 = run(CMD, **kwargs)
+                      "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN_A}
+            self.assertEqual(run(CMD, **kwargs).returncode, 0)
+            self.assertEqual(run(CMD, **kwargs).returncode, 0)
+            out = envfile.read_text(encoding="utf-8")
+            self.assertEqual(out.count(BEGIN), 1)
+            self.assertEqual(out.count(END), 1)
+            self.assertEqual(out.count(f"export WORKSPACE_GITHUB_LOGIN={LOGIN_A}"), 1)
+
+    def test_a_changed_value_replaces_the_block_and_other_lines_survive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            envfile = Path(tmp) / "env"
+            envfile.write_text("export SOMETHING_ELSE=kept\n", encoding="utf-8")
+            scratch = str(Path(tmp) / "scratch")
+            r1 = run(CMD, CLAUDE_PLUGIN_ROOT=str(KIT), CLAUDE_ENV_FILE=str(envfile), CONTEXT_ROOT="/nonexistent/.context",
+                      KIT_SCRATCH=scratch, CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN=LOGIN_A)
             self.assertEqual(r1.returncode, 0, r1.stderr)
-            first = envfile.read_text(encoding="utf-8")
-            self.assertEqual(first.count("export WORKSPACE_GITHUB_LOGIN"), 1)
-            # a second SessionStart on the very same file (nothing recreates it between sessions)
-            r2 = run(CMD, **kwargs)
+            # a later SessionStart with a changed plugin option (e.g. CLAUDE_PROJECT_DIR or an
+            # identity option changing between sessions) must not be skipped by a stale marker
+            r2 = run(CMD, CLAUDE_PLUGIN_ROOT=str(KIT), CLAUDE_ENV_FILE=str(envfile), CONTEXT_ROOT="/nonexistent/.context",
+                      KIT_SCRATCH=scratch, CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN=LOGIN_B)
             self.assertEqual(r2.returncode, 0, r2.stderr)
-            second = envfile.read_text(encoding="utf-8")
-            self.assertEqual(first, second)  # no duplicate block — the guard made this run a no-op
-            self.assertEqual(second.count("export WORKSPACE_GITHUB_LOGIN"), 1)
+            out = envfile.read_text(encoding="utf-8")
+            self.assertEqual(out.count(BEGIN), 1)  # exactly one block, not one appended per run
+            self.assertEqual(out.count(END), 1)
+            self.assertNotIn(f"export WORKSPACE_GITHUB_LOGIN={LOGIN_A}\n", out)  # the old line is gone, not shadowed
+            self.assertEqual(out.count(f"export WORKSPACE_GITHUB_LOGIN={LOGIN_B}"), 1)
+            self.assertIn("export SOMETHING_ELSE=kept", out)  # a line outside the block is untouched
 
     def test_no_env_file_is_still_a_quiet_no_op(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -51,7 +73,7 @@ class SessionStartIsIdempotent(unittest.TestCase):
             self.assertEqual((r.returncode, r.stdout), (0, ""))
 
 
-class SessionStartLogsFailures(unittest.TestCase):
+class SessionStartLoggingIsSafe(unittest.TestCase):
     def stub_kit(self, tmp: Path, *, scratch_fails: bool = False, ws_marker: str = "") -> Path:
         """A fake `$CLAUDE_PLUGIN_ROOT` whose kit_profile.py stands in for the real one: `scratch`
         either prints a real dir under $KIT_SCRATCH or fails outright (`scratch_fails`), `session-env`
@@ -93,37 +115,61 @@ class SessionStartLogsFailures(unittest.TestCase):
             self.assertTrue(log.is_file())
             self.assertIn("boom-from-session-env", log.read_text(encoding="utf-8"))
 
-    def test_a_broken_scratch_and_log_dir_still_lets_workspace_rules_run(self):
-        """`scratch` fails outright and the log directory it would fall back to is not even a
-        directory — the hook must still run `workspace-rules` and surface its output, not die on
-        the log-path redirect before getting there."""
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            fake_kit = self.stub_kit(tmp_path, scratch_fails=True, ws_marker="WORKSPACE-RULES-RAN")
-            blocked = tmp_path / "blocked"
-            blocked.touch()  # a FILE where the fallback log dir would need to be a directory
-            r = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), TMPDIR=str(blocked))
-            self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertIn("WORKSPACE-RULES-RAN", r.stdout)
-
-    def test_a_failed_session_env_does_not_block_a_later_successful_one(self):
-        """A session-env failure must not leave the `# ai-baton session-env` marker behind — the
-        next SessionStart has to retry, and once it succeeds the env file ends with exactly one
-        export block, not zero and not two."""
+    def test_a_failed_session_env_leaves_the_env_file_untouched_then_a_later_one_writes_one_block(self):
+        """A session-env failure must not write a half-written or stale block — the env file is
+        untouched — and the next SessionStart still retries; once it succeeds the file ends with
+        exactly one block, not zero and not two."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             fake_kit = self.stub_kit(tmp_path)
             envfile = tmp_path / "env"
+            envfile.write_text("export SOMETHING_ELSE=kept\n", encoding="utf-8")
+            before = envfile.read_text(encoding="utf-8")
             scratch = tmp_path / "scratch"
             r1 = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), CLAUDE_ENV_FILE=str(envfile),
                      KIT_SCRATCH=str(scratch), STUB_FAIL="1")
             self.assertEqual(r1.returncode, 0)
-            self.assertFalse(envfile.exists() and "# ai-baton session-env" in envfile.read_text(encoding="utf-8"))
+            self.assertEqual(envfile.read_text(encoding="utf-8"), before)  # untouched by the failed run
             r2 = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), CLAUDE_ENV_FILE=str(envfile), KIT_SCRATCH=str(scratch))
             self.assertEqual(r2.returncode, 0, r2.stderr)
             out = envfile.read_text(encoding="utf-8")
             self.assertEqual(out.count("export X=1"), 1)
-            self.assertEqual(out.count("# ai-baton session-env"), 1)
+            self.assertEqual(out.count(BEGIN), 1)
+            self.assertEqual(out.count(END), 1)
+            self.assertIn("export SOMETHING_ELSE=kept", out)
+
+    def test_scratch_failing_still_runs_workspace_rules_and_writes_nothing_under_tmpdir(self):
+        """`scratch` fails outright: the hook must still run `workspace-rules` and surface its
+        output, and — unlike the fix's first draft — must never fall back to writing under
+        $TMPDIR (a world-writable, shared directory)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_kit = self.stub_kit(tmp_path, scratch_fails=True, ws_marker="WORKSPACE-RULES-RAN")
+            fake_tmpdir = tmp_path / "tmpdir"
+            fake_tmpdir.mkdir()
+            r = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), TMPDIR=str(fake_tmpdir))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("WORKSPACE-RULES-RAN", r.stdout)
+            self.assertEqual(list(fake_tmpdir.iterdir()), [])  # nothing written under $TMPDIR
+
+    def test_a_symlinked_hooks_log_is_never_written_through(self):
+        """`hooks.log` being a symlink (planted by another user on a shared host, or left over from
+        something else) must not be followed — the hook logs to /dev/null instead of the symlink's
+        target, and the target is never created or modified."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_kit = self.stub_kit(tmp_path)
+            scratch = tmp_path / "scratch"
+            scratch.mkdir()
+            evil_target = tmp_path / "evil-target"
+            (scratch / "hooks.log").symlink_to(evil_target)
+            envfile = tmp_path / "env"
+            r = run(CMD, CLAUDE_PLUGIN_ROOT=str(fake_kit), CLAUDE_ENV_FILE=str(envfile),
+                    KIT_SCRATCH=str(scratch), STUB_FAIL="1")
+            self.assertEqual(r.returncode, 0)
+            self.assertFalse(evil_target.exists())  # the symlink was never followed for a write
+            self.assertTrue((scratch / "hooks.log").is_symlink())  # and was not replaced either
+            self.assertIn("no log available", r.stdout)  # no log path is named once it is a symlink
 
 
 if __name__ == "__main__":
