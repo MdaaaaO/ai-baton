@@ -13,7 +13,7 @@ Usage:
   sizing.py parse   <file|->                              → prints "model\\tdecision\\treason"
                                                               exit 1 no Sizing line in the body, 2 malformed
   sizing.py check   <file|->                              same exit codes; prints "ok · <model>, <decision>"
-  sizing.py format  <model> <delegate|main-session> "<reason>"   → the line text, exit 2 on a bad model/decision
+  sizing.py format  <model> "<delegate|main session>" "<reason>"   → the line text, exit 2 on a bad model/decision
   sizing.py models                                         → the accepted models, one per line
 """
 from __future__ import annotations
