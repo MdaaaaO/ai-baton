@@ -56,12 +56,14 @@ def migrate_text(text: str) -> tuple[str, list[str]]:
         else:
             entries.append((None, [line]))  # a comment or something the parser leaves alone
     top = {k: v for k, v in entries if k}
+    fm = fmt.parse_lines(lines)  # the canonical values — the one source for both what moves and what already exists
 
     # 2. what moves, as plain strings
     moved: dict[str, str] = {}
     for key in MOVED:
         if key in top:
-            raw = fmt.strip_comment(fmt.KEY.match(top[key][0]).group(2) or "")
+            v = fm.get(key, "")
+            raw = v if isinstance(v, str) else ""  # a bare key that opened a nested mapping carries no scalar value
             if key in ("requires", "facts"):
                 items = fmt.parse_csv(raw)
                 moved[key] = ",".join(sorted(items) if key == "requires" else items)
@@ -69,7 +71,7 @@ def migrate_text(text: str) -> tuple[str, list[str]]:
                 moved[key] = fmt.unquote(raw)
 
     # 3. the existing metadata block (moved keys never overwrite what is already there)
-    existing = fmt.meta(fmt.parse_lines(lines))
+    existing = fmt.meta(fm)
     meta_lines = [ln for ln in top.get("metadata", [])[1:] if ln.strip()]
     for key, val in moved.items():
         if key in existing:

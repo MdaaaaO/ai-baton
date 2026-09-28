@@ -37,7 +37,7 @@ Usage:
   kb.py discover --all | --check               → every manifest fact with its state here | validate manifests
   kb.py stale [--days N] [--check]             → tool/import/derived rows older than their manifest ttl_days
                                                  (N overrides every ttl); --check = exit 3 when any
-  kb.py migrate [--check]                      → bring the store up to the kit's schema: renamed system
+  kb.py migrate [--check | --off]               → bring the store up to the kit's schema: renamed system
                                                  flags moved (value kept), missing flags added (seeded from
                                                  their legacy flag, else false), rows under a renamed kind
                                                  (`slack.channels` → `slack.channel`) moved; prints the
@@ -159,36 +159,107 @@ def split_row(line: str) -> list[str] | None:
     return [unesc(c) for c in cells]
 
 
-def parse_doc(system: str) -> tuple[list[str], dict[str, dict[str, dict[str, str]]]]:
-    """Return (lines, {kind: {name: {column: value}}}) — rows are read, not modified."""
+# A file under the store is a system doc only when its name is this shape — README.md, a `_templates/`
+# entry (a directory, never matched by the *.md glob) and an editor backup (`slack.md~`, `#slack.md#`)
+# are prose or plumbing, never a table `all_facts()` should try to read. Must stay in sync with the
+# system-name grammar `doc_path()` enforces (letters, digits, `-`/`_`) — a hyphenated system doc still
+# has to round-trip through `all_facts()`, not just `get`/`set`.
+SYSTEM_FILE = re.compile(r"[a-z][a-z0-9_-]*\.md")
+
+# The heading line and the table header/separator it must be followed by for a `## <kind>` line to be
+# accepted as a fact-table section, exactly the grammar `new_doc()`/`table_header()` write.
+_HEADING = re.compile(r"^##\s+(\S+)\s*$")
+
+
+def _kind_heading(lines: list[str], i: int) -> str | None:
+    """The kind name when `lines[i]` opens a genuine fact-table section — the documented header
+    (`table_header()`) must follow directly, blank lines aside. Any other `## word` line is prose (a
+    hand-written note, a heading with no table under it yet) and is never a kind, so it can neither
+    absorb a table that happens to follow it nor (via a heading `_HEADING` fails to match) leave later
+    rows filed under whatever kind was open two sections back."""
+    m = _HEADING.match(lines[i])
+    if not m:
+        return None
+    j = i + 1
+    while j < len(lines) and lines[j].strip() == "":
+        j += 1
+    if j >= len(lines) or split_row(lines[j]) != list(COLUMNS):
+        return None
+    sep = split_row(lines[j + 1]) if j + 1 < len(lines) else None
+    if not sep or len(sep) != len(COLUMNS) or not all(re.fullmatch(r":?-+:?", c.strip()) for c in sep):
+        return None
+    return m.group(1)
+
+
+def _is_heading(line: str) -> bool:
+    """Any Markdown heading — a `## <kind>` table section, a `### `/`# ` title, or a multi-word `## `
+    line — ends whatever kind was open (a table never continues across one), whether or not it is
+    itself a kind (`_kind_heading` decides that)."""
+    return line.startswith("#")
+
+
+def parse_doc(system: str, warn: list[str] | None = None) -> tuple[list[str], dict[str, dict[str, dict[str, str]]]]:
+    """Return (lines, {kind: {name: {column: value}}}) — rows are read, not modified. A `## <kind>` heading
+    only opens a kind when the documented table header follows it directly (`_kind_heading`); any other
+    heading ends whatever kind was open, so a hand-written `## Notes` section can never absorb a table as
+    a bogus kind, and a heading a kind regex misses can never leave rows filed under an earlier kind. The
+    later row wins on a duplicate `name` within one kind (unchanged), but pass `warn` (a list) to also
+    collect one `<file>:<line>: …` line per such heading and per duplicate, so a caller can report them."""
     p = doc_path(system)
     if not p.is_file():
         return [], {}
     lines = p.read_text(encoding="utf-8").split("\n")
     facts: dict[str, dict[str, dict[str, str]]] = {}
+    first_line: dict[str, dict[str, int]] = {}
     kind = ""
-    for line in lines:
-        m = re.match(r"^##\s+(\S+)\s*$", line)
-        if m:
-            kind = m.group(1)
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        kh = _kind_heading(lines, i)
+        if kh is not None:
+            kind = kh
             facts.setdefault(kind, {})
+            first_line.setdefault(kind, {})
+            i += 1
+            continue
+        if _is_heading(line):
+            m = _HEADING.match(line)
+            if m and warn is not None:
+                warn.append(f"{p.name}:{i + 1}: '## {m.group(1)}' has no |{'|'.join(COLUMNS)}| table right "
+                            "after it — read as prose, not a fact kind")
+            kind = ""
+            i += 1
             continue
         cells = split_row(line)
         if not kind or cells is None or len(cells) < 2:
+            i += 1
             continue
         if cells[0] in ("name", "---") or set(cells[0]) <= {"-", ":", " "}:
+            i += 1
             continue
-        row = {c: (cells[i] if i < len(cells) else "") for i, c in enumerate(COLUMNS)}
+        row = {c: (cells[idx] if idx < len(cells) else "") for idx, c in enumerate(COLUMNS)}
         if row["name"]:
+            if row["name"] in facts[kind] and warn is not None:
+                warn.append(f"{p.name}:{i + 1}: duplicate row name {row['name']!r} under ## {kind} "
+                            f"(first at line {first_line[kind][row['name']]}) — the later row wins")
+            first_line[kind].setdefault(row["name"], i + 1)
             facts[kind][row["name"]] = row
+        i += 1
     return lines, facts
 
 
-def all_facts() -> dict[str, dict[str, dict[str, dict[str, str]]]]:
+def all_facts(warn: list[str] | None = None) -> dict[str, dict[str, dict[str, dict[str, str]]]]:
+    """Every system's facts, keyed by system name. Only files matching `SYSTEM_FILE` are read as systems;
+    anything else under the store (`README.md`, an editor backup, a stray note) is skipped, never fed to
+    `parse_doc` — pass `warn` to also collect one line per file skipped and per malformed table found."""
     out = {}
     if ENV.is_dir():
         for p in sorted(ENV.glob("*.md")):
-            _, facts = parse_doc(p.stem)
+            if not SYSTEM_FILE.fullmatch(p.name):
+                if warn is not None:
+                    warn.append(f"{p.name}: not a system doc name ({SYSTEM_FILE.pattern}) — skipped")
+                continue
+            _, facts = parse_doc(p.stem, warn=warn)
             if facts:
                 out[p.stem] = facts
     return out
@@ -272,6 +343,13 @@ def usage_error(msg: str) -> "SystemExit":
     return SystemExit(2)
 
 
+def print_warnings(warn: list[str]) -> None:
+    """The `all_facts()`/`parse_doc()` warnings (a skipped file, a heading with no table, a duplicate row
+    name) — printed on stderr so a store problem is reported instead of silently changing what a read returns."""
+    for w in warn:
+        print(f"kb: {w}", file=sys.stderr)
+
+
 def write_doc(system: str, lines: list[str]) -> None:
     """Write a system doc back and re-stamp its `updated:` — every row write (set, rm, migrate) goes through here."""
     text = "\n".join(lines)
@@ -312,9 +390,12 @@ def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", l
         # replace in place
         in_kind = False
         for i, line in enumerate(lines):
-            m = re.match(r"^##\s+(\S+)\s*$", line)
-            if m:
-                in_kind = m.group(1) == kind
+            kh = _kind_heading(lines, i)
+            if kh is not None:
+                in_kind = kh == kind
+                continue
+            if _is_heading(line):
+                in_kind = False
                 continue
             cells = split_row(line) if in_kind else None
             if cells and cells[0] == name:
@@ -330,25 +411,27 @@ def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", l
                 lines.pop()
             lines += ["", f"## {kind}", "", *table_header().split("\n"), new_row, ""]
         else:
-            # insert after the last row of that section
+            # insert after the last row of that section — `kind in facts` only holds once `_kind_heading`
+            # has confirmed a header + separator follow the heading, and this same scan meets that same
+            # header/separator (both satisfy `split_row(...) is not None`), so `last` is always set by
+            # the time the loop below ends; there is no "section without a table yet" case to fall back to.
             in_kind = False
             last = None
             for i, line in enumerate(lines):
-                m = re.match(r"^##\s+(\S+)\s*$", line)
-                if m:
+                kh = _kind_heading(lines, i)
+                if kh is not None:
                     if in_kind:
                         break
-                    in_kind = m.group(1) == kind
+                    in_kind = kh == kind
+                    continue
+                if _is_heading(line):
+                    if in_kind:
+                        break
                     continue
                 if in_kind and split_row(line) is not None:
                     last = i
-            if last is None:  # section without a table yet
-                for i, line in enumerate(lines):
-                    if re.match(rf"^##\s+{re.escape(kind)}\s*$", line):
-                        lines[i + 1:i + 1] = ["", *table_header().split("\n"), new_row]
-                        break
-            else:
-                lines.insert(last + 1, new_row)
+            assert last is not None, f"{system}.{kind}: header/separator missing for a kind already in facts"
+            lines.insert(last + 1, new_row)
         result = "added"
     write_doc(system, lines)
     return result
@@ -376,10 +459,12 @@ def rm_fact_report(system: str, kind: str, name: str) -> tuple[str | None, list[
         return None, []
     in_kind = False
     out = []
-    for line in lines:
-        m = re.match(r"^##\s+(\S+)\s*$", line)
-        if m:
-            in_kind = m.group(1) in headings
+    for i, line in enumerate(lines):
+        kh = _kind_heading(lines, i)
+        if kh is not None:
+            in_kind = kh in headings
+        elif _is_heading(line):
+            in_kind = False
         cells = split_row(line) if in_kind else None
         if cells and cells[0] == name:
             continue
@@ -395,10 +480,12 @@ def rm_row_under(system: str, heading: str, name: str) -> bool:
     if name not in facts.get(heading, {}):
         return False
     in_kind, out = False, []
-    for line in lines:
-        m = re.match(r"^##\s+(\S+)\s*$", line)
-        if m:
-            in_kind = m.group(1) == heading
+    for i, line in enumerate(lines):
+        kh = _kind_heading(lines, i)
+        if kh is not None:
+            in_kind = kh == heading
+        elif _is_heading(line):
+            in_kind = False
         cells = split_row(line) if in_kind else None
         if cells and cells[0] == name:
             continue
@@ -413,9 +500,9 @@ def drop_empty_section(system: str, kind: str) -> bool:
     if kind not in facts or facts[kind]:
         return False
     out, skipping = [], False
-    for line in lines:
-        if line.startswith("#"):  # any heading ends the section — hand-written prose after the table survives
-            skipping = re.match(rf"^##\s+{re.escape(kind)}\s*$", line) is not None
+    for i, line in enumerate(lines):
+        if _is_heading(line):  # any heading ends the section — hand-written prose after the table survives
+            skipping = _kind_heading(lines, i) == kind
             if skipping:
                 continue
         if not skipping:
@@ -710,10 +797,10 @@ def staleness(system: str, kind: str, name: str, row: dict[str, str], ttl_overri
     return {"age": age, "ttl": ttl, "who": who, "discoverable": hit is not None}
 
 
-def stale_rows(ttl_override: int | None = None) -> list[dict]:
+def stale_rows(ttl_override: int | None = None, warn: list[str] | None = None) -> list[dict]:
     out = []
     cfg = safe_config()
-    for system, kinds in all_facts().items():
+    for system, kinds in all_facts(warn).items():
         for kind, rows in kinds.items():
             for nm, row in rows.items():
                 st = staleness(system, canonical_kind(system, kind), nm, row, ttl_override, cfg)
@@ -963,6 +1050,8 @@ def config_value_problem(key: str, val) -> str:
                 return f"'{parts[0]}' has no flag '{part}' — known: {', '.join(sorted(k for k in node if not k.startswith('_')))}"
             return ""  # the template stops here: an open map, nothing to compare
         node = node[part]
+    if key == "tracker.kind" and val not in kit_profile.TRACKER_KINDS:
+        return f"'tracker.kind' must be one of {', '.join(kit_profile.TRACKER_KINDS)}, not {val!r}"
     if node is None or (isinstance(node, str) and isinstance(val, (int, float)) and not isinstance(val, bool)):
         return ""  # template null = any; a number where the template shows a placeholder string is an id, fine
     if _shape(node) != _shape(val):
@@ -1063,7 +1152,7 @@ def absent(msg: str) -> SystemExit:
 
 
 def _main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(prog="kb.py", description=__doc__.split("\n\n")[0],
+    ap = argparse.ArgumentParser(prog="kb.py", formatter_class=argparse.RawDescriptionHelpFormatter, description=__doc__,
                                  epilog="exit: 0 ok · 1 the value / fact asked about is absent · 2 usage or I/O error · 3 stale --check found rows")
     sub = ap.add_subparsers(dest="cmd", required=True)
     g = sub.add_parser("get"); g.add_argument("key"); g.add_argument("name")
@@ -1123,7 +1212,8 @@ def _main(argv: list[str]) -> int:
                                                      f"`kb.py get` answers from it until `kb.py migrate`)" if remaining else ""))
     elif a.cmd == "list":
         want_sys, want_kind = (a.key.split(".", 1) + [""])[:2] if a.key else ("", "")
-        for system, kinds in all_facts().items():
+        warn: list[str] = []
+        for system, kinds in all_facts(warn).items():
             if want_sys and system != want_sys:
                 continue
             for kind, rows in kinds.items():
@@ -1131,19 +1221,22 @@ def _main(argv: list[str]) -> int:
                     continue  # `list slack.channels` and `list slack.channel` both show rows under either heading
                 for nm, row in rows.items():
                     print(f"{system}.{kind}\t{nm}\t{row['value']}\t{row['purpose']}\t{row['learned-from']}")
+        print_warnings(warn)
     elif a.cmd == "values":
         seen = set()
-        for kinds in all_facts().values():
+        warn: list[str] = []
+        for kinds in all_facts(warn).values():
             for rows in kinds.values():
                 for row in rows.values():
                     v = row["value"]
                     if v and v not in seen:
                         seen.add(v)
                         print(v)
+        print_warnings(warn)
     elif a.cmd == "config":
         cfg = load_config()
         if not cfg:
-            print("kb: no env/config.json — run `kb.py init --blank` (or `kb.py import <dir>`)", file=sys.stderr)
+            print("kb: no env/config.json — run `kb.py init --blank` (or `--personal`)", file=sys.stderr)
             return 1
         v = dotted_get(cfg, a.key) if a.key else cfg
         if v is None:
@@ -1164,7 +1257,7 @@ def _main(argv: list[str]) -> int:
     elif a.cmd == "migrate":
         cfg = load_config()
         if not cfg:
-            print("kb: no env/config.json — run `kb.py init --blank` (or `kb.py import <dir>`)", file=sys.stderr)
+            print("kb: no env/config.json — run `kb.py init --blank` (or `--personal`)", file=sys.stderr)
             return 1
         if a.off:
             off = unmet_units(cfg)
@@ -1228,13 +1321,15 @@ def _main(argv: list[str]) -> int:
             raise SystemExit("kb: discover <system>.<kind> [<name>] | <config.key> | --all | --check")
         print(discover_plan(a.key, a.name, cfg))
     elif a.cmd == "stale":
-        rows = stale_rows(a.days)
+        warn: list[str] = []
+        rows = stale_rows(a.days, warn)
         for r in rows:
             age = f"{r['age']}d" if r["age"] is not None else "undated"
             hint = f"kb.py discover {r['key']} '{r['name']}'" if r["discoverable"] else "no manifest — re-verify by hand or `--from user`"
             print(f"{r['key']}\t{r['name']}\t{r['value']}\t{age} > ttl {r['ttl']}d\t{r['learned']}\t{hint}")
         if not rows:
             print("no stale rows")
+        print_warnings(warn)
         return 3 if rows and a.check else 0
     elif a.cmd == "init" and a.personal:
         import personal  # noqa: E402  (sibling module; imported here so kb.py stays importable on its own)

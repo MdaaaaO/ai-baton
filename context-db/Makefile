@@ -1,7 +1,7 @@
 # .context DB engine — Claude's CLI for the context document DB.
 # The engine (this Makefile + bin/ + _templates/) lives under .claude/context-db/ so
 # .claude/ is a portable kit; the CONTENT it operates on lives in a separate .context/
-# folder (default: the sibling ../../.context, override with CONTEXT=).
+# folder (override with CONTEXT=; the default content root is docs/layout.md's "Content root" paragraph).
 # Each *.md doc carries YAML frontmatter (its "row"); INDEX.md is the generated catalog.
 # These targets create, index, verify, and find docs.
 #
@@ -24,7 +24,7 @@
 #   $CLAUDE_CODE_SESSION_ID (or SESSION_ID=<uuid>); NOSTATS=1 skips it. Zero model turns.
 #
 # Kit / config (env fact store .context/reference/env/):
-#   make -C .claude/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|init
+#   make -C .claude/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|config-set|init|path|migrate|discover|stale
 #   make -C .claude/context-db kb ARGS="set slack.channel foo C0… --from tool:slack_search_channels"
 #   make -C .claude/context-db profile                   # active environment name
 #   make -C .claude/context-db profile KEY=tracker.kind  # one env-config value
@@ -34,18 +34,19 @@
 #   make -C .claude/context-db check-links               # every relative Markdown link resolves
 #   make -C .claude/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
 #   make -C .claude/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
+#   make -C .claude/context-db plugin-validate            # plugin + marketplace manifests and every skill/agent, through `claude plugin validate --strict` (needs the `claude` CLI)
 #   make -C .claude/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
 #   make -C .claude/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
 #   make -C .claude/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
-#   make -C .claude/context-db test                      # the engine's stdlib unittest suite (context-db/tests/)
+#   make -C .claude/context-db test [T=test_kb] [ISOLATED=1]  # the engine's stdlib unittest suite (context-db/tests/); T= runs one file
 #   make -C .claude/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
 #   make -C .claude/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
 #   make -C .claude/context-db sync-check                # warn when .claude/ is ahead of origin or the last sync errored
 #   make -C .claude/context-db kit-health [STALE=90]     # full kit audit for this machine (the kit-health skill's script)
 #   make -C .claude/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
 #
-# Content root: CONTEXT defaults to ../../.context (the sibling of .claude/). Point the
-# engine at a different content DB with, e.g.:
+# Content root: CONTEXT overrides the default described in docs/layout.md's "Content root" paragraph.
+# Point the engine at a different content DB with, e.g.:
 #   make -C .claude/context-db index CONTEXT=/path/to/some/.context
 # Always run `index` after adding or editing a doc's frontmatter.
 
@@ -122,15 +123,19 @@ index:
 verify:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) verify.py
 
-# make test  — the engine's stdlib unittest suite (context-db/tests/). A clone without an env store (a contributor's
-# checkout, `make ci` before setup) gets a throw-away blank one, so the suite never needs this machine's .context/.
-# make test [ISOLATED=1]  — ISOLATED=1 always runs on a throw-away blank store, never the workspace's own: ci.yml's
-# decoy gate (#95) seeds the sibling .context/ with markers and fails if one reaches the output
+# make test [T=test_kb] [ISOLATED=1]  — the engine's stdlib unittest suite (context-db/tests/). A clone without an
+# env store (a contributor's checkout, `make ci` before setup) gets a throw-away blank one, so the suite never
+# needs this machine's .context/ — a store that DOES exist (this machine's real one) is handed to the suite as-is;
+# every test is written to isolate itself from it (docs/contributing.md § Testing), never to read it. T=<module>
+# runs one file (tests/test_kb.py) instead of the full discovery. ISOLATED=1 always runs on a throw-away blank
+# store, never the workspace's own: ci.yml's decoy gate (#95) seeds the sibling .context/ with markers and fails
+# if one reaches the output. A bare `python3 -m unittest` (skipping this target) sets none of this up — it is
+# not a supported entry point (docs/contributing.md § Testing).
 test:
 	@ctx="$(CONTEXT)"; tmp=""; if [ -n "$(ISOLATED)" ] || [ ! -f "$$ctx/reference/env/config.json" ]; then \
 	  tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; ctx="$$tmp/.context"; CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py init --blank >/dev/null; \
 	  echo "test: $(if $(ISOLATED),ISOLATED=1,no env store at $(CONTEXT)) — using a throw-away blank one"; fi; \
-	cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" $(PY) -m unittest discover -s tests -t . -v
+	cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" $(PY) -m unittest $(if $(T),tests.$(T),discover -s tests -t .) -v
 
 # make kit-verify [STALE=90]  — every skill/agent carries the versioning frontmatter
 kit-verify:

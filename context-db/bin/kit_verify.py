@@ -147,8 +147,11 @@ def check_env_store(errors: list[str]) -> str:
     elif not isinstance(tracker, dict):
         errors.append(f"{rel}: tracker must be an object {{kind, key_regex, …}} (see environment-template/config.json), got {tracker!r}")
         tracker = {}
+    kind = tracker.get("kind")
+    if kind is not None and kind not in kit_profile.TRACKER_KINDS:
+        errors.append(f"{rel}: tracker.kind '{kind}' is not one of {', '.join(kit_profile.TRACKER_KINDS)}")
     rx = tracker.get("key_regex")
-    if tracker.get("kind") not in ("none", None) and not rx:
+    if kind not in ("none", None) and not rx:
         errors.append(f"{rel}: tracker.key_regex missing")
     if rx:
         try:

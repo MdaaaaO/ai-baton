@@ -39,8 +39,8 @@ skill that needs the fact; the manifest holds only the mechanics.
 Provenance written back is structured — `--from tool:<name>`, `user`, `import:<env>`, `derived:<key>` —
 and `kb.py set` appends today's date, so `stale` can measure age.
 
-A plugin ships extra manifests as `<dir>/discovery/*.json`; `kb.py import <dir>` copies them to the
-store's `_discovery/` (never overwriting) and `kb.py` reads both places; a store file with the same
+A plugin ships extra manifests as `<dir>/discovery/*.json`; copy the ones you want into the
+store's `_discovery/` and `kb.py` reads both places; a store file with the same
 file name as a kit manifest (`slack.json`) replaces it **whole** — every fact the kit's file had and the
 plugin's does not is gone on that machine — so a plugin that only *adds* facts uses its own file name
 (`slack-<plugin>.json`); `--check` names each kit manifest a store file shadows. Validate every manifest with `kb.py discover --check` (also run by `kit-verify`).

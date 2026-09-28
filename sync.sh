@@ -5,8 +5,8 @@
 # a versioned pre-push hook (hooks/pre-push, installed via core.hooksPath by this script and
 # setup.sh) refuses any push to the kit's `main`. Nothing else is synced: an environment's facts
 # live in the local env store (.context/reference/env/, never in git), its prose in
-# .context/reference/environment.md. Idempotent, lock-guarded, never fails the caller (it is also
-# run from a SessionEnd hook). Takes no arguments.
+# .context/reference/environment.md. Idempotent, lock-guarded; exits 0 except 3 when another run holds
+# the lock (it is also run from a SessionEnd hook, which ignores the exit). Takes no arguments.
 #
 #   sh .claude/sync.sh                  (from the workspace root, or via `make claude_sync`)
 #
@@ -17,7 +17,7 @@
 #   ok <what>                   fetched; fast-forwarded or already in step
 #   offline <epoch> since <ts>  the fetch could not resolve/reach origin; <epoch> = first run of the streak
 #   error <reason>              needs the user: off main, dirty, ahead, fetch failed or timed out, ff failed
-# A run that finds the lock busy logs `skipped` and leaves .sync-status alone (the holder writes it).
+# A run that finds the lock busy logs `skipped`, exits 3 and leaves .sync-status alone (the holder writes it).
 # The sync reports `error` — and pulls nothing — when .claude/ is not on main, has uncommitted
 # changes, or carries local commits on main: each of those is work that must move to a branch + PR.
 set -u
@@ -115,28 +115,112 @@ sync_kit() {
 [ -d "$HERE/.git" ] || { log "skip: .claude is not a git repo"; exit 0; }
 
 # lock: flock where it exists (Linux); on hosts without it (macOS without coreutils) an atomic mkdir
-# lock, treated as stale after 10 minutes. A busy lock is logged as `skipped` (and said on stderr for
-# `make claude_sync`) but never written to .sync-status: the holder's pending/ok/error is newer.
-LOCKDIR="$HERE/.sync.lock.d"; HAVE_LOCKDIR=""
-cleanup() { [ -n "$ERRF" ] && rm -f "$ERRF"; [ -n "$HAVE_LOCKDIR" ] && rmdir "$LOCKDIR" 2>/dev/null; return 0; }
+# lock. Either way the holder records `<pid> <utc-ts> <process-start-time>` (in .sync.lock, or
+# .sync.lock.d/owner) — the third field is the owner's own process start time as `ps -o lstart=`
+# reports it, so a stale lock can be told apart from a live one even after its pid gets reused (a
+# reboot or pid wraparound): a lock dir is stale when its owner pid is gone (`kill -0`), or when the
+# pid is alive but `ps -o lstart=` for it now differs from the start time recorded when the lock was
+# taken (same pid number, different process). There is deliberately no time ceiling on a live owner —
+# a lock is only ever judged by whether its owner process still is the process that took it, never by
+# age, so a slow-but-live sync can hold it as long as it needs to. An owner line with no third field
+# (written before this check existed) or one `ps` cannot answer right now falls back to `kill -0`
+# alone, same as before — a lock is never stolen just because the extra check could not be made. With
+# no owner file at all (a sync.sh from before owner files, or one killed between its mkdir and the
+# write) a lock dir is stale only once older than 10 minutes. Breaking a stale lock is serialised by a
+# second mkdir lock and re-checked inside it, so two runs that both saw the same dead owner can never
+# both remove-and-retake it (the second would delete the first's fresh lock). A busy lock is logged as
+# `skipped`, said on stderr with the holder, and exits 3 (the SessionEnd hook swallows it; `make
+# claude_sync` shows it) but never writes .sync-status: the holder's pending/ok/error is newer.
+LOCKDIR="$HERE/.sync.lock.d"; LOCKBRK="$HERE/.sync.lock.break"; HAVE_LOCKDIR=""; HAVE_LOCKBRK=""
+OWNER_PID=""; OWNER_TS=""; OWNER_START=""; STALE_WHY=""
+cleanup() {
+  [ -n "$ERRF" ] && rm -f "$ERRF"
+  [ -n "$HAVE_LOCKBRK" ] && rmdir "$LOCKBRK" 2>/dev/null
+  [ -n "$HAVE_LOCKDIR" ] && rm -f "$LOCKDIR/owner" && rmdir "$LOCKDIR" 2>/dev/null
+  return 0
+}
 trap cleanup EXIT
-skipped() { log "skipped: lock busy — $*"; printf 'sync.sh: skipped, lock busy — %s\n' "$*" >&2; }
+# pid_start <pid> — the process's start time as `ps -o lstart=` reports it, or empty when `ps` has
+# nothing to say (no such pid, or a `ps` without `lstart`, e.g. some minimal containers): callers then
+# fall back to `kill -0` alone rather than trust an empty answer either way.
+pid_start() { ps -o lstart= -p "$1" 2>/dev/null | sed -e 's/^ *//' -e 's/ *$//'; }
+owner_stamp() { printf '%s %s %s\n' "$$" "$(date -u +%FT%TZ)" "$(pid_start "$$")"; }
+# owner_of <file> — sets OWNER_PID / OWNER_TS / OWNER_START from a `<pid> <utc-ts> <process-start-time>`
+# owner file; OWNER_START is empty for an old two-field line, and for both when the file is absent or partial
+owner_of() {
+  OWNER_PID=""; OWNER_TS=""; OWNER_START=""
+  [ -f "$1" ] || return 0
+  local p="" t="" s=""
+  read -r p t s <"$1" 2>/dev/null || true
+  case "$p" in ''|*[!0-9]*) return 0 ;; esac
+  OWNER_PID=$p; OWNER_TS=${t:-?}; OWNER_START=$s
+}
+# owner_gone — is the owner recorded in $OWNER_PID/$OWNER_START (set by owner_of) no longer the
+# process that took the lock? True when the pid is gone outright, or when it is alive but `ps
+# -o lstart=` for it now differs from the start time recorded at lock-take time (the pid was reused,
+# same number, different process — see the block comment above). Sets $STALE_WHY on true. A live pid
+# with no recorded start (an owner line from before this check) or one `ps` can't answer right now is
+# judged by `kill -0` alone: never steal a lock just because the extra check could not be made.
+owner_gone() {
+  if ! kill -0 "$OWNER_PID" 2>/dev/null; then STALE_WHY="owner pid $OWNER_PID is gone"; return 0; fi
+  [ -n "$OWNER_START" ] || return 1
+  local now; now="$(pid_start "$OWNER_PID")"
+  [ -n "$now" ] || return 1
+  [ "$now" = "$OWNER_START" ] && return 1
+  STALE_WHY="owner pid $OWNER_PID is a different process now (reused pid, start time changed)"
+  return 0
+}
+# lockdir_stale — is $LOCKDIR left behind by a run that is no longer there? (sets STALE_WHY)
+# $LOCKDIR itself may already be gone: the fast `mkdir` in take_lockdir can lose to a holder that
+# releases the lock in the gap before this runs, and a missing dir is a free lock, not a busy one —
+# treat it as stale so take_lockdir's break-and-retake path (already serialised by $LOCKBRK) just
+# recreates it, instead of reporting busy on a lock nothing holds any more.
+lockdir_stale() {
+  [ -d "$LOCKDIR" ] || { STALE_WHY="lock dir vanished before the staleness check"; return 0; }
+  owner_of "$LOCKDIR/owner"
+  if [ -n "$OWNER_PID" ]; then
+    owner_gone && return 0
+    return 1
+  fi
+  [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null)" ] || return 1
+  STALE_WHY="no owner recorded, older than 10 min"; return 0
+}
+own_lockdir() { HAVE_LOCKDIR=1; owner_stamp >"$LOCKDIR/owner"; }
+take_lockdir() {
+  if mkdir "$LOCKDIR" 2>/dev/null; then own_lockdir; return 0; fi
+  lockdir_stale || return 1
+  mkdir "$LOCKBRK" 2>/dev/null || return 1
+  HAVE_LOCKBRK=1
+  local rc=1
+  # re-check under the breaker: another run may have broken it and taken a fresh lock meanwhile
+  if lockdir_stale; then
+    rm -f "$LOCKDIR/owner"; rmdir "$LOCKDIR" 2>/dev/null
+    if mkdir "$LOCKDIR" 2>/dev/null; then own_lockdir; log "lock: removed a stale lock dir ($STALE_WHY)"; rc=0; fi
+  fi
+  rmdir "$LOCKBRK" 2>/dev/null; HAVE_LOCKBRK=""
+  return "$rc"
+}
+skipped() {
+  local who="lock busy"
+  [ -n "$OWNER_PID" ] && who="lock busy (held by pid $OWNER_PID since $OWNER_TS)"
+  log "skipped: $who — $*"; printf 'sync.sh: skipped, %s — %s\n' "$who" "$*" >&2
+}
 take_lock() {
   if command -v flock >/dev/null 2>&1; then
-    exec 9>"$HERE/.sync.lock"
-    flock -w "$LOCK_WAIT" 9 && return 0
+    exec 9>>"$HERE/.sync.lock"
+    if flock -w "$LOCK_WAIT" 9; then owner_stamp >"$HERE/.sync.lock"; return 0; fi
+    owner_of "$HERE/.sync.lock"
     skipped "another sync.sh holds .sync.lock (hung SessionEnd sync? \`pgrep -af sync.sh\`, kill it)"
   else
-    if mkdir "$LOCKDIR" 2>/dev/null; then HAVE_LOCKDIR=1; return 0; fi
-    if [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
-      rmdir "$LOCKDIR" 2>/dev/null
-      if mkdir "$LOCKDIR" 2>/dev/null; then log "lock: removed a stale lock dir (>10 min)"; HAVE_LOCKDIR=1; return 0; fi
-    fi
-    skipped "no flock on this host and $LOCKDIR exists (another sync running; \`rmdir\` it if none is)"
+    take_lockdir && return 0
+    owner_of "$LOCKDIR/owner"
+    local hint="\`rm -r\` it if no sync is running"
+    [ -d "$LOCKBRK" ] && hint="$hint; so is $LOCKBRK, left by a run killed while breaking a stale lock"
+    skipped "no flock on this host and $LOCKDIR is held ($hint)"
   fi
   return 1
 }
-take_lock || exit 0
+take_lock || exit 3
 
 # sync.log keeps its last LOG_KEEP lines, trimmed in place (a temp file outside the checkout, never
 # a second file inside it — an untracked file would make the next sync refuse to pull)
