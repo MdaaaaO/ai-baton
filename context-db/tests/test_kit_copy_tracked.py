@@ -64,5 +64,16 @@ class KitCopyTrackedExcludesUntrackedFiles(unittest.TestCase):
             self.assertEqual((dest / "sub" / "nested.txt").read_text(encoding="utf-8"), "nested\n")
 
 
+    def test_a_non_checkout_source_fails_loudly_instead_of_copying_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            not_a_repo = tmp / "plain"
+            not_a_repo.mkdir()
+            (not_a_repo / "a.txt").write_text("x")
+            r = _copy_tracked(not_a_repo, tmp / "out", tmp / "home")
+            self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("kit_copy_tracked", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

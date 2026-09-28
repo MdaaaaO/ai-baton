@@ -25,7 +25,12 @@ kit_copy_tracked() {  # kit_copy_tracked <src-repo> <dest-dir> → copies every 
   # disabled the global/system git config, which would otherwise make git refuse a checkout it does not own.
   src="$1"; dest="$2"
   mkdir -p "$dest"
-  git -C "$src" -c safe.directory="$src" ls-files | while IFS= read -r f; do
+  # the list is captured first: in `git … | while`, git's own failure (not a checkout, trust refused) would be
+  # lost to the loop's status and leave a silently empty copy
+  files=$(git -C "$src" -c safe.directory="$src" ls-files) || { echo "kit_copy_tracked: git ls-files failed in $src" >&2; return 1; }
+  [ -n "$files" ] || { echo "kit_copy_tracked: no tracked files in $src" >&2; return 1; }
+  printf '%s\n' "$files" | while IFS= read -r f; do
+    [ -e "$src/$f" ] || continue  # tracked but deleted in the working tree
     mkdir -p "$dest/$(dirname "$f")"
     cp "$src/$f" "$dest/$f"
   done
