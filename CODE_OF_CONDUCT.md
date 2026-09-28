@@ -57,8 +57,8 @@ individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported through the same private channel [`SECURITY.md`](SECURITY.md) names —
-[GitHub Security Advisories](https://github.com/MdaaaaO/ai-baton/security/advisories/new) — so a report never has
+reported by email to the maintainer at
+[georg.kasper08@gmail.com](mailto:georg.kasper08@gmail.com), so a report never has
 to go through a public issue. All complaints will be reviewed and investigated
 promptly and fairly.
 
