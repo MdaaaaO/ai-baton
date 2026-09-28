@@ -2,15 +2,14 @@
 
 The **environment-agnostic body** of the workspace `CLAUDE.md`. The root `CLAUDE.md` (personal) says
 who the user is, then imports this file and the environment's prose (`.context/reference/environment.md`).
-Everything below holds everywhere; whatever differs between environments — tracker, chat, ids, repo
-map, capabilities — lives in the env store (values) and `environment.md` (prose), local to the machine.
+Everything below holds everywhere; whatever differs between environments lives in the env store (values) and `environment.md` (prose), local to the machine.
 Identity is `WORKSPACE_*` (`/plugin configure ai-baton`, else `.claude/settings.local.json`), never here.
-Kit reference: `$BATON/README.md`; `docs/contributing.md` § Versioning.
+Kit reference: `$BATON/README.md`.
 
 ## Layout
 
 The workspace root holds the repos, `CLAUDE.md`, a `Makefile` and the infra dirs `.claude/` (this kit,
-its own git repo), `.context/` (the knowledge base, below), `.worktrees/` and `exports/` (bulk data).
+its own git repo), `.context/` (the knowledge base, below), `.worktrees/` and `exports/`.
 **Nothing new at the root** — durable knowledge goes under `.context/`, raw data under `exports/`.
 
 ## The `.context/` DB — find first, persist durable knowledge
@@ -20,7 +19,7 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't lo
 1. **Find first:** read `.context/INDEX.md` (the generated catalog) and open only the leaf docs the
    task needs. Narrow with `make -C $BATON/context-db find DOMAIN=<domain>` or `find TAG=<tag>`.
 2. **Persist:** `make -C $BATON/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug> TITLE="…"`
-   (types: epic, reference, repo, meeting, 1on1, oncall, self-assessment, pr-review, log), edit the
+   (types: `.context/README.md`), edit the
    scaffold, then `make -C $BATON/context-db index` (also after any hand edit); `make -C
    $BATON/context-db verify` is the schema/freshness gate.
 3. **Domains are folders:** core `reference/`, `repos/`, `pr-reviews/`, `meetings/`, `1on1/`,
@@ -61,7 +60,7 @@ Specs: `docs/env-facts.md`, `docs/new-environment.md`.
   ownership in one `SendMessage` before editing — a worktree isolates branch/HEAD, not directory access.
 - **PR watches:** one multi-PR `pr-watch` Monitor per repo per session; every open PR has exactly one
   watcher across sessions. Watches die with their session — the successor re-arms them at startup.
-- **Kit changes are PR-only.** The kit checkout (`.claude/`, or a clone on a plugin install) stays on `main`;
+- **Kit changes are PR-only.** The kit checkout (`.claude/` or a clone) stays on `main`;
   edit in `.worktrees/kit_<topic>` off `origin/main`, open a PR, let the user merge (`CONTRIBUTING.md`). `.context/` content is local, never synced.
 
 ## Skills
@@ -69,13 +68,14 @@ Specs: `docs/env-facts.md`, `docs/new-environment.md`.
 Only names/descriptions load each session; the body loads on invoke. **Never rely on a skill for an
 always-on rule** — those are § Rules below (and in `environment.md`). Triggers:
 
-- session start → `session-register` · a step lands / closing → `session-handoff`
+- session start → `session-register` · a step lands / closing → `session-handoff`, then `session-retro`
 - own PR → `pr-open`, then `pr-watch`; a watch line → `pr-event-brief`
-- someone else's PR → `pr-scan` (queue) / `pr-review` (never for the user's own PRs)
-- tracker step → `ticket-open` / `ticket-update` / `ticket-close`
-- any non-trivial `gh` loop or count → `gh-cli` first
-- `NEEDS <fact>` or a new machine → `env-init` · after a sync or kit change → `kit-health`
-- signed-commits repos → `sign-queue` · weekly review → `self-assessment` · spend → `cost-report`
+- someone else's PR → `pr-scan` (queue) / `pr-review` (never the user's own)
+- tracker step → `ticket-open` / `ticket-pickup` / `ticket-update` / `ticket-close`
+- any non-trivial `gh` loop or count → `gh-cli` first · a README or CONTRIBUTING → `repo-docs`
+- `NEEDS <fact>` or a new machine → `env-init` · plugin install → `kit-setup` · after a sync or kit change → `kit-health`
+- signed-commits repos → `sign-queue` (why: `signed-git-commits`) · weekly review → `self-assessment` · spend → `cost-report`
+- chat draft → `slack-draft` · docs-page comments → `notion-page-review` · `requires`-gated rest: `environment.md`
 
 ## Rules (always on)
 
@@ -86,7 +86,7 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
   headers/bullets/tables for messages that genuinely bundle several items.
 - Refer to work by its tracker key (`ABC-123`, `#123`), never a bare feature nickname; every tracker
   key and PR reference is a **clickable link on every surface** (`[KEY](url)`); only PR titles stay bare.
-- Right-size to the reader: senior/expert readers get the TLDR only; hold detail until asked.
+- Right-size to the reader: experts get the TLDR only; hold detail until asked.
 - Don't pester people: one ask in the right channel, no nudge DMs, batch everything for one person,
   prefer removing the dependency over chasing it.
 - Never cite local `.context/` or workspace paths on any external surface — link the ticket/PR or
@@ -121,7 +121,6 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
 Caching: a stable prefix re-reads each turn at ~0.1× input (writes 1.25×, 5-min TTL; 2×, 1 h). The
 cliff is invalidation (tools → system → messages): editing `CLAUDE.md`, an import, a skill description
 or the tool list re-bills every open session in full next turn — **batch always-on edits into one PR**.
-Position matters too: long contexts recall their middle worst.
 
 - **Load by task:** `INDEX.md` first, then only the leaf docs needed. **Read slices** (`grep`,
   `Read` with offset+limit) and pipe big output to a count or scratch file.
