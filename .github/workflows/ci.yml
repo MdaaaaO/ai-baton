@@ -228,9 +228,6 @@ jobs:
           "$RUNNER_TEMP/pyyaml-venv/bin/pip" install --quiet "PyYAML==$PYYAML_VERSION"
           echo "$RUNNER_TEMP/pyyaml-venv/bin" >> "$GITHUB_PATH"
       - name: Engine tests on macOS
-        # advisory until the suite passes on macOS (make 3.81 has no --eval; /var resolves to /private/var):
-        # drop this line, and the job becomes a required check, once those failures are fixed
-        continue-on-error: true
         run: make -C context-db test
       # Picked by shebang, like the Linux "Shell scripts parse" + "POSIX scripts parse under dash" steps
       # together: a `#!/usr/bin/env bash` / `#!/bin/bash` script uses bash syntax (`< <(...)`, arrays) that

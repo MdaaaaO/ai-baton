@@ -44,7 +44,8 @@ class WorkspaceMkKitRoot(unittest.TestCase):
 
     def test_ctx_alias_runs_the_included_engine_on_the_workspace_store(self):
         out = self.dry("ctx_verify")
-        self.assertIn(f"CONTEXT_ROOT=\"{self.ws / '.context'}\"", out)  # the workspace's store, space and all
+        # $(CURDIR) is make's own getcwd(3) — resolves symlinks (and macOS's /var -> /private/var), unlike self.ws
+        self.assertIn(f"CONTEXT_ROOT=\"{self.ws.resolve() / '.context'}\"", out)  # the workspace's store, space and all
         self.assertIn("verify.py", out)
 
     def test_kit_override(self):
