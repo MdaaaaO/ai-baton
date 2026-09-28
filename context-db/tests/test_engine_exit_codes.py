@@ -62,6 +62,23 @@ class ExitCodes(unittest.TestCase):
                                     encoding="utf-8")
         self.assertExit(0, "kb.py", "discover", "--all")
 
+    def test_deprecated_get_alias_reads_systems_and_warns_once(self):
+        # one flag per capability: `slack.enabled` / `github.signed_commits` are retired — `kit_profile.py get` still answers them
+        # for one release, from the `systems.*` flag they now mean, with a one-line stderr warning; stdout carries
+        # only the value, same shape and exit code as a normal `get`.
+        self.run_("kb.py", "config-set", "systems.slack", "true")
+        aliased = self.run_("kit_profile.py", "get", "slack.enabled")
+        direct = self.run_("kit_profile.py", "get", "systems.slack")
+        self.assertEqual(aliased.returncode, 0, aliased.stderr)
+        self.assertEqual(aliased.stdout, direct.stdout)
+        self.assertEqual(aliased.stdout.strip(), "true")
+        self.assertEqual(aliased.stderr.strip(), "kit_profile: slack.enabled is deprecated — read systems.slack")
+        self.run_("kb.py", "config-set", "systems.signed_commits", "true")
+        aliased2 = self.run_("kit_profile.py", "get", "github.signed_commits")
+        self.assertEqual(aliased2.returncode, 0, aliased2.stderr)
+        self.assertEqual(aliased2.stdout.strip(), "true")
+        self.assertIn("github.signed_commits is deprecated — read systems.signed_commits", aliased2.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

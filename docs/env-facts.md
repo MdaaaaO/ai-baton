@@ -57,8 +57,11 @@ lists the vocabulary.
 
 `config.json` carries only what scripts branch on: `tracker.kind` (`kit_profile.TRACKER_KINDS`: `jira`|`github`|`none`), `tracker.key_regex`,
 `tracker.url_template`, `tracker.mcp_tools`, `tracker.close_reasons`, `tracker.repos`, `github.org`,
-`github.review_bot`, `github.bots`, `github.signed_commits`, `github.sandbox_token_prefix`,
-`github.owner_teams`, `slack.enabled`, `slack.domain`, `systems.*`, `tz_default`, `labels`,
+`github.review_bot`, `github.bots`, `github.sandbox_token_prefix`,
+`github.owner_teams`, `slack.domain`, `systems.*` (one flag per capability — `systems.slack` and
+`systems.signed_commits` are what every reader gates on now; `kit_profile.py get slack.enabled` / `get
+github.signed_commits` still answer for one release, from `systems.*`, with a deprecation warning on stderr —
+`kit_profile.DEPRECATED_ALIASES`), `tz_default`, `labels`,
 `self_assessment`, `diagrams` (pr-open's per-repo diagram overlays), `commits` (commit-subject style, `commit-style.md`), `datalake`, `cost` (cost-report's spend table,
 identity, phases — optional, absent = private mode), `datalake.kind` (warehouse vendor — optional, picks the
 `datalake-<vendor>` manifest), `kit.install_mode` (`clone`|`plugin`|`dev-checkout` — written by `setup.sh`, never by

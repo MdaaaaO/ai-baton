@@ -43,7 +43,6 @@
       "renovate[bot]",
       "github-actions[bot]"
     ],
-    "signed_commits": false,
     "sandbox_token_prefix": "<e.g. GH_TOKEN=dummy when a sandbox proxy injects the real token; empty otherwise>",
     "owner_teams": [
       "<CODEOWNERS teams whose review requests count as yours>"
@@ -53,7 +52,6 @@
     }
   },
   "slack": {
-    "enabled": false,
     "domain": "<acme.slack.com>",
     "channels": {
       "<name>": "<C… channel id>"

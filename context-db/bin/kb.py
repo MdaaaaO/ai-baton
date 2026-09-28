@@ -9,7 +9,7 @@ itself as the kit is used (discover → ask → `kb set`) and that nobody has to
 Layout (all under `.context/reference/env/`, created by `kb.py init`):
   config.json          the few STRUCTURAL switches scripts branch on: `environment` (this machine's
                        environment name), tracker.kind / key_regex / url_template / mcp_tools,
-                       github.org / review_bot / bots / owner_teams, slack.enabled / domain, systems.*,
+                       github.org / review_bot / bots / owner_teams, slack.domain, systems.*,
                        tz_default, domains, labels, self_assessment, diagrams, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
   _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
@@ -106,10 +106,12 @@ NEEDS_HANDBACK = re.compile(r"^NEEDS [a-z][\w-]*(\.[\w:/@+-]+)+(?: \S+)?$")
 DEFAULT_TTL = 180  # days, for a tool-sourced row no manifest covers
 
 # Structural keys copied from an imported config.json into env/config.json (everything a script reads).
+# `github.signed_commits` and `slack.enabled` are not here: one flag per capability, `systems.*` is the single
+# source (kit_profile.DEPRECATED_ALIASES carries the one-release read-only alias for the two retired keys).
 STRUCTURAL = {
     "tracker": ["kind", "key_regex", "url_template", "mcp_tools", "close_reasons", "repos"],
-    "github": ["org", "review_bot", "bots", "signed_commits", "sandbox_token_prefix", "owner_teams"],
-    "slack": ["enabled", "domain"],
+    "github": ["org", "review_bot", "bots", "sandbox_token_prefix", "owner_teams"],
+    "slack": ["domain"],
 }
 
 
@@ -1101,6 +1103,12 @@ def config_key_drift() -> list[str]:
                 out.append(f"template {section}.{k} missing (a script reads it — kb.STRUCTURAL)")
             if k not in (blank_config().get(section) or {}):
                 out.append(f"kb.blank_config() {section}.{k} missing (a script reads it — kb.STRUCTURAL)")
+    # one flag per capability: the template must never bring back a key `systems.*` replaced (a live machine's
+    # store still carrying one is not a kit-verify failure — kit-health warns there instead, § 3 of its report).
+    for old, new in kit_profile.DEPRECATED_ALIASES.items():
+        section, field = old.split(".", 1)
+        if field in (tmpl.get(section) or {}):
+            out.append(f"template still carries deprecated key '{old}' — {new} replaces it (kit_profile.DEPRECATED_ALIASES)")
     return out
 
 
@@ -1111,8 +1119,8 @@ def blank_config() -> dict:
         "environment": "local",
         "tracker": {"kind": "none", "key_regex": "", "url_template": "", "mcp_tools": {}, "close_reasons": {}, "repos": []},
         "github": {"org": "", "review_bot": "", "bots": ["dependabot[bot]", "renovate[bot]", "github-actions[bot]"],
-                   "signed_commits": False, "sandbox_token_prefix": "", "owner_teams": []},
-        "slack": {"enabled": False, "domain": ""},
+                   "sandbox_token_prefix": "", "owner_teams": []},
+        "slack": {"domain": ""},
         "systems": {name: False for name in SYSTEMS},
         "tz_default": "UTC",
         "domains": [],

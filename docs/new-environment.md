@@ -101,12 +101,13 @@ edited — if you already have a root `CLAUDE.md` or `Makefile`, add the two imp
    - `tracker`: `kind` = `jira` | `github` | `none` (the kinds the `ticket-*` skills have adapters for);
      `key_regex` with exactly one capture group; `url_template`; Jira adds site/project/sprint
      fields/transitions/`mcp_tools`, GitHub adds `repos` + `close_reasons`.
-   - `github`: `org`, `review_bot` (empty = none), `bots`, `signed_commits`, `owner_teams`,
+   - `github`: `org`, `review_bot` (empty = none), `bots`, `owner_teams`,
      `display_names` (login → first name, used by `pr-scan`), `sandbox_token_prefix`.
-   - `slack`: `enabled` + `domain`; disabled = the Slack steps of every skill are skipped.
+   - `slack`: `domain`; whether skills use Slack at all is `systems.slack`, not a `slack.*` key.
    - `labels` (per-repo label names for `pr-open`), `diagrams` (per-repo diagram overlays),
      `self_assessment` (`sources`, `report`, `scope`, `ledger`, `ledger_url`, `report_url`), `systems` (the capability flags — `jira`,
      `slack`, `notion`, `datalake`, `airflow`, `dbt`, `aws_sso`, `incident_io`, `lattice`, `signed_commits`;
+     disabled = the Slack/signing steps of every skill are skipped;
      a skill with `metadata.requires: "x"` is "not applicable" wherever `systems.x` is false), `tz_default`.
    - `domains`: the extra `.context/` domain folders (core domains need no entry).
 4. **Facts** (ids, logins, hosts): run **`/env-init`** once the `systems.*` flags are set — it takes the

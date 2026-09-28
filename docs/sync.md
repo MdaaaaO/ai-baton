@@ -87,4 +87,4 @@ for all async hooks to finish", then exits and "the hook process is orphaned"; o
 killed on the way out (the terminal closing with it) is what a stale `pending` reports.
 
 Nothing here commits: kit changes are branch + PR (`CONTRIBUTING.md`). Signing is a host-only
-concern for the repos under `github.signed_commits`, handled by the `sign-queue` skill.
+concern for the repos under `systems.signed_commits`, handled by the `sign-queue` skill.

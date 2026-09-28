@@ -468,5 +468,22 @@ class MigrationQuotesTopLevelScalars(unittest.TestCase):
         self.assertIn('license: "MIT: the kit license"  # not a real value\n', new)
 
 
+class DeprecatedCapabilityFacts(unittest.TestCase):
+    """One flag per capability — `slack.enabled` / `github.signed_commits` are retired, `systems.slack` /
+    `systems.signed_commits` are what every reader gates on now. pr-open's `metadata.facts` used to name the
+    two retired keys (both had a `target: config` entry in the discovery manifests); it must not any more —
+    the manifests answer `systems.slack` / `systems.signed_commits` instead, and a facts entry naming the old
+    key has no manifest to satisfy it."""
+
+    def test_pr_open_facts_do_not_name_the_retired_keys(self):
+        fm = fmt.load(KIT / "skills" / "pr-open" / "SKILL.md")
+        self.assertIsNotNone(fm)
+        meta = fm.get("metadata", {})
+        self.assertIsInstance(meta, dict)
+        facts = fmt.parse_csv(fmt.unquote(meta.get("facts", "")))
+        self.assertNotIn("slack.enabled", facts, facts)
+        self.assertNotIn("github.signed_commits", facts, facts)
+
+
 if __name__ == "__main__":
     unittest.main()
