@@ -70,6 +70,7 @@ _PYTHON_FLOOR_ERROR = python_floor_error()
 if _PYTHON_FLOOR_ERROR:
     sys.exit(_PYTHON_FLOOR_ERROR)
 
+from datetime import datetime, timezone  # noqa: E402
 from functools import lru_cache  # noqa: E402
 from pathlib import Path  # noqa: E402
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # noqa: E402
@@ -443,6 +444,19 @@ def zone() -> tuple[ZoneInfo, str]:
     except (ZoneInfoNotFoundError, ValueError, TypeError, OSError):  # OSError: a directory-shaped name (`Europe`) on older tzdata
         print(f"kit_profile: WORKSPACE_TZ {name!r} is not a known zone, rendering in UTC", file=sys.stderr)
         return ZoneInfo("UTC"), f" (UTC — WORKSPACE_TZ {name!r} unknown)"
+
+
+LOCAL_TIME_FMT = "%Y-%m-%d %I:%M %p %Z"  # how every displayed timestamp reads: `2026-09-23 02:21 PM EDT`
+
+
+def local_str(iso_utc: str, zone_info: ZoneInfo | None = None) -> str:
+    """'2026-09-23T18:21:00Z' -> '2026-09-23 02:21 PM EDT' in `zone_info` (default `zone()`); the input unchanged
+    when it is not that UTC shape. The one renderer the session scripts share."""
+    try:
+        t = datetime.strptime(iso_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return iso_utc
+    return t.astimezone(zone_info or zone()[0]).strftime(LOCAL_TIME_FMT)
 
 
 def template(kind: str) -> Path | None:

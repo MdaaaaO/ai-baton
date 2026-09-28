@@ -44,6 +44,7 @@ import kit_profile as profile  # same dir — the one content-root resolver
 import frontmatter  # same dir — the one frontmatter parser
 from fsutil import atomic_write  # same dir
 from session_stats import SPEND_BASIS  # same dir — one spend-basis wording, quoted verbatim here too
+from session import NEXT_HEADING  # same dir — the writer owns the session doc's section headings
 
 CTX = str(profile.context_root())
 SESS_DIR = os.path.join(CTX, "sessions")
@@ -54,17 +55,6 @@ STALE_HOURS = 12
 # correct across DST); every DISPLAYED timestamp is rendered in the owner's local zone.
 LOCAL_TZ, _ = profile.zone()  # WORKSPACE_TZ from settings.local.json env, else the env config's tz_default; UTC (+ one stderr line) when unknown
 
-
-def local_str(iso_utc: str) -> str:
-    """'2026-09-23T18:21:00Z' -> '2026-09-23 02:21 PM EDT'; returns the input unchanged if unparsable."""
-    try:
-        t = datetime.strptime(iso_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        return iso_utc
-    return t.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p %Z")
-
-
-NEXT_HEADING = "## Next session"
 # Ended sessions shown as rows (newest first); the rest are listed by name under a fold.
 # Makefile: `make … MAX_ENDED=<n>` (exported as SESSION_INDEX_MAX_ENDED).
 try:
@@ -241,7 +231,7 @@ def write_archive_index(now: datetime) -> int:
         "`sessions/archive/<file>` (its § Next session, § Session stats); the cross-session ledger stays "
         "`sessions/_ledger.md`. Nothing here is read at session start.",
         "",
-        f"_generated {now.astimezone(LOCAL_TZ).strftime('%Y-%m-%d %I:%M %p %Z')} · {len(rows)} archived_",
+        f"_generated {now.astimezone(LOCAL_TZ).strftime(profile.LOCAL_TIME_FMT)} · {len(rows)} archived_",
         "",
     ]
     if rows:
@@ -252,7 +242,7 @@ def write_archive_index(now: datetime) -> int:
         for m in rows:
             path = rel_from_root(m["_path"])
             prompt = f"[{path}]({path})" if has_next_prompt(m) else "-"
-            out.append(f"| `{cell(m, 'session')}` | {cell(m, 'epic')} | {local_str(m.get('heartbeat', ''))} "
+            out.append(f"| `{cell(m, 'session')}` | {cell(m, 'epic')} | {profile.local_str(m.get('heartbeat', ''), LOCAL_TZ)} "
                        f"| `{os.path.basename(m['_path'])}` | {prompt} |")
     else:
         out.append("_empty_")
@@ -307,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         f"Ended sessions with no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago, are swept "
         "to `sessions/archive/` (see `sessions/archive/INDEX.md`).",
         "",
-        f"_generated {now.astimezone(LOCAL_TZ).strftime('%Y-%m-%d %I:%M %p %Z')} · {len(active)} active · "
+        f"_generated {now.astimezone(LOCAL_TZ).strftime(profile.LOCAL_TIME_FMT)} · {len(active)} active · "
         f"{len(listed)} ended listed · {unlisted} ended with no prompt (not listed)_",
         "",
         "## Active",
@@ -326,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
             out.append(
                 f"| `{cell(m, 'session')}`{ref} | {cell(m, 'status')}{flag} "
                 f"| {cell(m, 'epic')} | {cell(m, 'working_on')} "
-                f"| {cell(m, 'responsibilities')} | {stats} | {cost} | {local_str(hb)} |"
+                f"| {cell(m, 'responsibilities')} | {stats} | {cost} | {profile.local_str(hb, LOCAL_TZ)} |"
             )
     else:
         out.append("_none registered_")
@@ -341,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
         for m in recent:
             ref = f" `{cell(m, 'ref')}`" if cell(m, "ref") else ""
             out.append(f"| `{cell(m, 'session')}`{ref} | {cell(m, 'epic')} "
-                       f"| {local_str(m.get('heartbeat', ''))} |")
+                       f"| {profile.local_str(m.get('heartbeat', ''), LOCAL_TZ)} |")
         out.append("")
         # One starter per shown session — never in the table itself (a cell cannot hold a fenced block).
         # Paste-ready: no markdown inside the fence, so a successor can copy the whole line as-is.

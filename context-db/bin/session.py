@@ -42,14 +42,6 @@ from fsutil import atomic_write, locked  # noqa: E402  — same dir
 # zone so they're easy to eyeball against the wall clock.
 LOCAL_TZ, _ = profile.zone()  # WORKSPACE_TZ from settings.local.json env, else the env config's tz_default; UTC (+ one stderr line) when unknown
 
-
-def local_str(iso_utc: str) -> str:
-    try:
-        t = datetime.strptime(iso_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        return iso_utc
-    return t.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p %Z")
-
 CTX = str(profile.context_root())  # the one content-root resolver
 SESS_DIR = os.path.join(CTX, "sessions")
 
@@ -270,7 +262,7 @@ def _ledger_append(meta: dict, st) -> None:
             cur = cur[part]
         return cur
 
-    row = (f"| {local_str(meta.get('heartbeat',''))} | `{meta.get('session','')}` | {meta.get('epic','') or '-'} | {g('turns')} | "
+    row = (f"| {profile.local_str(meta.get('heartbeat',''), LOCAL_TZ)} | `{meta.get('session','')}` | {meta.get('epic','') or '-'} | {g('turns')} | "
            f"{g('wall_hours', default=0.0)} | {k(g('context', 'peak'))} | {k(g('tokens', 'cache_read'))} | {k(g('tokens', 'output'))} | "
            f"{g('spend_total_usd_est', default=0.0):.0f} ({g('spend_usd_est', default=0.0):.0f}+{g('subagents_cost', 'spend_usd_est', default=0.0):.0f}) | "
            f"{g('compactions')} | {len(g('prs_touched', default=[]))} | {len(g('tickets_touched', default=[]))} | {g('sign_jobs')} | {g('slack', 'drafts')} |")
@@ -324,7 +316,7 @@ def cmd_touch(a) -> None:
     write_doc(path, meta, body)
     record_name(meta["session"])
     tail = " (+ next-session prompt)" if nxt else (" (next-session prompt withdrawn)" if nxt is not None else "")
-    print(f"touched {os.path.relpath(path, CTX)} @ {local_str(meta['heartbeat'])}" + tail)
+    print(f"touched {os.path.relpath(path, CTX)} @ {profile.local_str(meta['heartbeat'], LOCAL_TZ)}" + tail)
 
 
 def _next_prompt(a) -> str | None:
