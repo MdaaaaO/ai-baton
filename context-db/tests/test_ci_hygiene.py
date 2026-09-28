@@ -187,6 +187,12 @@ class MacosLeg(unittest.TestCase):
         job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
         self.assertIn("make -C context-db test", job)
 
+    def test_the_engine_suite_is_a_required_check_not_advisory(self):
+        # the suite passes on macOS now (the make/locale/path fixes around it): a red run must fail the job,
+        # the same bar ForcedSigningLeg holds its own engine-suite step to.
+        job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
+        self.assertNotIn("continue-on-error", job)
+
     def test_macos_job_is_gated_by_changed_paths(self):
         job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
         self.assertIn("needs: changed-paths", job)
@@ -421,8 +427,13 @@ class EngineMakefile(unittest.TestCase):
         then reads a store literally named `.context  `."""
         # neither CONTEXT nor CONTEXT_ROOT inherited: the assertion is about what the Makefile derives, not the caller's store
         env = {k: v for k, v in os.environ.items() if k not in ("CONTEXT", "CONTEXT_ROOT")}
-        p = subprocess.run(["make", "-C", str(KIT / "context-db"), "-s", "--eval", "show-context: ; @printf '%s|' \"$(CONTEXT)\"", "show-context"],
-                           env=env, capture_output=True, text=True)
+        # `--eval` is GNU make 4+ only (Apple ships 3.81); an included wrapper makefile works on both.
+        real_makefile = KIT / "context-db" / "Makefile"
+        with tempfile.TemporaryDirectory() as tmp:
+            wrapper = Path(tmp) / "show-context.mk"
+            wrapper.write_text(f"include {real_makefile}\nshow-context: ; @printf '%s|' \"$(CONTEXT)\"\n", encoding="utf-8")
+            p = subprocess.run(["make", "-C", str(KIT / "context-db"), "-s", "-f", str(wrapper), "show-context"],
+                               env=env, capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         value = p.stdout.rsplit("|", 1)[0]
         self.assertEqual(value, value.strip(), f"CONTEXT carries whitespace: {value!r}")

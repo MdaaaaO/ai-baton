@@ -67,8 +67,11 @@ class OneResolver(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertTrue((self.store / "reference" / "probe-doc.md").is_file(), p.stdout + p.stderr)
 
-        p = subprocess.run(["make", "-s", "-C", str(self.kit / "context-db"), "--eval",
-                            "show-context: ; @printf '%s' \"$(CONTEXT)\"", "show-context"],
+        # `--eval` is GNU make 4+ only (Apple ships 3.81); an included wrapper makefile works on both.
+        wrapper = Path(self.tmp.name) / "show-context.mk"
+        wrapper.write_text(f"include {self.kit / 'context-db' / 'Makefile'}\nshow-context: ; @printf '%s' \"$(CONTEXT)\"\n",
+                           encoding="utf-8")
+        p = subprocess.run(["make", "-s", "-C", str(self.kit / "context-db"), "-f", str(wrapper), "show-context"],
                            env=self.env, capture_output=True, text=True)
         self.assertEqual(Path(p.stdout).resolve(), self.store.resolve(), p.stderr)
 

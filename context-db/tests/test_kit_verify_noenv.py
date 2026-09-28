@@ -248,7 +248,8 @@ class ProjectDirContextRoot(unittest.TestCase):
                                capture_output=True, text=True)
             self.assertEqual(r.stdout.strip(), str(proj / "x"))  # CONTEXT_ROOT still wins
             r = subprocess.run([sys.executable, "-c", code], cwd=cache_bin, env=env, capture_output=True, text=True)
-            self.assertEqual(r.stdout.strip(), str(cache_bin.parents[2] / ".context"))  # nothing set: beside the kit, as before
+            # kit_profile resolves __file__ (symlinks, and macOS's /var -> /private/var) before deriving KIT.parent
+            self.assertEqual(Path(r.stdout.strip()).resolve(), (cache_bin.parents[2] / ".context").resolve())  # nothing set: beside the kit, as before
 
 
 class BodyChecks(unittest.TestCase):

@@ -185,6 +185,15 @@ class NewSh(ContextRoot):
         for escaped in (self.root.parent / "escape.md", self.root.parent.parent / "escape.md", self.root.parent / "x.md"):
             self.assertFalse(escaped.exists(), escaped)
 
+    def test_name_check_forces_a_c_locale(self):
+        # `[a-z]` / `[!a-z0-9._-]` in a shell `case` pattern are collation ranges on some libcs — under a
+        # locale whose default collation treats letters case-insensitively, they can silently accept an
+        # upper-case SLUG the check means to reject (#139). new.sh must pin LC_ALL=C before name_ok runs,
+        # so the check means the same thing regardless of the caller's (or the OS's) default locale.
+        text = (BIN / "new.sh").read_text(encoding="utf-8")
+        before_check = text.split("name_ok()", 1)[0]
+        self.assertIn("LC_ALL=C", before_check, "new.sh must force a C locale before the SLUG/DOMAIN check runs")
+
     def test_a_failed_template_lookup_is_an_error(self):
         # was `2>/dev/null || true`: a broken lookup silently fell back to the built-in template
         fake = Path(tempfile.mkdtemp())

@@ -7,6 +7,10 @@
 # via `kit_profile.py template <type>`), then the ENGINE dir (_templates/, next to this bin/).
 # Refuses to clobber, and prints the path. Run `make index` afterwards (the Makefile chains it).
 set -eu
+# `[a-z]` / `[!a-z0-9._-]` below are meant as plain ASCII ranges; some locales collate letters
+# case-insensitively, which would silently accept a SLUG/DOMAIN like "Upper" (#139) on a machine
+# whose default locale isn't C — force it so the path-safety check means the same thing everywhere.
+export LC_ALL=C
 
 # Engine dir (holds _templates/) — the parent of this bin/.
 ENGINE="$(cd "$(dirname "$0")/.." && pwd)"
