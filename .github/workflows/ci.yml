@@ -37,10 +37,35 @@ jobs:
           path: .claude
           fetch-depth: 0  # the review gate diffs against the base branch
 
+      # A Dependabot npm PR only ever touches a unit's package.json/package-lock.json — it cannot also bump
+      # SKILL.md's metadata.version to satisfy the check below, so its manifest-only diff gets the same
+      # --skip-bump treatment as the wording-only path (the third way docs/REVIEW.md § 1 lists), computed here
+      # from the actor and the changed paths rather than as a silent exemption inside review_gate.py itself —
+      # the reason stays visible in this run's log, not implicit in the diff's shape.
+      - name: Dependabot manifest-only diff (bump exemption)
+        if: github.event_name == 'pull_request'
+        id: dependabot-manifest
+        working-directory: .claude
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          git fetch -q --no-tags origin "$BASE_REF"
+          skip=false
+          if [ "$ACTOR" = "dependabot[bot]" ]; then
+            files=$(git diff --name-only "origin/$BASE_REF...HEAD")
+            if [ -n "$files" ] && [ -z "$(printf '%s\n' "$files" | grep -vE '^skills/[^/]+/package(-lock)?\.json$')" ]; then
+              skip=true
+              echo "bump check skipped: Dependabot manifest-only change"
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
       # Tier 0 of the review (docs/REVIEW.md § 1): what a diff against the base decides without a model — leak
       # shapes on every added line, a version + `updated` bump for every changed skill/agent. The
       # bump check is skipped for a PR the author marks wording-only (`wording` label, or `[skip-bump]` in the title or
-      # body) — the claim stays visible on the PR for the reviewer to question.
+      # body), or for a Dependabot npm PR the step above found manifest-only — both claims stay visible on the run
+      # for the reviewer to question.
       # The gate, its leak shapes and the allow-list come from the BASE branch (#129): the PR's head is the thing being
       # judged, so its copy of review_gate.py / leak_shapes.py / allow.txt must not decide. The base copy runs against
       # this checkout (`--repo .`); a PR that changes the gate is tested by `make test` on its own head.
@@ -49,7 +74,7 @@ jobs:
         working-directory: .claude
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          SKIP_BUMP: ${{ contains(github.event.pull_request.labels.*.name, 'wording') || contains(github.event.pull_request.title, '[skip-bump]') || contains(github.event.pull_request.body, '[skip-bump]') }}
+          SKIP_BUMP: ${{ steps.dependabot-manifest.outputs.skip == 'true' || contains(github.event.pull_request.labels.*.name, 'wording') || contains(github.event.pull_request.title, '[skip-bump]') || contains(github.event.pull_request.body, '[skip-bump]') }}
         run: |
           git fetch -q --no-tags origin "$BASE_REF"
           git worktree add -q --detach "$RUNNER_TEMP/base-kit" "origin/$BASE_REF"

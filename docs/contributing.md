@@ -283,7 +283,10 @@ Three tiers, one rule book — [`docs/REVIEW.md`](REVIEW.md):
   leak shapes plus e-mail, home-path and token shapes, and requires a higher `metadata.version`, an `updated` on or
   after the base's (and no later than tomorrow in UTC) for every skill or agent with a changed file (README edits
   do not count). A wording-only PR says so with the `wording` label or `[skip-bump]` in its title or body; the
-  reviewer may question the claim. Run it yourself: `make -C $BATON/context-db review-gate` (`BASE=`, `SKIP_BUMP=1`).
+  reviewer may question the claim. `ci.yml` skips it a third way, computed rather than claimed: a Dependabot npm
+  PR whose diff touches only a unit's `package.json` / `package-lock.json` — it cannot also bump `SKILL.md` itself,
+  and the run prints "bump check skipped: Dependabot manifest-only change" so the exemption stays visible.
+  Run it yourself: `make -C $BATON/context-db review-gate` (`BASE=`, `SKIP_BUMP=1`).
   The rest of tier 0 was already there: kit-verify (frontmatter, description budget, referenced scripts, plugin
   manifests), the unittest suite, `py_compile`, `bash -n`.
 - **Tier 1 — evidence.** `review_evidence.py` writes `.review/evidence.md` for the reviewer: the changed units with

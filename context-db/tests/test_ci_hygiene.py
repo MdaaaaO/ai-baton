@@ -320,6 +320,40 @@ class MermaidDepsPinned(unittest.TestCase):
             self.assertIsNotNone(m, f"no semver-major ignore rule for {name} in the pr-open npm entry")
 
 
+class DependabotManifestSkipBump(unittest.TestCase):
+    """A Dependabot npm PR only ever touches a unit's package.json/package-lock.json — it cannot also bump
+    SKILL.md's metadata.version, so ci.yml's kit-verify job grants it the same --skip-bump treatment as a
+    wording-only PR, computed from the actor and the changed paths (never a silent exemption inside
+    review_gate.py itself, which has no manifest-only carve-out — see test_review_gate.py's Bumps tests)."""
+
+    TEXT = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+
+    def job_text(self) -> str:
+        return self.TEXT.split("\n  kit-verify:\n", 1)[1].split("\n  changed-paths:\n", 1)[0]
+
+    def test_the_step_names_both_the_actor_and_the_path_check(self):
+        job = self.job_text()
+        step = job.split("Dependabot manifest-only diff", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("dependabot[bot]", step)  # the actor condition
+        self.assertIn("skills/[^/]+/package(-lock)?", step)  # the path check: only skills/*/package(-lock).json
+        self.assertIn("git diff --name-only", step)  # computed from the diff, not claimed
+        self.assertIn("bump check skipped: Dependabot manifest-only change", step)  # visible, not silent
+
+    def test_review_gate_step_still_honours_the_wording_only_path(self):
+        job = self.job_text()
+        step = job.split("Review gate (tier 0", 1)[1].split("\n      - name:", 1)[0]
+        self.assertIn("dependabot-manifest.outputs.skip", step)
+        self.assertIn("contains(github.event.pull_request.labels.*.name, 'wording')", step)
+        self.assertIn("[skip-bump]", step)
+
+    def test_review_gate_py_has_no_silent_manifest_exemption(self):
+        # the exemption lives in ci.yml (computed, visible in the run's log), not as an unlabeled shape
+        # review_gate.py matches on its own — grep the module, not just this workflow.
+        text = (BIN / "review_gate.py").read_text(encoding="utf-8")
+        self.assertNotIn("lockfile_only", text)
+        self.assertNotIn("NPM_MANIFESTS", text)
+
+
 class Hosting(unittest.TestCase):
     """A public repository runs every job on GitHub-hosted runners — no workflow names a self-hosted runner, so
     neither a pull request's code nor a push can reach a maintainer's machine."""

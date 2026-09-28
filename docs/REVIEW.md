@@ -11,7 +11,9 @@ live in `ci.yml` (§ 1). Rules only, here.
 12-digit account ids, org hosts, timezone literals, e-mail addresses, home paths, token shapes — `review_gate.py`,
 shared list `leak_shapes.py`); a changed skill or agent without a higher `metadata.version`, a `metadata.updated`
 on or after the base's and no later than tomorrow in UTC (the author stamps their local date) (wording-only PRs carry the `wording` label or
-`[skip-bump]` — the author's visible claim, which you may question); frontmatter schema, description budget,
+`[skip-bump]` — the author's visible claim, which you may question — and a Dependabot npm PR whose diff touches
+only a unit's `package.json` / `package-lock.json` gets the same treatment, computed by `ci.yml` from the actor and
+the changed paths, printed as "bump check skipped: Dependabot manifest-only change"); frontmatter schema, description budget,
 referenced scripts and flags, always-on file budgets, plugin manifests (`kit_verify.py`); the unittest suite;
 `py_compile`, `bash -n`. The same shapes also run over **every tracked file** (`review_gate.py --tree`, on every PR and push to `main`), so a leak that reached `main` without a PR diff (a release commit, a squash) still fails CI. The evidence file (`.review/evidence.md`) says whether tier 0 passed and lists the units,
 their `requires` sets and the lines pre-flagged for you. Read it first; do not re-derive it.

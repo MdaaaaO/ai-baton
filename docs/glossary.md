@@ -79,6 +79,8 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Unit** — one skill (`skills/<name>/SKILL.md`) or one agent (`agents/<name>.md`): the thing `kit-verify`
   validates and `review_gate.py` bumps by version.
 - **Wording-only** — a PR that changes text but no behaviour: no version bump, declared with the `wording` label or
-  `[skip-bump]` in the title or body (`review_gate.py --skip-bump`); the reviewer may question the claim.
+  `[skip-bump]` in the title or body (`review_gate.py --skip-bump`); the reviewer may question the claim. `ci.yml`
+  grants the same `--skip-bump` a third way, computed rather than declared: a Dependabot npm PR whose diff touches
+  only a unit's `package.json` / `package-lock.json`.
 - **Workspace root** — the directory Claude Code sessions run in: the repos, the root `CLAUDE.md` and `Makefile`,
   `.claude/` (the kit) and `.context/` (the DB). Every kit path is relative to it.
