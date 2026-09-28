@@ -251,10 +251,15 @@ def bump_findings(base: str, head: str, cwd: Path = KIT, files: dict[str, str] |
     return out
 
 
-def run(base: str, head: str = "HEAD", skip_bump: bool = False, cwd: Path = KIT) -> tuple[list[str], dict[str, str]]:
+def run(base: str, head: str = "HEAD", skip_bump: bool = False, cwd: Path = KIT,
+        check: str = "all") -> tuple[list[str], dict[str, str]]:
+    """(findings, changed files) for base..head — `check` is all | leak | bump. The one path the CLI and
+    review_evidence.py take."""
     files = changed_files(base, head, cwd)
-    findings = leak_findings(base, head, cwd, files)
-    if not skip_bump:
+    findings: list[str] = []
+    if check in ("all", "leak"):
+        findings += leak_findings(base, head, cwd, files)
+    if check in ("all", "bump") and not skip_bump:
         findings += bump_findings(base, head, cwd, files)
     return findings, files
 
@@ -279,12 +284,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f)
             print(f"review-gate --tree: {'FAIL' if findings else 'OK'} — {n} file(s) at {a.head}, {len(findings)} finding(s)")
         return 1 if findings else 0
-    files = changed_files(a.base, a.head, cwd)
-    findings: list[str] = []
-    if a.check in ("all", "leak"):
-        findings += leak_findings(a.base, a.head, cwd, files)
-    if a.check in ("all", "bump") and not a.skip_bump:
-        findings += bump_findings(a.base, a.head, cwd, files)
+    findings, files = run(a.base, a.head, a.skip_bump, cwd, a.check)
     if a.json:
         print(json.dumps(findings))
     else:
