@@ -2,7 +2,7 @@
 name: session-handoff
 description: Flush durable knowledge before a session ends or a ticket/PR/epic step lands: the context doc, priorities, indexes, the session's stats (context doc, session file, cross-session ledger) and the paste-ready next-session prompt the successor starts from. Invoke when finishing a piece of work, before ending a session, or on "wrap up / hand off / update context".
 metadata:
-  version: "7"
+  version: "8"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
 user-invocable: true

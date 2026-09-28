@@ -2,7 +2,7 @@
 name: pr-watch
 description: Low-noise watch on the PRs you authored: ONE multi-PR Monitor per repo per session, emitting only actionable events (bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeping waiting branches current with their base, merging via `pr-merge.sh` once the gates hold. Park rule: sign-off, idle windows, human gate. For every open PR your session owns.
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-27"
   reviewed: "2026-09-26"
 ---

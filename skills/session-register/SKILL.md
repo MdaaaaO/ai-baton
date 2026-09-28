@@ -2,7 +2,7 @@
 name: session-register
 description: Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree.
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
 user-invocable: true
