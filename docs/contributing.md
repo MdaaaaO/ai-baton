@@ -180,7 +180,7 @@ tags that commit `vX.Y.Z` and publishes a GitHub Release with the section as not
   (the kit checkout itself stays on its branch), pushes it and opens the PR with the `release` label.
 - The kit checkout is the workspace's `.claude/` clone. A plugin install has no clone (the plugin cache is not
   a git checkout), so point `KIT_CHECKOUT` at a clone of the kit repo and include the file by path:
-  `make -f $BATON/workspace.mk kit_release_dry KIT_CHECKOUT=<kit clone>`. The level is
+  `make -f $BATON/workspace.mk kit_release_dry KIT_CHECKOUT=<kit clone>` (`$BATON` — the kit root — `docs/glossary.md`). The level is
   inferred from the subjects (`feat` → minor, `!` / `BREAKING CHANGE:` → major, else patch) unless given.
 - Release PRs need no issue (`pr-issue` exempts them) and get no Claude review.
 - `v0.0.0` marks the history before Conventional Commits; the first release lists what came after it.

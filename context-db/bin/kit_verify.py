@@ -232,7 +232,7 @@ def check_identity_options(errors: list[str], man: dict) -> None:
     `userConfig` entry of the mapped key (string, titled, described) and nothing else is declared there — the
     manifest and the resolver drift apart otherwise; and `hooks/hooks.json` carries the SessionStart hook that
     re-exports the options as `WORKSPACE_*` and `CLAUDE_PROJECT_DIR` for Bash (`kit_profile.py session-env`, #3), else the plugin path
-    never sees the values the user typed into `/config`."""
+    never sees the values the user typed into `/plugin configure ai-baton`."""
     uc = man.get("userConfig") if isinstance(man.get("userConfig"), dict) else {}
     want = {v: k for k, v in kit_profile.IDENTITY_KEYS.items()}
     for key, var in sorted(want.items()):

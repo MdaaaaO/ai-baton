@@ -1,7 +1,7 @@
 # <Your name>'s Claude Code Workspace
 
 <One or two sentences: how you want to be addressed, team, timezone. Identity VALUES
-(`WORKSPACE_USER`, `WORKSPACE_GITHUB_LOGIN`, `WORKSPACE_TZ`, …) come from the plugin's `/config` dialog or
+(`WORKSPACE_USER`, `WORKSPACE_GITHUB_LOGIN`, `WORKSPACE_TZ`, …) come from the plugin's `/plugin configure` dialog or
 `.claude/settings.local.json` on a clone.>
 
 @.claude/WORKSPACE.md
