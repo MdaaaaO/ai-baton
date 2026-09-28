@@ -37,6 +37,36 @@ Both paths set `$BATON`, the environment variable naming the kit root that the r
 commands write as `$BATON/…` — a clone's `settings.json` sets it to `.claude`, a plugin install's SessionStart
 hook exports it from Claude Code's plugin cache. You never set it yourself (`docs/glossary.md`).
 
+## The loop
+
+The kit exists to run this loop, not to be a feature list: an issue is sized once, picked up by a worker matched
+to that size, reviewed and merged without a human once the routine gates hold, and a session's own retro turns
+what went wrong back into an issue.
+
+```mermaid
+flowchart LR
+  issue["Issue"] -->|"ticket-open sizes it"| pickup["ticket-pickup verifies, claims"]
+  pickup -->|"a worker sized to the ticket"| worker["fix + tests + one commit"]
+  worker -->|"pr-open"| pr["Pull request"]
+  pr -->|"pr-watch"| review["Claude review"]
+  review -->|"green + approved"| merge["auto-merge"]
+  merge --> handoff["session-handoff"]
+  handoff --> retro["session-retro"]
+  retro -.->|"a kit gap"| issue
+```
+
+- **`ticket-open`** writes the ticket's Sizing line once: which model, and whether the job stays in the main
+  session or goes to a worker (`docs/delegation.md` § Sizing).
+- **`ticket-pickup`** re-checks that call against the current default branch, then claims the ticket.
+- A worker sized to the ticket does the fix — in the main session for a judgment call, in the background when
+  it's one of a queue (`docs/delegation.md` § The worker brief).
+- **`pr-open`** opens the PR with its diagrams, labels and reviewers; **`pr-watch`** keeps it current and
+  surfaces only what needs a decision.
+- Claude reads the diff against one rule file ([`docs/REVIEW.md`](docs/REVIEW.md)) and posts a verdict; an
+  approved, green PR merges itself — a human gates only the sensitive paths (`.github/workflows/`).
+- **`session-handoff`** flushes what the session learned; **`session-retro`** checks the session against the
+  kit and offers a kit gap back as an issue, closing the loop.
+
 ## Why a kit
 
 | You have | What breaks | What the kit adds |
