@@ -12,7 +12,7 @@ build the day a script reads a name that is not a row here). **Scope** is one of
 
 A platform variable (`HOME`, `TMPDIR`, `CI`, `GITHUB_*`, `RUNNER_*`, `CLAUDE_*` from Claude Code,
 `NO_COLOR`) carries no row: it is not the kit's to document. `WORKSPACE_*` identity variables are
-listed below for completeness, but their single source of truth is `docs/env-facts.md` § Identity and
+listed below for completeness, but their single source of truth is `docs/packaging.md` § Identity and
 `context-db/bin/kit_profile.py`'s `IDENTITY_KEYS`.
 
 ## Sync, session registry, evals
@@ -82,7 +82,7 @@ listed below for completeness, but their single source of truth is `docs/env-fac
 ## Identity (`WORKSPACE_*`)
 
 One reader, `context-db/bin/kit_profile.py`'s `identity()` (plugin option first, then the variable
-itself — settings.local.json env or a shell export); full spec `docs/env-facts.md` § Identity.
+itself — settings.local.json env or a shell export); full spec `docs/packaging.md` § Identity.
 
 | Name | Default | Read by | Purpose | Scope |
 |---|---|---|---|---|
