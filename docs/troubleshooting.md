@@ -48,7 +48,7 @@ the full state table; to see a failure immediately rather than at the next regis
 
 | Event | Call |
 |---|---|
-| `PostToolUse` on `Write`/`Edit`/`MultiEdit`/`NotebookEdit` of a file under the content root | `ctx validate --changed --adopt`, synchronous; findings come back as the hook's `systemMessage` (a `ctx validate: …` line) |
+| `PostToolUse` on `Write`/`Edit`/`MultiEdit`/`NotebookEdit` of a file under the content root | `ctx validate --changed --adopt`, synchronous; findings come back as the hook's `systemMessage` (a `ctx validate: …` line); any other failure except `NO_STORE`, a timeout included, comes back as `ctx validate did not run: <first error line>`, so validation never stops unnoticed |
 | the same, `async` | `ctx touch --session <session_id>`: the heartbeat of the registry row `session register` stamped with the harness session id |
 | `SessionStart` `startup`/`resume`/`clear` | `ctx brief --registry`, byte-budgeted, into the session's context |
 | `SessionStart` `compact` | `ctx brief --session <session_id>`, byte-budgeted |
@@ -108,6 +108,8 @@ Two artifacts are common to both modes:
 3. In the root `Makefile`, delete the line `include .claude/workspace.mk` — delete the file entirely when that
    was its only line.
 4. Remove the harness memory symlink (above).
+5. `rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/ai-baton-kit/ctx-store"` if you ran `ctx_adapter.py install` (the pinned
+   ctx-store copy lives outside the checkout).
 
 **Plugin** (`claude plugin install ai-baton@ai-baton-kit`):
 
@@ -120,5 +122,7 @@ Two artifacts are common to both modes:
    never imports `@.claude/WORKSPACE.md` — that came from the SessionStart hook at runtime, so there is no line
    on disk for it to leave behind).
 5. Remove the harness memory symlink (above).
+6. `rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/ai-baton-kit/ctx-store"` if you ran `ctx_adapter.py install` (the pinned
+   ctx-store copy lives outside the plugin cache).
 
 Either way, `/kit-health` won't run again once step 1 is done — there is nothing left to check.

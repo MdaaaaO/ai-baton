@@ -17,7 +17,8 @@ JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not 
 or found, or when anything in the adapter itself fails, so a machine that has not adopted ctx-store sees nothing:
 
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
-                       comes back as `{"systemMessage": …}`, every other outcome is silent
+                       comes back as `{"systemMessage": …}`; any exit but 0 or
+                       NO_STORE (or a timeout) comes back as `ctx validate did not run: …`
   post-tool-use-async  the same trigger → `ctx touch --session <session_id>` (the registry row `session register`
                        stamped with the harness session id); output ignored
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
@@ -173,11 +174,19 @@ def hook(name: str) -> str:
         if not _changed_under(payload, root):
             return ""
         if name == "post-tool-use":
-            r = _ctx(ctx, store, "validate", "--changed", "--adopt")
-            if r.returncode == 3:  # validation findings: the one outcome worth a line in the session
-                text = " · ".join(ln.strip() for ln in r.stderr.splitlines() if ln.strip())
-                return json.dumps({"systemMessage": f"ctx validate: {text[:MESSAGE_MAX]}"})
-            return ""
+            try:
+                r = _ctx(ctx, store, "validate", "--changed", "--adopt")
+            except subprocess.TimeoutExpired:
+                return json.dumps({"systemMessage": f"ctx validate did not run: no answer within {HOOK_TIMEOUT}s"})
+            lines = [ln.strip() for ln in r.stderr.splitlines() if ln.strip()]
+            if r.returncode == 3:  # validation findings
+                return json.dumps({"systemMessage": f"ctx validate: {' · '.join(lines)[:MESSAGE_MAX]}"})
+            if r.returncode == 0 or (lines and lines[0].split()[0] == "NO_STORE"):
+                return ""  # clean, or the content root is not a store yet (not adopted): nothing to say
+            # Any other exit (usage, lock timeout, read-only, a ctx that changed its verbs) means validation did
+            # not happen; staying silent would read exactly like "no findings".
+            first = lines[0] if lines else f"exit {r.returncode}"
+            return json.dumps({"systemMessage": f"ctx validate did not run: {first[:MESSAGE_MAX]}"})
         sid = _session_id(payload)
         if sid:
             _ctx(ctx, store, "touch", "--session", sid)

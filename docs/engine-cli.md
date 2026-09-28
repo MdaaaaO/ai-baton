@@ -354,7 +354,8 @@ JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not 
 or found, or when anything in the adapter itself fails, so a machine that has not adopted ctx-store sees nothing:
 
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
-                       comes back as `{"systemMessage": …}`, every other outcome is silent
+                       comes back as `{"systemMessage": …}`; any exit but 0 or
+                       NO_STORE (or a timeout) comes back as `ctx validate did not run: …`
   post-tool-use-async  the same trigger → `ctx touch --session <session_id>` (the registry row `session register`
                        stamped with the harness session id); output ignored
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted

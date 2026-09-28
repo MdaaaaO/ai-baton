@@ -21,7 +21,7 @@ Setting up the plugin path, step by step: [`plugin-setup.md`](plugin-setup.md).
 | `evals/` | the eval dir, named by `plugin.json` `"experimental": {"evals": "evals"}` — `claude plugin eval .` (`make -C context-db eval`) | same files, same command |
 | `context-db/` (engine, discovery manifests, templates) | ships inside the plugin root; scripts find the kit from their own location | `.claude/context-db/` |
 | `hooks/` (`pre-push`, `commit-msg`) | **git** hooks, not Claude Code hooks — not a plugin component | installed by `setup.sh` / `sync.sh` (`core.hooksPath`) |
-| `settings.json` (`SessionEnd` → `sync.sh`) | not shipped: the plugin update **is** the sync | the kit's project settings |
+| `settings.json` (`SessionEnd` → `sync.sh`; ctx-store `SessionStart`/`PostToolUse` hooks) | not shipped: the plugin update **is** the sync, and `hooks/hooks.json` carries the same ctx-store hooks | the kit's project settings |
 | `setup.sh`, `CLAUDE.example.md`, `environment-template/` | not plugin components, but `setup.sh` runs here too — from the plugin cache, via `/kit-setup` or `sh $BATON/setup.sh` (`plugin-setup.md` step 3) | the workspace bootstrap, run by hand |
 | `sync.sh`, `workspace.mk` | not used — the plugin update *is* the sync (row above), and there is no root `Makefile` include to run `workspace.mk` targets from | the workspace bootstrap |
 | `.context/` (DB, env store, memory, state) | **never in the plugin** — project data, found through `CLAUDE_PROJECT_DIR/.context` | beside `.claude/` |

@@ -267,11 +267,33 @@ class PostToolUse(Base):
         self.assertEqual(set(out), {"systemMessage"})
         self.assertIn(finding, out["systemMessage"])
 
-    def test_any_other_failure_is_silent(self):
+    def test_any_other_failure_says_validation_did_not_run(self):
         for rc, err in (("4", "LOCK_TIMEOUT x: lock timeout\n"), ("5", "STORE_READONLY x: store is read-only\n"),
-                        ("1", "USAGE x: bad command line\n")):
+                        ("1", "USAGE x: bad command line\n"), ("7", "")):
             r = self.adapter("hook", "post-tool-use", stdin=self.write(self.root / "a.md"), FAKE_CTX_RC=rc, FAKE_CTX_ERR=err)
-            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), rc)
+            self.assertEqual((r.returncode, r.stderr), (0, ""), rc)
+            msg = json.loads(r.stdout)["systemMessage"]
+            self.assertTrue(msg.startswith("ctx validate did not run: "), msg)
+            self.assertIn(err.strip() or "exit 7", msg)
+
+    def test_a_validate_timeout_says_validation_did_not_run(self):
+        mod = load_adapter()
+        def boom(*a, **k):
+            raise mod.subprocess.TimeoutExpired("ctx", mod.HOOK_TIMEOUT)
+        mod._ctx = boom
+        mod.resolve = lambda: (self.fake, "override")
+        mod._context_root = lambda: self.root
+        import io
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"CTX_STORE": ""}), \
+             mock.patch.object(sys, "stdin", io.StringIO(self.write(self.root / "a.md"))):
+            out = mod.hook("post-tool-use")
+        self.assertIn("ctx validate did not run", json.loads(out)["systemMessage"])
+
+    def test_no_store_on_validate_stays_silent(self):
+        r = self.adapter("hook", "post-tool-use", stdin=self.write(self.root / "a.md"),
+                         FAKE_CTX_RC="2", FAKE_CTX_ERR="NO_STORE x: no store found\n")
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
 
     def test_ctx_store_set_is_passed_through_not_overridden(self):
         locator = "memory://" + uuid.uuid4().hex[:8]
