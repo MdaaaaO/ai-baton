@@ -184,6 +184,7 @@ It also ships three agents (`triage`, `review-runner`, `auto-runner`) and the `c
 | [authoring](docs/authoring.md) | The checklist for a new skill or agent |
 | [delegation](docs/delegation.md) | When to hand a read or a fix to a subagent, sized by cost |
 | [engine-cli](docs/engine-cli.md) | Every engine command and flag |
+| [decisions](docs/decisions/README.md) | Design choices worth not re-litigating (ADR-style notes) |
 | [commit-style](docs/commit-style.md) · [REVIEW](docs/REVIEW.md) · [glossary](docs/glossary.md) · [CHANGELOG](CHANGELOG.md) · [contributing](docs/contributing.md) | Contributor reference |
 
 ## Contributing

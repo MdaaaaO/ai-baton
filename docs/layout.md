@@ -98,8 +98,10 @@ The four fattest cells above, unabridged:
   hooks / sync), `authoring.md` (the checklist: every frontmatter key with its rule, body rules, bump, tests,
   evals, review gate), `engine-cli.md` (the engine's CLI reference, generated from `make help` + every tool's
   `--help` by `make -C $BATON/context-db engine-cli-doc`), `glossary.md` (the kit's terms), `contributing.md`
-  (the full contributor reference — issue → PR → review → release, one section per topic), `CHANGELOG.md` (one
-  line per skill/agent version bump). Every `SKILL.md`/agent carries `version`/`updated`/`reviewed` (+ optional
+  (the full contributor reference — issue → PR → review → release, one section per topic), `decisions/` (ADR-style
+  notes for a design choice a contributor would otherwise re-litigate; `decisions/README.md` is the spec and
+  index), `CHANGELOG.md` (one line per skill/agent version bump). Every `SKILL.md`/agent carries
+  `version`/`updated`/`reviewed` (+ optional
   `requires`, `facts`) as strings under `metadata:` — the Claude Code profile of the Agent Skills spec,
   `docs/contributing.md` § Skill frontmatter; `make -C $BATON/context-db kit-verify [STALE=90]` enforces it and checks
   this machine's env store is complete. Writing a skill: `docs/authoring.md` (the checklist), `docs/contributing.md`
