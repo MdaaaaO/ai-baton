@@ -12,8 +12,17 @@ trusting or messaging it. Stdlib only; run via `make -C $BATON/context-db sessio
 
 Size discipline: WORKSPACE.md tells every session to read this file first, so it is
 part of every session's start-up cost. Active/idle rows carry everything (working_on,
-responsibilities, stats); ended rows are one short line — name, ended-at, the first line
-of the next-session prompt — for the newest MAX_ENDED sessions, older ones by name only.
+responsibilities, stats); ended rows are one short line — name, epic, ended-at — for the
+newest MAX_ENDED sessions, older ones by name only. Neither carries the prompt's own text
+any more (writing a successor's chat into a file every session reads at startup was the
+bug this file fixes): a session that left a real next-session prompt gets one starter block
+below the table instead, a plain line the successor pastes verbatim — "Register as the
+successor of <name>; your prompt is in <path> § Next session." — plus a link whose text is
+that same path, for a viewer that shows link text but does not resolve it. Only the newest
+MAX_ENDED sessions get a block; older ones (still in the fold) get the path without one. A
+session that ended with no real prompt — nothing written, blank, or a "no successor" note
+(session-handoff's wording for a lane that intentionally left nothing to hand over) — does
+not appear in the Ended table at all; `has_next_prompt()` is the one place that decides "real".
 Ended sessions with no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago, are swept to
 sessions/archive/<name>.md (listed in sessions/archive/INDEX.md) so the live registry stays short
 under a fold. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
@@ -61,7 +70,30 @@ try:
     MAX_ENDED = max(0, int(os.environ.get("SESSION_INDEX_MAX_ENDED") or 5))
 except ValueError:  # a bad value must not leave the index stale behind a traceback
     MAX_ENDED = 5
-PROMPT_PREVIEW = 80  # chars of the next-session prompt shown in an ended row
+
+# A stored next-session prompt that is only a "no successor" note — session-handoff's wording for a lane
+# that ended with nothing to hand over but still wanted to point a reader at where the work went (e.g.
+# "No successor: the lane folds into <other session>") — tells a reader where the work went, not what to
+# paste to pick it up: it does not count as a real prompt, same as an absent or blank one.
+NO_SUCCESSOR_RE = re.compile(r"^no\s+successor\b", re.IGNORECASE)
+
+
+def has_next_prompt(m: dict) -> bool:
+    """Whether `m["_next"]` is a real hand-off — the one place that decides it, so the Ended table, the
+    archive sweep grace window and the archive index all agree. Blank, whitespace-only, and a "no successor"
+    note are all "no prompt"."""
+    text = (m.get("_next", "") or "").strip()
+    return bool(text) and not NO_SUCCESSOR_RE.match(text)
+
+
+def rel_from_root(path: str) -> str:
+    """`path` (a session's `_path`, live under sessions/ or already swept to sessions/archive/) relative to
+    the workspace root, e.g. `.context/sessions/<name>.md` — the form a fresh session at the workspace root
+    can open directly, and what session-register's startup step resolves the prompt from. CONTEXT_ROOT is
+    always a `.context/` directory (docs/layout.md), so the prefix is a structural constant, never an
+    environment-specific path."""
+    return os.path.join(".context", os.path.relpath(path, CTX)).replace(os.sep, "/")
+
 
 # Ended sessions leave the live registry for sessions/archive/ when nothing waits on them: no next-session
 # prompt (nothing for a successor to pick up), or ended more than ARCHIVE_DAYS ago. Makefile:
@@ -135,16 +167,6 @@ def cost_split(stats: str) -> tuple[str, str]:
     return m.group(1), (stats[:m.start()] + stats[m.end():]).strip(" ·") or "-"
 
 
-def prompt_preview(m: dict) -> str:
-    """First non-empty, non-fence line of the next-session prompt, cut to PROMPT_PREVIEW chars."""
-    for ln in m.get("_next", "").split("\n"):
-        ln = ln.strip()
-        if ln and not ln.startswith("```"):
-            ln = ln.replace("|", "\\|")
-            return ln if len(ln) <= PROMPT_PREVIEW else ln[:PROMPT_PREVIEW - 1].rstrip() + "…"
-    return "-"
-
-
 def by_heartbeat(items: list[dict]) -> list[dict]:
     return sorted(items, key=lambda r: r.get("heartbeat", ""), reverse=True)
 
@@ -154,7 +176,7 @@ def archive_reason(m: dict) -> str | None:
     a = age_hours(m.get("heartbeat", ""))
     if a is None:
         return None  # unparsable ended-at: never drop a row on a bad value (same stance as MAX_ENDED)
-    if not m.get("_next"):
+    if not has_next_prompt(m):
         if a > NOPROMPT_HOURS:
             return f"no next-session prompt, ended {int(a)}h ago (> {NOPROMPT_HOURS}h)"
         return None  # inside the grace window — a resumed session may still refine the hand-off
@@ -223,11 +245,15 @@ def write_archive_index(now: datetime) -> int:
         "",
     ]
     if rows:
-        out.append("| Session | Epic | Ended | Next-session prompt (first line) | File |")
+        # Same rule as the live table: a link (text = path), never the prompt's own text — "-" when the
+        # session left no real prompt to point at (has_next_prompt, shared with archive_reason above).
+        out.append("| Session | Epic | Ended | File | Prompt |")
         out.append("|---|---|---|---|---|")
         for m in rows:
+            path = rel_from_root(m["_path"])
+            prompt = f"[{path}]({path})" if has_next_prompt(m) else "-"
             out.append(f"| `{cell(m, 'session')}` | {cell(m, 'epic')} | {local_str(m.get('heartbeat', ''))} "
-                       f"| {prompt_preview(m)} | `{os.path.basename(m['_path'])}` |")
+                       f"| `{os.path.basename(m['_path'])}` | {prompt} |")
     else:
         out.append("_empty_")
     atomic_write(ARCHIVE_OUT, "\n".join(out) + "\n")
@@ -259,6 +285,11 @@ def main(argv: list[str] | None = None) -> int:
     if a.dry_run:
         print(f"dry run — {len(active)} active, {len(ended)} ended stay in the live registry")
         return 0
+    # The Ended table lists only a session that left a real hand-off (has_next_prompt); one that ended
+    # clean with nothing to hand over, or crashed, still lives in `ended` for the archive grace window
+    # (archive_reason) and the sessions/ directory, just not here — there is nothing for a reader to pick up.
+    listed = [m for m in ended if has_next_prompt(m)]
+    unlisted = len(ended) - len(listed)
 
     out = [
         "# `.context/` — SESSION INDEX (live registry)",
@@ -269,13 +300,15 @@ def main(argv: list[str] | None = None) -> int:
         f"isolates branch/HEAD, not directory access). ⚠ **STALE** = no heartbeat for over {STALE_HOURS}h; "
         "re-verify with `ListAgents` (match by ref). **Stats** / **~$ est.** come from the session's "
         "transcript (main session only, list price). Heartbeats are shown in the owner's local zone. "
-        "An ended row shows the first line of its **next-session prompt**; the full prompt is "
-        "`sessions/<name>.md` § Next session, its stats § Session stats and `sessions/_ledger.md`. "
+        "The Ended table lists only a session that left a real **next-session prompt** — a starter below "
+        "the table points at it (`sessions/<name>.md` § Next session); a session that ended with nothing "
+        "to hand over is not listed here (its file and stats stay in `sessions/<name>.md` § Session stats "
+        "and `sessions/_ledger.md`, and it is swept on the usual schedule). "
         f"Ended sessions with no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago, are swept "
         "to `sessions/archive/` (see `sessions/archive/INDEX.md`).",
         "",
         f"_generated {now.astimezone(LOCAL_TZ).strftime('%Y-%m-%d %I:%M %p %Z')} · {len(active)} active · "
-        f"{len(ended)} ended_",
+        f"{len(listed)} ended listed · {unlisted} ended with no prompt (not listed)_",
         "",
         "## Active",
         "",
@@ -299,22 +332,36 @@ def main(argv: list[str] | None = None) -> int:
         out.append("_none registered_")
     out.append("")
 
-    if ended:
-        recent, older = ended[:MAX_ENDED], ended[MAX_ENDED:]
+    if listed:
+        recent, older = listed[:MAX_ENDED], listed[MAX_ENDED:]
         out.append(f"## Ended (newest {len(recent)})")
         out.append("")
-        out.append("| Session | Epic | Ended | Next-session prompt (first line) |")
-        out.append("|---|---|---|---|")
+        out.append("| Session | Epic | Ended |")
+        out.append("|---|---|---|")
         for m in recent:
             ref = f" `{cell(m, 'ref')}`" if cell(m, "ref") else ""
             out.append(f"| `{cell(m, 'session')}`{ref} | {cell(m, 'epic')} "
-                       f"| {local_str(m.get('heartbeat', ''))} | {prompt_preview(m)} |")
+                       f"| {local_str(m.get('heartbeat', ''))} |")
         out.append("")
-        if older:
-            names = ", ".join(f"`{cell(m, 'session')}`" for m in older)
-            out.append(f"<details><summary>{len(older)} older ended session(s) — `sessions/<name>.md`</summary>")
+        # One starter per shown session — never in the table itself (a cell cannot hold a fenced block).
+        # Paste-ready: no markdown inside the fence, so a successor can copy the whole line as-is.
+        for m in recent:
+            name = cell(m, "session")
+            path = rel_from_root(m["_path"])
+            out.append(f"`{name}` — [{path}]({path})")
             out.append("")
-            out.append(names)
+            out.append("```text")
+            out.append(f"Register as the successor of {name}; your prompt is in {path} § Next session.")
+            out.append("```")
+            out.append("")
+        if older:
+            entries = ", ".join(
+                f"`{cell(m, 'session')}` ([{rel_from_root(m['_path'])}]({rel_from_root(m['_path'])}))"
+                for m in older
+            )
+            out.append(f"<details><summary>{len(older)} older ended session(s)</summary>")
+            out.append("")
+            out.append(entries)
             out.append("")
             out.append("</details>")
             out.append("")
@@ -323,7 +370,8 @@ def main(argv: list[str] | None = None) -> int:
     archived = write_archive_index(now)
     tail = f", {moved} archived" if moved else ""
     tail += f" ({archived} in sessions/archive/)" if archived else ""
-    print(f"wrote {os.path.relpath(OUT, CTX)} — {len(active)} active, {len(ended)} ended{tail}")
+    print(f"wrote {os.path.relpath(OUT, CTX)} — {len(active)} active, {len(listed)} ended listed"
+          f", {unlisted} with no prompt{tail}")
     return 0
 
 

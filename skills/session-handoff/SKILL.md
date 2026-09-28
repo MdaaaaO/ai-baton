@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flush durable knowledge before a session ends or a ticket/PR/epic step lands: the context doc, priorities, indexes, the session's stats (context doc, session file, cross-session ledger) and the paste-ready next-session prompt the successor starts from. Invoke when finishing a piece of work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -84,7 +84,10 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       in your final message — "no follow-up from this session". If a stale prompt from earlier in the
       session is still on file and no longer true, withdraw it with `NEXT=none` rather than leaving it to
       mislead the successor. A pointer to another session's open PR/ticket goes in the context doc as a
-      note (step 1), never into the prompt.
+      note (step 1), never into the prompt. If the lane itself is done — folded into another session,
+      abandoned — and it is worth a one-line marker for a reader of the raw file, `NEXT` may hold a "No
+      successor: …" note instead of being omitted; either way it is not a real prompt, so the Ended table
+      never lists the session for it (`gen_sessions.py`'s `has_next_prompt`).
     - **Something to hand over:** draft the prompt a fresh session on this lane should be started with:
       ≤12 plain lines (no code fence inside), covering the session `NAME` to register (successor of `<this
       name>`), the epic and tickets *this session* owned, the files to read first (context doc sections,
@@ -95,8 +98,10 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       not survive between tool calls, so the Write call takes the literal path) for `<dir>/next.md`, then
       pass the same path to the registry step: `make -C $BATON/context-db session-end NAME=<name>
       NEXT=<dir>/next.md` (`session-touch … NEXT=<dir>/next.md` when only pausing). It lands in `## Next
-      session` of your session file, and its first line in the **Next-session prompt** column of
-      `SESSION_INDEX.md` — the successor's `session-register` startup reads it from there. Then **end your
+      session` of your session file — never copied into `SESSION_INDEX.md` itself, which shows only a
+      starter that points at that file and section (a paste-ready "Register as the successor of `<name>`;
+      your prompt is in `<path>` § Next session." plus a link) — the successor's `session-register` startup
+      opens the file from there and reads the full text. Then **end your
       last chat message with the same prompt in a code block** so the user can paste it into the new
       session without opening the index. Internal surface: local paths are fine here.
 11. **Coordination** — if another active session owns follow-on work (check `SESSION_INDEX.md`),

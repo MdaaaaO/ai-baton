@@ -28,12 +28,25 @@ def env_for(root: Path, **extra: str) -> dict:
     return {**env, "CONTEXT_ROOT": str(root), **extra}
 
 
-def run(root: Path, *args: str, days: str = "7") -> str:
-    env = env_for(root, SESSION_ARCHIVE_DAYS=days, SESSION_ARCHIVE_NOPROMPT_HOURS="48", SESSION_INDEX_MAX_ENDED="5")
+def run(root: Path, *args: str, days: str = "7", max_ended: str = "5") -> str:
+    env = env_for(root, SESSION_ARCHIVE_DAYS=days, SESSION_ARCHIVE_NOPROMPT_HOURS="48",
+                  SESSION_INDEX_MAX_ENDED=max_ended)
     r = subprocess.run([sys.executable, str(BIN / "gen_sessions.py"), *args], env=env, cwd=BIN,
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     return r.stdout
+
+
+def blank_root() -> Path:
+    """A throwaway CONTEXT_ROOT with a blank env store (gen_sessions resolves the display timezone from it) —
+    never the live store; the caller owns cleanup."""
+    tmp = tempfile.TemporaryDirectory()
+    root = Path(tmp.name)
+    r = subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env_for(root),
+                       cwd=BIN, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    (root / "sessions").mkdir()
+    return tmp, root
 
 
 class ArchiveSweep(unittest.TestCase):
@@ -75,12 +88,23 @@ class ArchiveSweep(unittest.TestCase):
         self.assertEqual(arch, ["INDEX.md", "old-with-prompt.md", "stale-no-prompt.md"])
         idx = (self.root / "SESSION_INDEX.md").read_text()
         self.assertIn("`fresh-with-prompt`", idx)
-        self.assertIn("`fresh-no-prompt`", idx)
+        # fresh-no-prompt is still live (inside the 48h grace window) but has nothing to hand over —
+        # not listed in the Ended table at all, unlike the old first-line-preview behaviour. bad-heartbeat
+        # (unparsable heartbeat, never swept) has a real prompt and stays listed alongside it.
+        self.assertNotIn("fresh-no-prompt", idx)
         self.assertNotIn("old-with-prompt", idx)
         self.assertNotIn("<details>", idx)
+        self.assertIn("2 ended listed", idx)
+        self.assertIn("1 ended with no prompt (not listed)", idx)
+        # the starter, never the prompt's own words
+        self.assertIn("Register as the successor of fresh-with-prompt; your prompt is in "
+                      ".context/sessions/fresh-with-prompt.md § Next session.", idx)
+        self.assertNotIn("Register as fresh-2", idx)
+        self.assertNotIn("Register as bad-2", idx)
         aidx = (self.root / "sessions" / "archive" / "INDEX.md").read_text()
         self.assertIn("| `old-with-prompt` | E-1 |", aidx)
-        self.assertIn("Register as old-2.", aidx)
+        self.assertIn("[.context/sessions/archive/old-with-prompt.md](.context/sessions/archive/old-with-prompt.md)", aidx)
+        self.assertNotIn("Register as old-2.", aidx)
         self.assertIn("2 archived_", aidx)
         # a second run is a no-op that keeps the archive index in step
         out2 = run(self.root)
@@ -169,7 +193,11 @@ class ArchiveSweep(unittest.TestCase):
         self.assertIn("restored stale-no-prompt.md from sessions/archive/", r.stdout)
         self.assertTrue((self.root / "sessions" / "stale-no-prompt.md").exists())
         self.assertFalse((self.root / "sessions" / "archive" / "stale-no-prompt.md").exists())
-        self.assertIn("Register as stale-2", (self.root / "SESSION_INDEX.md").read_text())
+        idx = (self.root / "SESSION_INDEX.md").read_text()
+        self.assertIn("`stale-no-prompt`", idx.split("## Ended")[1])
+        self.assertIn("Register as the successor of stale-no-prompt; your prompt is in "
+                      ".context/sessions/stale-no-prompt.md § Next session.", idx)
+        self.assertNotIn("Register as stale-2", idx)  # the prompt's own words never land in the index
 
     def test_restore_picks_the_newest_archived_file_for_a_reused_name(self):
         run(self.root)  # stale-no-prompt (3 d) → archive/stale-no-prompt.md
@@ -198,6 +226,87 @@ class ArchiveSweep(unittest.TestCase):
         out = run(self.root, "--dry-run", days="abc")
         self.assertIn("would archive old-with-prompt", out)
         self.assertNotIn("would archive fresh-with-prompt", out)
+
+
+class EndedTablePromptPointer(unittest.TestCase):
+    """#266: the Ended table points at a real next-session prompt instead of quoting its own words, and
+    lists a session at all only when it left one — an empty prompt, a whitespace-only one, and a "no
+    successor" note (session-handoff's wording for a lane that ended with nothing to hand over) all count
+    as no prompt, same as never writing `## Next session`."""
+
+    def setUp(self):
+        self.tmp, self.root = blank_root()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_real_prompt_gets_a_starter_and_a_link_not_its_own_words(self):
+        session_file(self.root, "has-prompt", "ended", 0.1,
+                     "Register as has-prompt-2, re-arm the watch on the release PR and finish the migration.")
+        idx = run(self.root)
+        text = (self.root / "SESSION_INDEX.md").read_text()
+        self.assertIn("`has-prompt`", text.split("## Ended")[1])
+        # the starter: paste-ready, points at the file — never the stored sentence's own words
+        self.assertIn("Register as the successor of has-prompt; your prompt is in "
+                      ".context/sessions/has-prompt.md § Next session.", text)
+        self.assertIn("[.context/sessions/has-prompt.md](.context/sessions/has-prompt.md)", text)
+        self.assertNotIn("re-arm the watch on the release PR", text)
+        self.assertNotIn("finish the migration", text)
+
+    def test_empty_prompt_is_not_listed(self):
+        session_file(self.root, "no-prompt", "ended", 0.1, "")
+        run(self.root)
+        text = (self.root / "SESSION_INDEX.md").read_text()
+        self.assertNotIn("no-prompt", text)
+        self.assertIn("0 ended listed", text)
+        self.assertIn("1 ended with no prompt (not listed)", text)
+        self.assertTrue((self.root / "sessions" / "no-prompt.md").exists())  # kept, just not listed
+
+    def test_whitespace_only_prompt_is_not_listed(self):
+        session_file(self.root, "blank-prompt", "ended", 0.1, "   \n\t   \n")
+        run(self.root)
+        text = (self.root / "SESSION_INDEX.md").read_text()
+        self.assertNotIn("blank-prompt", text)
+        self.assertIn("0 ended listed", text)
+
+    def test_no_successor_note_is_not_listed(self):
+        session_file(self.root, "folded-lane", "ended", 0.1,
+                     "No successor: the lane folds into has-prompt.")
+        session_file(self.root, "has-prompt", "ended", 0.1, "Register as has-prompt-2.")
+        run(self.root)
+        text = (self.root / "SESSION_INDEX.md").read_text()
+        self.assertNotIn("folded-lane", text)
+        self.assertIn("`has-prompt`", text.split("## Ended")[1])
+        self.assertIn("1 ended listed", text)
+        self.assertIn("1 ended with no prompt (not listed)", text)
+        self.assertTrue((self.root / "sessions" / "folded-lane.md").exists())  # still on disk, still archivable later
+
+    def test_older_fold_gets_the_path_but_no_block(self):
+        session_file(self.root, "newest", "ended", 0.1, "Register as newest-2.", hb=(
+            datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        session_file(self.root, "older", "ended", 0.1, "Register as older-2.", hb=(
+            datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        run(self.root, max_ended="1")
+        idx = (self.root / "SESSION_INDEX.md").read_text()
+        self.assertIn("## Ended (newest 1)", idx)
+        self.assertIn("```text\nRegister as the successor of newest;", idx)
+        self.assertIn("<details>", idx)
+        fold = idx.split("<details>", 1)[1]
+        self.assertIn("`older`", fold)
+        self.assertIn("[.context/sessions/older.md](.context/sessions/older.md)", fold)
+        self.assertNotIn("```", fold)  # no starter block for a folded, older entry
+        self.assertNotIn("Register as older-2", idx)  # the prompt's own words never appear anywhere
+
+    def test_archived_session_prompt_is_a_link_not_the_prompt_text(self):
+        session_file(self.root, "old-real", "ended", 30, "Register as old-real-2, finish the audit.")
+        session_file(self.root, "old-blank", "ended", 30, "")
+        run(self.root, days="7")
+        aidx = (self.root / "sessions" / "archive" / "INDEX.md").read_text()
+        self.assertIn("[.context/sessions/archive/old-real.md](.context/sessions/archive/old-real.md)", aidx)
+        self.assertNotIn("finish the audit", aidx)
+        self.assertIn("| `old-blank` | E-1 |", aidx)
+        # old-blank's row still ends in a bare "-" for the Prompt column, not a link
+        self.assertRegex(aidx, r"\| `old-blank` \| E-1 \| [^|]+ \| `old-blank\.md` \| - \|")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 name: session-register
 description: Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree.
 metadata:
-  version: "13"
+  version: "14"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -29,13 +29,18 @@ worktree.
    session — re-verify with `ListAgents` (match by **ref**, not name; the tool exists in the main
    session only — a forked worker reports the row to its caller instead) before trusting or
    messaging it.
-   **If you succeed an ended session on the same lane, start from its prompt:** the
-   *Next-session prompt* column shows its first line (or only the session's name in the fold, when
-   more than `MAX_ENDED` sessions have ended since); the full prompt is `sessions/<name>.md`
-   § Next session. A predecessor that ended more than `SESSION_ARCHIVE_DAYS` (7) days ago is no
-   longer in the index — it was swept to `sessions/archive/<name>.md` (listed in
-   `sessions/archive/INDEX.md`, prompt intact). Register under the name it proposes, read what it
-   lists, claim what it names. Re-verify anything time-sensitive (draft sent?, PR merged?) against the surface first.
+   **If you were paste-started from a starter in the Ended table** — a line such as "Register as
+   the successor of `<name>`; your prompt is in `<path>` § Next session." — that line is not the
+   prompt itself: open `<path>` (relative to the workspace root, e.g. `.context/sessions/<name>.md`,
+   or the archive path when the predecessor was already swept) and read its `## Next session` section
+   for the full text; the table never carries the prompt's own words. Only the newest `MAX_ENDED`
+   ended sessions get a starter; an older one (still in the fold) is named with a link to the same
+   path but no starter — open the file the same way. A session that ended with nothing to hand over
+   (no `## Next session`, or a "no successor" note) is not listed at all — there is nothing to pick up.
+   A predecessor that ended more than `SESSION_ARCHIVE_DAYS` (7) days ago is no longer in the index —
+   it was swept to `sessions/archive/<name>.md` (listed in `sessions/archive/INDEX.md`, prompt intact).
+   Register under the name it proposes, read what it lists, claim what it names. Re-verify anything
+   time-sensitive (draft sent?, PR merged?) against the surface first.
 2. **Decide coordination:** if another *active* session already owns the epic/PR/worktree you
    are about to touch, agree ownership explicitly (one `SendMessage`, or leave it to them) —
    don't both edit the same PR or run git in the same worktree. If no one owns it, you do.
@@ -126,10 +131,12 @@ jobs · Slack drafts`
 ```sh
 make -C $BATON/context-db session-end NAME=<name> NEXT=$(python3 $BATON/context-db/bin/kit_profile.py scratch)/next.md
 ```
-Marks the row `ended`, stores the `NEXT` file as your `## Next session` hand-off prompt (its first line
-in the index's Ended table; `session-handoff` step 10 decides whether there is one to write — a session
-with nothing to hand over omits `NEXT` entirely, and `NEXT=none` withdraws a prompt already on file that
-has gone stale). An ended session **without** a prompt is archived out of the index after
+Marks the row `ended`, stores the `NEXT` file as your `## Next session` hand-off prompt (the Ended table
+gets a starter that points at it, never the prompt's own words — `session-handoff` step 10 decides
+whether there is one to write — a session with nothing to hand over omits `NEXT` entirely, and
+`NEXT=none` withdraws a prompt already on file that has gone stale). An ended session **without** a
+real prompt (nothing on file, or a "no successor" note) does not appear in the Ended table at all, and
+is archived out of the index entirely after
 `SESSION_ARCHIVE_NOPROMPT_HOURS` (48, never more than `ARCHIVE_DAYS`) — that covers both a clean end with
 nothing left to do and a crash (`heartbeat.sh` ends a crashed session the same way, without a prompt);
 `session-register` / `session-touch` / `session-end` move an archived file back from `sessions/archive/`
