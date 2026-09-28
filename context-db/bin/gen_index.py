@@ -21,6 +21,7 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import frontmatter as fm  # noqa: E402  — the one frontmatter parser
 import kit_profile  # noqa: E402  — the one content-root resolver
+from fsutil import atomic_write  # noqa: E402  — same dir; INDEX.md is a store file, never a torn write
 
 ROOT = str(kit_profile.context_root())
 # Files/dirs that are engine, not content:
@@ -123,8 +124,7 @@ def render(rows: list[dict]) -> str:
 def main() -> int:
     rows, problems = collect()
     index_path = os.path.join(ROOT, "INDEX.md")
-    with open(index_path, "w", encoding="utf-8") as f:
-        f.write(render(rows) + "\n")
+    atomic_write(index_path, render(rows) + "\n")
     print(f"wrote {rel(index_path)} — {len(rows)} docs across "
           f"{len({r.get('domain') for r in rows})} domains")
     if problems:
