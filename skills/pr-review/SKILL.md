@@ -50,7 +50,7 @@ The runner reads only the bundle — never `git show`, never CI-log polling, no 
 already answers. Four reads are live because the bundle cannot hold them, each capped to what its step names:
 a repo's own `CLAUDE.md`/`AGENTS.md` review rules when the PR did not touch that file (step 2.3, else it's
 the bundle's own `head/<path>`); a base blob for a path the PR did not touch (step 4); one named file in an
-external repo when a convention claim needs settling (`agents/review-runner.md` step 3); and a repo-wide
+external repo when a convention claim needs settling (`agents/review-runner.md` step 4); and a repo-wide
 `ref()`/`exposures` search at the head ref for stakeholder impact (step 4b).
 
 ## 0. Coordinate (repos other sessions also work) *(main session)*
