@@ -33,6 +33,10 @@ git clone https://github.com/MdaaaaO/ai-baton.git .claude && sh .claude/setup.sh
 > **Never use your home directory as the workspace root.** `~/.claude` is Claude Code's own config directory;
 > `setup.sh` refuses `$HOME` as the workspace root.
 
+Both paths set `$BATON`, the environment variable naming the kit root that the rest of this repo's docs and
+commands write as `$BATON/…` — a clone's `settings.json` sets it to `.claude`, a plugin install's SessionStart
+hook exports it from Claude Code's plugin cache. You never set it yourself (`docs/glossary.md`).
+
 ## Why a kit
 
 | You have | What breaks | What the kit adds |
@@ -142,8 +146,9 @@ It also ships three agents (`triage`, `review-runner`, `auto-runner`) and the `c
 | [packaging](docs/packaging.md) | Plugin versus clone |
 | [sync](docs/sync.md) | How the kit moves between machines |
 | [authoring](docs/authoring.md) | The checklist for a new skill or agent |
+| [delegation](docs/delegation.md) | When to hand a read or a fix to a subagent, sized by cost |
 | [engine-cli](docs/engine-cli.md) | Every engine command and flag |
-| [commit-style](docs/commit-style.md) · [REVIEW](docs/REVIEW.md) · [glossary](docs/glossary.md) · [CHANGELOG](CHANGELOG.md) | Contributor reference |
+| [commit-style](docs/commit-style.md) · [REVIEW](docs/REVIEW.md) · [glossary](docs/glossary.md) · [CHANGELOG](CHANGELOG.md) · [contributing](docs/contributing.md) | Contributor reference |
 
 ## Contributing
 

@@ -146,7 +146,7 @@ def settings_local_env() -> dict:
 def identity_env() -> dict[str, str]:
     """The user's identity as `{WORKSPACE_*: value}` from every source: the plugin option
     (`CLAUDE_PLUGIN_OPTION_<KEY>` — visible when kit-health runs inside a hook) wins, then the `WORKSPACE_*` variable in
-    the environment (on a plugin install the SessionStart hook re-exported the `/config` values into Bash; on a clone
+    the environment (on a plugin install the SessionStart hook re-exported the `/plugin configure ai-baton` values into Bash; on a clone
     Claude Code merged settings.local.json `env`), then settings.local.json read directly (a script run outside a
     session). Never printed — callers match against it or report which source a key came from."""
     file_env = settings_local_env()
@@ -513,7 +513,7 @@ def kit_dependencies() -> frozenset[str]:
 
 def identity_values() -> list[tuple[re.Pattern, str]]:
     """The user's identity — full name, `first.last`, the GitHub login — from the plugin options and
-    settings.local.json env (the option values are scanned too, so a login typed into `/config` that
+    settings.local.json env (the option values are scanned too, so a login typed into `/plugin configure ai-baton` that
     lands in a kit file is a finding). Not the single name parts: many are ordinary words (Will, Page, Mark)
     and would flood the report. Case-insensitive; the caller never prints what these match, so the label
     names which form hit."""
@@ -809,8 +809,8 @@ def identity_wiring(r: Report) -> None:
     src = identity_sources()
     settings = settings_local_path()
     hooked = [k for k, v in src.items() if v in ("option", "environment")]
-    if hooked:  # the plugin path: /config options re-exported by the SessionStart hook (or a shell export) — the file is optional
-        r.add(OK, "machine", "identity from the environment (plugin `/config` via the SessionStart hook, or a shell export): "
+    if hooked:  # the plugin path: /plugin configure ai-baton options re-exported by the SessionStart hook (or a shell export) — the file is optional
+        r.add(OK, "machine", "identity from the environment (`/plugin configure ai-baton` via the SessionStart hook, or a shell export): "
               + ", ".join(f"`{k}`" for k in hooked))
         if not settings.is_file():
             r.add(OK, "machine", "`settings.local.json` absent — not needed, the environment carries the identity")
@@ -821,7 +821,7 @@ def identity_wiring(r: Report) -> None:
               "(values set there reach Bash from the next session on: restart it if you just configured them)")
     for k in ("WORKSPACE_USER", "WORKSPACE_GITHUB_LOGIN", "WORKSPACE_TZ"):
         if not src[k]:
-            r.add(WARN, "machine", f"`{k}` unset — `/config` (plugin) or settings.local.json env (clone); scripts fall back to `gh api user` / UTC where they can")
+            r.add(WARN, "machine", f"`{k}` unset — `/plugin configure ai-baton` (plugin) or settings.local.json env (clone); scripts fall back to `gh api user` / UTC where they can")
     zone_warning(r, src)
 
 
@@ -836,7 +836,7 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
         pass
     source = src.get("WORKSPACE_TZ", "")
     if source == "environment" and kit_profile.plugin_install(KIT) is not None:
-        # Bash sees the hook's re-export of the /config option and a shell export alike — name both (#30)
+        # Bash sees the hook's re-export of the /plugin configure ai-baton option and a shell export alike — name both (#30)
         source = "hook-or-shell"
     where = {"option": "the plugin option `tz` (`/plugin configure ai-baton`)",
              "hook-or-shell": "the plugin option `tz` (`/plugin configure ai-baton`, which the SessionStart hook exports as "
@@ -1035,7 +1035,7 @@ def sec_machine(r: Report) -> str:
         elif identity_set("WORKSPACE_SLACK_LATTICE_DM"):
             r.add(OK, "machine", "lattice: paste-block flow — `WORKSPACE_SLACK_LATTICE_DM` set (plugin option or settings.local.json; no connector to probe)")
         else:
-            r.add(WARN, "machine", "lattice: `WORKSPACE_SLACK_LATTICE_DM` unset (`/config` or settings.local.json) — the self-assessment skill cannot read the Lattice bot DM")
+            r.add(WARN, "machine", "lattice: `WORKSPACE_SLACK_LATTICE_DM` unset (`/plugin configure ai-baton` or settings.local.json) — the self-assessment skill cannot read the Lattice bot DM")
     mcp = [k for k in kb.MCP_BACKED if systems.get(k)]  # kb.py owns the list, beside kb.SYSTEMS
     if mcp:
         r.raw(f"- MCP-backed systems ({', '.join(mcp)}): not probeable from a shell — the skill's step 3 checks the servers are connected in this session")

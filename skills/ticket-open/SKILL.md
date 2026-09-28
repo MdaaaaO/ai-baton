@@ -2,9 +2,10 @@
 name: ticket-open
 description: Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues) — type/placement (active sprint, or labels + milestone), labels, epic/parent link, a lean opening comment (Goal + Plan + Links), and the matching .context/ context doc. The tracker analogue of pr-open. Invoke right before/after creating the ticket.
 metadata:
-  version: "5"
-  updated: "2026-09-26"
+  version: "6"
+  updated: "2026-09-27"
   reviewed: "2026-09-24"
+  facts: "tracker.kind"
 user-invocable: true
 ---
 

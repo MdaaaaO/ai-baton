@@ -80,6 +80,26 @@
       "ttl_days": 90,
       "purpose": "labels a repo actually has (pr-open's type/area mapping)",
       "common_word": true
+    },
+    {
+      "key": "github.display_names",
+      "target": "config",
+      "tool": "derive",
+      "args": {
+        "from": "github.person"
+      },
+      "verify": "every login with a github.person row appears as login → first name (`kit_profile.py`'s github command builds the map from the rows)",
+      "ttl_days": 0,
+      "purpose": "login → first name map pr-scan renders in its queue table"
+    },
+    {
+      "key": "github.sandbox_token_prefix",
+      "target": "config",
+      "tool": "user",
+      "args": {},
+      "verify": "`NAME=value` where a sandbox proxy needs a placeholder token for `gh`; empty on a host where `gh` is natively logged in (kit-health warns when a sandbox is detected and this is still empty)",
+      "ttl_days": 0,
+      "purpose": "the placeholder every gh-invoking script applies before calling `gh`"
     }
   ]
 }

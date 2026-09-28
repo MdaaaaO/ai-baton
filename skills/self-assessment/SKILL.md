@@ -2,9 +2,10 @@
 name: self-assessment
 description: Compose the user's weekly self-assessment for a PAST ISO week or range from `.context/` and the systems of record, never live sessions: the week file plus the report block and ledger card the env config asks for, back-filled from the systems of record where `.context/` has no coverage. Invoke as "self-assessment for last week" or "for W37".
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-09-27"
   reviewed: "2026-09-24"
+  facts: "self_assessment.ledger,self_assessment.ledger_url"
 user-invocable: true
 ---
 
@@ -139,7 +140,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      `## Outcome`/"fill in live" section was actually *filled* — an empty outcome on a meeting that ran
      (yet whose ticket was closed anyway) is itself a *Learnings* finding, not a skip. Where the report is
      `lattice` and `systems.lattice` is true, also read the review tool's bot DM (`WORKSPACE_SLACK_LATTICE_DM`, a
-     `/config` option or settings.local.json; needs `systems.slack`) for 1:1 recaps / action items landing in the window.
+     `/plugin configure ai-baton` option or settings.local.json; needs `systems.slack`) for 1:1 recaps / action items landing in the window.
    - **on-call** — only if `on-call` is in `self_assessment.sources`: `on-call/rotations/<date>.md` + the
      `on-call/` monitor docs (+archive); **pr-reviews/README.md** + per-repo files (any environment).
    - **Datalake** — only if `datalake` is in `self_assessment.sources` and `systems.datalake`

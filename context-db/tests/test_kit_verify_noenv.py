@@ -167,6 +167,19 @@ class LoadJsonFile(unittest.TestCase):
             self.assertIsNone(data)
             self.assertIsNotNone(err)
 
+    def test_unreadable_and_invalid_json_are_worded_differently(self):
+        # a deferred review nit: every caller used to label both kinds "invalid JSON — …", so an unreadable or
+        # dangling file read as a parse error it never was
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text("{not json", encoding="utf-8")
+            _, err = kit_verify.load_json_file(bad)
+            self.assertTrue(err.startswith("invalid JSON — "), err)
+            dangling = Path(tmp) / "dangling.json"
+            dangling.symlink_to(Path(tmp) / "does-not-exist.json")
+            _, err2 = kit_verify.load_json_file(dangling)
+            self.assertTrue(err2.startswith("unreadable — "), err2)
+
 
 class PluginManifest(unittest.TestCase):
     """plugin.json version == VERSION, kebab name, the marketplace entry points at the root — env-free."""
@@ -334,6 +347,159 @@ class IssueRefs(unittest.TestCase):
         root = self.kit({"x.md": "#999\n"})
         (root / "CHANGELOG.md").unlink()
         self.assertEqual(self.check(root), [])
+
+
+class DescriptionShape(unittest.TestCase):
+    """A description a reader cannot tell the trigger from, or one written in the first person, is a
+    warning (not a failure yet — 15 of 18 units predate the rule; the PR body lists them)."""
+
+    def test_no_trigger_phrase_warns(self):
+        warn: list[str] = []
+        kit_verify.check_description_shape("skills/x/SKILL.md", {"description": "Formats a report nicely."}, warn)
+        self.assertTrue(any("no trigger" in w for w in warn), warn)
+
+    def test_a_trigger_phrase_is_silent(self):
+        warn: list[str] = []
+        kit_verify.check_description_shape("skills/x/SKILL.md", {"description": "Formats a report. Use when asked to format one."}, warn)
+        self.assertEqual(warn, [])
+
+    def test_first_person_is_flagged(self):
+        warn: list[str] = []
+        kit_verify.check_description_shape("skills/x/SKILL.md", {"description": "I format a report when asked."}, warn)
+        self.assertTrue(any("first person" in w for w in warn), warn)
+
+
+class ReviewedFreshness(unittest.TestCase):
+    """`reviewed:` older than the file's last committed edit is a warning; --no-git and an unknown path
+    (no git repository, or a file git has never seen) are both silently skipped, never guessed at."""
+
+    def repo(self, tmp: str, rel: str = "skill.md", content: str = "x") -> Path:
+        kit = Path(tmp)
+        for args in (["init", "-q"], ["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"]):
+            subprocess.run(["git", *args], cwd=kit, check=True, capture_output=True)
+        p = kit / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", rel], cwd=kit, check=True, capture_output=True)
+        env = {**os.environ, "GIT_AUTHOR_DATE": "2026-09-20T12:00:00", "GIT_COMMITTER_DATE": "2026-09-20T12:00:00"}
+        subprocess.run(["git", "commit", "-q", "-m", "x"], cwd=kit, check=True, capture_output=True, env=env)
+        return kit
+
+    def test_reviewed_before_the_last_commit_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self.repo(tmp)
+            warn: list[str] = []
+            kit_verify.check_reviewed_freshness(kit, Path("skill.md"), "2026-09-01", warn)
+            self.assertTrue(any("predates the last edit 2026-09-20" in w for w in warn), warn)
+
+    def test_reviewed_after_the_last_commit_is_silent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self.repo(tmp)
+            warn: list[str] = []
+            kit_verify.check_reviewed_freshness(kit, Path("skill.md"), "2026-09-25", warn)
+            self.assertEqual(warn, [])
+
+    def test_a_path_git_has_never_heard_of_is_silently_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self.repo(tmp)
+            warn: list[str] = []
+            kit_verify.check_reviewed_freshness(kit, Path("nope.md"), "2020-01-01", warn)
+            self.assertEqual(warn, [])
+
+    def test_no_git_repository_is_silently_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warn: list[str] = []
+            kit_verify.check_reviewed_freshness(Path(tmp), Path("skill.md"), "2020-01-01", warn)
+            self.assertEqual(warn, [])
+
+    def test_no_git_flag_is_threaded_through_check_unit(self):
+        text = ("---\nname: demo\ndescription: Demo skill. Use when testing.\nmetadata:\n"
+                "  version: \"1\"\n  updated: \"2026-09-20\"\n  reviewed: \"2026-09-01\"\n---\n\n# demo\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self.repo(tmp, "skills/demo/SKILL.md", text)
+            saved = kit_verify.KIT
+            kit_verify.KIT = kit
+            try:
+                p, rel = kit / "skills" / "demo" / "SKILL.md", Path("skills/demo/SKILL.md")
+                errors, stale, warn = [], [], []
+                kit_verify.check_unit(p, rel, errors, stale, 0, None, warn, False)
+                self.assertTrue(any("predates the last edit" in w for w in warn), warn)
+                errors, stale, warn = [], [], []
+                kit_verify.check_unit(p, rel, errors, stale, 0, None, warn, True)
+                self.assertEqual([w for w in warn if "predates" in w], [])
+            finally:
+                kit_verify.KIT = saved
+
+
+    def test_no_git_cli_flag_is_accepted(self):
+        rc, _, err = run("--no-env", "--no-git", str(FIX / "good-skill"))
+        self.assertEqual(rc, 0, err)
+
+
+class LoadingTable(unittest.TestCase):
+    """docs/loading.md quotes the unit/description/body numbers between `<!-- kit-verify:<key> -->`
+    markers kit-verify itself computes — a mismatch (or a missing marker) is a failure, not a warning, since a
+    stale number in a doc is just wrong, not a matter of editorial judgement."""
+
+    def with_doc(self, text: str, fn):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = kit_verify.LOADING_MD
+            kit_verify.LOADING_MD = Path(tmp) / "loading.md"
+            kit_verify.LOADING_MD.write_text(text, encoding="utf-8")
+            try:
+                errors: list[str] = []
+                fn(errors)
+                return errors
+            finally:
+                kit_verify.LOADING_MD = saved
+
+    def marked(self, values: dict[str, str]) -> str:
+        return "".join(f"<!-- kit-verify:{k} -->{v}<!-- /kit-verify:{k} -->\n" for k, v in values.items())
+
+    def test_matching_markers_pass(self):
+        want = kit_verify.loading_table_values()
+        errors = self.with_doc(self.marked(want), kit_verify.check_loading_table_drift)
+        self.assertEqual(errors, [])
+
+    def test_a_stale_number_fails(self):
+        want = dict(kit_verify.loading_table_values())
+        want["units"] = str(int(want["units"]) + 1)
+        errors = self.with_doc(self.marked(want), kit_verify.check_loading_table_drift)
+        self.assertTrue(any("kit-verify:units" in e and "--loading-table --write" in e for e in errors), errors)
+
+    def test_byte_totals_tolerate_small_drift_but_not_large(self):
+        n = kit_verify.loading_numbers()
+        near = dict(kit_verify.loading_table_values({**n, "body_bytes": int(n["body_bytes"] * 1.03)}))
+        self.assertEqual(self.with_doc(self.marked(near), kit_verify.check_loading_table_drift), [])
+        far = dict(kit_verify.loading_table_values({**n, "body_bytes": int(n["body_bytes"] * 1.2)}))
+        errors = self.with_doc(self.marked(far), kit_verify.check_loading_table_drift)
+        self.assertTrue(any("kit-verify:body-bytes" in e for e in errors), errors)
+
+    def test_write_rewrites_every_marker_and_then_passes(self):
+        n = kit_verify.loading_numbers()
+        stale = kit_verify.loading_table_values({**n, "units": n["units"] - 1, "body_bytes": n["body_bytes"] // 2})
+        def fix_then_check(errors):
+            kit_verify.write_loading_table(kit_verify.loading_table_values())
+            kit_verify.check_loading_table_drift(errors)
+        self.assertEqual(self.with_doc("intro\n" + self.marked(stale), fix_then_check), [])
+
+    def test_missing_markers_are_each_reported(self):
+        errors = self.with_doc("no markers here\n", kit_verify.check_loading_table_drift)
+        self.assertEqual(len(errors), 4, errors)
+
+    def test_loading_table_cli_prints_every_number(self):
+        rc, out, err = run("--loading-table")
+        self.assertEqual(rc, 0, err)
+        for key in ("units", "desc-bytes", "bodies", "body-bytes"):
+            self.assertIn(f"{key}:", out)
+
+    def test_description_budget_warns_past_90_percent(self):
+        # the real kit sits at 9,470 / 9,500 B today — past the 90% line kit-verify warns at, not yet over the
+        # cap (the whole point: a warning before the surprise failure)
+        rc, out, err = run("--no-env")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("~ warn: descriptions total", err)
+        self.assertIn("largest:", err)
 
 
 if __name__ == "__main__":

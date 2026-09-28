@@ -58,6 +58,9 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   missing from the env store; the main session resolves it (`env-init`) and re-runs.
 - **Not applicable** — the one-line stop `<skill>: not applicable here — <why>` a capability-tier unit prints when
   a required flag is false. Never improvise around it.
+- **`/plugin configure ai-baton`** — the Claude Code command that opens the plugin's `userConfig` dialog on a
+  plugin install (`user_name`, `github_login`, `tz`, `slack_self_dm`, `slack_lattice_dm`); `/config` is Claude
+  Code's own settings command (theme, model, …), a different command — never write that spelling for identity.
 - **Provenance** — the `learned-from` cell of an env-store row: `<who> <YYYY-MM-DD>` with who = `tool:<name>`,
   `user`, `import:<env>` or `derived:<key>` (`kb.py set --from`). `kb.py stale` measures the date against the
   manifest's `ttl_days`; a `user` row is never stale.

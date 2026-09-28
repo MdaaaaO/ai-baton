@@ -24,7 +24,8 @@ applies: **you must understand what you submit, whoever or whatever wrote it.**
 ## Development setup
 
 Develop in a worktree of a kit checkout, never in the checkout itself and never under the plugin cache
-(`$BATON` on a plugin install, overwritten on every update). Which checkout depends on how you installed the kit:
+(`$BATON` on a plugin install — the kit root, `docs/glossary.md` — overwritten on every update). Which checkout
+depends on how you installed the kit:
 
 | install | the kit checkout | once |
 |---|---|---|

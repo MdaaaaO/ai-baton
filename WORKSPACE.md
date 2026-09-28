@@ -4,7 +4,7 @@ The **environment-agnostic body** of the workspace `CLAUDE.md`. The root `CLAUDE
 who the user is, then imports this file and the environment's prose (`.context/reference/environment.md`).
 Everything below holds everywhere; whatever differs between environments — tracker, chat, ids, repo
 map, capabilities — lives in the env store (values) and `environment.md` (prose), local to the machine.
-Identity is `WORKSPACE_*` (plugin `/config`, else `.claude/settings.local.json`), never here.
+Identity is `WORKSPACE_*` (`/plugin configure ai-baton`, else `.claude/settings.local.json`), never here.
 Kit reference: `$BATON/README.md`; `docs/contributing.md` § Versioning.
 
 ## Layout

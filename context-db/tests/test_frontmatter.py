@@ -160,7 +160,7 @@ class Migration(unittest.TestCase):
             (kit_copy / "skills" / "demo").mkdir(parents=True)
             (kit_copy / "skills" / "demo" / "SKILL.md").write_text(LEGACY, encoding="utf-8")
             (kit_copy / "context-db" / "bin").mkdir(parents=True)
-            for name in ("frontmatter.py", "migrate_frontmatter.py"):
+            for name in ("frontmatter.py", "fsutil.py", "migrate_frontmatter.py"):
                 (kit_copy / "context-db" / "bin" / name).write_bytes((KIT / "context-db" / "bin" / name).read_bytes())
             r = subprocess.run([sys.executable, ".claude/context-db/bin/migrate_frontmatter.py", "--check", ".claude/skills/demo/SKILL.md"],
                                cwd=tmp, capture_output=True, text=True, env={**os.environ})
@@ -249,6 +249,51 @@ class Verifier(unittest.TestCase):
     def test_facts_without_manifest_fail(self):
         errors = verify(MIGRATED.replace("tracker.kind", "teletext.page 100"))
         self.assertTrue(any("has no discovery manifest" in e for e in errors), errors)
+
+    def test_body_read_of_an_undeclared_fact_fails(self):
+        # a body that reads a fact via `kit_profile.py get`/`kb.py get` must name it in metadata.facts —
+        # caught here, not the first time a session hits the missing key mid-skill
+        text = MIGRATED.replace(
+            "body line with `requires: [slack]` that must stay untouched",
+            "body line with `requires: [slack]` that must stay untouched\n\n"
+            "Read `python3 kit_profile.py get tracker.repos` first.",
+        )
+        errors = verify(text)
+        self.assertTrue(any("tracker.repos" in e and "does not declare it in metadata.facts" in e for e in errors), errors)
+        declared = text.replace('facts: "slack.channel eng-help,tracker.kind"',
+                                 'facts: "slack.channel eng-help,tracker.kind,tracker.repos"')
+        self.assertEqual(verify(declared), [])
+
+    def test_bare_whole_section_read_needs_no_declaration(self):
+        text = MIGRATED.replace(
+            "body line with `requires: [slack]` that must stay untouched",
+            "body line with `requires: [slack]` that must stay untouched\n\n"
+            "Read `python3 kit_profile.py get tracker` first.",
+        )
+        self.assertEqual(verify(text), [])
+
+    def test_systems_flag_fact_bypasses_the_manifest_but_checks_membership(self):
+        # `systems.*` is not discovered through a manifest (every store carries the whole set) — declaring one
+        # only has to name a real capability flag
+        ok = MIGRATED.replace('facts: "slack.channel eng-help,tracker.kind"', 'facts: "systems.slack"')
+        self.assertEqual(verify(ok), [])
+        bad = MIGRATED.replace('facts: "slack.channel eng-help,tracker.kind"', 'facts: "systems.telegram"')
+        errors = verify(bad)
+        self.assertTrue(any("unknown capability flag 'telegram'" in e for e in errors), errors)
+
+    def test_dynamic_systems_gate_requires_each_concrete_flag_declared(self):
+        # a body that reads `get systems.<x>` dynamically still names the concrete flags it gates on elsewhere
+        # (pr-review's env-specific enrichment) — each of those must be declared too
+        text = MIGRATED.replace(
+            "body line with `requires: [slack]` that must stay untouched",
+            "body line with `requires: [slack]` that must stay untouched\n\n"
+            "Gated by `python3 kit_profile.py get systems.<x>`; jira enrichment needs `systems.jira`.",
+        )
+        errors = verify(text)
+        self.assertTrue(any("systems.jira" in e and "does not declare it in metadata.facts" in e for e in errors), errors)
+        declared = text.replace('facts: "slack.channel eng-help,tracker.kind"',
+                                 'facts: "slack.channel eng-help,tracker.kind,systems.jira"')
+        self.assertEqual(verify(declared), [])
 
     def test_stale_reviewed_is_reported_not_failed(self):
         with tempfile.TemporaryDirectory() as tmp:

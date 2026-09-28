@@ -66,6 +66,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kit_profile  # noqa: E402
+from fsutil import atomic_write  # noqa: E402 — same dir; every write to a tracked/store file goes through it
 
 KIT = kit_profile.KIT
 CTX = kit_profile.context_root()
@@ -251,7 +252,9 @@ def parse_doc(system: str, warn: list[str] | None = None) -> tuple[list[str], di
 def all_facts(warn: list[str] | None = None) -> dict[str, dict[str, dict[str, dict[str, str]]]]:
     """Every system's facts, keyed by system name. Only files matching `SYSTEM_FILE` are read as systems;
     anything else under the store (`README.md`, an editor backup, a stray note) is skipped, never fed to
-    `parse_doc` — pass `warn` to also collect one line per file skipped and per malformed table found."""
+    `parse_doc` — pass `warn` to also collect one line per file skipped and per malformed table found.
+    A file that cannot even be read (bad encoding, a permission error) is reported the same way and
+    skipped on its own: one unreadable doc must never blank out every other system's facts."""
     out = {}
     if ENV.is_dir():
         for p in sorted(ENV.glob("*.md")):
@@ -259,7 +262,12 @@ def all_facts(warn: list[str] | None = None) -> dict[str, dict[str, dict[str, di
                 if warn is not None:
                     warn.append(f"{p.name}: not a system doc name ({SYSTEM_FILE.pattern}) — skipped")
                 continue
-            _, facts = parse_doc(p.stem, warn=warn)
+            try:
+                _, facts = parse_doc(p.stem, warn=warn)
+            except (UnicodeDecodeError, OSError) as e:
+                if warn is not None:
+                    warn.append(f"{p.name}: cannot read ({e}) — skipped, other systems unaffected")
+                continue
             if facts:
                 out[p.stem] = facts
     return out
@@ -351,10 +359,11 @@ def print_warnings(warn: list[str]) -> None:
 
 
 def write_doc(system: str, lines: list[str]) -> None:
-    """Write a system doc back and re-stamp its `updated:` — every row write (set, rm, migrate) goes through here."""
+    """Write a system doc back and re-stamp its `updated:` — every row write (set, rm, migrate) goes through here.
+    Atomic (fsutil.atomic_write): a reader always sees the old table or the new one, never a torn one."""
     text = "\n".join(lines)
     text = re.sub(r"^updated:.*$", f"updated: {today()}", text, count=1, flags=re.M)
-    doc_path(system).write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+    atomic_write(doc_path(system), text if text.endswith("\n") else text + "\n")
 
 
 def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", learned: str = "",
@@ -373,7 +382,7 @@ def set_fact(system: str, kind: str, name: str, value: str, purpose: str = "", l
     ENV.mkdir(parents=True, exist_ok=True)
     p = doc_path(system)
     if not p.is_file():
-        p.write_text(new_doc(system, DEFAULT_KINDS.get(system, [kind])), encoding="utf-8")
+        atomic_write(p, new_doc(system, DEFAULT_KINDS.get(system, [kind])))
     lines, facts = parse_doc(system)
     explicit = bool(learned.strip())
     # compare what the table will hold, not the raw input: a cell is trimmed and escaped, so " C123 " is "C123"
@@ -508,7 +517,7 @@ def drop_empty_section(system: str, kind: str) -> bool:
         if not skipping:
             out.append(line)
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).rstrip("\n") + "\n"
-    doc_path(system).write_text(text, encoding="utf-8")
+    atomic_write(doc_path(system), text)
     return True
 
 
@@ -746,7 +755,7 @@ def discover_plan(key: str, name: str, cfg: dict) -> str:
         out.append(f"check:   is `{args.get('tool')}` among this session's tools → true / false")
         prov = "tool:roster"
     elif tool == "settings":
-        out.append(f"read:    `{args.get('key')}` from the shell environment (WORKSPACE_* identity: plugin /config option, else .claude/settings.local.json)")
+        out.append(f"read:    `{args.get('key')}` from the shell environment (WORKSPACE_* identity: `/plugin configure ai-baton`, else .claude/settings.local.json)")
         prov = "tool:settings"
     elif tool == "derive":
         out.append(f"derive:  from `{args.get('from')}`" + (f" with template {args['template']}" if args.get("template") else ""))
@@ -828,7 +837,7 @@ def load_config() -> dict:
 
 def save_config(cfg: dict) -> None:
     ENV.mkdir(parents=True, exist_ok=True)
-    config_path().write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    atomic_write(config_path(), json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
 
 
 def dotted_get(cur, path: str):
@@ -1117,7 +1126,7 @@ def init_blank() -> list[str]:
     for system, kinds in DEFAULT_KINDS.items():
         p = doc_path(system)
         if not p.is_file():
-            p.write_text(new_doc(system, kinds), encoding="utf-8")
+            atomic_write(p, new_doc(system, kinds))
             made.append(p.name)
     return made
 

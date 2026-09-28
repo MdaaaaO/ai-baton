@@ -1,0 +1,32 @@
+{
+  "system": "self_assessment",
+  "facts": [
+    {
+      "key": "self_assessment.ledger",
+      "target": "config",
+      "tool": "user",
+      "args": {},
+      "verify": "true only when this machine has the Artifact tool and wants every composed week on one update-ledger page; absent or false reads as off",
+      "ttl_days": 0,
+      "purpose": "gates self-assessment's step 10 (the ledger page)"
+    },
+    {
+      "key": "self_assessment.ledger_url",
+      "target": "config",
+      "tool": "user",
+      "args": {},
+      "verify": "the Artifact URL of the ledger page step 10 created on its first run here; empty until then",
+      "ttl_days": 0,
+      "purpose": "the page self-assessment republishes instead of creating a second one"
+    },
+    {
+      "key": "self_assessment.report_url",
+      "target": "config",
+      "tool": "user",
+      "args": {},
+      "verify": "the form URL the ledger card links to, if the team has one",
+      "ttl_days": 0,
+      "purpose": "optional link the ledger card offers next to the copy-ready block"
+    }
+  ]
+}
