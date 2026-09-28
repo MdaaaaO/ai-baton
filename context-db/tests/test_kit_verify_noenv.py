@@ -375,6 +375,11 @@ class CtxWriteProse(unittest.TestCase):
     def hits(self, body: str) -> list[str]:
         return [msg for _line, msg in kit_verify.ctx_write_prose_hits(body)]
 
+    def test_append_a_line_elsewhere_is_not_a_hit(self):
+        self.assertEqual(self.hits("1. Append a line to the PR body with the test result.\n"), [])
+        self.assertEqual(self.hits("1. Append a line to `.context/sessions/x.md`.\n"), [])  # an exempt path
+        self.assertTrue(self.hits("1. Append a line to the context doc's Session log.\n"))
+
     def test_exempt_mirrors_the_deny_hooks_skip_list(self):
         exempt = kit_verify._ctx_write_exempt
         for rel in ("sessions/foo.md", "state/bar.md", "handoff/x.md", "_templates/y.md", "bin/z.md",

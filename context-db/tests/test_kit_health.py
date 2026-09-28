@@ -279,11 +279,20 @@ class CtxPinCheck(unittest.TestCase):
         self.assertIn("ctx_adapter.py adopt`", line)
 
     def test_a_different_api_is_a_warning_naming_both(self):
-        level, line = self.check(ctx_version=(0, "ctx 0.3.0 (api 0)", ""))
+        with mock.patch.dict(os.environ, {"KIT_CTX": ""}):
+            level, line = self.check(ctx_version=(0, "ctx 0.3.0 (api 0)", ""))
         self.assertEqual(level, "WARN")
         self.assertIn("api 0", line)
         self.assertIn("expects api 1", line)
+        self.assertIn("remove `", line)  # `install` keeps a usable copy at the pin: removing it is part of the fix
         self.assertIn("ctx_adapter.py adopt`", line)
+
+    def test_a_different_api_under_kit_ctx_names_the_override(self):
+        with mock.patch.dict(os.environ, {"KIT_CTX": "/opt/other/ctx"}):
+            level, line = self.check(ctx_version=(0, "ctx 9.0.0 (api 2)", ""))
+        self.assertEqual(level, "WARN")
+        self.assertIn("`KIT_CTX` points at it", line)
+        self.assertNotIn("install &&", line)  # install would not clear it: KIT_CTX overrides the pin
 
     def test_unparseable_ctx_version_output_is_a_warning(self):
         level, line = self.check(ctx_version=(0, "garbage", ""))

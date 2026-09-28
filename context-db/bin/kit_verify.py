@@ -672,7 +672,7 @@ CTX_SHELL_WRITE = re.compile(r"\bsed\s+-i\b|(?:^|[\s\"'])>>(?:[\s\"'$]|$)|\bcat\
 CTX_TOOL_NAMED = re.compile(r"\bctx_(?:log|str_replace|insert|create|new|fm|delete|rename|move|touch|migrate|"
                             r"maintain|resolve|validate|find|get|view|brief|doctor)\b|ctx_adapter\.py\s+ctx\b|"
                             r"\bctx\s+(?:tools?|verbs?)\b")
-CTX_APPEND_LINE = re.compile(r"\bappend(?:ed|ing)?\s+(?:a\s+|one\s+)?(?:line|bullet|entry|row|checkbox)\b")
+CTX_APPEND_LINE = re.compile(r"\bappend(?:ed|ing)?\s+(?:a\s+|one\s+)?(?:line|bullet|entry|row|checkbox)\b", re.I)
 
 
 def _ctx_write_exempt(rel: str) -> bool:
@@ -751,7 +751,10 @@ def ctx_write_prose_hits(body: str) -> list[tuple[int, str]]:
             out.append((start, f"names `.context/{hit}` without naming a ctx tool — write it through "
                         "`ctx_str_replace`/`ctx_insert`/`ctx_log`/`ctx_fm`/`ctx_create`/`ctx_new` (or "
                         "`ctx_adapter.py ctx <verb>` from Bash), never Write/Edit/a shell redirect"))
-        elif CTX_APPEND_LINE.search(text):
+        elif CTX_APPEND_LINE.search(text) and (
+                "context doc" in text.lower()
+                or any(not _ctx_write_exempt(m.group(1)) for m in CTX_DOC_PATH.finditer(text))):
+            # only when the unit is about a context doc: "append a line to the PR body" is not
             out.append((start, "\"append a line\" to a context doc without naming a ctx tool"))
     return out
 

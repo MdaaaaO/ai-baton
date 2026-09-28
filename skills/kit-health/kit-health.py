@@ -1156,8 +1156,13 @@ def ctx_pin_check(r: Report) -> None:
     m = re.search(r"\bapi\s+(\d+)\b", out)
     got = m.group(1) if m else ""
     if got != want:
+        # `install` keeps a usable pinned copy and KIT_CTX overrides the pin, so the plain fix would not clear this
+        if os.environ.get("KIT_CTX", "").strip():
+            how = f"`KIT_CTX` points at it — unset it, or point it at a ctx that reports api {want}"
+        else:
+            how = f"remove `{Path(ctx_path).parent}` (a stale copy at the pin), then {fix}"
         r.add(WARN, "engine", f"ctx pin: `{ctx_path} --version` reports api {got or 'none'}, the adapter expects "
-                              f"api {want} — {fix}")
+                              f"api {want} — {how}")
     else:
         r.add(OK, "engine", f"ctx pin: `{ctx_path} --version` reports api {want}")
 
