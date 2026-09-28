@@ -37,8 +37,13 @@ DATA_RE = re.compile(r'(<script id="data" type="application/json">)(.*?)(</scrip
 FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 LOCAL_PATH_RE = re.compile(r"(?<![\w/])\.context/|\.worktrees/|/Users/|/home/", re.I)
 # A template placeholder that leaked into a composed week file: an angle-bracket hint (`<one sentence…>`),
-# a literal ellipsis, or an unfilled `TBD`/`TODO` marker — none of these belong in a published card.
-PLACEHOLDER_RE = re.compile(r"<[^>]+>|^\s*…\s*$|\s…\s*$|\bTBD\b|\bTODO\b")  # a template token; prose may still use "…" mid-sentence
+# a literal ellipsis, or an unfilled `TBD`/`TODO` marker — none of these belong in a published card. The
+# angle-bracket shape is deliberately narrow — lowercase prose holding a space or a colon — so it never
+# fires on legitimate bullet content that happens to use `<`/`>` (`Option<T>`, `p99 < 200ms and > 50ms`,
+# a bullet quoting `</script>`).
+PLACEHOLDER_RE = re.compile(r"<[a-z](?=[a-z ,/:-]*[ :])[a-z ,/:-]{2,}>|^\s*…\s*$|\s…\s*$|\bTBD\b|\bTODO\b")
+# a template token; prose may still use "…" mid-sentence
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)  # a scaffold's instructional comment, never bullet text
 
 
 def frontmatter(text: str) -> dict[str, str]:
@@ -111,7 +116,7 @@ def parse_block(text: str, mode: str) -> list[dict]:
         if mode == "week-file":
             print("note: no `## … update` heading (expected — week-file mode omits it); "
                   "using the week file's own `## ` sections instead", file=sys.stderr)
-            return _sections(text, _top_heading)
+            return _sections(HTML_COMMENT_RE.sub("", text), _top_heading)
         sys.exit(f"no `## … update` heading in the week file — required when self_assessment.report is {mode!r}")
     start = heads[-1].end()
     nxt = re.search(r"^## ", text[start:], re.M)
@@ -204,8 +209,10 @@ def build(args) -> None:
     if not m:
         sys.exit("page has no <script id=\"data\"> block — not a ledger page")
     data = json.loads(m.group(2) or "[]")
+    new_ids: set[tuple[int, str]] = set()
     for w in args.week:
         card = make_card(Path(w), args.tag, args.mode)
+        new_ids.add((card["year"], card["id"]))
         data = [c for c in data if not (c["id"] == card["id"] and card_year(c) == card["year"])]
         data.append(card)
     data.sort(key=sort_key)
@@ -213,7 +220,10 @@ def build(args) -> None:
     payload = json.dumps(data, ensure_ascii=False, indent=1).replace("</", "<\\/")
     html = html[: m.start(2)] + payload + "\n" + html[m.end(2) :]
     html = refresh_masthead(html, data)
-    problems = check_html(html)
+    # Placeholder text is only ever checked on the cards this run just composed — an old, already
+    # published card is never re-audited, so one legitimate `<`/`>` bullet that slipped past a stale
+    # version of this check can never block every later build.
+    problems = check_html(html, new_ids)
     if problems:
         # Never leave a publishable file behind on a failed check — a session that only sees the
         # file exists would republish it over the live ledger.
@@ -226,7 +236,10 @@ def build(args) -> None:
     print(f"wrote {args.out} — {len(data)} cards: {', '.join(c['id'] for c in data)}")
 
 
-def check_html(html: str) -> list[str]:
+def check_html(html: str, new_ids: set[tuple[int, str]] | None = None) -> list[str]:
+    """`new_ids` scopes the placeholder check to the cards a `build` just composed — `None` (the
+    standalone `check` command, auditing a whole page by hand) checks every card, since there is no
+    "this run" to narrow to."""
     m = DATA_RE.search(html)
     if not m:
         return ["no data block"]
@@ -240,11 +253,12 @@ def check_html(html: str) -> list[str]:
         seen.add(key)
         if len(c.get("sections", [])) < 3:
             problems.append(f"{c['id']}: only {len(c.get('sections', []))} section(s)")
+        check_placeholders = new_ids is None or key in new_ids
         for s in c.get("sections", []):
             for b in s["bullets"]:
                 if LOCAL_PATH_RE.search(b):
                     problems.append(f"{c['id']}: local path in a bullet — {b[:60]}…")
-                if PLACEHOLDER_RE.search(b):
+                if check_placeholders and PLACEHOLDER_RE.search(b):
                     problems.append(f"{c['id']}: placeholder text in a bullet — {b[:60]}…")
     if "{{" in html:
         problems.append("unfilled {{placeholder}} left in the page")

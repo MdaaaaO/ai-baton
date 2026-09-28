@@ -37,7 +37,17 @@ class DateGrepIsYearAgnostic(unittest.TestCase):
     def test_the_date_grep_example_derives_its_year_instead_of_hardcoding_one(self):
         text = (KIT / "skills" / "self-assessment" / "SKILL.md").read_text(encoding="utf-8")
         self.assertNotRegex(text, r"\b20\d\d-09-\(0", "the date-grep example hardcodes a specific year")
-        self.assertIn("date +%Y", text, "the date-grep example should derive the year from `date`, not hardcode it")
+
+    def test_the_date_grep_example_derives_the_year_from_the_window_not_today(self):
+        # `$(date +%Y)` alone is TODAY's year — wrong in January for a window in last December or W01
+        # (a silently wrong year reads as "no history", not an error). The example must derive the year
+        # from step 1's own window (its Monday), e.g. `date -d "$MON" +%Y`, never bare `date +%Y`.
+        text = (KIT / "skills" / "self-assessment" / "SKILL.md").read_text(encoding="utf-8")
+        # the actual grep command must not run `$(date +%Y)` (today's year) — the prose may still
+        # name that shape once to say "never do this"
+        self.assertNotIn('grep -rEn "$(date +%Y)', text, "the grep command derives the year from today, not the window")
+        self.assertRegex(text, r"date -d [\"']?\$\w+[\"']? \+%Y", "should derive the year from a window variable")
+        self.assertIn("step 1's Monday", text)
 
 
 class ShadowDateNeverHardcoded(unittest.TestCase):

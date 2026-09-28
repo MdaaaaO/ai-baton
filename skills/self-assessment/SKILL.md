@@ -131,9 +131,12 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      guardrail (`make -C $BATON/context-db verify` warns past 30KB), a live doc keeps only the newest tail;
      **recent-but-not-newest history — including a just-finished week after a trim — lives in
      `archive/<slug>-log.md`** (newest-first). Archive↔live pairs share the slug
-     (`archive/<slug>-log.md` ↔ `<domain>/<slug>.md`). Date-grep both, built from step 1's Mon–Sun window
-     (e.g. a window of Sep 7–13 is `` grep -rEn "$(date +%Y)-09-(0[7-9]|1[0-3])" <dirs> `` — `date` supplies
-     the year so the example never goes stale; adjust the month/day range to the window). **Exclude** generated files
+     (`archive/<slug>-log.md` ↔ `<domain>/<slug>.md`). Date-grep both, using **the window's own year —
+     step 1's Monday, never `` $(date +%Y) ``** (today's year is wrong for a January run composing last
+     December or ISO W01; a silently-wrong year reads as "no history found", not an error). E.g. with
+     `MON=<step 1's Monday YYYY-MM-DD>` and a window of Sep 7–13:
+     `` grep -rEn "$(date -d "$MON" +%Y)-09-(0[7-9]|1[0-3])" <dirs> `` (adjust month/day to the window).
+     **Exclude** generated files
      (`INDEX.md`, `SESSION_INDEX.md`) and `sessions/*.md` (live "responsibilities", not dated work);
      **dedupe** hits by (date + headline). Keep only docs inside `self_assessment.scope`.
    - **meetings / 1on1** — only if `meetings` / `1on1` are in `self_assessment.sources` (separate

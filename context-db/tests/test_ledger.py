@@ -134,6 +134,26 @@ class MissingReportBlock(BlankStore):
         self.assertIn("week-file mode", err.getvalue())
         self.assertEqual([s["heading"] for s in card["sections"]], ["Shipped", "Learnings"])
 
+    def test_a_scaffold_comment_never_becomes_a_bullet(self):
+        # the week-file fallback parses the file's own `## ` sections; a section left with the
+        # scaffold's multi-line HTML comment (never filled in) must not turn into bullet text.
+        week = self.write_week("2027-W05.md", (
+            "---\ntitle: Weekly update\ntype: self-assessment\ndomain: self-assessment\n"
+            "status: archived\nupdated: 2027-01-25\n---\n\n# Weekly update\n\n"
+            "## Scope / Sources\n"
+            "<!-- Quote self_assessment.scope verbatim, then list which self_assessment.sources were\n"
+            "     swept this week and which were skipped and why. -->\n\n"
+            "## Shipped\n- shipped a thing (evidence link)\n"
+        ))
+        err = io.StringIO()
+        with redirect_stderr(err):
+            card = LEDGER.make_card(week, mode="week-file")
+        headings = [s["heading"] for s in card["sections"]]
+        self.assertEqual(headings, ["Shipped"])  # "Scope / Sources" had no real content, so it's dropped
+        for s in card["sections"]:
+            for b in s["bullets"]:
+                self.assertNotIn("Quote self_assessment.scope", b)
+
 
 class PlaceholderCheck(unittest.TestCase):
     """`check_html` used to look for one token (`{{`, the page's own unfilled template placeholder);
@@ -142,9 +162,12 @@ class PlaceholderCheck(unittest.TestCase):
 
     def page(self, cards: list[dict]) -> str:
         import json
+        # same escape `build()` applies: `</` -> `<\/` so a bullet quoting "</script>" can't
+        # terminate the data block early.
+        payload = json.dumps(cards).replace("</", "<\\/")
         return (
             '<html><body><script id="data" type="application/json">'
-            + json.dumps(cards)
+            + payload
             + "</script></body></html>"
         )
 
@@ -178,6 +201,26 @@ class PlaceholderCheck(unittest.TestCase):
     def test_ordinary_bullet_is_not_flagged(self):
         problems = LEDGER.check_html(self.page([self.card("shipped a thing (evidence link)")]))
         self.assertEqual([p for p in problems if "placeholder" in p], [])
+
+    def test_legitimate_angle_bracket_bullets_are_not_flagged(self):
+        for bullet in (
+            "added Option<T> to the parser",
+            "p99 < 200ms and > 50ms after the fix",
+            "a bullet quoting </script> literally",
+        ):
+            problems = LEDGER.check_html(self.page([self.card(bullet)]))
+            self.assertEqual([p for p in problems if "placeholder" in p], [], (bullet, problems))
+
+    def test_an_old_published_card_with_such_a_bullet_never_blocks_a_later_build(self):
+        # check_html is re-run over the WHOLE merged page on every build; an already-published card
+        # is never re-audited for placeholders — only the id(s) `new_ids` names (the cards this run
+        # just composed) are checked, so a historical bullet can never block every later build.
+        old = self.card("added Option<T> to the parser")
+        old["id"], old["year"] = "W01", 2027
+        new = self.card("shipped a thing (evidence link)")
+        new["id"], new["year"] = "W02", 2027
+        problems = LEDGER.check_html(self.page([old, new]), new_ids={(2027, "W02")})
+        self.assertEqual([p for p in problems if "placeholder" in p], [], problems)
 
 
 class PageExistenceCheck(unittest.TestCase):
