@@ -52,7 +52,7 @@ Resolution order for a fact a skill needs: `kb get` → `kb discover` (the manif
 discovery tool: `slack_search_channels`, Jira issue-type metadata / transitions, `gh label list`, …) →
 run that tool and verify → ask the user only when the tool cannot settle it → `kb set … --from tool:<name>`
 (or `user`) so the next session has it. Manifest schema: context-db/discovery/README.md.
-Stdlib only. Reads CONTEXT_ROOT (default: the `.context/` beside `.claude/`).
+Stdlib only. The store is under kit_profile.context_root() (docs/layout.md's "Content root" paragraph).
 """
 from __future__ import annotations
 import argparse

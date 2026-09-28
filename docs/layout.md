@@ -7,7 +7,10 @@ lives in the workspace's `.context/`, never in this repo. How the pieces call ea
 **Content root.** The engine finds `.context/` at `CONTEXT_ROOT` when that variable is set, else beside the kit
 (`.claude/`'s sibling — one level further up from a kit worktree such as `.worktrees/kit_<topic>/`), else
 `CLAUDE_PROJECT_DIR`, else — a plugin install only — the nearest `.context/reference/env/config.json` above the
-current directory. Full algorithm: `kit_profile.py`'s `context_root()`. Every other mention of the default
+current directory. Full algorithm: `kit_profile.py`'s `context_root()` — the engine's only resolver: `kb.py`,
+`session.py`, `gen_index.py`, `gen_sessions.py`, `verify.py`, `new.sh` (`kit_profile.py context`) and the Makefile's
+`CONTEXT` all ask it and keep no fallback of their own. The test suite never uses it: `make test` and the test package
+run on a throw-away store under the temp dir (`docs/contributing.md` § Testing). Every other mention of the default
 (`context-db/Makefile`'s header, `docs/engine-cli.md`) links back to this paragraph rather than restating it.
 
 > **Plugin install:** the tree below is the clone's. On a plugin install the kit is not in `<workspace root>/.claude/`

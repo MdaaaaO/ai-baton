@@ -21,8 +21,8 @@ spend, PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's
 discoverable via $CLAUDE_CODE_SESSION_ID / --session-id; `--no-stats` skips it. Stats are
 derived from the transcript with zero model turns, so the live registry row is always current.
 
-The content root is CONTEXT_ROOT (set by the Makefile from CONTEXT, default the
-sibling ../../.context of the engine dir). Empty CLI values are treated as "leave
+The content root is kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets
+from CONTEXT, else docs/layout.md's "Content root" default). Empty CLI values are treated as "leave
 unchanged" so the Makefile can pass every flag unconditionally. Stdlib only.
 """
 from __future__ import annotations
@@ -49,11 +49,7 @@ def local_str(iso_utc: str) -> str:
         return iso_utc
     return t.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p %Z")
 
-# Content root: the Makefile passes CONTEXT_ROOT; fall back to the sibling .context/
-# of the engine dir (../../.context relative to this bin/) for a direct invocation.
-CTX = os.environ.get("CONTEXT_ROOT") or os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".context")
-)
+CTX = str(profile.context_root())  # the one content-root resolver
 SESS_DIR = os.path.join(CTX, "sessions")
 
 # Frontmatter fields, in emit order.

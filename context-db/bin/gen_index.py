@@ -6,9 +6,8 @@ YAML frontmatter "row" (title/type/domain/tags/status/updated), and emits a
 grouped, sorted catalog. INDEX.md is generated — never hand-edit it; run
 `make -C $BATON/context-db index`.
 
-The content root is the CONTEXT_ROOT env var (set by the Makefile from CONTEXT,
-default the sibling ../../.context). It is NOT this file's parent any more: the
-engine lives under $BATON/context-db/, the content under .context/.
+The content root is kit_profile.context_root() (CONTEXT_ROOT, which the Makefile
+sets from CONTEXT, else the default in docs/layout.md's "Content root" paragraph).
 
 Stdlib only (no PyYAML): frontmatter is a flat `key: value` block, parsed here.
 """
@@ -21,12 +20,9 @@ from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import frontmatter as fm  # noqa: E402  — the one frontmatter parser
+import kit_profile  # noqa: E402  — the one content-root resolver
 
-# Content root: the Makefile passes CONTEXT_ROOT; fall back to the sibling .context/
-# of the engine dir (../../.context relative to this bin/) for a direct invocation.
-ROOT = os.environ.get("CONTEXT_ROOT") or os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", ".context")
-)
+ROOT = str(kit_profile.context_root())
 # Files/dirs that are engine, not content:
 SKIP_DIRS = {"bin", "_templates", "sessions", "handoff", "memory", "state"}  # sessions/ = live session registry, on-call/handoff/ = handoff toolkit state (the toolkit itself lives outside the kit) + rendered page artifacts (operational, not knowledge)
 SKIP_FILES = {"INDEX.md", "README.md", "SESSION_INDEX.md"}

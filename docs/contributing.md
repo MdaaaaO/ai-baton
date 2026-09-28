@@ -230,12 +230,14 @@ parallel reviews never race on one shared Claude Code install.
 ## Testing
 
 The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C .claude/context-db test` (discovery, < 10 s,
-no install; a clone without an env store gets a throw-away blank one) — and CI runs it on every PR. `make test
-T=test_kb` runs one file (`tests/test_kb.py`) instead of the full discovery — useful while iterating on one module.
-`make test` is the only supported entry point: a bare `python3 -m unittest discover -s context-db/tests -t
-context-db` sets up none of the isolation the bullets below describe, and — on a machine whose own `.context/`
-already has an env store — reads it, because nothing points it elsewhere; a test that leans on that only by
-accident then passes here and fails on someone else's machine or in CI (which always starts store-less). It covers `kb.py`
+no install) — and CI runs it on every PR. `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
+discovery — useful while iterating on one module. The suite always runs on a **throw-away env store**, never this
+machine's `.context/`: `make test` builds a blank one under the temp dir as CI does (`kb.py init --blank`, environment
+`ci`), whatever `CONTEXT` or `CONTEXT_ROOT` says and wherever it runs from — a kit worktree resolves the workspace's
+live store (`docs/layout.md` § Content root). The test package enforces it: a bare `python3 -m unittest discover -s
+context-db/tests -t .` without `CONTEXT_ROOT` gets its own blank store (removed at exit), and a `CONTEXT_ROOT` outside
+the temp dir, the store beside the kit, or a store naming an environment other than `ci` stops the run before any
+test loads. It covers `kb.py`
 (the store: set/get/rm, renamed kinds, provenance and stale rows, config, migrate), `kit_verify.py` (frontmatter
 schema, env-store checks, `--stale`, `--no-env`), `gen_index.py` / `verify.py` / `new.sh` on a throw-away
 `CONTEXT_ROOT`, `gen_sessions.py`, `commit_style.py`, `eval_check.py` (on a throw-away kit), `session_stats.py` + `transcripts.py` on a synthetic
@@ -247,9 +249,9 @@ and `pr-open/diagram-plan.py`, and the `pr-issue` parser (`.github/scripts/check
 - **A new engine module gets a test module**; a shared helper (`frontmatter.py`, `transcripts.py`, `leak_shapes.py`)
   is the only copy — a second parser or reader is a review finding.
 - **A test never reads the machine's store.** It points `kit_profile.ENV_DIR` / `kb.ENV` at a throw-away blank one
-  (clearing the `lru_cache`s) or passes its own `CONTEXT_ROOT` to every subprocess — `make test` hands the suite this
-  machine's `.context/` when one exists. Tests are stdlib only, need no network and no `gh`, and may run inside a
-  Claude session (`CLAUDE_CODE_SESSION_ID` is set there — tests that depend on it clear it). Fixture files live under `tests/fixtures/` (the leak scan skips
+  (clearing the `lru_cache`s) or passes its own `CONTEXT_ROOT` to every subprocess; one that drops `CONTEXT_ROOT` to
+  test the resolver either only resolves the path or runs a kit copy in a temp dir. Tests are stdlib only, need no
+  network and no `gh`, and may run inside a Claude session (`CLAUDE_CODE_SESSION_ID` is set there — tests that depend on it clear it). Fixture files live under `tests/fixtures/` (the leak scan skips
   that directory); a fact-shaped literal a test needs is assembled at run time.
 
 ## Code review

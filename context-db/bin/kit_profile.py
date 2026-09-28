@@ -58,6 +58,13 @@ DEFAULT_NAME = "local"
 # together with the adapter.
 TRACKER_KINDS = ("jira", "github", "none")
 
+# The `.context/` domains the engine itself owns, in every environment — the one list `verify.py` (and kit-health's
+# leak scan, through it) reads; the environment adds its own under the store's `domains` key (`domains()`). Besides
+# the folders WORKSPACE.md names: `on-call` (`new.sh TYPE=oncall` writes there), `kit-health` (kit-health.py's
+# HEALTH stamp) and `onboarding` (the master checklist the content README describes).
+CORE_DOMAINS = ("reference", "repos", "meetings", "1on1", "self-assessment", "pr-reviews", "onboarding", "archive",
+                "kit-health", "on-call")
+
 # How the kit is installed (#34) and what follows from it — the one table every mode-dependent hint reads.
 #   clone        — the workspace's `.claude/` (a git checkout, or a copy without git that sync.sh skips)
 #   plugin       — a Claude Code plugin install: no git checkout, `.claude-plugin/plugin.json` (the plugin cache)
@@ -121,7 +128,10 @@ def recorded_install_mode() -> str:
 
 
 def context_root() -> Path:
-    """`CONTEXT_ROOT`, else the `.context/` beside the kit — also found from a kit worktree
+    """The engine's ONE content-root resolver: every script (kb, session, gen_index, gen_sessions, verify, new.sh via
+    `kit_profile.py context`, the Makefile's CONTEXT) asks this function and keeps no copy of its own. The order is
+    documented once, in docs/layout.md's "Content root" paragraph.
+    `CONTEXT_ROOT`, else the `.context/` beside the kit — also found from a kit worktree
     (`<root>/.worktrees/<name>/`), where the sibling is two levels up. On the plugin path the kit sits in
     Claude Code's plugin cache: `CLAUDE_PROJECT_DIR` (hooks get it, and the SessionStart hook re-exports it), else
     the nearest env store above the current directory — the Bash tool starts in the project dir but is not handed
