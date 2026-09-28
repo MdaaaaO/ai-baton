@@ -94,6 +94,8 @@ jobs:
           {
             echo "## tree-review — ${FILES} file(s)"
             echo '```'
-            claude "$@" "$prompt"
+            # the prompt goes on stdin: `--allowed-tools` takes a variable number of values, so a prompt passed
+            # as the next argument would be swallowed as one more tool name and `-p` would run with no input
+            printf '%s' "$prompt" | claude "$@"
             echo '```'
           } 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"

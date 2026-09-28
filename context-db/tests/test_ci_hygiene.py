@@ -553,5 +553,15 @@ class AutoMergeCheckPick(unittest.TestCase):
         self.assertIn("has not run on this head", out)
 
 
+class TreeReviewPrompt(unittest.TestCase):
+    """`--allowed-tools` takes a variable number of values: a prompt passed as the next argument is swallowed
+    as a tool name and `claude -p` runs with no input. tree-review.yml must feed the prompt on stdin."""
+
+    def test_the_prompt_goes_on_stdin_not_after_a_variadic_flag(self):
+        text = (WORKFLOWS / "tree-review.yml").read_text(encoding="utf-8")
+        self.assertIn('printf \'%s\' "$prompt" | claude "$@"', text)
+        self.assertNotIn('claude "$@" "$prompt"', text)
+
+
 if __name__ == "__main__":
     unittest.main()
