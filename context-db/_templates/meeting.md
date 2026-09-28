@@ -1,7 +1,7 @@
 ---
 title: {{TITLE}}
 type: meeting
-domain: meetings
+domain: {{DOMAIN}}
 tags: []
 status: active
 updated: {{DATE}}
