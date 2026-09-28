@@ -48,7 +48,8 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
   python3 ctx_adapter.py hook <name>      # one of the hooks above; hook JSON on stdin
 
 Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
-4 not adopted (`adopt --check`) · 5 adopted, but a store file differs from the kit's (kept; `adopt --replace`). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
+4 not adopted (`adopt --check`) · 5 adopted, but a store file differs from the kit's (kept; `adopt --replace`) — 3
+takes precedence when both hold (the `differs:` lines still print). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
 """
 from __future__ import annotations
 import argparse
