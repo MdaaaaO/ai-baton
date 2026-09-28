@@ -2,7 +2,7 @@
 name: ticket-close
 description: "Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues): a final outcome comment (Delivered / Verified / Out-of-scope), the right transition or close reason (Done / Won't Do / Cancelled), the delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-28"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
@@ -33,9 +33,9 @@ kind X in this environment" and stop.
    on a third party (`WORKSPACE.md` § Rules — the open thread is the gate).
 3. **Close with the right outcome** — one of three, each a key under the adapter's config:
    shipped → `done`; decided-not-to-do on merit → `wont_do`; abandoned / superseded → `cancelled`.
-4. **Flush + close out** — run `session-handoff`: context-doc Session log + relevant section, tick
-   `.context/reference/priorities.md`, archive the context doc if the initiative is fully done, update
-   `MEMORY.md` if a note changed.
+4. **Flush + close out** — run `session-handoff` (through its ctx tools): context-doc Session log +
+   relevant section, tick `.context/reference/priorities.md`, archive the context doc if the initiative
+   is fully done, update `MEMORY.md` if a note changed.
 
 ## Adapter — Jira (tracker.kind = jira)
 

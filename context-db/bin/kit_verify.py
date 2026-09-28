@@ -658,6 +658,109 @@ def check_forked_write_leak(rel, fm, body: str, errors: list[str]) -> None:
                           "something the main session applies, never a step the fork runs itself")
 
 
+# `.context/` writes go through the ctx MCP tools (`ctx_log`/`ctx_str_replace`/`ctx_insert`/`ctx_create`/`ctx_new`/
+# `ctx_fm`) or `ctx_adapter.py ctx <verb>` from Bash — never Write/Edit/a shell redirect (#322/#324). The
+# PreToolUse deny already stops a Write/Edit tool call; this check exists for what that hook cannot see: a
+# Bash-run heredoc/`sed -i`/`tee`/`cat >`/`>>` reaching the file directly, or prose that never names which tool
+# routes the change, so a reader (model or human) reaches for Write/Edit by habit. Exempt what the deny exempts
+# (ctx_adapter.py's `_exempt()`): the index's skip dirs, a dot dir, INDEX.md/SESSION_INDEX.md, README.md at any
+# level, and anything that isn't a `.md` doc.
+CTX_WRITE_SKIP_DIRS = {"bin", "_templates", "sessions", "handoff", "memory", "state"}
+CTX_DOC_PATH = re.compile(r"`?\.context/((?:[\w.<>-]+/)+[\w.<>-]+\.md)`?")
+CTX_WRITE_VERB = re.compile(r"\b(?:[Ee]dit|[Ww]rite|[Oo]verwrite|[Rr]ewrite|[Aa]ppend(?:ed|ing)?|[Tt]ick(?:ed|ing)?)\b")
+CTX_SHELL_WRITE = re.compile(r"\bsed\s+-i\b|(?:^|[\s\"'])>>(?:[\s\"'$]|$)|\bcat\s*>{1,2}|\btee\b|<<['\"]?[A-Za-z_]\w*['\"]?")
+CTX_TOOL_NAMED = re.compile(r"\bctx_(?:log|str_replace|insert|create|new|fm|delete|rename|move|touch|migrate|"
+                            r"maintain|resolve|validate|find|get|view|brief|doctor)\b|ctx_adapter\.py\s+ctx\b|"
+                            r"\bctx\s+(?:tools?|verbs?)\b")
+CTX_APPEND_LINE = re.compile(r"\bappend(?:ed|ing)?\s+(?:a\s+|one\s+)?(?:line|bullet|entry|row|checkbox)\b")
+
+
+def _ctx_write_exempt(rel: str) -> bool:
+    """A path a model may still touch directly, mirroring ctx_adapter.py's `_exempt()` (its store-settings
+    generated/ignore globs aside — a prose scan has no adopted store to ask): not a `.md` doc, a dot dir, one of
+    the index's skip dirs (`bin _templates sessions handoff memory state`), or INDEX.md/SESSION_INDEX.md/
+    README.md at any level."""
+    parts = rel.split("/")
+    if not rel.endswith(".md") or any(p.startswith(".") for p in parts):
+        return True
+    return bool(set(parts[:-1]) & CTX_WRITE_SKIP_DIRS) or parts[-1] in ("INDEX.md", "SESSION_INDEX.md", "README.md")
+
+
+def _prose_units(body: str) -> list[tuple[int, str]]:
+    """(start line, joined text) for each top-level line of a body, its indented wrapped-continuation lines
+    (a numbered/bulleted step's own sub-bullets and soft-wrapped prose) folded in — the granularity
+    `ctx_write_prose_hits` reads a step's own tool mentions at: a `ctx_log` two steps down a numbered list
+    must not excuse a different step's unrouted write. Fenced code is skipped, never scanned as prose."""
+    out: list[tuple[int, str]] = []
+    start: int | None = None
+    buf: list[str] = []
+    fenced = False
+    for n, line in enumerate(body.split("\n"), 1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            if buf:
+                out.append((start, " ".join(buf)))
+            buf, start = [], None
+            continue
+        if fenced:
+            continue
+        if not line.strip():
+            if buf:
+                out.append((start, " ".join(buf)))
+            buf, start = [], None
+        elif line[:1].isspace() and buf:
+            buf.append(line.strip())
+        else:
+            if buf:
+                out.append((start, " ".join(buf)))
+            buf, start = [line.strip()], n
+    if buf:
+        out.append((start, " ".join(buf)))
+    return out
+
+
+CTX_WRITE_PROXIMITY = 80  # chars either side of a flagged path a write verb/shell redirect must fall within — a
+# path mentioned only in passing elsewhere in the same step (e.g. "the ledger feeds `.context/reference/x.md`",
+# a read-only pipeline note) must not be flagged just because the step's OWN write target, a few sentences
+# away, happens to use a write verb too.
+
+
+def ctx_write_prose_hits(body: str) -> list[tuple[int, str]]:
+    """(line, message) for prose that tells the model to write a `.context/` doc directly instead of naming a
+    ctx tool — see the module comment above CTX_WRITE_SKIP_DIRS. A unit (one top-level step, its sub-bullets and
+    wrapped continuation folded in by `_prose_units`) is exempt the moment it names a ctx tool, `ctx_adapter.py
+    ctx`, or the phrase `ctx tools`/`ctx verbs` anywhere in it — a step that delegates to another skill by name
+    (`session-handoff`) without saying so is not read as routed; the delegate's own prose is checked on its own
+    unit. Within a unit, a write verb must fall within CTX_WRITE_PROXIMITY characters of the specific path it
+    is read as acting on — a step can legitimately mention more than one `.context/` path, and only some
+    of them its own write target."""
+    out: list[tuple[int, str]] = []
+    for start, text in _prose_units(body):
+        if CTX_TOOL_NAMED.search(text):
+            continue
+        hit = ""
+        for m in CTX_DOC_PATH.finditer(text):
+            if _ctx_write_exempt(m.group(1)):
+                continue
+            lo, hi = max(0, m.start() - CTX_WRITE_PROXIMITY), min(len(text), m.end() + CTX_WRITE_PROXIMITY)
+            window = text[lo:hi]
+            if CTX_WRITE_VERB.search(window) or CTX_SHELL_WRITE.search(window):
+                hit = m.group(1)
+                break
+        if hit:
+            out.append((start, f"names `.context/{hit}` without naming a ctx tool — write it through "
+                        "`ctx_str_replace`/`ctx_insert`/`ctx_log`/`ctx_fm`/`ctx_create`/`ctx_new` (or "
+                        "`ctx_adapter.py ctx <verb>` from Bash), never Write/Edit/a shell redirect"))
+        elif CTX_APPEND_LINE.search(text):
+            out.append((start, "\"append a line\" to a context doc without naming a ctx tool"))
+    return out
+
+
+def check_ctx_write_prose(rel, body: str, errors: list[str]) -> None:
+    for line, msg in ctx_write_prose_hits(body):
+        errors.append(f"{rel}: body line {line} {msg}")
+
+
 STEP = re.compile(r"^(\d+)\.\s+(.*\S)")
 
 # The fork hand-back line is `NEEDS <system>.<kind> <name>` — never a colon (docs/env-facts.md § Environment
@@ -746,6 +849,7 @@ def check_body(p: Path, rel, body: str, errors: list[str], is_agent: bool = Fals
         if m.group(1) != unit_dir.name:
             errors.append(f"{rel}: cites `{m.group(0)}` — cross-reference a skill by name (`{m.group(1)}`, `/{m.group(1)}`), never by "
                           "its path: installed paths differ per host (docs/contributing.md § Skills)")
+    check_ctx_write_prose(rel, body, errors)
     for n, what, hit in leak_shapes.scan(p.read_text(encoding="utf-8", errors="replace"), rel=str(rel), allow=leak_shapes.allowed()):
         errors.append(f"{rel}:{n}: {what} `{hit}` — an environment fact never ships in a unit; read it from the env store "
                       "(`kb.py get`, declare it in metadata.facts) or use a `<placeholder>` (a dated example that must stay "

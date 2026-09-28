@@ -21,7 +21,8 @@ Sections:
                   symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell;
                   one legacy line: a leftover `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
-                  scaffolds every doc type into a scratch content root
+                  scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
+                  and the pinned `ctx --version` answers the API the adapter expects
   6. stamp      — last green run of THIS environment: `.context/kit-health/HEALTH-<env>.md` (local; each
                   machine keeps its own; records kit_commit, kit_version and install_mode)
 --stamp writes that HEALTH file (kit_commit) when there are no errors and no un-accepted leak hit (other
@@ -1127,6 +1128,38 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
     rc, out, err = sh([sys.executable, str(BIN / "kb.py"), "list"])
     r.add(OK if rc == 0 else ERR, "engine", "`kb.py list` " + ("reads the env store" if rc == 0 else f"failed: {both(out, err)[-300:]}"))
     ctx_store(r)
+    ctx_pin_check(r)
+
+
+def ctx_pin_check(r: Report) -> None:
+    """The ctx at the adapter's pin must itself answer `ctx --version` with the API `ctx_adapter.py version`'s
+    second line names (`ctx_adapter.CTX_API`) — a machine whose cached install predates a pin bump, or whose
+    `KIT_CTX` override points at an unrelated build, would otherwise drift from what the hooks (the PreToolUse
+    deny, `validate --changed --adopt`) assume without kit-health ever saying so. Read-only: `where` finds the
+    pinned executable (never installs it), then `<ctx> --version` is run directly — no adopted store needed."""
+    adapter = "python3 $BATON/context-db/bin/ctx_adapter.py"
+    fix = f"`{adapter} install && {adapter} adopt`"
+    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "version"])
+    want = next((ln.split(" ", 1)[1] for ln in out.splitlines() if ln.startswith("api ")), "")
+    if rc != 0 or not want:
+        r.add(ERR, "engine", f"`{adapter} version` failed: {both(out, err)[-300:]}")
+        return
+    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "where"])
+    if rc != 0:
+        r.add(WARN, "engine", f"ctx pin: not installed — {fix}")
+        return
+    ctx_path = out.strip()
+    rc, out, err = sh([ctx_path, "--version"])
+    if rc != 0:
+        r.add(WARN, "engine", f"ctx pin: `{ctx_path} --version` failed: {both(out, err)[-300:]} — {fix}")
+        return
+    m = re.search(r"\bapi\s+(\d+)\b", out)
+    got = m.group(1) if m else ""
+    if got != want:
+        r.add(WARN, "engine", f"ctx pin: `{ctx_path} --version` reports api {got or 'none'}, the adapter expects "
+                              f"api {want} — {fix}")
+    else:
+        r.add(OK, "engine", f"ctx pin: `{ctx_path} --version` reports api {want}")
 
 
 def ctx_store(r: Report) -> None:

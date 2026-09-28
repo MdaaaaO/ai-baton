@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "27"
+  version: "28"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
@@ -205,7 +205,8 @@ line outside a hunk) and preview again. The body gets no footer (config `footer`
 
 1. **KB write-back** (`.context/pr-reviews/<repo>.md`; create with
    `make -C $BATON/context-db new TYPE=pr-review DOMAIN=pr-reviews SLUG=<repo> TITLE="<org>/<repo> — PR review knowledge"`
-   if missing). The bullet format, dedupe rule and the 30KB archive-move rule: `reference/kb-writeback.md`.
+   if missing; edits go through the ctx tools, item 3). The bullet format, dedupe rule and the 30KB
+   archive-move rule: `reference/kb-writeback.md`.
 2. `## Session log` line in the same file: `- <date> — #<pr> <author> <title> — <event>, <n>
    inline, <hits> traps hit, KB +<n>` (newest first).
 3. Self-assessment drop: append one evidence-linked bullet to

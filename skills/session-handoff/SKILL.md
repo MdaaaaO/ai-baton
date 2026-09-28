@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -35,7 +35,8 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
      any session that re-reads it after a compact, so split it when you see the warning (or before).
    - Reference every ticket/PR as a clickable link (§ Rules).
 2. **Priorities** — where `.context/reference/priorities.md` exists, tick the matching checkbox(es)
-   and add the next step if one emerged (an environment without that file skips this step).
+   (`ctx_str_replace`) and add the next step if one emerged (`ctx_insert`) (an environment without that
+   file skips this step).
 3. **Task-specific docs** — if you did a PR review, update `.context/pr-reviews/<repo>.md`
    and its README; if on-call, append `.context/on-call/rotations/<week>.md`; if it's Thursday and
    you're the self-assessment session, append `.context/self-assessment/weeks/<week>.md` — through the ctx
