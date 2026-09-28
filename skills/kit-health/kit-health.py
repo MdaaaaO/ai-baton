@@ -499,9 +499,15 @@ def kit_owner_handle(frel: str, line: str, m: re.Match, owner: str) -> bool:
 
 @functools.lru_cache(maxsize=None)
 def kit_dependencies() -> frozenset[str]:
-    """Names of the tools the kit itself installs or calls (`uvx --from '<pkg>`, `uses: <owner>/<repo>`) plus
-    the kit's own repo name — naming a dependency is not a leak, even when a tracked repo shares the name."""
+    """Names of the tools the kit itself installs or calls (`uvx --from '<pkg>`, `uses: <owner>/<repo>`, the ctx
+    adapter's pinned `CTX_REPO`) plus the kit's own repo name — naming a dependency is not a leak, even when a
+    tracked repo shares the name."""
     deps = {kit_repo().rsplit("/", 1)[-1]} - {""}
+    try:
+        adapter = (KIT / "context-db" / "bin" / "ctx_adapter.py").read_text(encoding="utf-8")
+    except OSError:
+        adapter = ""
+    deps |= set(re.findall(r'^CTX_REPO\s*=\s*"[^"]*/([\w.-]+?)(?:\.git)?"', adapter, re.M))
     for f in [KIT / "workspace.mk", *sorted((KIT / ".github" / "workflows").glob("*.yml"))]:
         try:
             text = f.read_text(encoding="utf-8")

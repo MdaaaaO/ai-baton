@@ -671,5 +671,32 @@ class NoTraceback(unittest.TestCase):
         self.assertIn("metadata.reviewed", p.stdout)
         self.assertIn("exit 0 GREEN", p.stdout)
 
+class CtxDependency(unittest.TestCase):
+    """The ctx adapter's pinned upstream is a dependency the kit calls, not an environment value: the
+    `<org>/<repo>` path shape must skip it, as it skips workflow `uses:` repos."""
+
+    def test_the_pinned_ctx_repo_is_a_kit_dependency(self):
+        kh = load_kit_health()
+        kh.kit_dependencies.cache_clear()
+        m = re.search(r'^CTX_REPO\s*=\s*"[^"]*/([\w.-]+)"', (kh.KIT / "context-db" / "bin" / "ctx_adapter.py")
+                      .read_text(encoding="utf-8"), re.M)
+        self.assertIsNotNone(m, "ctx_adapter.py names its upstream as CTX_REPO")
+        self.assertIn(m.group(1), kh.kit_dependencies())
+
+    def test_the_org_path_shape_skips_it_and_still_catches_other_repos(self):
+        kh = load_kit_health()
+        org = "o" + "rgx" * 2
+        cfg = {"github": {"org": org}}
+        with mock.patch.object(kh.kb, "all_facts", return_value={}), \
+             mock.patch.object(kh.kit_profile, "load", return_value=cfg), \
+             mock.patch.object(kh, "kit_dependencies", return_value=frozenset({"ctx-store"})), \
+             mock.patch.object(kh, "identity_env", return_value={}):
+            pats, _ = kh.configured_values()
+        def hits(line: str) -> list[str]:
+            return [what for rx, what in pats if rx.search(line) and "<repo>" in what]
+        self.assertEqual(hits(f'CTX_REPO = "https://github.com/{org}/ctx-store"'), [])
+        self.assertTrue(hits(f"see https://github.com/{org}/private-thing"))
+
+
 if __name__ == "__main__":
     unittest.main()
