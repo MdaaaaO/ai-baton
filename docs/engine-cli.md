@@ -167,6 +167,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig
                         python3 kit_profile.py identity-source <WORKSPACE_* var>  # option | env | `` (unset) — where the value comes from, never the value
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
+                        python3 kit_profile.py session-env --update <file>  # replace <file>'s begin/end block in place, atomically; other lines untouched
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)

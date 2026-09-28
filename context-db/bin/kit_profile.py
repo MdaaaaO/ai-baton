@@ -27,6 +27,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig
                         python3 kit_profile.py identity-source <WORKSPACE_* var>  # option | env | `` (unset) — where the value comes from, never the value
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
+                        python3 kit_profile.py session-env --update <file>  # replace <file>'s begin/end block in place, atomically; other lines untouched
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
@@ -598,6 +599,49 @@ def session_env(environ: dict | None = None) -> dict[str, str]:
     return out
 
 
+SESSION_ENV_BEGIN = "# ai-baton session-env begin"
+SESSION_ENV_END = "# ai-baton session-env end"
+# non-greedy across the block, one trailing newline eaten with it when present; DOTALL so `.` crosses lines,
+# MULTILINE so `^`/`$` anchor each line rather than the whole file — a file the block does not appear in is
+# returned unchanged
+_SESSION_ENV_BLOCK_RE = re.compile(
+    r"^" + re.escape(SESSION_ENV_BEGIN) + r"$.*?^" + re.escape(SESSION_ENV_END) + r"$\n?",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def session_env_block(environ: dict | None = None) -> str:
+    """The `# ai-baton session-env begin/end` block `update_session_env_file` writes into $CLAUDE_ENV_FILE:
+    one `export VAR=value` per line (see `session_env`), always ending in a newline."""
+    lines = [f"export {var}={shlex.quote(value)}" for var, value in session_env(environ).items()]
+    return "\n".join([SESSION_ENV_BEGIN, *lines, SESSION_ENV_END]) + "\n"
+
+
+def update_session_env_file(path: str, environ: dict | None = None) -> None:
+    """Replace `path`'s `# ai-baton session-env begin/end` block in place — the plugin's SessionStart hook,
+    run every session start, so a persisted $CLAUDE_ENV_FILE keeps picking up a changed
+    `CLAUDE_PROJECT_DIR`/`BATON`/identity option instead of the first session's values freezing in place.
+    A missing file counts as empty (a brand new $CLAUDE_ENV_FILE); any other read error (permission denied,
+    a directory at `path`, undecodable bytes, …) is raised, not swallowed, and nothing is written. The old
+    block is dropped wherever it sits, the kept text is given a trailing newline if it lacks one (so the
+    fresh block never glues onto another writer's last line), and the fresh block is appended. The write
+    itself is `fsutil.atomic_write` (temp file + `os.replace`, same directory, keeps the file's mode) so a
+    reader never sees a torn file and a failure here also leaves `path` untouched. `fsutil` is
+    imported here, not at module load: most callers of this file never touch `--update`, and a
+    lone copy of `kit_profile.py` (a test double, a partial cache) should not need `fsutil.py`
+    beside it just to be imported."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # same dir; a no-op if already there
+    from fsutil import atomic_write  # noqa: E402
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        text = ""
+    kept = _SESSION_ENV_BLOCK_RE.sub("", text)
+    if kept and not kept.endswith("\n"):
+        kept += "\n"
+    atomic_write(path, kept + session_env_block(environ))
+
+
 def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str:
     """The kit's always-on body (`WORKSPACE.md`) for the plugin's SessionStart hook to print into the session's
     context — a plugin cannot ship a CLAUDE.md, and on a plugin install the seeded `@.claude/WORKSPACE.md` import has
@@ -693,9 +737,21 @@ def main(argv: list[str]) -> int:
         for var, value in identity_env().items():
             print(f"export {var}={shlex.quote(value)}")
     elif cmd == "session-env":
-        # the plugin's SessionStart hook: identity-env plus CLAUDE_PROJECT_DIR (#3)
-        for var, value in session_env().items():
-            print(f"export {var}={shlex.quote(value)}")
+        rest = argv[2:]
+        if rest and rest[0] == "--update":
+            if len(rest) < 2:
+                print("kit_profile: `session-env --update` needs <file> — kit_profile.py session-env --update <file>", file=sys.stderr)
+                return 2
+            target = rest[1]
+            try:
+                update_session_env_file(target)
+            except OSError as e:
+                print(f"kit_profile: session-env --update {target} failed: {e}", file=sys.stderr)
+                return 2
+        else:
+            # the plugin's SessionStart hook: identity-env plus CLAUDE_PROJECT_DIR (#3)
+            for var, value in session_env().items():
+                print(f"export {var}={shlex.quote(value)}")
     elif cmd == "workspace-rules":
         # the plugin's SessionStart hook: WORKSPACE.md on stdout (→ the session's context) for a plugin-path workspace (#3)
         sys.stdout.write(workspace_rules())
