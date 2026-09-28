@@ -28,7 +28,8 @@ run on a throw-away store under the temp dir (`docs/contributing.md` § Testing)
 │   ├── reference/env/       #   the env fact store: config.json + slack.md/tracker.md/github.md/… + _templates/ (kb.py)
 │   ├── reference/environment.md  # this environment's prose: domains, capabilities, conventions, rules, repo map
 │   ├── memory/              #   harness auto-memory (symlinked from ~/.claude/projects/<slug>/memory)
-│   └── state/pr-review/     #   pr-scan / pr-review config.json, ledger.jsonl, .submitted/
+│   ├── state/pr-review/     #   pr-scan / pr-review config.json, ledger.jsonl, .submitted/
+│   └── state/sign-queue/    #   the sign-queue's own runtime jobs + logs (skills/sign-queue/ ships the scripts only)
 ├── CLAUDE.md                # your preamble + `@.claude/WORKSPACE.md` (clone only) + `@.context/reference/environment.md` — NOT in this repo
 ├── Makefile                 # your targets + `include .claude/workspace.mk` (clone only; NOT in this repo)
 └── <repo-a>/, <repo-b>/, …   # the repos this environment works on
@@ -58,7 +59,6 @@ run on a throw-away store under the temp dir (`docs/contributing.md` § Testing)
 | `agents/` | Subagent definitions, one file per agent — the forked workers skills run under; where they sit between skills, engine and context DB: `docs/architecture.md`. |
 | `context-db/` | The engine (Makefile, `bin/`, `_templates/`) behind the `.context/` document DB, plus `context-README.template.md` (the DB spec, seeded into `../.context/README.md`). `make -C $BATON/context-db help` lists every target. Content lives in `../.context/`. CLI reference: `docs/engine-cli.md`. |
 | `pr-review/` | Tooling README + `config.example.json` for `pr-scan` / `pr-review`; the live state is in `../.context/state/pr-review/`. |
-| `sign-queue/` | Runtime queue for host-signed commits (ignored; only `.gitkeep` is tracked). |
 | `docs/` | Kit-level docs, one file per topic — details below. |
 
 ## Notes

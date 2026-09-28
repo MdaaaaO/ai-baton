@@ -2,7 +2,7 @@
 name: self-assessment
 description: "Composes the user's weekly self-assessment for a past ISO week or range from `.context/` and the systems of record, never live sessions: the week file plus the report block and ledger card the env config asks for, back-filled where `.context/` lacks coverage. Invoke as \"self-assessment for last week\" or \"for W37\"."
 metadata:
-  version: "13"
+  version: "14"
   updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "self_assessment.ledger,self_assessment.ledger_url"
@@ -158,7 +158,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      above are complete.)
 4. **Verify, don't trust — and tie-break conflicts explicitly.** Numbers and tracker keys come from
    evidence, not memory or a drop's say-so; check anything surprising against the listed systems of
-   record (`CLAUDE.md` § Verification). Cross-sweep numeric conflicts are **routine** (a pilot week had three)
+   record (`WORKSPACE.md` § Verification). Cross-sweep numeric conflicts are **routine** (a pilot week had three)
    — apply a fixed tie-break, don't average or guess:
    - **PR line/file stats → GitHub** (the diff is authoritative over a ticket comment's recollection).
    - **Ticket-scoped measurements → that ticket's own closing comment** (row counts, per-event shares).

@@ -1,9 +1,9 @@
 ---
 name: pr-event-brief
-description: Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN line a pr-watch Monitor emits; the main session then performs the action.
+description: "Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN line a pr-watch Monitor emits; the main session then performs the action."
 metadata:
-  version: "8"
-  updated: "2026-09-26"
+  version: "9"
+  updated: "2026-09-28"
   reviewed: "2026-09-24"
   facts: "github.review_bot"
 argument-hint: <owner/repo> <pr_number> "<event line>"
@@ -52,9 +52,12 @@ re-request or merge anything — the main session does that.
 3. Unresolved threads **and** `reviewDecision` in one GraphQL call (the MERGE rule below needs
    `reviewDecision`; no REST call above returns it):
    ```
-   gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewDecision reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{databaseId author{login} body}}}}}}}' -F o=<owner> -F r=<repo> -F n=$pr
+   gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewDecision reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved comments(first:1){nodes{databaseId author{login} body}}}}}}}' -F o=<owner> -F r=<repo> -F n=$pr
    ```
-   Thread count, and for up to 5 unresolved ones `<databaseId> by <login>: <≤12 words>`.
+   Thread count, and for up to 5 unresolved ones `<databaseId> by <login>: <≤12 words>`. `first:100` is one
+   page (gh-cli's own pagination trap, here on a GraphQL cursor rather than a REST offset): if
+   `pageInfo.hasNextPage` comes back true, the count is a floor, not a total — say `≥N threads (more
+   exist, unread)` rather than reporting it as complete.
 4. `repos/$repo/issues/$pr/comments` — human comments newer than the event, if any (`$WORKSPACE_GITHUB_LOGIN`
    = own, skip; if it is unset in this fork's shell — it is a `settings.local.json` value the watcher's
    shell has, not necessarily exported here — resolve it via `gh api user --jq .login` instead of assuming

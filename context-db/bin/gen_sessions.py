@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 import kit_profile as profile  # same dir — the one content-root resolver
 import frontmatter  # same dir — the one frontmatter parser
 from fsutil import atomic_write  # same dir
+from session_stats import SPEND_BASIS  # same dir — one spend-basis wording, quoted verbatim here too
 
 CTX = str(profile.context_root())
 SESS_DIR = os.path.join(CTX, "sessions")
@@ -298,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         "that will touch a shared epic, PR, or worktree**, then agree ownership explicitly (a worktree "
         f"isolates branch/HEAD, not directory access). ⚠ **STALE** = no heartbeat for over {STALE_HOURS}h; "
         "re-verify with `ListAgents` (match by ref). **Stats** / **~$ est.** come from the session's "
-        "transcript (main session only, list price). Heartbeats are shown in the owner's local zone. "
+        f"transcript ({SPEND_BASIS}). Heartbeats are shown in the owner's local zone. "
         "The Ended table lists only a session that left a real **next-session prompt** — a starter below "
         "the table points at it (`sessions/<name>.md` § Next session); a session that ended with nothing "
         "to hand over is not listed here (its file and stats stay in `sessions/<name>.md` § Session stats "

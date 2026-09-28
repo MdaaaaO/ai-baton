@@ -2,8 +2,8 @@
 name: gh-cli
 description: "Querying GitHub with `gh` without the known traps: auth (native login vs a proxy token prefix), `--jq` has no `--arg`, search rate limits, `reviewed-by`/`review-requested` semantics, review pagination, `--json` fields older gh lacks (`wait-checks.sh`), writes that silently fail. Load before non-trivial `gh api`/`search`/`pr` work."
 metadata:
-  version: "12"
-  updated: "2026-09-27"
+  version: "13"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "github.org,github.sandbox_token_prefix"
 ---
@@ -130,7 +130,7 @@ the script.
   come from an agent that drafted the review for its author. Count them, but label them.
 - **Repo scope matters**: a four-repo count can halve someone whose work is cross-repo; run the
   org-wide (`user:<org>`) count next to it.
-- Numbers go in a table in the reply, never in prose (`CLAUDE.md` § Writing for the user).
+- Numbers go in a table in the reply, never in prose (`WORKSPACE.md` § Rules).
 
 ## Related
 

@@ -2,7 +2,7 @@
 
 Why: the session holding the review queue is long-lived (`/loop 2h /pr-scan`), and everything it
 reads is re-billed on every later tick. A PR snapshot is 20–100K tokens; three of them make the
-"compacted giant" `CLAUDE.md` § Cost & context hygiene warns about. So the diff, reviews, threads and
+"compacted giant" `WORKSPACE.md` § Cost & context hygiene warns about. So the diff, reviews, threads and
 the verification round-trips live in a child that dies after the review, and the main session keeps
 only the sheet, the walk with the user, the post, and the KB write-back.
 

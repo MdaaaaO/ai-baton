@@ -56,6 +56,11 @@ def _local_str(iso_utc: str) -> str:
         return iso_utc
     return t.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p %Z")
 
+# One definition of "session spend", quoted verbatim wherever a number is shown (SESSION_INDEX.md's
+# footer, session-handoff, session-register): the row is the TOTAL (main + subagents) — what the
+# ledger and cost-report already use; the per-session block breaks the two back out.
+SPEND_BASIS = "TOTAL — main session + every subagent transcript, list-price estimate"
+
 DEFAULT_PRICES = (15.0, 18.75, 1.5, 75.0, 30.0)  # $/Mtok: input, cache write (5m TTL), cache read, output, cache write (1h TTL)
 # (model-id substring, prices) — first match wins; anything else (opus, fable, mythos, unknown) = default
 MODEL_PRICES = (

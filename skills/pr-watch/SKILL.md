@@ -2,8 +2,8 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "14"
-  updated: "2026-09-27"
+  version: "15"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
 ---
 
@@ -85,7 +85,7 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
   BEHIND, bot-approved PR that never reaches auto-merge. One attempt per head; `PR_WATCH_SYNC_COOLDOWN`
   (default 3600 s) stops a busy `main` from restarting the PR's CI every two minutes; the cooldown is
   seeded from the head commit when it is a GitHub `web-flow` merge commit, so a re-armed watcher
-  (30-min Monitor cap) does not restart the clock at zero. `PR_WATCH_SYNC=0` turns it off (e.g. a PR
+  (60-min Monitor cap) does not restart the clock at zero. `PR_WATCH_SYNC=0` turns it off (e.g. a PR
   someone is mid-review on, or a branch the user is about to force-push).
 - A failure (403 workflow scope, 422 conflict) is reported once per head and not retried — act per the
   table above. `mergeable_state=dirty` is reported as `CONFLICTS` and never touched.
@@ -135,7 +135,7 @@ look back: if the previous **two consecutive windows** delivered zero actionable
 muted CI lines), do **not** re-arm — run the `session-handoff` skill and end the session. The successor
 re-arms from the `## Open PRs` list (`session-register` step 4) when the user reports the gate moved.
 
-Arithmetic: 3 PRs × 30-min Monitors ≈ 6 wake-ups/h ≈ $1.80/h idle; one 1 h multi-PR Monitor ≈ $0.30/h;
+Arithmetic: 3 PRs × 60-min Monitors ≈ 3 wake-ups/h ≈ $0.90/h idle; one 1 h multi-PR Monitor ≈ $0.30/h;
 parked = $0. A PR waiting on an `update-branch` only the user's machine can run, a human review or a third party is not
 something a live session makes happen faster.
 
