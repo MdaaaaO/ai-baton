@@ -2,8 +2,8 @@
 name: review-runner
 description: "Opus worker for pr-review steps 1–4 (snapshot, repo trap KB, review pass incl. --deep lenses, independent verification) on one PR: writes the triage sheet to $CTX/triage.json, returns only the overview block (≤3K tokens) — the diff never enters a long-lived prefix. Never posts, never asks. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "10"
-  updated: "2026-09-27"
+  version: "11"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
 model: opus
 effort: medium
@@ -40,7 +40,8 @@ so you spend them on judgment, not on fetching.
    findings unless the user asked; the walk is about replies).
 2. Load only what the bundle cannot know: `kb-traps.md` (check every applicable trap, record hit/n/a/
    unverified), the repo's own review rules if the KB names them (the repo's `CLAUDE.md` section on SQL
-   semantics, say; `head/AGENTS.md` if the PR touched it), and the tracker ticket in the title/body — `getJiraIssue`
+   semantics, say; `head/AGENTS.md` if the PR touched it, else one live `gh api contents` read — the same
+   named exception as `pr-review/SKILL.md` § Contract), and the tracker ticket in the title/body — `getJiraIssue`
    (one call) **only where `systems.jira` is true**; where it's false, skip the lookup and treat any ticket
    reference in the overview as `n/a in this environment`. Nothing else at this step.
 3. Review pass over `diff.patch` (per-file via `diffs/`), collecting candidates on these axes:
