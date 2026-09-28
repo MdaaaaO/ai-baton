@@ -64,7 +64,12 @@ claude_sync:
 # prints the push/PR commands that finish it.
 #   make kit_release_dry               # the next version and its changelog section (as of origin/main), nothing written
 #   make kit_release [LEVEL=minor]     # branch, commit, push, PR (LEVEL: major|minor|patch|X.Y.Z; default inferred)
-_CREL    := uvx -q --from 'conventional-release>=0.2,<1' conventional-release
+# conventional-release's own version is an exact pin, not a floating range — one pin, .github/versions.env, next to
+# this file (the workspace's own kit checkout; #85's KIT_CHECKOUT names a release's git checkout when it differs
+# from where workspace.mk itself lives, but the tool version tracks this file, like every other target here).
+-include $(KIT)/.github/versions.env
+# a test fakes this via `make _CREL=…` — a command-line assignment beats `?=` too, same as `:=` above
+_CREL    ?= uvx -q --from conventional-release==$(CONVENTIONAL_RELEASE_VERSION) conventional-release
 _REL_WT  := .worktrees/kit_release-run
 LEVEL    ?=
 # the default checkout: the workspace's own `.claude/` clone, and nothing else — a release never defaults to a kit that

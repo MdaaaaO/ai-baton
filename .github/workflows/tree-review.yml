@@ -75,9 +75,9 @@ jobs:
 
       - if: steps.token.outputs.enabled == 'true'
         name: Install the Claude Code CLI
-        env:
-          CLAUDE_CODE_VERSION: 2.1.283
-        run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
+        run: |
+          . .github/versions.env
+          npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
 
       - if: steps.token.outputs.enabled == 'true'
         name: Leak-by-meaning lens over the tree
