@@ -62,6 +62,12 @@ claude_sync:
 # Needs uv (uvx) and gh; the PR gets the `release` label (a failed label fails the target). A run that fails
 # after cutting the branch keeps the branch and the worktree — the release commit may be only there — and
 # prints the push/PR commands that finish it.
+# After conventional-release's own commit (it bumps VERSION and plugin.json — .conventional-release.toml
+# version-files — but can't reach .claude-plugin/marketplace.json's plugins[].source.ref, a differently
+# named, nested, tag-prefixed field its version-files mechanism has no path to), a real (non-dry) run pins that
+# ref with `context-db/bin/bump_marketplace_ref.py` as a second commit on the same release branch — squashed
+# into one `chore(release):` commit with everything else at merge, so an install still resolves the tagged
+# release, not whatever main holds when it updates. A failed pin leaves the branch and worktree too.
 #   make kit_release_dry               # the next version and its changelog section (as of origin/main), nothing written
 #   make kit_release [LEVEL=minor]     # branch, commit, push, PR (LEVEL: major|minor|patch|X.Y.Z; default inferred)
 # conventional-release's own version is an exact pin, not a floating range — one pin, .github/versions.env, next to
@@ -97,6 +103,18 @@ kit_release_dry kit_release:
 	    echo "then clean up:"; \
 	    echo "  git -C '$(KIT_CHECKOUT)' worktree remove '$(_REL_ABS)' && git -C '$(KIT_CHECKOUT)' branch -D $$br"; \
 	    exit $$rc; \
+	  fi; \
+	  if [ $$rc -eq 0 ] && [ -n "$$br" ]; then \
+	    if ! ( cd "$(_REL_WT)" && python3 context-db/bin/bump_marketplace_ref.py \
+	           && git add .claude-plugin/marketplace.json \
+	           && { git diff --cached --quiet || git commit -q -m "chore(release): pin marketplace ref"; } \
+	           && git push -q ); then \
+	      echo "kit_release: pinning .claude-plugin/marketplace.json's ref failed on $$br — kept it and its worktree, the PR is open without the pin:"; \
+	      echo "  worktree  $(_REL_ABS)"; \
+	      echo "  branch    $$br"; \
+	      echo "  cd '$(_REL_ABS)' && python3 context-db/bin/bump_marketplace_ref.py && git add .claude-plugin/marketplace.json && git commit -m 'chore(release): pin marketplace ref' && git push"; \
+	      exit 1; \
+	    fi; \
 	  fi; \
 	  git -C "$(KIT_CHECKOUT)" worktree remove --force "$(_REL_ABS)"; \
 	  if [ -n "$$br" ]; then git -C "$(KIT_CHECKOUT)" branch -q -D "$$br"; fi; \

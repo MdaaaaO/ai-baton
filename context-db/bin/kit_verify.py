@@ -210,8 +210,11 @@ MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json"
 
 def check_plugin_manifest(errors: list[str]) -> None:
     """The plugin manifest: parses, kebab-case `name`, `version` == `VERSION` (conventional-release bumps both;
-    the marketplace entry names the same plugin and points at the repo root). `claude plugin validate --strict .` is
-    the authoritative schema check (make plugin-validate); this is the version discipline no external tool checks."""
+    the marketplace entry names the same plugin and pins a github source to that same version, tag-prefixed, so
+    an install fetches the tagged release rather than whatever the default branch holds — `bump_marketplace_ref.py`
+    keeps `ref` in step with a release; this is the drift gate for when that step is skipped or edited by hand).
+    `claude plugin validate --strict .` is the authoritative schema check (make plugin-validate); this is the
+    version discipline no external tool checks."""
     mp = KIT / PLUGIN_MANIFEST
     if not mp.is_file():
         errors.append(f"{PLUGIN_MANIFEST}: missing — the kit is a plugin (docs/packaging.md)")
@@ -240,8 +243,18 @@ def check_plugin_manifest(errors: list[str]) -> None:
         errors.append(f"{MARKETPLACE_MANIFEST}: {err}")
         return
     entries = market.get("plugins") if isinstance(market.get("plugins"), list) else []
-    if not any(isinstance(e, dict) and e.get("name") == name and e.get("source") in ("./", ".") for e in entries):
-        errors.append(f"{MARKETPLACE_MANIFEST}: no plugins[] entry with name {name!r} and source \"./\" (the repo root)")
+    entry = next((e for e in entries if isinstance(e, dict) and e.get("name") == name), None)
+    if entry is None:
+        errors.append(f"{MARKETPLACE_MANIFEST}: no plugins[] entry with name {name!r}")
+    else:
+        source = entry.get("source")
+        if not (isinstance(source, dict) and source.get("source") == "github" and source.get("repo")):
+            errors.append(f"{MARKETPLACE_MANIFEST}: plugins[].source for {name!r} is not a github source "
+                           "(an install must resolve to the tagged release, not the repo's default branch)")
+        elif kit_version and source.get("ref") != f"v{kit_version}":
+            errors.append(f"{MARKETPLACE_MANIFEST}: source.ref {source.get('ref')!r} != 'v{kit_version}' — "
+                           "the marketplace ref and plugin.json/VERSION drifted (bump_marketplace_ref.py keeps "
+                           "them together at release time)")
     check_identity_options(errors, man)
 
 

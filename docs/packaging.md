@@ -124,9 +124,14 @@ facts (channel ids, tracker site, org) stay in the env store, which keeps discov
 
 ## Version discipline
 
-`plugin.json` `version` == `VERSION` == the latest `CHANGELOG.md` release section. `kit-verify` fails when the two
-files disagree (every machine, no `claude` CLI needed); `.conventional-release.toml` lists both in `version-files`,
-so a release PR bumps them together. `make -C $BATON/context-db plugin-validate` (part of `make ci` and
+`plugin.json` `version` == `VERSION` == the latest `CHANGELOG.md` release section == `marketplace.json`'s plugin
+entry `source.ref` (`v` + the version — a `github` source pinned to the release tag, so an install resolves to
+what the release actually shipped, not whatever `main` holds when it fetches). `kit-verify` fails when any of
+these disagree (every machine, no `claude` CLI needed). `.conventional-release.toml` lists `VERSION` and
+`plugin.json` in `version-files`, so a release PR bumps them together; `marketplace.json`'s `ref` is a different
+shape — nested, tag-prefixed — that mechanism can't reach, so `make kit_release` runs
+`context-db/bin/bump_marketplace_ref.py` as a second commit on the release branch instead (`CONTRIBUTING.md` §
+Releases). `make -C $BATON/context-db plugin-validate` (part of `make ci` and
 `ci.yml`) runs `claude plugin validate --strict` on the manifests, the skills and the agents where the CLI exists.
 
 ## Pre-publish checklist

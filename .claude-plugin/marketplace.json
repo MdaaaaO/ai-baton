@@ -8,7 +8,11 @@
   "plugins": [
     {
       "name": "ai-baton",
-      "source": "./",
+      "source": {
+        "source": "github",
+        "repo": "MdaaaaO/ai-baton",
+        "ref": "v0.5.0"
+      },
       "description": "Capability-gated skills and agents, the env fact store, the context DB engine and kit-health.",
       "category": "productivity"
     }

@@ -3,6 +3,7 @@ cuts from its `.claude/` by default, a plugin-shaped workspace (no `.claude/`) f
 checkout the target stops with one line naming `KIT_CHECKOUT`. conventional-release is faked through `_CREL` (a
 command-line variable beats the file's `:=`), so no network and no uv. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import json
 import os
 import shutil
 import subprocess
@@ -92,6 +93,84 @@ class KitRelease(unittest.TestCase):
                 self.assertIn("KIT_CHECKOUT=", r.stdout)
                 self.assertNotIn("CREL", r.stdout)
                 self.assertFalse((self.ws / ".worktrees").exists())
+
+
+@unittest.skipUnless(MAKE, "make not installed")
+class KitReleaseMarketplaceRef(unittest.TestCase):
+    """kit_release's post-CREL step: after a real (non-dry) release commit, bump_marketplace_ref.py runs
+    in the release worktree and its change reaches origin as a second commit on the release branch — still
+    inside the one open PR, since a squash-merge later collapses both into one `chore(release):` commit.
+    conventional-release is faked (branch + VERSION/plugin.json bump + commit + push + a PR-URL line), and so
+    is `gh` (only `pr edit --add-label` needs to exit 0 — no real GitHub call)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="kit-release-mkt-test."))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.env = _env(self.tmp)
+        self.origin = self.tmp / "origin.git"
+        seed = self.tmp / "seed"
+        self.git("init", "-q", "--bare", str(self.origin), cwd=self.tmp)
+        self.git("-c", "init.defaultBranch=main", "init", "-q", str(seed), cwd=self.tmp)
+        (seed / "context-db" / "bin").mkdir(parents=True)
+        shutil.copy(KIT / "context-db" / "bin" / "kit_profile.py", seed / "context-db" / "bin")
+        shutil.copy(KIT / "context-db" / "bin" / "bump_marketplace_ref.py", seed / "context-db" / "bin")
+        (seed / "VERSION").write_text("0.1.0\n")
+        (seed / ".claude-plugin").mkdir()
+        (seed / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "x", "version": "0.1.0"}))
+        (seed / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+            {"name": "m", "owner": {"name": "o"},
+             "plugins": [{"name": "x", "source": {"source": "github", "repo": "o/x", "ref": "v0.1.0"}}]}))
+        self.git("add", "-A", cwd=seed)
+        self.git("commit", "-qm", "init", cwd=seed)
+        self.git("push", "-q", str(self.origin), "HEAD:main", cwd=seed)
+        self.git("--git-dir", str(self.origin), "symbolic-ref", "HEAD", "refs/heads/main", cwd=self.tmp)
+        self.ws = self.tmp / "ws"
+        self.ws.mkdir()
+        fakebin = self.tmp / "fakebin"
+        fakebin.mkdir()
+        # the fake release tool: on a real (non-dry) `release`, cuts the branch itself, bumps VERSION and
+        # plugin.json the way conventional-release's version-files does, commits, pushes, and prints a PR line —
+        # everything workspace.mk's own recipe expects back from the real tool
+        self.crel = fakebin / "crel.sh"
+        self.crel.write_text(
+            "#!/bin/sh\nset -e\n"
+            'if [ "$1" = "release" ] && [ "$2" != "--dry-run" ]; then\n'
+            "  git checkout -q -b release/v0.2.0\n"
+            '  printf "0.2.0\\n" > VERSION\n'
+            "  python3 -c \"import json,pathlib; p=pathlib.Path('.claude-plugin/plugin.json'); "
+            "d=json.loads(p.read_text()); d['version']='0.2.0'; p.write_text(json.dumps(d))\"\n"
+            "  git add VERSION .claude-plugin/plugin.json\n"
+            '  git commit -q -m "chore(release): 0.2.0"\n'
+            "  git push -q --set-upstream origin release/v0.2.0\n"
+            '  echo "https://github.com/o/x/pull/1"\n'
+            "fi\n"
+        )
+        self.crel.chmod(0o755)
+        gh = fakebin / "gh"
+        gh.write_text('#!/bin/sh\necho "gh $*" >&2\nexit 0\n')
+        gh.chmod(0o755)
+        self.env["PATH"] = f"{fakebin}:{self.env['PATH']}"
+
+    def git(self, *args, cwd):
+        subprocess.run(["git", *args], cwd=cwd, env=self.env, check=True, capture_output=True)
+
+    def clone(self, dest: Path) -> Path:
+        self.git("clone", "-q", str(self.origin), str(dest), cwd=self.tmp)
+        return dest
+
+    def test_pins_the_marketplace_ref_as_a_second_commit_on_the_release_branch(self):
+        self.clone(self.ws / ".claude")
+        r = subprocess.run([MAKE, "-s", "-f", str(KIT / "workspace.mk"), f"_CREL={self.crel}", "kit_release"],
+                            cwd=self.ws, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        show = subprocess.run(
+            ["git", "--git-dir", str(self.origin), "log", "--format=%s", "release/v0.2.0"],
+            env=self.env, capture_output=True, text=True, check=True).stdout
+        self.assertIn("chore(release): pin marketplace ref", show)
+        blob = subprocess.run(
+            ["git", "--git-dir", str(self.origin), "show", "release/v0.2.0:.claude-plugin/marketplace.json"],
+            env=self.env, capture_output=True, text=True, check=True).stdout
+        self.assertEqual(json.loads(blob)["plugins"][0]["source"]["ref"], "v0.2.0")
 
 
 class ConventionalReleaseVersionPin(unittest.TestCase):
