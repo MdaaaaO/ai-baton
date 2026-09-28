@@ -41,7 +41,8 @@ hook exports it from Claude Code's plugin cache. You never set it yourself (`doc
 
 The kit exists to run this loop, not to be a feature list: an issue is sized once, picked up by a worker matched
 to that size, reviewed and merged without a human once the routine gates hold, and a session's own retro turns
-what went wrong back into an issue.
+what went wrong back into an issue. The cost story is the point: the expensive model reviews and decides, and
+cheaper models do the reading and the mechanical work.
 
 ```mermaid
 flowchart LR
@@ -63,7 +64,8 @@ flowchart LR
 - **`pr-open`** opens the PR with its diagrams, labels and reviewers; **`pr-watch`** keeps it current and
   surfaces only what needs a decision.
 - Claude reads the diff against one rule file ([`docs/REVIEW.md`](docs/REVIEW.md)) and posts a verdict; an
-  approved, green PR merges itself — a human gates only the sensitive paths (`.github/workflows/`).
+  approved, green PR merges itself. A human gates only the sensitive paths: anything under `.github/`, and the
+  review's own rule and gate files.
 - **`session-handoff`** flushes what the session learned; **`session-retro`** checks the session against the
   kit and offers a kit gap back as an issue, closing the loop.
 
