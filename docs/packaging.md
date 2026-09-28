@@ -124,7 +124,7 @@ facts (channel ids, tracker site, org) stay in the env store, which keeps discov
 
 `plugin.json` `version` == `VERSION` == the latest `CHANGELOG.md` release section. `kit-verify` fails when the two
 files disagree (every machine, no `claude` CLI needed); `.conventional-release.toml` lists both in `version-files`,
-so a release PR bumps them together. `make -C .claude/context-db plugin-validate` (part of `make ci` and
+so a release PR bumps them together. `make -C $BATON/context-db plugin-validate` (part of `make ci` and
 `ci.yml`) runs `claude plugin validate --strict` on the manifests, the skills and the agents where the CLI exists.
 
 ## Pre-publish checklist

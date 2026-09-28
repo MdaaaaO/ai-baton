@@ -7,7 +7,7 @@ You are the kit's CI reviewer. The rules you judge by are at the end of this mes
 below. Tier 0 already ran and FAILED:
 
 ```
-[STOP] skills/notion-page-review/SKILL.md:1 — files of `notion-page-review` changed but `metadata.version` is 4 (base 4); bump it, or mark the PR wording-only (`wording` label / `[skip-bump]`) (CONTRIBUTING § Versioning)
+[STOP] skills/notion-page-review/SKILL.md:1 — files of `notion-page-review` changed but `metadata.version` is 4 (base 4); bump it, or mark the PR wording-only (`wording` label / `[skip-bump]`) (docs/contributing.md § Versioning)
 review-gate: FAIL — 1 changed file(s), 1 unit(s) [notion-page-review], 1 finding(s)
 ```
 

@@ -35,7 +35,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   units with their `requires` sets, the tier-0 verdict and the pre-flagged lines; the rules beside it are copied
   from the base branch.
 - **Flush** — writing durable state to disk when a step lands: the context doc's Session log and section,
-  `make -C .claude/context-db index`, `session-touch`, the memory index if a note changed. The guard against
+  `make -C $BATON/context-db index`, `session-touch`, the memory index if a note changed. The guard against
   compaction drift (`WORKSPACE.md` § Cost & context hygiene).
 - **Fork** — a skill with `context: fork` runs its body in a subagent under the agent its `agent:` key names
   (`triage`, `review-runner`, `auto-runner`); it returns a brief and never acts, so its reading stays out of the main
@@ -61,7 +61,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Provenance** — the `learned-from` cell of an env-store row: `<who> <YYYY-MM-DD>` with who = `tool:<name>`,
   `user`, `import:<env>` or `derived:<key>` (`kb.py set --from`). `kb.py stale` measures the date against the
   manifest's `ttl_days`; a `user` row is never stale.
-- **Review gate (tier 0)** — `review_gate.py`, run by `ci.yml` and `make -C .claude/context-db review-gate`: leak
+- **Review gate (tier 0)** — `review_gate.py`, run by `ci.yml` and `make -C $BATON/context-db review-gate`: leak
   and PII shapes on every added line, and a version / `updated` bump for every changed unit. Tiers 1–3
   are the evidence file, the Claude review and the `evals/kit-review-*` cases (`docs/REVIEW.md`).
 - **Session registry** — `.context/sessions/<name>.md`, one file per live session (what it owns, a ≤ 12 h heartbeat,

@@ -12,7 +12,7 @@ plain-text line `Verdict: approve` or `Verdict: request-changes`.
 --- a/skills/session-register/SKILL.md
 +++ b/skills/session-register/SKILL.md
 @@ -40,6 +40,8 @@
- 5. Touch the row on every flush (`make -C .claude/context-db session-touch NAME=<name>`).
+ 5. Touch the row on every flush (`make -C $BATON/context-db session-touch NAME=<name>`).
 +6. When the session ends, push the kit's `main` so the other machines pick the registry up:
 +   `git -C .claude push origin main`.
 --- a/skills/session-register/heartbeat.sh
