@@ -433,7 +433,7 @@ def cmd_work_prs(a) -> int:
     m = resolve_mode()
     login = m["github_login"]
     if not login:
-        raise SystemExit("WORKSPACE_GITHUB_LOGIN is not set (plugin `/config` github_login or settings.local.json env) — needed for author:<login>")
+        raise SystemExit("WORKSPACE_GITHUB_LOGIN is not set (`/plugin configure ai-baton` github_login or settings.local.json env) — needed for author:<login>")
     since, until = a.since or _default_since(), a.until or date.today().isoformat()
     scopes = []
     if m["github_org"]:
@@ -487,7 +487,7 @@ def cmd_work_tickets(a) -> int:
     login = profile.identity("WORKSPACE_GITHUB_LOGIN")
     repos = profile.get("tracker.repos", []) or []
     if not login:
-        raise SystemExit("WORKSPACE_GITHUB_LOGIN is not set (plugin `/config` github_login or settings.local.json env) — needed for assignee:<login>")
+        raise SystemExit("WORKSPACE_GITHUB_LOGIN is not set (`/plugin configure ai-baton` github_login or settings.local.json env) — needed for assignee:<login>")
     if not repos:
         raise SystemExit("tracker.repos is empty — no repo to count closed issues in (a missing config is not 0 tickets)")
     since, until = a.since or _default_since(), a.until or date.today().isoformat()

@@ -38,8 +38,8 @@ run on a throw-away store under the temp dir (`docs/contributing.md` § Testing)
 
 | Path | What it is |
 |---|---|
-| `WORKSPACE.md` | **The environment-agnostic body of the workspace `CLAUDE.md`** (the *core* layer): layout, the `.context/` DB, env facts, session registry, the skill trigger list, always-on rules, cost & context hygiene. `kit-verify` caps it at 10 KB (it loads into every session's prefix — `docs/loading.md`). It loads into every session by import or hook: on a clone the root `CLAUDE.md` imports it (`@.claude/WORKSPACE.md`) and it updates with `make claude_sync`; on a plugin install the SessionStart hook injects it (`kit_profile.py workspace-rules`) and it updates with `claude plugin update`. No names, logins, memory pointers — those stay in the preamble / `settings.local.json` — and nothing that differs between environments, which lives in the env store (values) and `.context/reference/environment.md` (prose). |
-| `../.context/reference/env/` | **The env fact store** (not in this repo — it is `.context/` content): `config.json` with the structural switches scripts read (`tracker.kind`, `github.org`, `systems.*`, …) and one markdown table per system (`slack.md`, `tracker.md`, `github.md`, `aws.md`, `notion.md`) holding the ids and names a skill needs at run time — each row `name · value · purpose · learned-from`. Managed by `context-db/bin/kb.py` (also `make -C $BATON/context-db kb ARGS="…"`), read by `kit_profile.py get <key>` — every subcommand and flag, including the scratch-directory helper: `docs/engine-cli.md`. Skills resolve a fact as `kb.py get` → discovery tool → ask once → `kb.py set`. `_templates/<type>.md` in the store override the engine's context-doc templates. Spec: `docs/env-facts.md`. |
+| `WORKSPACE.md` | **The environment-agnostic body of the workspace `CLAUDE.md`** (the *core* layer, ≤ 10 KB). Loads into every session by import (clone) or hook (plugin) — details below. |
+| `../.context/reference/env/` | **The env fact store** (not in this repo — `.context/` content): structural switches plus one markdown table per system, managed by `kb.py` — details below. |
 | `../.context/reference/environment.md` | **This environment's prose** (not in this repo — `.context/` content, imported by the root `CLAUDE.md` as `@.context/reference/environment.md`): the domains, the capabilities this machine turns on (`systems.*`), conventions, always-on rules, and the repo map. Seeded by `setup.sh` from `environment-template/environment.md`. |
 | `environment-template/` | Skeleton of a new environment: `config.json` (the env store's structural switches — every top-level key the store knows; `kb.py config` prints the live ones, `docs/env-facts.md` § The store explains them) and `environment.md` (the prose doc); `setup.sh` seeds both when they are missing and never again (`sh $BATON/setup.sh --refresh-seeds` shows what a later template change would add). See `docs/new-environment.md`. |
 | `CLAUDE.md` | The kit's own memory file (≤ 600 B, `kit-verify` caps it): what this directory is, where the contributor and review rules live. On a clone Claude Code loads `.claude/CLAUDE.md` into a workspace session next to `WORKSPACE.md` (a plugin install has no such file, so it loads nowhere), and the review action restores it from the base branch in CI. |
@@ -47,7 +47,7 @@ run on a throw-away store under the temp dir (`docs/contributing.md` § Testing)
 | `workspace.mk` | Shared Make targets for the root `Makefile` of a clone (`include .claude/workspace.mk`; a plugin install has no include): `sign*` (drain the sign queue on the host), `claude_sync` (fast-forward the kit), `kit_release` / `kit_release_dry` (a kit release PR, CONTRIBUTING.md § Releases), `ctx_index` / `ctx_verify` / `ctx_find`. |
 | `settings.json` | Project-level harness settings on a clone (compact window, subagent model, `BATON=.claude`, the `SessionEnd` sync hook). Shared; not shipped by the plugin, whose `hooks/hooks.json` SessionStart hook exports `BATON` and injects `WORKSPACE.md` instead. |
 | `settings.local.example.json` | Template for the ignored `settings.local.json` (clone path): your identity as `env` (`WORKSPACE_USER`, `WORKSPACE_GITHUB_LOGIN`, `WORKSPACE_TZ`, `WORKSPACE_SLACK_SELF_DM`, `WORKSPACE_SLACK_LATTICE_DM`). On a plugin install the same five are `userConfig` options (`/plugin configure ai-baton`), which win over the file. |
-| `setup.sh` | Idempotent first-run / post-recreate setup; Claude runs it from the install prompt (`README.md` § Install), you can re-run it any time. It creates `../.context/memory` + `state/` and symlinks the harness memory dir (an existing dir with notes is migrated with a verified copy; `--force` repoints a link that points elsewhere). It seeds the personal files (`settings.local.json`, the pr-review config) and a blank env fact store (`kb.py init --blank`; `--personal` fills it for a GitHub-only machine without a question — `README.md` § Install). It seeds the workspace files when absent — `.context/reference/environment.md`, the root `CLAUDE.md` and `Makefile`, `.context/README.md`, the self-assessment charter — and never overwrites one; `--refresh-seeds` prints the diff between each seeded copy and its template. It removes the kit's `__pycache__` dirs and empty leftover directories, and reports which `CLAUDE.md` import is missing. |
+| `setup.sh` | Idempotent first-run / post-recreate setup, safe to re-run — details below. |
 | `sync.sh` | **PR-only for the kit:** installs the `hooks/` guards (`pre-push`, `commit-msg`), fast-forwards `main` to `origin/main` (never commits or pushes kit files; a dirty or ahead `.claude/` is an `error` in `.sync-status`, nothing destructive). Takes no arguments; nothing else is synced. See `docs/sync.md`. |
 | `.claude-plugin/` | The kit **as a Claude Code plugin** (`plugin.json`, and `marketplace.json` making the repo its own marketplace): `claude plugin marketplace add <owner>/ai-baton && claude plugin install ai-baton@ai-baton-kit`. `plugin.json` `version` == `VERSION` (`kit-verify` checks; a release bumps both). Decision, layout map and what the plugin path cannot install: `docs/packaging.md`. |
 | `hooks/pre-push` | Versioned git hook (`core.hooksPath`, set by `setup.sh` / `sync.sh`) that refuses any push to the kit's `main` — branch pushes pass; `KIT_ALLOW_MAIN_PUSH=1` is the deliberate one-off override. Defence in depth beside the repo's `main` ruleset (which admins bypass): it refuses before the push leaves the machine. |
@@ -59,4 +59,49 @@ run on a throw-away store under the temp dir (`docs/contributing.md` § Testing)
 | `context-db/` | The engine (Makefile, `bin/`, `_templates/`) behind the `.context/` document DB, plus `context-README.template.md` (the DB spec, seeded into `../.context/README.md`). `make -C $BATON/context-db help` lists every target. Content lives in `../.context/`. CLI reference: `docs/engine-cli.md`. |
 | `pr-review/` | Tooling README + `config.example.json` for `pr-scan` / `pr-review`; the live state is in `../.context/state/pr-review/`. |
 | `sign-queue/` | Runtime queue for host-signed commits (ignored; only `.gitkeep` is tracked). |
-| `docs/` | Kit-level docs: `delegation.md` (what to hand a subagent — reads and code — and which model, by size), `env-facts.md` (the env fact store — schema, `kb.py`, how a skill resolves a fact), `new-environment.md` (checklist for a new environment), `commit-style.md` (the commit-subject styles and how a repo's is resolved), `REVIEW.md` (the review rules — what CI decides, the four lenses, grading, the one-line finding shape; the CI reviewer reads it from the base branch), `packaging.md` (plugin + clone), `loading.md` (what loads when — the three layers, the byte budgets, how to measure, why a template change never reaches an existing machine), `architecture.md` (the one diagram: session → `CLAUDE.md` imports → skills / agents → engine → context DB ← hooks / sync), `authoring.md` (the checklist: every frontmatter key with its rule, body rules, bump, tests, evals, review gate), `engine-cli.md` (the engine's CLI reference, generated from `make help` + every tool's `--help` by `make -C $BATON/context-db engine-cli-doc`), `glossary.md` (the kit's terms), `CHANGELOG.md` (one line per skill/agent version bump). Every `SKILL.md`/agent carries `version`/`updated`/`reviewed` (+ optional `requires`, `facts`) as strings under `metadata:` — the Claude Code profile of the Agent Skills spec, `CONTRIBUTING.md` § Skill frontmatter; `make -C $BATON/context-db kit-verify [STALE=90]` enforces it and checks this machine's env store is complete. Writing a skill: `docs/authoring.md` (the checklist), `CONTRIBUTING.md` § Skills (the two tiers, the `NEEDS` return, layout, evals) and the scaffold `docs/templates/skill/` + `docs/templates/evals/`. |
+| `docs/` | Kit-level docs, one file per topic — details below. |
+
+## Notes
+
+The four fattest cells above, unabridged:
+
+- **`WORKSPACE.md`** — layout, the `.context/` DB, env facts, session registry, the skill trigger list, always-on
+  rules, cost & context hygiene. `kit-verify` caps it at 10 KB (it loads into every session's prefix —
+  `docs/loading.md`). It loads into every session by import or hook: on a clone the root `CLAUDE.md` imports it
+  (`@.claude/WORKSPACE.md`) and it updates with `make claude_sync`; on a plugin install the SessionStart hook
+  injects it (`kit_profile.py workspace-rules`) and it updates with `claude plugin update`. No names, logins,
+  memory pointers — those stay in the preamble / `settings.local.json` — and nothing that differs between
+  environments, which lives in the env store (values) and `.context/reference/environment.md` (prose).
+- **`../.context/reference/env/`** — `config.json` with the structural switches scripts read (`tracker.kind`,
+  `github.org`, `systems.*`, …) and one markdown table per system (`slack.md`, `tracker.md`, `github.md`, `aws.md`,
+  `notion.md`) holding the ids and names a skill needs at run time — each row `name · value · purpose ·
+  learned-from`. Managed by `context-db/bin/kb.py` (also `make -C $BATON/context-db kb ARGS="…"`), read by
+  `kit_profile.py get <key>` — every subcommand and flag, including the scratch-directory helper: `docs/engine-cli.md`.
+  Skills resolve a fact as `kb.py get` → discovery tool → ask once → `kb.py set`. `_templates/<type>.md` in the
+  store override the engine's context-doc templates. Spec: `docs/env-facts.md`.
+- **`setup.sh`** — Claude runs it from the install prompt (`README.md` § Install), you can re-run it any time. It
+  creates `../.context/memory` + `state/` and symlinks the harness memory dir (an existing dir with notes is
+  migrated with a verified copy; `--force` repoints a link that points elsewhere). It seeds the personal files
+  (`settings.local.json`, the pr-review config) and a blank env fact store (`kb.py init --blank`; `--personal`
+  fills it for a GitHub-only machine without a question — `README.md` § Install). It seeds the workspace files
+  when absent — `.context/reference/environment.md`, the root `CLAUDE.md` and `Makefile`, `.context/README.md`,
+  the self-assessment charter — and never overwrites one; `--refresh-seeds` prints the diff between each seeded
+  copy and its template. It removes the kit's `__pycache__` dirs and empty leftover directories, and reports
+  which `CLAUDE.md` import is missing.
+- **`docs/`** — `delegation.md` (what to hand a subagent — reads and code — and which model, by size),
+  `env-facts.md` (the env fact store — schema, `kb.py`, how a skill resolves a fact), `new-environment.md`
+  (checklist for a new environment), `commit-style.md` (the commit-subject styles and how a repo's is resolved),
+  `REVIEW.md` (the review rules — what CI decides, the four lenses, grading, the one-line finding shape; the CI
+  reviewer reads it from the base branch), `packaging.md` (plugin + clone), `loading.md` (what loads when — the
+  three layers, the byte budgets, how to measure, why a template change never reaches an existing machine),
+  `architecture.md` (the one diagram: session → `CLAUDE.md` imports → skills / agents → engine → context DB ←
+  hooks / sync), `authoring.md` (the checklist: every frontmatter key with its rule, body rules, bump, tests,
+  evals, review gate), `engine-cli.md` (the engine's CLI reference, generated from `make help` + every tool's
+  `--help` by `make -C $BATON/context-db engine-cli-doc`), `glossary.md` (the kit's terms), `contributing.md`
+  (the full contributor reference — issue → PR → review → release, one section per topic), `CHANGELOG.md` (one
+  line per skill/agent version bump). Every `SKILL.md`/agent carries `version`/`updated`/`reviewed` (+ optional
+  `requires`, `facts`) as strings under `metadata:` — the Claude Code profile of the Agent Skills spec,
+  `CONTRIBUTING.md` § Skill frontmatter; `make -C $BATON/context-db kit-verify [STALE=90]` enforces it and checks
+  this machine's env store is complete. Writing a skill: `docs/authoring.md` (the checklist), `CONTRIBUTING.md`
+  § Skills (the two tiers, the `NEEDS` return, layout, evals) and the scaffold `docs/templates/skill/` +
+  `docs/templates/evals/`.

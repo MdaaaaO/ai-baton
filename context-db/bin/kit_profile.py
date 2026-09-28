@@ -338,7 +338,7 @@ def get(path: str, default=None):
 # Identity: the user's own values, never the environment's. Two sources, one reader. On the plugin path
 # Claude Code collects them through `plugin.json` `userConfig` and hands them to hooks as
 # `CLAUDE_PLUGIN_OPTION_<KEY>`; on the clone path they are the `WORKSPACE_*` env of the ignored
-# `.claude/settings.local.json`. `identity()` prefers the plugin option, so a value typed into `/config` wins
+# `.claude/settings.local.json`. `identity()` prefers the plugin option, so a value typed into `/plugin configure ai-baton` wins
 # over a stale file, and every script keeps reading `WORKSPACE_*` through it.
 IDENTITY_KEYS: dict[str, str] = {  # WORKSPACE_* variable → userConfig key
     "WORKSPACE_USER": "user_name",
@@ -368,7 +368,7 @@ def identity(var: str, environ: dict | None = None) -> str:
 
 def identity_env(environ: dict | None = None) -> dict[str, str]:
     """`{WORKSPACE_*: value}` for every identity variable whose plugin option is set — what a hook exports so
-    scripts and skill bodies that read `$WORKSPACE_*` see the `/config` values on the plugin path. A variable
+    scripts and skill bodies that read `$WORKSPACE_*` see the `/plugin configure ai-baton` values on the plugin path. A variable
     already set in the environment (settings.local.json) is included only when the option is set: the file
     keeps working unchanged, and the option wins."""
     env = os.environ if environ is None else environ

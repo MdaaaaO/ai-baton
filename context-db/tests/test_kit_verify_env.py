@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -136,7 +137,10 @@ class StaleFlag(unittest.TestCase):
         self.assertNotIn("~ stale:", r.stderr)
         r = self.run_verify("--stale", "1")  # every unit reviewed before yesterday — with no --stale nothing is listed
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stderr.count("~ stale:"), int(r.stdout.rsplit(", ", 1)[-1].split()[0]) if "stale" in r.stdout else 0)
+        # the summary line may also end ", N warn" (unrelated non-blocking notes) — find the stale count by name,
+        # not by position
+        m = re.search(r"(\d+) stale", r.stdout)
+        self.assertEqual(r.stderr.count("~ stale:"), int(m.group(1)) if m else 0)
 
     def test_stale_without_a_value_is_a_usage_error_not_a_traceback(self):
         r = self.run_verify("--stale")

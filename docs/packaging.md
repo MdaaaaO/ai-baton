@@ -22,7 +22,8 @@ Setting up the plugin path, step by step: [`plugin-setup.md`](plugin-setup.md).
 | `context-db/` (engine, discovery manifests, templates) | ships inside the plugin root; scripts find the kit from their own location | `.claude/context-db/` |
 | `hooks/` (`pre-push`, `commit-msg`) | **git** hooks, not Claude Code hooks — not a plugin component | installed by `setup.sh` / `sync.sh` (`core.hooksPath`) |
 | `settings.json` (`SessionEnd` → `sync.sh`) | not shipped: the plugin update **is** the sync | the kit's project settings |
-| `setup.sh`, `sync.sh`, `workspace.mk`, `CLAUDE.example.md`, `environment-template/` | not plugin components; run from a clone | the workspace bootstrap |
+| `setup.sh`, `CLAUDE.example.md`, `environment-template/` | not plugin components, but `setup.sh` runs here too — from the plugin cache, via `/kit-setup` or `sh $BATON/setup.sh` (`plugin-setup.md` step 3) | the workspace bootstrap, run by hand |
+| `sync.sh`, `workspace.mk` | not used — the plugin update *is* the sync (row above), and there is no root `Makefile` include to run `workspace.mk` targets from | the workspace bootstrap |
 | `.context/` (DB, env store, memory, state) | **never in the plugin** — project data, found through `CLAUDE_PROJECT_DIR/.context` | beside `.claude/` |
 | `README.md`, `WORKSPACE.md`, `docs/`, `CONTRIBUTING.md` | carried, not loaded | the same |
 
@@ -112,8 +113,8 @@ person. Two sources, one reader:
 | plugin | `plugin.json` `userConfig` (`user_name`, `github_login`, `tz`, `slack_self_dm`, `slack_lattice_dm`), asked for by `/plugin configure ai-baton` or `claude plugin install --config key=value`; the chat ids are `sensitive` (masked, secure storage) | Claude Code hands them to hooks as `CLAUDE_PLUGIN_OPTION_<KEY>`; the `hooks/hooks.json` SessionStart hook runs `kit_profile.py session-env`, which appends `export WORKSPACE_*=…` (and `CLAUDE_PROJECT_DIR`, which the Bash tool is not handed, #3) to `$CLAUDE_ENV_FILE`, so every later Bash command sees them — from the *next* session on: a `/plugin configure` mid-session reaches Bash after a restart |
 | clone | the `env` block of the ignored `.claude/settings.local.json` (`settings.local.example.json`) | merged into every Bash, hook and subagent environment by Claude Code |
 
-`kit_profile.identity(var)` reads the option first, then the `WORKSPACE_*` variable, so a value typed into `/config`
-wins over a stale file; `kit_profile.py identity-source <var>` says which source answered, never the value.
+`kit_profile.identity(var)` reads the option first, then the `WORKSPACE_*` variable, so a value typed into
+`/plugin configure ai-baton` wins over a stale file; `kit_profile.py identity-source <var>` says which source answered, never the value.
 Scripts and skill bodies keep reading `$WORKSPACE_*`. `kit-verify` fails when `userConfig` and
 `kit_profile.IDENTITY_KEYS` drift or the hook is missing; `kit-health` scans the option values for leaks like the
 file's, and § 4 names the source of each key. Secrets belong in neither place (docs/contributing.md § Secrets); environment

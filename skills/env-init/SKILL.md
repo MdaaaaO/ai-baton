@@ -2,7 +2,7 @@
 name: env-init
 description: "Fill or refresh this machine's env fact store from the discovery manifests: run the named tool per missing or stale fact, verify, write back with provenance, and ask the user once for what no tool settles. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact."
 metadata:
-  version: "7"
+  version: "8"
   updated: "2026-09-27"
   reviewed: "2026-09-26"
 user-invocable: true
@@ -61,7 +61,7 @@ secret, and asks the user only for what no tool can settle — once, batched.
      Exit status is checked separately from the output; an error is a failed lookup, not an empty answer.
    - **`roster`**: the fact is "does this session have tool X" (a `<system>.enabled` switch) — answer from
      the tool list, no call. **`settings`**: read the named `WORKSPACE_*` variable from the shell environment
-     (the plugin's `/config` options on a plugin install, `.claude/settings.local.json` on a clone); never
+     (`/plugin configure ai-baton` on a plugin install, `.claude/settings.local.json` on a clone); never
      print anything else from either source.
    - **`derive`**: compute from the facts named in `args` exactly as the `note:` says (e.g. `key_regex`
      from the tracker project); provenance `derived:<source-key>`.
