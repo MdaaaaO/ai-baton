@@ -99,9 +99,11 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
 - **Status** via `tracker.mcp_tools.transition`: In Progress → **In Review**
   (`tracker.transitions.in_review`, when the PR is up — `pr-open` does this) → Done (`ticket-close`).
   Check the transitions actually available first via `tracker.mcp_tools.transitions_list` (ids drift).
-- **Pointer** = a remote issue link to the chat-thread permalink or PR — check what's already there via
-  `tracker.mcp_tools.remote_link`; without that tool, fall back to `POST /rest/api/3/issue/{key}/remotelink`
-  with body `{"object": {"url": "<link>", "title": "<title>"}}`.
+- **Pointer** = a remote issue link to the chat-thread permalink or PR — first list the links already there
+  via `tracker.mcp_tools.remote_link` (read-only) and stop if this URL is one of them; otherwise create it with
+  `POST /rest/api/3/issue/{key}/remotelink`, body `{"object": {"url": "<link>", "title": "<title>"}}`. Check,
+  then create: never create without checking, even when the read tool is missing (then read the links via
+  `GET` on the same endpoint).
 
 ## Adapter — GitHub issues (tracker.kind = github)
 
