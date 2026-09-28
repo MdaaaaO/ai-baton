@@ -92,5 +92,38 @@ class KitRelease(unittest.TestCase):
                 self.assertFalse((self.ws / ".worktrees").exists())
 
 
+class ConventionalReleaseVersionPin(unittest.TestCase):
+    """The default `_CREL` (no test overriding it via the command line, as KitRelease above does) reads an exact
+    version from `.github/versions.env` next to workspace.mk — one pin, not the floating range release.yml,
+    pr-title.yml and this file each held before it existed. `KIT=` on the command line points the `-include` at a
+    fixture directory, the same seam the file's own header documents for naming the kit."""
+
+    @staticmethod
+    def crel_for(version: str) -> str:
+        # `make test` (docs/contributing.md) itself runs as a make recipe, so this process may already carry
+        # MAKELEVEL/MAKEFLAGS from that outer make — strip them (as _env() above does for KitRelease) so the
+        # inner make below prints nothing but the target's own output, not an inherited "Entering directory".
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS"))}
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = Path(tmp)
+            (kit / ".github").mkdir()
+            (kit / ".github" / "versions.env").write_text(f"CONVENTIONAL_RELEASE_VERSION={version}\n")
+            r = subprocess.run([MAKE, "-f", str(KIT / "workspace.mk"), "-s",
+                                "--eval", "print-crel: ; @printf '%s' \"$(_CREL)\"", "print-crel", f"KIT={kit}"],
+                               capture_output=True, text=True, cwd=tmp, env=env, check=True)
+            return r.stdout
+
+    def test_reads_the_exact_version_no_floating_range(self):
+        pinned = "0." + "9.9"  # fact-shaped, assembled at run time
+        self.assertEqual(self.crel_for(pinned),
+                         f"uvx -q --from conventional-release=={pinned} conventional-release")
+
+    def test_no_trailing_blanks_in_the_value(self):
+        # a comment on the `_CREL` line itself would leave blanks before it in the value (the same class of bug
+        # test_ci_hygiene.py's EngineMakefile check guards for CONTEXT) — assert the printed value has none.
+        value = self.crel_for("1.2.3")
+        self.assertEqual(value, value.strip())
+
+
 if __name__ == "__main__":
     unittest.main()

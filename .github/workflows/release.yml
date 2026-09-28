@@ -30,19 +30,21 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write  # push the tag, create the release
-    env:
-      TOOL: conventional-release>=0.3.1,<1  # 0.3.1: publish-release; detect names a tag already on HEAD
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0  # detect needs the tags
+      # An exact version, not a floating range — one pin, .github/versions.env, bumped there via PR.
+      - name: Load pinned tool versions
+        # only the NAME=value lines: $GITHUB_ENV rejects the file's comment lines, which would fail every release run
+        run: grep -E '^[A-Z_][A-Z0-9_]*=' .github/versions.env >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
 
       # released=true: a release commit without its tag. released=false with a tag: the tag already marks
       # this commit (a re-run). The tag on another commit, or VERSION disagreeing with the subject, fails here.
       - id: detect
         name: Is this a release commit?
-        run: uvx --from "$TOOL" conventional-release detect --github-output
+        run: uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release detect --github-output
 
       - name: Tag the release commit
         if: steps.detect.outputs.released == 'true'
@@ -51,7 +53,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          uvx --from "$TOOL" conventional-release tag "$VERSION" --push
+          uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release tag "$VERSION" --push
 
       # Whenever the commit carries its tag, new or from an earlier attempt: creates the Release only when
       # `gh release view` says "release not found"; any other gh error fails the step.
@@ -60,4 +62,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.detect.outputs.version }}
-        run: uvx --from "$TOOL" conventional-release publish-release "$VERSION"
+        run: uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release publish-release "$VERSION"

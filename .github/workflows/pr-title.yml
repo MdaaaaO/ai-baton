@@ -15,6 +15,12 @@ permissions:
   contents: read
   pull-requests: read
 
+# Pushes in quick succession (synchronize on the same PR) queue redundant runs otherwise; keyed on the PR, not the
+# ref, so this and pr-issue below cancel independently of what auto-merge.yml later reads.
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   pr-title:
     name: pr-title
@@ -27,13 +33,21 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
+      # An exact version, not a floating range — one pin, .github/versions.env, bumped there via PR. Bootstrap
+      # fallback only: a base sha before this file existed (e.g. a PR opened against a main that predates it)
+      # has no .github/versions.env to source, so fall back to the same value the file pins — never a second
+      # place this drifts from once every base carries the file.
+      - name: Load pinned tool versions
+        run: |
+          [ -f .github/versions.env ] && . .github/versions.env
+          : "${CONVENTIONAL_RELEASE_VERSION:=0.3.1}"
+          echo "CONVENTIONAL_RELEASE_VERSION=$CONVENTIONAL_RELEASE_VERSION" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Title is a Conventional Commit
         env:
-          TOOL: conventional-release>=0.2,<1
           TITLE: ${{ github.event.pull_request.title }}
         run: |
-          uvx --from "$TOOL" conventional-release check-title "$TITLE"
+          uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release check-title "$TITLE"
           python3 context-db/bin/commit_style.py title --style conventional "$TITLE"
 
   # Every change comes from an issue (docs/contributing.md, "From issue to merge"). The rule and the

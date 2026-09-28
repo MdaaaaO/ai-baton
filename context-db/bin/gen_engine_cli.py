@@ -43,6 +43,7 @@ TOOLS = (
     "personal.py",
     "session.py",
     "session_stats.py",
+    "session_retro.py",
     "gen_sessions.py",
     "gen_index.py",
     "verify.py",
@@ -124,7 +125,10 @@ def render() -> str:
 
 
 def norm(text: str) -> str:
-    """Whitespace-insensitive form: argparse re-flows help text per Python version, the words do not change."""
+    """Whitespace-insensitive form: argparse re-flows help text per Python version, the words do not change —
+    except one heading argparse itself renamed (`optional arguments:` before 3.10, `options:` from 3.10 on),
+    canonicalised here so the committed doc matches `--help` on every floor-to-latest Python the kit supports."""
+    text = text.replace("optional arguments:", "options:")
     return re.sub(r"\s+", " ", text).strip()
 
 

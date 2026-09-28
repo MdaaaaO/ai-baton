@@ -33,7 +33,10 @@ jobs:
   evals:
     name: evals
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Three short suites, one default model: no run has needed close to this, but none has run at all yet either
+    # (the secret has never been configured) — 30 is an estimate from the suite sizes, not a measurement; tighten
+    # it once real runs exist.
+    timeout-minutes: 30
     steps:
       - id: token
         name: Is the eval credential configured?
@@ -72,21 +75,24 @@ jobs:
           done
           echo "models=${models# }" >> "$GITHUB_OUTPUT"
 
-      # Same pinned CLI as ci.yml; bubblewrap + socat so the runner can sandbox the eval's tool calls on Linux.
+      # Same pinned CLI as ci.yml — one pin, .github/versions.env, sourced rather than repeated; bubblewrap + socat
+      # so the runner can sandbox the eval's tool calls on Linux.
       - if: steps.token.outputs.enabled == 'true'
         name: Install the Claude Code CLI
-        env:
-          CLAUDE_CODE_VERSION: 2.1.283
+        working-directory: .claude
         run: |
+          . .github/versions.env
           sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat >/dev/null
           npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
 
       - if: steps.token.outputs.enabled == 'true'
         name: Static check first (no tokens)
-        run: make -C .claude/context-db eval-check
+        working-directory: .claude
+        run: make -C context-db eval-check
 
       - if: steps.token.outputs.enabled == 'true'
         name: Run the suite
+        working-directory: .claude
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SKILL: ${{ inputs.skill }}
@@ -99,7 +105,17 @@ jobs:
             [ "$model" = default ] && model=""
             echo "## evals — ${SKILL:-every case} on ${model:-the default model}" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            make -C .claude/context-db eval TRUST=1 SKILL="$SKILL" MODEL="$model" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
+            make -C context-db eval TRUST=1 SKILL="$SKILL" MODEL="$model" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           done
           exit $rc
+
+      # A run with the secret missing skips every step above and would otherwise conclude success — a required
+      # check satisfied by a run that evaluated nothing. workflow_dispatch always runs from within this repo (no
+      # fork PR can trigger it), so the missing-secret case is always the same-repo one: a revoked token or a
+      # renamed secret, never a fork with no access to it.
+      - name: Fail when the credential was missing (nothing was evaluated)
+        if: always() && steps.token.outputs.enabled != 'true'
+        run: |
+          echo "::error::evals skipped — CLAUDE_CODE_OAUTH_TOKEN not available; this run evaluated nothing"
+          exit 1
