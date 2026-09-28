@@ -9,3 +9,4 @@ environment-template/config.json:acme\.  # template placeholders (acme.atlassian
 settings.local.example.json:Europe/Berlin   # example value for WORKSPACE_TZ in the settings template
 skills/cost-report/fixtures/tickets\.sample\.tsv:ACME-2\d\d$   # sample tracker export for cost-report's tests (placeholder org)
 evals/kit-review-third-party-attribution/prompt\.md:colleague's `jdoe/dotfiles`$   # the reviewer's proof case for the attribution class; it leaks on purpose
+CODE_OF_CONDUCT\.md:(mailto:)?georg\.kasper08@gmail\.com$   # the maintainer's public contact for conduct reports (owner's choice)
