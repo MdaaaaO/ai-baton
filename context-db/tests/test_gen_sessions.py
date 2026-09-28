@@ -37,11 +37,12 @@ def run(root: Path, *args: str, days: str = "7", max_ended: str = "5") -> str:
     return r.stdout
 
 
-def blank_root() -> Path:
-    """A throwaway CONTEXT_ROOT with a blank env store (gen_sessions resolves the display timezone from it) —
-    never the live store; the caller owns cleanup."""
+def blank_root(name: str = ".context") -> tuple[tempfile.TemporaryDirectory, Path]:
+    """A throwaway CONTEXT_ROOT (`<tmp>/<name>`, a workspace's usual shape) with a blank env store
+    (gen_sessions resolves the display timezone from it) — never the live store; the caller owns cleanup."""
     tmp = tempfile.TemporaryDirectory()
-    root = Path(tmp.name)
+    root = Path(tmp.name) / name
+    root.mkdir()
     r = subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env_for(root),
                        cwd=BIN, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -51,13 +52,7 @@ def blank_root() -> Path:
 
 class ArchiveSweep(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        # the generator reads the env config (tz_default) from CONTEXT_ROOT — give the temp root a blank store
-        r = subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env_for(self.root),
-                           cwd=BIN, capture_output=True, text=True)
-        assert r.returncode == 0, r.stderr
-        (self.root / "sessions").mkdir()
+        self.tmp, self.root = blank_root()
         session_file(self.root, "live", "active", 0, "")
         session_file(self.root, "fresh-with-prompt", "ended", 1, "Register as fresh-2, read X.")
         session_file(self.root, "fresh-no-prompt", "ended", 1, "")  # crashed session inside the 48 h grace window
@@ -252,6 +247,17 @@ class EndedTablePromptPointer(unittest.TestCase):
         self.assertIn("[.context/sessions/has-prompt.md](.context/sessions/has-prompt.md)", text)
         self.assertNotIn("re-arm the watch on the release PR", text)
         self.assertNotIn("finish the migration", text)
+
+    def test_starter_path_follows_a_content_root_not_named_dot_context(self):
+        tmp, root = blank_root("kb-store")
+        try:
+            session_file(root, "has-prompt", "ended", 0.1, "Register as has-prompt-2.")
+            run(root)
+            text = (root / "SESSION_INDEX.md").read_text()
+            self.assertIn("your prompt is in kb-store/sessions/has-prompt.md § Next session.", text)
+            self.assertNotIn(".context/sessions/has-prompt.md", text)
+        finally:
+            tmp.cleanup()
 
     def test_empty_prompt_is_not_listed(self):
         session_file(self.root, "no-prompt", "ended", 0.1, "")

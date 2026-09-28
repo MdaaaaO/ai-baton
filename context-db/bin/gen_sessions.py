@@ -89,10 +89,9 @@ def has_next_prompt(m: dict) -> bool:
 def rel_from_root(path: str) -> str:
     """`path` (a session's `_path`, live under sessions/ or already swept to sessions/archive/) relative to
     the workspace root, e.g. `.context/sessions/<name>.md` — the form a fresh session at the workspace root
-    can open directly, and what session-register's startup step resolves the prompt from. CONTEXT_ROOT is
-    always a `.context/` directory (docs/layout.md), so the prefix is a structural constant, never an
-    environment-specific path."""
-    return os.path.join(".context", os.path.relpath(path, CTX)).replace(os.sep, "/")
+    can open directly, and what session-register's startup step resolves the prompt from. The prefix is the
+    content root's own directory name, so a CONTEXT_ROOT with another basename still yields a real path."""
+    return os.path.relpath(path, os.path.dirname(os.path.abspath(CTX))).replace(os.sep, "/")
 
 
 # Ended sessions leave the live registry for sessions/archive/ when nothing waits on them: no next-session
