@@ -32,6 +32,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
 Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key, `plugin` on a clone) · 2 usage or I/O error.
+Below Python 3.9 this file exits with one line (`ai-baton needs Python 3.9+ (found …)`) before any other import.
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 """
 from __future__ import annotations
@@ -42,9 +43,28 @@ import re
 import shlex
 import stat
 import sys
-from functools import lru_cache
-from pathlib import Path
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+MIN_PYTHON = (3, 9)  # zoneinfo (stdlib, imported below), Path.is_relative_to, str.removeprefix — the kit-wide floor
+
+
+def python_floor_error(version_info=None) -> str | None:
+    """None when `version_info` (default: this interpreter's `sys.version_info`) meets the kit's floor, else
+    the one-line message a machine below it should stop with, before an import below fails with a stack trace
+    instead. `version_info` takes any 2+-tuple starting (major, minor), so a test can pass a plain tuple."""
+    major_minor = tuple((version_info if version_info is not None else sys.version_info)[:2])
+    if major_minor >= MIN_PYTHON:
+        return None
+    found = ".".join(str(p) for p in (version_info if version_info is not None else sys.version_info)[:3])
+    return f"ai-baton needs Python {'.'.join(str(p) for p in MIN_PYTHON)}+ (found {found})"
+
+
+_PYTHON_FLOOR_ERROR = python_floor_error()
+if _PYTHON_FLOOR_ERROR:
+    sys.exit(_PYTHON_FLOOR_ERROR)
+
+from functools import lru_cache  # noqa: E402
+from pathlib import Path  # noqa: E402
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # noqa: E402
 
 KIT = Path(__file__).resolve().parents[2]
 KIT_AS_CALLED = Path(os.path.abspath(__file__)).parents[2]  # symlinks kept: a `.claude` link to a checkout is a clone

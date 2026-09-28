@@ -43,7 +43,7 @@ jobs:
       REPO: ${{ github.repository }}
       SHA: ${{ github.event.workflow_run.head_sha }}
       # comma-separated: a check name may contain spaces (`install-smoke (clone)`, #98)
-      REQUIRED: kit-verify,pr-title,pr-issue,claude-review,install-smoke (clone),install-smoke (plugin)
+      REQUIRED: kit-verify,pr-title,pr-issue,claude-review,install-smoke (clone),install-smoke (plugin),python-floor (3.9)
       REVIEWER: github-actions[bot]
     steps:
       - id: token

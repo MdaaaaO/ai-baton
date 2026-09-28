@@ -119,6 +119,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
 Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key, `plugin` on a clone) · 2 usage or I/O error.
+Below Python 3.9 this file exits with one line (`ai-baton needs Python 3.9+ (found …)`) before any other import.
 Stdlib only; never prints anything from settings.local.json (`identity-env` re-exports plugin options only).
 ```
 

@@ -1,4 +1,6 @@
 # Third-party actions are pinned by commit SHA; Dependabot proposes the bumps and keeps the `# vN` comment.
+# Labels are the repo's own documented set (docs/contributing.md § Labels): type + area on every PR, so
+# `enhancement` (a bump is a type: feat) — not `dependencies`, which the label list does not carry.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -7,4 +9,4 @@ updates:
       interval: weekly
     commit-message:
       prefix: "ci(deps)"
-    labels: [dependencies, area:ci]
+    labels: [enhancement, area:ci]

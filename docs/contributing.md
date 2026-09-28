@@ -4,6 +4,18 @@ The full rules behind [`CONTRIBUTING.md`](../CONTRIBUTING.md), one section per t
 machine on its next `make claude_sync`, and a sync only fast-forwards, so whatever lands on `main` changes how
 every session behaves the same day. That is why nothing reaches `main` except through an issue and a reviewed PR.
 
+## Prerequisites
+
+Stdlib Python only (no pip installs), plus `git` and `make` on the machine, `gh` logged in for the PR and ticket
+skills. The floor is **Python 3.9**: `context-db/bin/kit_profile.py` — imported by every engine script — checks
+`sys.version_info` before its first import and exits with one line (`ai-baton needs Python 3.9+ (found …)`) on
+anything older, because the engine itself uses 3.9-only stdlib (`zoneinfo`, `Path.is_relative_to`,
+`str.removeprefix`). `ci.yml`'s `python-floor` job runs `make test` and `verify-skill` under 3.9 on
+`ubuntu-latest`, pinned by commit SHA like every other action (`docs/contributing.md` § Where CI runs); no macOS
+leg yet — BSD-vs-GNU `date`/`sed`/`awk` differences need their own fix first, tracked separately. `README.md`'s
+own prerequisites table gets the same minimum-versions line from a different PR; this is the floor's one other
+statement, not a second source of truth for it.
+
 ## From issue to merge
 
 Every change is traceable both ways: **issue → PR → squash commit → CHANGELOG line**, and back.

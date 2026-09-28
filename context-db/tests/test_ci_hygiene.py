@@ -42,6 +42,101 @@ class Pins(unittest.TestCase):
         self.assertIn("package-ecosystem: github-actions", cfg)
         self.assertIn("ci(deps)", cfg)
 
+    def test_labels_are_ones_the_repo_documents(self):
+        # docs/contributing.md § Labels lists no `dependencies` — a Dependabot PR gets the type label the table
+        # does carry (`enhancement`: a version bump is a `feat`), not one the repo has never created. The `labels:`
+        # line itself is what Dependabot reads; a mention of the word in a comment above it is not the same claim.
+        cfg = (KIT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        labels_line = next(line for line in cfg.splitlines() if line.strip().startswith("labels:"))
+        self.assertNotIn("dependencies", labels_line)
+        self.assertIn("enhancement", labels_line)
+
+
+class VersionsSinglePlace(unittest.TestCase):
+    """Every third-party tool version the kit installs at run time — the Claude Code CLI, conventional-release —
+    is pinned once, in .github/versions.env, and every workflow (or workspace.mk) that needs it sources that file
+    rather than repeating the literal, so the copies cannot drift from each other by hand."""
+
+    VERSIONS_ENV = KIT / ".github" / "versions.env"
+
+    def test_versions_env_declares_every_pin(self):
+        text = self.VERSIONS_ENV.read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?m)^CLAUDE_CODE_VERSION=\S+$", "no CLAUDE_CODE_VERSION= line")
+        self.assertRegex(text, r"(?m)^CONVENTIONAL_RELEASE_VERSION=\S+$", "no CONVENTIONAL_RELEASE_VERSION= line")
+
+    def test_no_workflow_hardcodes_the_claude_code_version(self):
+        for wf in workflows():
+            text = wf.read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"CLAUDE_CODE_VERSION:\s*[\"']?\d",
+                               f"{wf.name}: hardcodes a version instead of sourcing .github/versions.env")
+
+    def test_every_cli_install_sources_the_pinned_file_first(self):
+        seen = 0
+        install = 'npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"'
+        for wf in workflows():
+            text = wf.read_text(encoding="utf-8")
+            for m in re.finditer(re.escape(install), text):
+                seen += 1
+                step_start = text.rfind("run:", 0, m.start())
+                self.assertIn(".github/versions.env", text[step_start:m.start()],
+                             f"{wf.name}: installs the CLI without sourcing versions.env in the same step")
+        self.assertGreater(seen, 0)
+
+    def test_no_floating_range_for_conventional_release(self):
+        for path in [*workflows(), KIT / "workspace.mk"]:
+            text = path.read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"conventional-release[><=]=?\s*[\d.]+\s*,",
+                               f"{path.name}: a floating version range for conventional-release, not the exact pin")
+
+    def test_conventional_release_workflows_use_the_exact_pin(self):
+        for name in ("release.yml", "pr-title.yml"):
+            text = (WORKFLOWS / name).read_text(encoding="utf-8")
+            self.assertIn("conventional-release==$CONVENTIONAL_RELEASE_VERSION", text,
+                         f"{name}: not pinned to the exact version sourced from versions.env")
+
+
+class PrTitleHygiene(unittest.TestCase):
+    def test_has_a_concurrency_group(self):
+        # pushes in quick succession (repeated `synchronize`) otherwise queue redundant runs
+        text = (WORKFLOWS / "pr-title.yml").read_text(encoding="utf-8")
+        self.assertIn("concurrency:", text.split("\njobs:", 1)[0])
+
+
+class EvalsHygiene(unittest.TestCase):
+    TEXT = (WORKFLOWS / "evals.yml").read_text(encoding="utf-8")
+
+    def test_timeout_is_not_the_old_90_minutes(self):
+        self.assertNotIn("timeout-minutes: 90", self.TEXT)
+
+    def test_a_missing_credential_fails_the_job(self):
+        # a run with the secret missing must not conclude success — a required check satisfied by a run that
+        # evaluated nothing (the earlier shape: every later step guarded and skipped, nothing left to fail)
+        tail = self.TEXT.rsplit("enabled != 'true'", 1)
+        self.assertEqual(len(tail), 2, "no final step gated on the credential being unavailable")
+        self.assertIn("exit 1", tail[1][:300])
+
+    def test_no_hardcoded_claude_context_db_path(self):
+        # ci.yml checks out the whole workspace one level under `.claude`; evals.yml only itself, so `working-directory:
+        # .claude` + a relative `context-db` path, not a literal `.claude/context-db` repeated in two run: blocks.
+        # Comments (this file's own header included) may still describe ci.yml's unrelated layout in prose.
+        code = "\n".join(line for line in self.TEXT.splitlines() if not line.lstrip().startswith("#"))
+        self.assertNotIn(".claude/context-db", code)
+
+
+class PythonFloorLeg(unittest.TestCase):
+    """ci.yml's python-floor job (the 3.9 leg) is a real merge gate, not decoration — auto-merge.yml must wait on
+    it like every other required check, or a 3.9 regression could still get squash-merged."""
+
+    def test_ci_yml_declares_the_job(self):
+        text = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("name: python-floor (3.9)", text)
+        self.assertIn('python-version: "3.9"', text)
+
+    def test_auto_merge_requires_it(self):
+        text = (WORKFLOWS / "auto-merge.yml").read_text(encoding="utf-8")
+        required = next(line for line in text.splitlines() if line.strip().startswith("REQUIRED:"))
+        self.assertIn("python-floor (3.9)", required)
+
 
 class Hosting(unittest.TestCase):
     """A public repository runs every job on GitHub-hosted runners — no workflow names a self-hosted runner, so
