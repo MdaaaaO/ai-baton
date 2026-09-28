@@ -109,13 +109,25 @@ class ManifestAndHook(unittest.TestCase):
         cmd = json.loads((KIT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         with tempfile.TemporaryDirectory() as tmp:
             envfile = Path(tmp) / "env"
+            scratch = Path(tmp) / "scratch"
             base = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_"))}
             r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_ENV_FILE": str(envfile),
-                                                      "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN, "CONTEXT_ROOT": "/nonexistent/.context"},
+                                                      "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN, "CONTEXT_ROOT": "/nonexistent/.context",
+                                                      "KIT_SCRATCH": str(scratch)},
                                capture_output=True, text=True)
             self.assertEqual((r.returncode, r.stdout), (0, ""))
-            self.assertEqual(envfile.read_text(encoding="utf-8"), f"export WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n")
-            r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CONTEXT_ROOT": "/nonexistent/.context"},
+            self.assertEqual(envfile.read_text(encoding="utf-8"),
+                              f"# ai-baton session-env\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n")
+            # a second SessionStart on the same env file is a no-op — the marker guards against a re-append
+            r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_ENV_FILE": str(envfile),
+                                                      "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN, "CONTEXT_ROOT": "/nonexistent/.context",
+                                                      "KIT_SCRATCH": str(scratch)},
+                               capture_output=True, text=True)
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
+            self.assertEqual(envfile.read_text(encoding="utf-8"),
+                              f"# ai-baton session-env\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n")
+            r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CONTEXT_ROOT": "/nonexistent/.context",
+                                                      "KIT_SCRATCH": str(scratch)},
                                capture_output=True, text=True)  # no env file (a non-SessionStart caller): a quiet no-op
             self.assertEqual((r.returncode, r.stdout), (0, ""))
 
