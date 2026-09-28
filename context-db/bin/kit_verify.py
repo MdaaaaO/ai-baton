@@ -431,7 +431,7 @@ def write_loading_table(values: dict[str, str], *, force: bool = False) -> dict[
     also touch docs/loading.md and collide with a parallel one on the same lines. `force=True` (the CLI's
     `--write --force`, for a deliberate refresh e.g. at release time) rewrites every marker regardless.
     Markers the doc lacks stay missing (the drift check still reports them). Returns a note per marker whose
-    value differed from what's now measured — "" for an exact match — for the CLI to print alongside it."""
+    value differed from what's now measured (a marker that matches exactly has no entry) for the CLI to print alongside it."""
     text = LOADING_MD.read_text(encoding="utf-8")
     notes: dict[str, str] = {}
 
