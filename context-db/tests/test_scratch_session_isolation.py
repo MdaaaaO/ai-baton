@@ -78,5 +78,31 @@ class RegisteringFixtureNeverWritesTheRealRuntimeDir(unittest.TestCase):
             self.assertEqual(result["written_text"].strip(), "iso-check")
 
 
+    def test_a_sandbox_sessions_job_dir_and_kit_scratch_are_dropped_too(self):
+        # scratch() consults CLAUDE_JOB_DIR and KIT_SCRATCH before XDG_RUNTIME_DIR: a sandbox session exports them
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            job, kit_scratch = tmp / "job", tmp / "kit-scratch"
+            (job / "tmp").mkdir(parents=True)  # scratch() is `<job>/tmp` in a sandbox
+            kit_scratch.mkdir()
+            root = tmp / ".context"
+            ambient = {**os.environ, "CLAUDE_JOB_DIR": str(job), "KIT_SCRATCH": str(kit_scratch),
+                       "CLAUDE_CODE_SESSION_ID": "s-real-parent"}
+            script = textwrap.dedent(f"""
+                import os, subprocess, sys
+                sys.path.insert(0, {str(CONTEXT_DB)!r})
+                import tests  # noqa: F401
+                env = {{**os.environ, "CONTEXT_ROOT": {str(root)!r}, "CLAUDE_CODE_SESSION_ID": "s-fixture-fake"}}
+                r = subprocess.run([sys.executable, {str(BIN / "session.py")!r}, "register", "--name", "iso-job",
+                                    "--no-stats"], env=env, cwd={str(BIN)!r}, capture_output=True, text=True)
+                sys.stderr.write(r.stderr)
+                sys.exit(r.returncode)
+                """)
+            outer = subprocess.run([sys.executable, "-c", script], env=ambient, capture_output=True, text=True)
+            self.assertEqual(outer.returncode, 0, outer.stderr)
+            self.assertEqual([p for p in job.rglob("session-name")], [], "wrote into the real job dir")
+            self.assertEqual([p for p in kit_scratch.rglob("session-name")], [], "wrote into the real KIT_SCRATCH")
+
+
 if __name__ == "__main__":
     unittest.main()

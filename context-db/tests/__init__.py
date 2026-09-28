@@ -56,13 +56,16 @@ def _restore_runtime_env(saved: dict) -> None:
             os.environ[_k] = _v
 
 
-# Never let a test's scratch dir land in the real session's $XDG_RUNTIME_DIR — see point 2 above. TMPDIR is
-# deliberately untouched (also point 2): scratch() never reaches it once XDG_RUNTIME_DIR is always set.
-atexit.register(_restore_runtime_env, {k: os.environ.get(k) for k in ("XDG_RUNTIME_DIR", "CLAUDE_CODE_SESSION_ID")})
+# Never let a test's scratch dir land in the real session's — see point 2 above. scratch() consults CLAUDE_JOB_DIR and
+# KIT_SCRATCH before XDG_RUNTIME_DIR, so a sandbox session's values are dropped too (tests that need them set their
+# own). TMPDIR is deliberately untouched (also point 2): scratch() never reaches it once XDG_RUNTIME_DIR is always set.
+_SESSION_SCRATCH_VARS = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_JOB_DIR", "KIT_SCRATCH")
+atexit.register(_restore_runtime_env, {k: os.environ.get(k) for k in ("XDG_RUNTIME_DIR", *_SESSION_SCRATCH_VARS)})
 _runtime_dir = tempfile.mkdtemp(prefix="kit-tests-runtime-")
 atexit.register(shutil.rmtree, _runtime_dir, True)
 os.environ["XDG_RUNTIME_DIR"] = _runtime_dir
-os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
+for _k in _SESSION_SCRATCH_VARS:
+    os.environ.pop(_k, None)
 
 
 def hermetic_env(tmp, trust=None) -> dict:
