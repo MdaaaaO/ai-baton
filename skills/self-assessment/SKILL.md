@@ -2,8 +2,8 @@
 name: self-assessment
 description: "Composes the user's weekly self-assessment for a past ISO week or range from `.context/` and the systems of record, never live sessions: the week file plus the report block and ledger card the env config asks for, back-filled where `.context/` lacks coverage. Invoke as \"self-assessment for last week\" or \"for W37\"."
 metadata:
-  version: "12"
-  updated: "2026-09-27"
+  version: "13"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
   facts: "self_assessment.ledger,self_assessment.ledger_url"
 user-invocable: true

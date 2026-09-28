@@ -34,24 +34,26 @@ LINE = re.compile(
 
 
 def find_raw(body: str) -> str | None:
-    """The first raw `**Sizing:**` line in `body`, matched or not — lets a caller tell "missing" (no such line)
-    from "present but malformed" (this line, `LINE` didn't match it)."""
+    """The LAST raw `**Sizing:**` line in `body`, matched or not — lets a caller tell "missing" (no such line)
+    from "present but malformed" (this line, `LINE` didn't match it). Last, because a caller passes the
+    description followed by the comments in order, and a later correction overrides the opening call."""
+    found = None
     for ln in body.splitlines():
         if ln.strip().startswith("**Sizing:**"):
-            return ln.strip()
-    return None
+            found = ln.strip()
+    return found
 
 
 def parse(body: str) -> tuple[str, str, str]:
-    """(model, decision, reason) from `body`'s Sizing line. Raises ValueError("missing") when there is no
+    """(model, decision, reason) from `body`'s last Sizing line. Raises ValueError("missing") when there is no
     `**Sizing:**` line at all, or ValueError(<the raw line>) when one exists but is not `LINE`-shaped (including
     a model outside MODELS)."""
-    m = LINE.search(body)
-    if m is not None and m.group("model") in MODELS:
-        return m.group("model"), m.group("decision"), m.group("reason").strip()
     raw = find_raw(body)
     if raw is None:
         raise ValueError("missing")
+    m = LINE.search(raw)
+    if m is not None and m.group("model") in MODELS:
+        return m.group("model"), m.group("decision"), m.group("reason").strip()
     raise ValueError(raw)
 
 

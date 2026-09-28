@@ -2,8 +2,8 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "9"
-  updated: "2026-09-27"
+  version: "10"
+  updated: "2026-09-28"
   reviewed: "2026-09-27"
 user-invocable: true
 ---

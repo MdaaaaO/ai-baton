@@ -102,5 +102,12 @@ class Cli(unittest.TestCase):
         self.assertIn("model must be one of", err)
 
 
+class LastLineWins(unittest.TestCase):
+    def test_a_later_correction_overrides_the_opening_line(self):
+        body = ("Goal: x\n**Sizing:** `sonnet`, delegate. specified fix\n\n"
+                "(comment)\n**Sizing:** `opus`, delegate. touches a trust boundary")
+        self.assertEqual(sizing.parse(body), ("opus", "delegate", "touches a trust boundary"))
+
+
 if __name__ == "__main__":
     unittest.main()

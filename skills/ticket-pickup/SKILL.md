@@ -64,9 +64,11 @@ scanning the same tracker does not start the same ticket twice.
 
 ## Adapter — Jira (tracker.kind = jira)
 
-1. **Read** via the tracker's read tool; the Sizing line lives in the description field.
-2. **Write a sized/corrected line** by editing the description (`tracker.mcp_tools.edit` or equivalent) —
-   append with `sizing.py format`, never hand-roll the line.
+1. **Read** the description and the comments via the tracker's read tool. `ticket-open` posts the Sizing line
+   in its opening comment, so pass the description followed by the comments, oldest first, to `sizing.py
+   parse`; the last line wins.
+2. **Write a sized/corrected line** as a new comment (`tracker.mcp_tools.comment`), produced by
+   `sizing.py format`, never hand-rolled. It overrides the earlier line because the last one wins.
 3. **Claim** by transitioning to the environment's in-progress state (`tracker.transitions`, if the env config
    names one) and assigning the current user.
 
@@ -74,11 +76,13 @@ scanning the same tracker does not start the same ticket twice.
 
 Tools: `gh` with the token per skill `gh-cli` (`github.sandbox_token_prefix`), in one of `tracker.repos`.
 
-1. **Read:** `gh issue view <n> -R <repo> --json body` (the Sizing line is a line of the body, not a separate
-   field — same as `ticket-open` wrote it).
-2. **Write a sized/corrected line:** re-read the current body, append the line
-   `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main session>" "<reason>"` produces, and
-   `gh issue edit <n> -R <repo> --body-file <file>`.
+1. **Read:** `gh issue view <n> -R <repo> --json body,comments`. `ticket-open` writes the Sizing line in the
+   body, or in a first comment when it fell back to `gh issue comment`. Pass the body followed by the
+   comments, oldest first, to `sizing.py parse`; the last line wins.
+2. **Write a sized/corrected line** as a new comment:
+   `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main session>" "<reason>"`, posted with
+   `gh issue comment <n> -R <repo> --body-file <file>`. It overrides the earlier line because the last one
+   wins.
 3. **Claim:** `gh issue edit <n> -R <repo> --add-assignee @me`; add the repo's in-progress label too if one
    exists in its label set (`gh label list -R <repo>`) — don't invent one.
 
