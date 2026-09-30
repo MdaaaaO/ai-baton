@@ -28,7 +28,7 @@ does: a procedure, an example exchange, a rationale, an environment value.
 ## Layer 2 — on invoke (when a skill or agent runs)
 
 - **`SKILL.md` bodies** load when the skill is invoked (by trigger or `/name`): <!-- kit-verify:bodies -->26<!-- /kit-verify:bodies --> bodies,
-  <!-- kit-verify:body-bytes -->208,528 B<!-- /kit-verify:body-bytes --> together, so the
+  <!-- kit-verify:body-bytes -->207,371 B<!-- /kit-verify:body-bytes --> together, so the
   layer is roughly ten times the always-on one and is paid only by the session that uses it. Cap `BODY_MAX_LINES` = 300
   lines per body (a warn past `BODY_WARN_LINES` = 130); target 70–130 (`docs/contributing.md` § Skills). A unit that
   genuinely needs more is named in `BODY_LINES_ALLOW` (kit_verify.py) with a reason.

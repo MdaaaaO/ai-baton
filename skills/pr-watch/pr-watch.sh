@@ -10,12 +10,15 @@
 # Emits ONLY actionable events:
 #   bot Assessment on <head>; new top-level review comments from anyone but this login and
 #   the bot's in-thread replies; new reviews (approve/changes/comment) from anyone but this login;
-#   new issue comments from anyone but this login; non-green checks; head moved;
+#   new issue comments from anyone but this login; non-green checks; head moved (not by its own sync);
 #   merged/closed (exit). Own replies and bot "thanks" replies are filtered out.
 #   Auto-sync (owner decision 2026-09-21): while the PR waits for review, keep its branch merged with the base branch —
 #   when it is behind, no human APPROVED review exists and the cooldown has passed, PUT pulls/N/update-branch
 #   (GitHub-signed merge commit). Emits SYNCED / BEHIND (approved, 403, 422) / CONFLICTS lines. PR_WATCH_SYNC=0 disables,
 #   PR_WATCH_SYNC_COOLDOWN=<s> (default 3600) limits how often a fast-moving base re-triggers CI on the PR.
+#   The merge commit such a sync lands is tracked silently (SYNCED already said it; no HEAD MOVED follows), and in bot
+#   mode the watcher then removes and re-adds the review bot as a requested reviewer itself (RE-REQUEST line only if
+#   that fails) — each was a wake-up that asked the session for nothing it could not do here.
 #   CHECK NOT GREEN (owner decision 2026-09-22): at most ONE line per head (reset on HEAD MOVED), and only once the suite
 #   has settled (no check run queued/in_progress), listing every failing check at that moment — previously one line
 #   per newly-finished failing check (~10 wake-ups for one known cause).
@@ -78,21 +81,26 @@ putv() { printf '%s\n' "$2" >"$D/$1"; }
 # (bot verdict, CHECK NOT GREEN, seen ids) is kept so a re-armed watcher stays SILENT about what it already
 # reported and only emits what changed in the gap (2026-09-22 — every replayed line was a wasted ~$0.30 wake-up).
 # The state is reset — old replay behaviour — when the head differs, no state exists, or PR_WATCH_REPLAY=1.
+# A head argument that differs from the state is NOT a reason to reset when the state's head is the PR's live head:
+# the watcher already followed that move (a HEAD MOVED it reported, or its own update-branch it tracked silently),
+# and the argument is just the original arming command's head, reused verbatim on an expiry re-arm. Resetting there
+# re-emitted HEAD MOVED and replayed the bot verdict — a wasted wake-up per re-arm.
 prs=""
 while [ $# -gt 0 ]; do
   pr=$1; h=$2; shift 2; D="$base_dir-$pr"; mkdir -p "$D" || exit 2
+  seed=$(gh api "repos/$repo/pulls/$pr" --jq '.head.sha' 2>/dev/null)
   prev=$(getv head); same=0
   case "$prev" in "") ;; "$h"*) same=1;; *) case "$h" in "$prev"*) same=1;; esac;; esac
+  if [ "$same" = 0 ] && [ -n "$prev" ] && [ -n "$seed" ]; then case "$seed" in "$prev"*) same=1;; esac; fi
   if [ "$same" = 1 ] && [ "${PR_WATCH_REPLAY:-0}" != 1 ] && [ -s "$D/init" ]; then
-    echo "pr-watch: PR $pr re-armed on known head $h — silent about already-reported state (PR_WATCH_REPLAY=1 to replay)" >&2
+    echo "pr-watch: PR $pr re-armed on known head $prev — silent about already-reported state (PR_WATCH_REPLAY=1 to replay)" >&2
   else
-    rm -f "$D/seen_bot" "$D/seen_c" "$D/seen_r" "$D/seen_i" "$D/init" "$D/notgreen" "$D/sync_stuck" "$D/appr_seen" "$D/dirty_seen"
+    rm -f "$D/seen_bot" "$D/seen_c" "$D/seen_r" "$D/seen_i" "$D/init" "$D/notgreen" "$D/sync_stuck" "$D/appr_seen" "$D/dirty_seen" "$D/sync_from"
     : >"$D/seen_c"; : >"$D/seen_r"; : >"$D/seen_i"; putv head "$h"; putv seen_bot 0
   fi
   # Seed the cooldown from the current head: if it is a GitHub-made merge commit (update-branch), its
   # committer date is the last sync — a re-armed watcher must not restart the clock at 0.
   [ -f "$D/last_sync" ] || putv last_sync 0
-  seed=$(gh api "repos/$repo/pulls/$pr" --jq '.head.sha' 2>/dev/null)
   if [ -n "$seed" ]; then
     seed_info=$(gh api "repos/$repo/commits/$seed" --jq '"\(.parents|length) \(.committer.login // "") \(.commit.committer.date)"' 2>/dev/null)
     case "$seed_info" in
@@ -113,7 +121,35 @@ while true; do
     fi
     rm -f "$ierr"
     cur=${info%% *}; rest=${info#* }; base=${rest%% *}; mstate=${rest##* }
-    case "$cur" in "$head"*) ;; *) short=$(printf %s "$cur" | cut -c1-9); echo "PR $pr HEAD MOVED to $short (was $head)"; head=$short; putv head "$head"; putv seen_bot 0; rm -f "$D/notgreen";; esac
+    case "$cur" in "$head"*) ;; *)
+      short=$(printf %s "$cur" | cut -c1-9)
+      # This watcher's own update-branch (sync_from = the head it synced FROM) is not news to the session — it
+      # already got the SYNCED line. Recognised strictly: the new head is a two-parent GitHub (web-flow) merge commit
+      # whose first parent is exactly that head. Anything else — a push, someone else's rebase, a lookup failure —
+      # is a real HEAD MOVED, as before.
+      self=0; from=$(getv sync_from)
+      if [ -n "$from" ]; then
+        pinfo=$(gh api "repos/$repo/commits/$cur" --jq '"\(.parents|length) \(.parents[0].sha // "") \(.committer.login // "")"' 2>/dev/null)
+        [ "$pinfo" = "2 $from web-flow" ] && self=1
+      fi
+      rm -f "$D/sync_from"
+      if [ "$self" = 1 ]; then echo "pr-watch: PR $pr head $head -> $short is this watcher's own update-branch merge — tracked silently" >&2
+      else echo "PR $pr HEAD MOVED to $short (was $head)"; fi
+      head=$short; putv head "$head"; putv seen_bot 0; rm -f "$D/notgreen"
+      # The review bot does not re-review a merge-commit head on its own, and a plain POST re-request is a no-op there
+      # (GitHub thinks it already asked) — remove, then re-add, as pr-merge.sh's force_review does. Only now, once the
+      # sync commit is the head: a request sent before it landed would review a head that is about to be replaced.
+      # A failure is a line (the session must re-request by hand), never silence.
+      if [ "$self" = 1 ] && [ -n "$bot" ]; then
+        if gh api -X DELETE "repos/$repo/pulls/$pr/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$D/.rrerr" &&
+           gh api -X POST "repos/$repo/pulls/$pr/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$D/.rrerr"; then
+          echo "pr-watch: PR $pr re-requested $bot on $short (remove + re-add)" >&2
+        else
+          echo "PR $pr RE-REQUEST of $bot on $short failed after the auto-sync: $(head -1 "$D/.rrerr" | tr -d '\r') — re-request by hand (DELETE then POST requested_reviewers)"
+        fi
+        rm -f "$D/.rrerr"
+      fi;;
+    esac
     # keep the branch merged with its base while we wait for reviews (we cannot merge anyway, so a stale branch only delays the merge)
     if [ "$sync" = 1 ] && [ -n "$cur" ] && [ -n "$base" ] && [ "$(getv sync_stuck)" != "$cur" ]; then
       if [ "$mstate" = dirty ]; then
@@ -142,7 +178,10 @@ while true; do
                 if [ "$(getv appr_seen)" != "$cur" ]; then echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing (a push would dismiss the approval where dismiss_stale_reviews is on): merge now, or update-branch and ask for re-approval"; putv appr_seen "$cur"; fi
               else
                 out=$(gh api -X PUT "repos/$repo/pulls/$pr/update-branch" -f expected_head_sha="$cur" 2>&1); rc=$?
-                if [ "$rc" = 0 ]; then echo "PR $pr SYNCED with $base (was $behind behind): update-branch requested on $(printf %s "$cur" | cut -c1-9) — HEAD MOVED follows; further worktree pushes need --rebase"; putv last_sync "$now"
+                if [ "$rc" = 0 ]; then
+                  if [ -n "$bot" ]; then rr="the watcher re-requests $bot itself once it lands"; else rr="nothing to re-request"; fi
+                  echo "PR $pr SYNCED with $base (was $behind behind): update-branch requested on $(printf %s "$cur" | cut -c1-9) — the merge head is tracked silently (no HEAD MOVED follows) and $rr; further worktree pushes need --rebase"
+                  putv last_sync "$now"; putv sync_from "$cur"
                 else
                   case "$out" in
                     *"HTTP 403"*) echo "PR $pr BEHIND $base by $behind — update-branch refused (403: the token lacks the workflow scope, PR touches .github/workflows?) — rebase the worktree + sign-queue --rebase, or on the user's machine: gh pr update-branch $pr";;
