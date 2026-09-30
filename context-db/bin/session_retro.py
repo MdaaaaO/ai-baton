@@ -14,7 +14,8 @@ and runs the rule checks a script can decide (`rule_hits`), each a CANDIDATE the
   attribution-leak    a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer in a PR/issue
                       title, body, comment or review, or a commit message — dropped on purpose (WORKSPACE.md § Rules);
                       the self-identifier from `kit_profile.py footer` is the only thing that stays
-  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style)
+  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style);
+                      a `git commit` under a temp dir or alongside a pytest invocation is fixture setup, not a hit
   agent-no-model      an `Agent` call without `model` (it inherits the main session's, the most expensive one)
   workspace-path      a `.context/`, `.worktrees/` or home-directory path in a title or body posted to GitHub
   store-write-no-root a writing `kb.py` / `session.py` call from a worktree without an explicit `CONTEXT_ROOT=`
@@ -34,6 +35,7 @@ import os
 import re
 import shlex
 import sys
+import tempfile
 from pathlib import Path
 
 import commit_style  # same dir — the title / subject check pr-open uses
@@ -61,6 +63,8 @@ ATTRIBUTION_RE = re.compile(
     re.I,
 )
 LEAK_RE = re.compile(r"(?<![\w.])\.context/|(?<![\w.])\.worktrees/|(?<![\w])/(?:home|Users)/[^/\s`'\"]+/|(?<![\w/])~/")
+TEMP_DIR_RE = re.compile(r"(?:^|/)(?:pytest-of-[^/]+|ai-baton-kit(?:-\d+)?)(?:/|$)")
+PYTEST_RUN_RE = re.compile(r"(?:^|[;&|]\s*)(?:\S*/)?(?:python3?\s+-m\s+)?pytest\b")
 STORE_WRITES = {"kb.py": ("set", "rm", "config-set", "init", "migrate"), "session.py": ("register", "touch", "end")}
 MAKE_WRITES = ("session-register", "session-touch", "session-end")
 REGISTRY_SKILLS = ("session-register", "session-handoff")
@@ -145,6 +149,31 @@ def _opts(args: list[str]) -> dict[str, list[str]]:
                 o.setdefault(a, []).append("")
         i += 1
     return o
+
+
+def _in_temp_dir(path: str) -> bool:
+    """True when `path` sits under `/tmp`, `$TMPDIR` (macOS sets this to `/var/folders/…/T/`, never `/tmp`
+    itself — both must be checked, not one as a fallback for the other), `$KIT_SCRATCH`, the kit scratch root
+    (`ai-baton-kit[-<uid>]`) or a pytest temp dir (`tmp_path` / `tmpdir` land under `pytest-of-<user>/pytest-<n>/…`,
+    itself under the system temp root) — a `git commit` there is test-fixture setup, not one the session means to
+    ship, so it is not a commit-style candidate."""
+    if not path:
+        return False
+    p = os.path.normpath(path)
+    rp = os.path.realpath(path)
+    bases = ["/tmp", tempfile.gettempdir(), os.environ.get("TMPDIR") or "", os.environ.get("KIT_SCRATCH") or ""]
+    for base in bases:
+        if not base:
+            continue
+        base = os.path.normpath(base)
+        if p == base or p.startswith(base + os.sep):
+            return True
+        # `/tmp` is a symlink to `/private/tmp` on macOS — compare resolved forms too, so a path built from
+        # the unresolved side (or vice versa) still matches.
+        rbase = os.path.realpath(base)
+        if rp == rbase or rp.startswith(rbase + os.sep):
+            return True
+    return bool(TEMP_DIR_RE.search(p))
 
 
 def _unheredoc(v: str) -> str:
@@ -340,7 +369,8 @@ class Retro:
                 continue
             cmd = inp.get("command", "")
             cwd = c["cwd"]
-            for seg in _segments(_tokens(cmd)):
+            segs = _segments(_tokens(cmd))
+            for si, seg in enumerate(segs):
                 if seg[0] == "cd" and len(seg) > 1:  # later segments of this command run there
                     cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(seg[1])))
                 w = _store_call(seg)
@@ -366,8 +396,15 @@ class Retro:
                     m = o.get("--message") or next((v for k, v in o.items() if re.fullmatch(r"-[a-zA-Z]*m", k)), None)
                     msg = _unheredoc(m[0]) if m else (body_of(o, inline=(), files=("-F", "--file")) or "")
                     subject = msg.strip().splitlines()[0] if msg.strip() else ""
-                    wd = pre[pre.index("-C") + 1] if "-C" in pre[:-1] else c["cwd"]
-                    if subject and "$" not in subject:  # an unexpanded variable: the real subject is unknown
+                    wd = pre[pre.index("-C") + 1] if "-C" in pre[:-1] else cwd
+                    # a fixture/test-setup commit (temp dir, or a pytest run LATER in the same Bash call —
+                    # "commit && pytest" seeds a repo the suite then runs against) is not a candidate: it
+                    # never ships. "pytest && commit" is the opposite order — pytest ran first, the commit is
+                    # the real work — and must still be checked, or the usual "test, then commit" chain would
+                    # never get title-style coverage.
+                    later = " ; ".join(" ".join(s) for s in segs[si + 1:])
+                    fixture = _in_temp_dir(wd) or _in_temp_dir(cwd) or bool(PYTEST_RUN_RE.search(later))
+                    if subject and "$" not in subject and not fixture:  # an unexpanded variable: the real subject is unknown
                         probs = commit_style.check_subject(subject, style(wd))
                         if probs:
                             hit("title-style", c, f"commit subject `{subject}`: {probs[0]}")

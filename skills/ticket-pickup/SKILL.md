@@ -2,8 +2,8 @@
 name: ticket-pickup
 description: "Verifies a ticket's Sizing line against the default branch, decides main session vs a background sub-agent and model, sizes a missing line, and claims the ticket. Use when picking up, starting or resuming a tracker ticket. Not for creating one (`ticket-open`) or posting a progress update (`ticket-update`)."
 metadata:
-  version: "1"
-  updated: "2026-09-27"
+  version: "2"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
 user-invocable: true
@@ -64,9 +64,10 @@ scanning the same tracker does not start the same ticket twice.
 
 ## Adapter — Jira (tracker.kind = jira)
 
-1. **Read** the description and the comments via the tracker's read tool. `ticket-open` posts the Sizing line
-   in its opening comment, so pass the description followed by the comments, oldest first, to `sizing.py
-   parse`; the last line wins.
+1. **Read** the description and the comments via the tracker's read tool. `ticket-open` writes the Sizing
+   line into the description, and a sized or corrected line is added as a comment (step 2), so read the
+   description first and then every comment, oldest first: the last Sizing line found wins. (Tickets opened
+   before this change carry the opening block in their first comment; the same order covers them.)
 2. **Write a sized/corrected line** as a new comment (`tracker.mcp_tools.comment`), produced by
    `sizing.py format`, never hand-rolled. It overrides the earlier line because the last one wins.
 3. **Claim** by transitioning to the environment's in-progress state (`tracker.transitions`, if the env config
