@@ -86,7 +86,9 @@ in terminal replies, bare `#162` (auto-linked) inside GitHub.
 1. **Create with labels + milestone — they replace the sprint field.** Before posting the body file
    (this one and the parent's, step 2), `python3 $BATON/context-db/bin/kit_profile.py public-text-check
    <file> --repo <repo>`: exit 0 → post; exit 1 → rewrite the hits generically (never post the file as
-   is) and re-check. Only applies when `<repo>` is public and not one of `tracker.repos` — a session in a
+   is) and re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run;
+   fix the store or check the file by hand before posting. Only applies when `<repo>` is public and not
+   one of `tracker.repos` — a session in a
    private work environment opening an issue on an unrelated public repo is exactly the case it exists for.
    `gh issue create -R <repo> --title … --body-file <file> --label <type>,<area> [--milestone <open milestone>]`.
    Labels come from the repo's **own** set (`gh label list -R <repo>`) — one type label + any area

@@ -14,6 +14,7 @@ from pathlib import Path
 
 BIN = Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(BIN))
+import kb  # noqa: E402
 import kit_profile  # noqa: E402
 
 
@@ -127,7 +128,9 @@ class Scan(unittest.TestCase):
         f = self.write("see " + "widgets-app" + "#42 for the fix\n")
         r = run(str(f), "--repo", "other/pub", "--public", root=self.root)
         self.assertEqual(r.returncode, 1, r.stderr)
-        self.assertIn("widgets-app", r.stdout)
+        # the value itself is never printed — only the kind and a redacted (leak_shapes.redact()) prefix
+        self.assertNotIn("widgets-app", r.stdout)
+        self.assertIn("wi…", r.stdout)
 
     def test_session_footer_embedding_a_lane_tracker_key_lower_cased_is_a_hit(self):
         # #357 second-sweep note: tracker keys lower-cased inside a lane name, in the session footer
@@ -135,7 +138,8 @@ class Scan(unittest.TestCase):
         f = self.write(f"work continues.\n\nsession `{key.lower()}-migration`\n")
         r = run(str(f), "--repo", "other/pub", "--public", root=self.root)
         self.assertEqual(r.returncode, 1, r.stderr)
-        self.assertIn(key.lower(), r.stdout.lower())
+        self.assertNotIn(key.lower(), r.stdout.lower())
+        self.assertIn("ke…", r.stdout.lower())
 
     def test_cross_org_hash_reference_is_a_hit(self):
         f = self.write("tracked in " + "foreign" + "-org/internal#7\n")
@@ -154,6 +158,9 @@ class Scan(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stderr)
         lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
         self.assertTrue(all(ln.split(":", 1)[0] == "2" for ln in lines), r.stdout)
+        # #357 review: never the value verbatim — redacted (leak_shapes.redact()) instead
+        self.assertNotIn("acmecorp/widgets-app", r.stdout)
+        self.assertNotIn("widgets-app", r.stdout)
 
 
 class RepoIsPublicStub(unittest.TestCase):
@@ -202,6 +209,48 @@ class RepoIsPublicStub(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("scanning anyway", r.stderr)
         self.assertIn("clean", r.stdout)
+
+
+class LoaderErrors(unittest.TestCase):
+    """#357 review: a loader/value-set error must never fall through to exit 0 "clean" — that is a false
+    negative dressed up as a clean scan. `kb.all_facts()` failing is exit 3, distinct from exit 0 (clean) and
+    exit 1 (hits); every calling skill treats exit 3 like a hit — do not post. In-process (not subprocess,
+    unlike the rest of this file) so `kb.all_facts` can be stubbed directly — the same pattern
+    `tests/test_kb_store.py` uses to point kit_profile at a throw-away store without touching the workspace's."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        write_config(self.root, {"environment": "t", "tracker": {"repos": []}})
+        self.body = Path(self.tmp.name) / "body.md"
+        self.body.write_text("nothing sensitive here\n", encoding="utf-8")
+        self._saved_env_dir = kit_profile.ENV_DIR
+        self._saved_all_facts = kb.all_facts
+        kit_profile.ENV_DIR = self.root / "reference" / "env"
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+        kb.all_facts = lambda *a, **k: (_ for _ in ()).throw(ValueError("bad table"))
+
+    def tearDown(self):
+        kb.all_facts = self._saved_all_facts
+        kit_profile.ENV_DIR = self._saved_env_dir
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+        self.tmp.cleanup()
+
+    def test_loader_error_is_exit_3_not_exit_0(self):
+        rc = kit_profile.public_text_check(str(self.body), "other/pub", public=True)
+        self.assertEqual(rc, 3)
+
+    def test_loader_error_prints_a_one_line_reason_never_clean(self):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = kit_profile.public_text_check(str(self.body), "other/pub", public=True)
+        self.assertEqual(rc, 3)
+        self.assertNotIn("clean", out.getvalue())
+        self.assertIn("could not load the env store's values — not checked", err.getvalue())
 
 
 if __name__ == "__main__":

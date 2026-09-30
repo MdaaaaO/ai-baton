@@ -170,7 +170,9 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                #   values) — applies only when <owner/repo> is public (a
                                                                #   `gh api` lookup, skippable with --public/--private) and
                                                                #   is not one of this environment's own tracker.repos;
-                                                               #   exit 1 prints one `<line>: <what> <matched text>` per hit
+                                                               #   exit 1 prints one `<line>: <what> <redacted>` per hit,
+                                                               #   never the value itself; exit 3 = the env store could
+                                                               #   not be loaded — treat like a hit, never like exit 0
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC

@@ -309,5 +309,9 @@ def cross_org_shapes(owner: str) -> list[tuple[re.Pattern, str]]:
     caller that could not parse `--repo` has already failed earlier)."""
     if not owner:
         return []
-    return [(re.compile(rf"\b(?!{re.escape(owner)}/)[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*#\d+\b", re.IGNORECASE),
+    # the match start is anchored on `(?<![\w.-])`, not `\b`: `\b` also holds right after a hyphen or dot inside
+    # the owner (e.g. `my-org/pub` — a boundary sits between `-` and `o`), so a same-org link could still match
+    # from mid-owner (`org/pub#1`) once the negative lookahead below has already been stepped past.
+    return [(re.compile(rf"(?<![\w.-])(?!{re.escape(owner)}/)[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*#\d+\b",
+                        re.IGNORECASE),
              "other-org `<org>/<repo>#<n>` reference — use the full URL, or describe it generically")]

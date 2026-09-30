@@ -47,7 +47,8 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    ends with it too. **Before `gh pr create`** (and before any later `gh pr comment`/`gh pr edit --body-file`
    on this PR), run `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file> --repo <o>/<r>` on
    the body file — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
-   re-check; a no-op when `<o>/<r>` is one of `tracker.repos` or not public.
+   re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run; fix the
+   store or check the file by hand before posting; a no-op when `<o>/<r>` is one of `tracker.repos` or not public.
 2. **Reviewers**: the code owner(s) who must approve (CODEOWNERS for the touched paths; the user's teams
    are `github.owner_teams`) — plus `github.review_bot` **only when it is non-empty**. Request via
    `gh api -X POST repos/<o>/<r>/pulls/<n>/requested_reviewers -f 'reviewers[]=…'` (teams:

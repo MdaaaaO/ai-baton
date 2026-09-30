@@ -116,7 +116,9 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
 
 - Comment: before posting `<file>`, `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
   --repo <repo>` — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
-  re-check; a no-op when `<repo>` is one of `tracker.repos` or not public. Then `gh issue comment <n> -R
+  re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run; fix the
+  store or check the file by hand before posting; a no-op when `<repo>` is one of `tracker.repos` or not
+  public. Then `gh issue comment <n> -R
   <repo> --body-file <file>` (token per skill `gh-cli` — `github.sandbox_token_prefix`; `<repo>` from
   `tracker.repos`). Mentions are plain `@login`. Edit-the-last-comment =
   `gh issue comment <n> --edit-last` under the same gate as above.

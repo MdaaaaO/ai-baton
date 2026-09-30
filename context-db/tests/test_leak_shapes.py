@@ -147,6 +147,28 @@ class CrossOrgShapes(unittest.TestCase):
     def test_empty_owner_yields_no_shape(self):
         self.assertEqual(leak_shapes.cross_org_shapes(""), [])
 
+    def test_hyphenated_owner_same_org_reference_is_not_flagged(self):
+        # #357 review: `\b` also holds right after the `-` in `my-org`, so the old anchor let the match start
+        # mid-owner (`org/pub#1`) once the negative lookahead had been stepped past — a same-org link wrongly flagged
+        pats = leak_shapes.cross_org_shapes("my-org")
+        hits = leak_shapes.scan("see my-org/pub#1 for details", pats)
+        self.assertEqual(hits, [])
+
+    def test_hyphenated_owner_other_org_reference_is_still_flagged(self):
+        pats = leak_shapes.cross_org_shapes("my-org")
+        hits = leak_shapes.scan("see other-org/pub#1 for details", pats)
+        self.assertEqual([h for _n, _w, h in hits], ["other-org/pub#1"])
+
+    def test_dotted_owner_same_org_reference_is_not_flagged(self):
+        pats = leak_shapes.cross_org_shapes("my.org")
+        hits = leak_shapes.scan("see my.org/pub#1 for details", pats)
+        self.assertEqual(hits, [])
+
+    def test_dotted_owner_other_org_reference_is_still_flagged(self):
+        pats = leak_shapes.cross_org_shapes("my.org")
+        hits = leak_shapes.scan("see other.org/pub#1 for details", pats)
+        self.assertEqual([h for _n, _w, h in hits], ["other.org/pub#1"])
+
 
 class CommonWordKinds(unittest.TestCase):
     def test_reads_common_word_flag_from_manifests(self):

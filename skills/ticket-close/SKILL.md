@@ -53,7 +53,9 @@ kind X in this environment" and stop.
 
 - Final comment: before posting, `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
   --repo <repo>` — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
-  re-check; a no-op when `<repo>` is one of `tracker.repos` or not public. Then `gh issue comment <n> -R
+  re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run; fix the
+  store or check the file by hand before posting; a no-op when `<repo>` is one of `tracker.repos` or not
+  public. Then `gh issue comment <n> -R
   <repo> --body-file <file>`.
 - **Close reason replaces the transition.** Resolve the value for the outcome key with `get --nonempty`
   and **stop if the lookup fails** — a plain `get` would let a configured-but-blank reason (`""`) through,

@@ -144,7 +144,7 @@ def check_no_private_value(name: str) -> None:
             values.add(repo)
             values.add(repo.rsplit("/", 1)[-1])
     for dom in cfg.get("domains") or []:
-        if dom:
+        if dom and str(dom).strip() not in profile.CORE_DOMAINS:
             values.add(str(dom).strip())
     for v in values:
         if len(v) < 4 or v.lower() in leak_shapes.GENERIC or v.lower() in leak_shapes.COMMON_REPO_NAMES:

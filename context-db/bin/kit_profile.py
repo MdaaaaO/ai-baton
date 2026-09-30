@@ -29,7 +29,9 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                #   values) — applies only when <owner/repo> is public (a
                                                                #   `gh api` lookup, skippable with --public/--private) and
                                                                #   is not one of this environment's own tracker.repos;
-                                                               #   exit 1 prints one `<line>: <what> <matched text>` per hit
+                                                               #   exit 1 prints one `<line>: <what> <redacted>` per hit,
+                                                               #   never the value itself; exit 3 = the env store could
+                                                               #   not be loaded — treat like a hit, never like exit 0
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC
@@ -787,11 +789,14 @@ def public_text_hits(text: str, cfg: dict, owner: str) -> tuple[list[tuple[int, 
 
 def public_text_check(path: str, repo: str, *, public: bool | None = None) -> int:
     """`kit_profile.py public-text-check <file> --repo <owner/repo>`'s engine — exit 0 (not applicable, or
-    scanned clean), 1 (hits — one line per hit on stdout, `<line>: <what> <matched text>`), 2 (usage: a bad
-    `--repo` slug or an unreadable `<file>`). Applies only when `repo` is public (skips the `gh api` lookup
-    when `public` is already known — True/False, the CLI's `--public`/`--private`, so a test never touches the
-    network) and is not one of this environment's OWN `tracker.repos` — this environment's own facts in its own
-    repos are not a leak, they are the repo doing its job."""
+    scanned clean), 1 (hits — one line per hit on stdout, `<line>: <what> <redacted>`, never the value itself —
+    `leak_shapes.redact()`), 2 (usage: a bad `--repo` slug or an unreadable `<file>`), 3 (the env store could not
+    be loaded, or its tables were malformed — the value half of the scan did not run, so a clean result would be
+    a false negative; callers must treat exit 3 as "do not post", the same as a hit, never as exit 0). Applies
+    only when `repo` is public (skips the `gh api` lookup when `public` is already known — True/False, the CLI's
+    `--public`/`--private`, so a test never touches the network) and is not one of this environment's OWN
+    `tracker.repos` — this environment's own facts in its own repos are not a leak, they are the repo doing its
+    job."""
     m = REPO_SLUG_RE.match(repo)
     if not m:
         print(f"kit_profile: public-text-check: {repo!r} is not an <owner>/<repo> slug", file=sys.stderr)
@@ -816,13 +821,21 @@ def public_text_check(path: str, repo: str, *, public: bool | None = None) -> in
         print(f"public-text-check: {owner}/{name} is not public — not scanned")
         return 0
     hits, errors = public_text_hits(text, cfg, owner)
-    for e in errors:
-        print(f"public-text-check: {e}", file=sys.stderr)
+    if errors:
+        # a loader/value-set error must never fall through to exit 0 "clean" — that reads as a negative result
+        # when the value half of the scan silently never ran (kit-health's own docstring forbids exactly this:
+        # a swallowed error must never look like a scan that came back clean).
+        print("public-text-check: could not load the env store's values — not checked", file=sys.stderr)
+        for e in errors:
+            print(f"public-text-check: {e}", file=sys.stderr)
+        return 3
     if not hits:
         print(f"public-text-check: {path}: clean")
         return 0
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import leak_shapes  # noqa: E402  — same dir
     for n, what, matched in hits:
-        print(f"{n}: {what} {matched}")
+        print(f"{n}: {what} {leak_shapes.redact(what, matched)}")
     return 1
 
 

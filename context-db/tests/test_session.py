@@ -452,7 +452,7 @@ class NoPrivateValueInName(unittest.TestCase):
         (env_dir / "config.json").write_text(json.dumps({
             "environment": "t",
             "tracker": {"kind": "github", "repos": ["acme" + "corp/widgets" + "-app"], "key_regex": r"\bKEY-\d+\b"},
-            "domains": ["ig" + "bot"],
+            "domains": ["ig" + "bot", "on-call"],
         }), encoding="utf-8")
 
     def tearDown(self):
@@ -476,6 +476,13 @@ class NoPrivateValueInName(unittest.TestCase):
 
     def test_an_unrelated_name_is_accepted(self):
         r = run("session.py", "register", "--name", "kit-hardening", "--no-stats", root=self.root, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_name_embedding_a_core_domain_is_accepted(self):
+        # #357 review: `on-call` is one of the engine's own CORE_DOMAINS (an ordinary word every environment
+        # can list under `domains`), not this environment's own private project — unlike `configured_values`
+        # (which already excludes `kit_profile.CORE_DOMAINS`), the domain loop here used to catch it too
+        r = run("session.py", "register", "--name", "on-call-rotation", "--no-stats", root=self.root, env=self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_an_existing_name_already_on_file_is_grandfathered(self):
