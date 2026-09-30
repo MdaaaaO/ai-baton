@@ -110,11 +110,16 @@ class ManifestAndHook(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             envfile = Path(tmp) / "env"
             scratch = Path(tmp) / "scratch"
-            base = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_"))}
+            # CLAUDE_PROJECT_DIR is stripped too: no project dir is set below, on purpose (not a kit workspace),
+            # so an ambient value from the calling process must never leak in and change the outcome.
+            base = {k: v for k, v in os.environ.items()
+                    if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_")) and k != "CLAUDE_PROJECT_DIR"}
             r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_ENV_FILE": str(envfile),
                                                       "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN, "CONTEXT_ROOT": "/nonexistent/.context",
                                                       "KIT_SCRATCH": str(scratch)},
                                capture_output=True, text=True)
+            # no CLAUDE_PROJECT_DIR → not a kit workspace → the resolved-profile block is gated off too (#370
+            # review), same as workspace-rules already was: a quiet env-file write, nothing on stdout
             self.assertEqual((r.returncode, r.stdout), (0, ""))
             self.assertEqual(envfile.read_text(encoding="utf-8"),
                               f"# ai-baton session-env begin\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n"

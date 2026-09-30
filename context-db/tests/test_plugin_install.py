@@ -25,6 +25,18 @@ OWNER = "octo-" + "org"
 SHA = "0123456789abcdef" * 2 + "01234567"
 UPDATED = "2026-09-26T21:02:14.934Z"
 
+# session-env --update also prints the "resolved profile" block to stdout — never the env file — but only inside
+# a kit workspace (CLAUDE_PROJECT_DIR under a `.context/reference/env` dir, #370 review); with CONTEXT_ROOT
+# pointed at a store whose config.json does not exist (and a fresh KIT_SCRATCH: no session registered) every
+# value is a placeholder.
+NO_STORE_PROFILE_BLOCK = (
+    "resolved profile (kit_profile.py get):\n"
+    "  tracker: kind=<unset> key_regex=<unset> url_template=<unset>\n"
+    "  github.review_bot=<unset>\n"
+    "  systems on: <none>\n"
+    "  footer: none yet — `session-register` records the name; then `kit_profile.py footer` (this block shows it from the next session start)\n"
+)
+
 
 def fake_install(tmp: Path) -> Path:
     """`<tmp>/config/plugins/cache/<marketplace>/<plugin>/<version>` with its manifest and the registry entry."""
@@ -151,10 +163,14 @@ class SessionEnvHook(unittest.TestCase):
         base = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_", "CLAUDE_PROJECT_DIR"))}
         with tempfile.TemporaryDirectory() as tmp:
             envfile = Path(tmp) / "env"
-            ws = Path(tmp) / "my ws"
+            ws = Path(tmp) / "my ws"  # no `.context/reference/env` anywhere under it — not a kit workspace at all
             r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_ENV_FILE": str(envfile),
-                                                      "CLAUDE_PROJECT_DIR": str(ws), "CONTEXT_ROOT": "/nonexistent/.context"},
+                                                      "CLAUDE_PROJECT_DIR": str(ws), "CONTEXT_ROOT": "/nonexistent/.context",
+                                                      "KIT_SCRATCH": str(Path(tmp) / "scratch")},
                                capture_output=True, text=True)
+            # outside a kit workspace both SessionStart blocks are gated off (#370 review): the resolved-profile
+            # block (session-env --update) the same way workspace-rules already was — total silence, not a
+            # placeholder-filled block
             self.assertEqual((r.returncode, r.stdout), (0, ""))
             shown = subprocess.run(["sh", "-c", envfile.read_text(encoding="utf-8") + 'printf %s "$CLAUDE_PROJECT_DIR"'],
                                    capture_output=True, text=True)
@@ -183,16 +199,21 @@ class WorkspaceRules(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ws = Path(tmp) / "ws"
             (ws / ".context" / "reference" / "env").mkdir(parents=True)
+            # CONTEXT_ROOT and KIT_SCRATCH pinned to this test's own tmp dir: the "resolved profile" block (session-env
+            # --update, which runs first) must not pick up another test's env store or registered session name
             r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_PROJECT_DIR": str(ws),
-                                                      "CLAUDE_ENV_FILE": str(Path(tmp) / "env")}, capture_output=True, text=True)
+                                                      "CLAUDE_ENV_FILE": str(Path(tmp) / "env"), "CONTEXT_ROOT": "/nonexistent/.context",
+                                                      "KIT_SCRATCH": str(Path(tmp) / "scratch")}, capture_output=True, text=True)
             self.assertEqual(r.returncode, 0)
-            self.assertEqual(r.stdout, (KIT / "WORKSPACE.md").read_text(encoding="utf-8"))  # stdout = session context
+            # stdout = session context: the resolved-profile block first, then WORKSPACE.md — neither in the env file
+            self.assertEqual(r.stdout, NO_STORE_PROFILE_BLOCK + (KIT / "WORKSPACE.md").read_text(encoding="utf-8"))
             self.assertIn("export CLAUDE_PROJECT_DIR=", (Path(tmp) / "env").read_text(encoding="utf-8"))  # never mixed into stdout
             broken = Path(tmp) / "broken-kit"  # no WORKSPACE.md in the kit: a visible line in the session, never silence
             (broken / "context-db" / "bin").mkdir(parents=True)
             for f in (KIT / "context-db" / "bin").glob("*.py"):
                 (broken / "context-db" / "bin" / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
-            r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(broken), "CLAUDE_PROJECT_DIR": str(ws)},
+            r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(broken), "CLAUDE_PROJECT_DIR": str(ws),
+                                                      "CONTEXT_ROOT": "/nonexistent/.context", "KIT_SCRATCH": str(Path(tmp) / "scratch")},
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 0)
             self.assertIn("could not load WORKSPACE.md", r.stdout)

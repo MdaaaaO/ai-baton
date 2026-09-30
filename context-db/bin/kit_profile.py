@@ -39,7 +39,12 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig
                         python3 kit_profile.py identity-source <WORKSPACE_* var>  # option | env | `` (unset) — where the value comes from, never the value
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
-                        python3 kit_profile.py session-env --update <file>  # replace <file>'s begin/end block in place, atomically; other lines untouched
+                        python3 kit_profile.py session-env --update <file>  # replace <file>'s begin/end block in place, atomically; other lines
+                                                               #   untouched; also prints the "resolved profile" block to stdout — tracker
+                                                               #   kind/key_regex/url_template, github.review_bot, the true systems.* flags, the
+                                                               #   footer line (or a note that it appears after session-register) — for the
+                                                               #   SessionStart context, never into <file>; byte-budgeted and value-safe
+                                                               #   (kit_profile.py get's own values; a secret-shaped one prints <redacted>)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
@@ -698,25 +703,33 @@ def update_session_env_file(path: str, environ: dict | None = None) -> None:
     atomic_write(path, kept + session_env_block(environ))
 
 
+def _workspace_env_root(environ: dict | None = None) -> Path | None:
+    """The nearest ancestor of `CLAUDE_PROJECT_DIR` (itself included) holding an env store — a directory at
+    `<ancestor>/.context/reference/env` — stopping below `$HOME` (never `~/.context`, #68); `None` when
+    `CLAUDE_PROJECT_DIR` is unset or no such ancestor exists. The ONE presence test for "is this session inside a
+    kit workspace" — `workspace_rules()` and `resolved_profile_block()` both call it, so a session outside a kit
+    workspace never gets one of the two SessionStart blocks without the other."""
+    env = os.environ if environ is None else environ
+    proj = str(env.get("CLAUDE_PROJECT_DIR", "")).strip()
+    if not proj:
+        return None
+    start, home = Path(proj).resolve(), Path.home().resolve()
+    for base in (start, *start.parents):
+        if base == home:  # never `~/.context` (#68)
+            break
+        if (base / ".context" / "reference" / "env").is_dir():
+            return base
+    return None
+
+
 def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str:
     """The kit's always-on body (`WORKSPACE.md`) for the plugin's SessionStart hook to print into the session's
     context — a plugin cannot ship a CLAUDE.md, and on a plugin install the seeded `@.claude/WORKSPACE.md` import has
     no file to load (#3). "" unless `CLAUDE_PROJECT_DIR` is, or sits below, a kit workspace (a dir holding an env store
     — the plugin is installed per user, so other projects get nothing; a repo inside the workspace gets it, as a clone's
     parent CLAUDE.md reaches it) that does not import its own copy (a `.claude/` clone)."""
-    env = os.environ if environ is None else environ
     kit = kit or KIT
-    proj = str(env.get("CLAUDE_PROJECT_DIR", "")).strip()
-    if not proj:
-        return ""
-    start, home = Path(proj).resolve(), Path.home().resolve()
-    root = None
-    for base in (start, *start.parents):
-        if base == home:  # never `~/.context` (#68)
-            break
-        if (base / ".context" / "reference" / "env").is_dir():
-            root = base
-            break
+    root = _workspace_env_root(environ)
     if root is None or (root / ".claude" / "WORKSPACE.md").is_file():
         return ""
     return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
@@ -741,6 +754,75 @@ def footer() -> str:
     bare "Generated with" fallback is exactly what goes away — nothing to append)."""
     n = session_name()
     return FOOTER.format(n) if n else ""
+
+
+RESOLVED_PROFILE_HEADER = "resolved profile (kit_profile.py get):"
+RESOLVED_PROFILE_BUDGET = 600  # bytes — the SessionStart context is not the place for an env-store dump
+RESOLVED_PROFILE_MARKER = "\n…(truncated — kit_profile.py get <key> for the rest)"
+
+
+def _profile_value(key: str) -> str:
+    """One `kit_profile.py get <key>` value for the resolved-profile block: `<unset>` for a missing or empty key —
+    never a traceback, so a session with no env store (or one missing this key) still starts — and `<redacted>`
+    for a value shaped like a secret (`leak_shapes.SECRET_SHAPES`: a GitHub/Slack/GitLab token, an AWS access
+    key, a private key header), so a mis-filed config value never reaches a session's own context. The raw value
+    otherwise — this function never shows anything `get()` does not already print."""
+    v = get(key)
+    s = "" if v is None else str(v)
+    if not s:
+        return "<unset>"
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # same dir; a no-op if already there
+    import leak_shapes  # noqa: E402
+    for rx, _what in leak_shapes.SECRET_SHAPES:
+        if re.search(rx, s):
+            return "<redacted>"
+    return s
+
+
+def resolved_profile_lines() -> list[str]:
+    """The SessionStart hook's "resolved profile" block — the stable facts a session reads most (tracker
+    kind/key_regex/url_template, `github.review_bot`, the `systems.*` flags that are true) plus the footer line,
+    or, before any session name is registered for this run, a one-line note that the footer appears after
+    `session-register`. Every value is `_profile_value`'s: value-safe and traceback-free even with no env store."""
+    flags = get("systems") or {}
+    on = sorted(k for k, v in flags.items() if v)
+    lines = [
+        RESOLVED_PROFILE_HEADER,
+        f"  tracker: kind={_profile_value('tracker.kind')} key_regex={_profile_value('tracker.key_regex')} "
+        f"url_template={_profile_value('tracker.url_template')}",
+        f"  github.review_bot={_profile_value('github.review_bot')}",
+        f"  systems on: {', '.join(on) if on else '<none>'}",
+    ]
+    lines.append(f"  footer: {footer()}" if session_name() else
+                 "  footer: none yet — `session-register` records the name; then `kit_profile.py footer` (this block shows it from the next session start)")
+    return lines
+
+
+def resolved_profile_block(environ: dict | None = None) -> str:
+    """`resolved_profile_lines()` joined into the text the SessionStart hook prints to stdout (the same channel as
+    the WORKSPACE.md injection — never into `$CLAUDE_ENV_FILE`), always ending in a newline and never over
+    `RESOLVED_PROFILE_BUDGET` bytes: under budget, unchanged; over it, cut to the budget minus the truncation
+    marker, with the marker appended, so a line is trimmed rather than silently dropped whole. "" outside a kit
+    workspace — gated on the SAME presence test `workspace_rules()` uses (`_workspace_env_root`), so a session in
+    an unrelated project never gets a stray block full of `<unset>` placeholders; a store that exists but lacks a
+    key still shows `<unset>` per key, unchanged. Never raises: any failure computing it (a malformed config.json —
+    e.g. `systems` holding a string instead of a mapping — or anything else) is caught whole, one line to stderr
+    (`kit_profile: resolved profile skipped: <ExcType>: <msg>`), "" returned instead — the SessionStart hook's
+    env-file write and exit code must never depend on this block (hooks.json's `||` fallback would otherwise blame
+    a successful write on the profile block's own crash)."""
+    if _workspace_env_root(environ) is None:
+        return ""
+    try:
+        text = "\n".join(resolved_profile_lines())
+        data = text.encode("utf-8")
+        if len(data) <= RESOLVED_PROFILE_BUDGET:
+            return text + "\n"
+        marker = RESOLVED_PROFILE_MARKER.encode("utf-8")
+        keep = max(RESOLVED_PROFILE_BUDGET - len(marker) - 1, 0)  # -1: the trailing newline every return carries
+        return data[:keep].decode("utf-8", errors="ignore") + RESOLVED_PROFILE_MARKER + "\n"
+    except Exception as e:
+        print(f"kit_profile: resolved profile skipped: {type(e).__name__}: {e}", file=sys.stderr)
+        return ""
 
 
 REPO_SLUG_RE = re.compile(r"^([A-Za-z0-9][\w.-]*)/([A-Za-z0-9][\w.-]*)$")
@@ -902,6 +984,8 @@ def main(argv: list[str]) -> int:
             except OSError as e:
                 print(f"kit_profile: session-env --update {target} failed: {e}", file=sys.stderr)
                 return 2
+            # the "resolved profile" block goes to stdout — the SessionStart context — never into <file>
+            sys.stdout.write(resolved_profile_block())
         else:
             # the plugin's SessionStart hook: identity-env plus CLAUDE_PROJECT_DIR (#3)
             for var, value in session_env().items():
