@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# submit-review.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST] [--auto]
+# submit-review.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST] [--auto] [--auto-comment]
 # request FILE: {"event":"COMMENT|APPROVE|REQUEST_CHANGES","body":"…","comments":[{"path":"…","line":N,"side":"RIGHT","body":"…"}]}
 # preview: validates, injects the snapshot marker (no footer — owner decision 2026-09-19: attribution text only costs the reader), prints the exact payload and its digest.
 # submit:  refuses unless --confirm matches the digest, the live head still equals --head, and this
@@ -7,6 +7,10 @@
 #          review with 422 if any comment cannot be anchored, so nothing half-lands); verifies afterwards.
 # --auto:  the trivial-PR auto-approve path (or PR_REVIEW_AUTO=1). Refuses unless auto_approve.mode == "live" AND
 #          trivial-check.py --head <sha> says eligible on the exact head being approved. Ledger status auto_approved.
+# --auto-comment: the unattended auto-COMMENT path for direct review requests (or PR_REVIEW_AUTO_COMMENT=1).
+#          Refuses unless the request event is exactly "COMMENT" (never APPROVE/REQUEST_CHANGES on this path),
+#          auto_comment.mode == "live", and the live PR author is not the user (never the user's own PR).
+#          Ledger status auto_commented. Mutually exclusive with --auto.
 # lint:    body + inline comments are refused when they leak local paths (.context/, scratchpad, /tmp, ai-baton-kit/ (formerly claude-kit/), /run/user/, home dirs) or a
 #          bare Jira key that is not a link — the workspace rules for every external surface.
 set -uo pipefail
@@ -19,12 +23,14 @@ CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
 export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_HOME
 ME=$(jq -r .login "$ROOT/config.json"); FOOTER=$(jq -r '.footer // ""' "$ROOT/config.json"); LEDGER=$ROOT/ledger.jsonl
 AUTO_MODE=$(jq -r '.auto_approve.mode // "off"' "$ROOT/config.json"); RET=$(jq -r '.submitted_retention_days // 14' "$ROOT/config.json")
+AUTOC_MODE=$(jq -r '.auto_comment.mode // "off"' "$ROOT/config.json")
 TRIVIAL=$(dirname "$0")/trivial-check.py
 mkdir -p "$ROOT/.submitted"; find "$ROOT/.submitted" -mindepth 1 -maxdepth 1 -type d -mtime +"$RET" -exec rm -rf {} + 2>/dev/null
-usage(){ echo "usage: submit-review.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST] [--auto]" >&2; exit 2; }
-cmd=${1:-}; shift || usage; repo=""; pr=""; head=""; req=""; confirm=""; auto=${PR_REVIEW_AUTO:-0}
+usage(){ echo "usage: submit-review.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST] [--auto] [--auto-comment]" >&2; exit 2; }
+cmd=${1:-}; shift || usage; repo=""; pr=""; head=""; req=""; confirm=""; auto=${PR_REVIEW_AUTO:-0}; autoc=${PR_REVIEW_AUTO_COMMENT:-0}
 while [ $# -gt 0 ]; do case $1 in
-  --repo) repo=$2; shift 2;; --pr) pr=$2; shift 2;; --head) head=$2; shift 2;; --request) req=$2; shift 2;; --confirm) confirm=$2; shift 2;; --auto) auto=1; shift;; *) usage;; esac; done
+  --repo) repo=$2; shift 2;; --pr) pr=$2; shift 2;; --head) head=$2; shift 2;; --request) req=$2; shift 2;; --confirm) confirm=$2; shift 2;; --auto) auto=1; shift;; --auto-comment) autoc=1; shift;; *) usage;; esac; done
+[ "$auto" = 1 ] && [ "$autoc" = 1 ] && { echo "error: --auto and --auto-comment are mutually exclusive" >&2; exit 2; }
 [ "$cmd" = preview ] || [ "$cmd" = submit ] || usage
 [ -n "$repo" ] && [ -n "$pr" ] && [ -n "$head" ] && [ -f "$req" ] || usage
 [[ "$head" =~ ^[0-9a-f]{40}$ ]] || { echo "error: --head must be the full 40-char sha" >&2; exit 2; }
@@ -74,10 +80,20 @@ if [ "$auto" = 1 ]; then
   [ "$(jq -r .event "$req")" = "APPROVE" ] || { echo "error: --auto is only for APPROVE" >&2; exit 2; }
   [ "$AUTO_MODE" = live ] || { echo "error: auto_approve.mode is '$AUTO_MODE', not 'live' — refusing to auto-approve (shadow mode reports only)" >&2; exit 8; }
 fi
+if [ "$autoc" = 1 ]; then
+  # unattended auto-COMMENT path (owner-decision scope, issue-tracked): opt-in config, COMMENT only —
+  # never APPROVE/REQUEST_CHANGES here, whatever the request says.
+  [ "$(jq -r .event "$req")" = "COMMENT" ] || { echo "error: --auto-comment is only for COMMENT (never APPROVE/REQUEST_CHANGES on this path)" >&2; exit 2; }
+  [ "$AUTOC_MODE" = live ] || { echo "error: auto_comment.mode is '$AUTOC_MODE', not 'live' — refusing to auto-comment (shadow mode reports only)" >&2; exit 8; }
+fi
 
 # 2. live PR state
 live=$(gh api "repos/$repo/pulls/$pr" 2>/dev/null) || { echo "error: cannot read repos/$repo/pulls/$pr" >&2; exit 3; }
 live_head=$(jq -r .head.sha <<<"$live"); base=$(jq -r .base.sha <<<"$live"); state=$(jq -r .state <<<"$live")
+if [ "$autoc" = 1 ]; then
+  pr_author=$(jq -r .user.login <<<"$live")
+  [ "$pr_author" != "$ME" ] || { echo "error: --auto-comment refuses to post on the user's own PR" >&2; exit 8; }
+fi
 if [ "$state" != "open" ]; then
   # A merged/closed PR still accepts reviews (post-merge findings keep their inline anchors); allow only on explicit opt-in.
   [ "${PR_REVIEW_ALLOW_CLOSED:-0}" = "1" ] || { echo "error: PR is $state (set PR_REVIEW_ALLOW_CLOSED=1 to post a post-merge review; never APPROVE/REQUEST_CHANGES on a merged PR)" >&2; exit 3; }
@@ -134,6 +150,6 @@ want=$(jq '.comments|length' <<<"$payload")
 if [ "$ver" = "null" ] || [ -z "$ver" ]; then echo "status: uncertain — POST returned id $rid but the review is not listed yet; re-check before any retry"; exit 7; fi
 echo "status: submitted · review $rid · state $(jq -r .state <<<"$ver") · url $(jq -r .html_url <<<"$ver") · inline comments $nposted/$want"
 [ "$nposted" = "$want" ] || echo "warning: inline comment count differs from request"
-lstatus=reviewed; [ "$auto" = 1 ] && lstatus=auto_approved
+lstatus=reviewed; [ "$auto" = 1 ] && lstatus=auto_approved; [ "$autoc" = 1 ] && lstatus=auto_commented
 ( flock 9; jq -nc --arg repo "$repo" --argjson pr "$pr" --arg head "$head" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson id "$rid" --arg ev "$(jq -r .event <<<"$payload")" --argjson n "$nposted" --arg st "$lstatus" \
   '{repo:$repo, pr:$pr, head:$head, status:$st, ts:$ts, review_id:$id, event:$ev, comments:$n}' >> "$LEDGER" ) 9>"$ROOT/.ledger.lock"
