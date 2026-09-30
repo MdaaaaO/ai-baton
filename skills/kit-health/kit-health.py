@@ -460,6 +460,25 @@ COMMON_REPO_NAMES = {"config", "configs", "dotfiles", "docs", "notes", "scripts"
 IDENTITY = "identity"  # `what` prefix of patterns whose match is never printed (settings.local.json values)
 
 
+def git_ignored(root: Path, rels: list[str]) -> set[str]:
+    """The subset of `rels` (root-relative, `/`-separated) that `git check-ignore` reports: a vendored or build
+    tree the project's own `.gitignore` excludes, beyond the fixed `SKIP_DIRS` list (e.g. a dependency directory
+    other than `node_modules`, or one nested deeper than one level). Third-party text changes with every
+    dependency bump, so it is dropped from the scan rather than accepted per hit. Empty set when `root` is not a
+    git checkout (a plugin install has no `.git`: `check-ignore` exits >1) or the check otherwise fails to run —
+    `scan_files()` then falls back to `SKIP_DIRS`/`SKIP_FILES` alone, same as before this existed."""
+    if not rels:
+        return set()
+    try:
+        p = subprocess.run(["git", "-C", str(root), "check-ignore", "--stdin"], input="\n".join(rels),
+                            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if p.returncode not in (0, 1):  # 0 = some ignored, 1 = none ignored, other = no .git / fatal error
+        return set()
+    return {line for line in p.stdout.splitlines() if line}
+
+
 def scan_files() -> list[Path]:
     files = [KIT / "WORKSPACE.md", KIT / "README.md", KIT / "setup.sh", KIT / "sync.sh", KIT / "sync-check.sh",
              KIT / "hooks" / "pre-push", KIT / "hooks" / "commit-msg",
@@ -468,8 +487,10 @@ def scan_files() -> list[Path]:
     for sub in ("context-db", "agents", "environment-template", "docs", "skills", ".github"):
         files += [p for p in (KIT / sub).rglob("*") if p.is_file()]
     # leak_shapes.skip_path is the one rule; `fixtures/` files stay in the list so section 2 can count them
-    return sorted({f for f in files if f.is_file() and "__pycache__" not in f.parts
-                   and ("fixtures" in f.relative_to(KIT).parts or not leak_shapes.skip_path(str(f.relative_to(KIT))))})
+    candidates = sorted({f for f in files if f.is_file() and "__pycache__" not in f.parts
+                         and ("fixtures" in f.relative_to(KIT).parts or not leak_shapes.skip_path(str(f.relative_to(KIT))))})
+    ignored = git_ignored(KIT, [str(f.relative_to(KIT)) for f in candidates])
+    return [f for f in candidates if str(f.relative_to(KIT)) not in ignored]
 
 
 def kit_repo() -> str:
