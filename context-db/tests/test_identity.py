@@ -27,16 +27,6 @@ TOKYO = "Asia/" + "Tokyo"
 BERLIN = "Europe/" + "Berlin"
 DM = "D0" + "1ABCDEF"
 
-# session-env --update also prints the "resolved profile" block to stdout — never into the env file;
-# with CONTEXT_ROOT pointed at a store that does not exist, every value is a placeholder.
-NO_STORE_PROFILE_BLOCK = (
-    "resolved profile (kit_profile.py get):\n"
-    "  tracker: kind=<unset> key_regex=<unset> url_template=<unset>\n"
-    "  github.review_bot=<unset>\n"
-    "  systems on: <none>\n"
-    "  footer: none yet — `session-register` records the name; then `kit_profile.py footer` (this block shows it from the next session start)\n"
-)
-
 
 class Resolver(unittest.TestCase):
     def test_option_wins_then_variable_then_empty(self):
@@ -120,12 +110,17 @@ class ManifestAndHook(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             envfile = Path(tmp) / "env"
             scratch = Path(tmp) / "scratch"
-            base = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_"))}
+            # CLAUDE_PROJECT_DIR is stripped too: no project dir is set below, on purpose (not a kit workspace),
+            # so an ambient value from the calling process must never leak in and change the outcome.
+            base = {k: v for k, v in os.environ.items()
+                    if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_")) and k != "CLAUDE_PROJECT_DIR"}
             r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_ENV_FILE": str(envfile),
                                                       "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN, "CONTEXT_ROOT": "/nonexistent/.context",
                                                       "KIT_SCRATCH": str(scratch)},
                                capture_output=True, text=True)
-            self.assertEqual((r.returncode, r.stdout), (0, NO_STORE_PROFILE_BLOCK))
+            # no CLAUDE_PROJECT_DIR → not a kit workspace → the resolved-profile block is gated off too (#370
+            # review), same as workspace-rules already was: a quiet env-file write, nothing on stdout
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
             self.assertEqual(envfile.read_text(encoding="utf-8"),
                               f"# ai-baton session-env begin\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n"
                               "# ai-baton session-env end\n")
@@ -136,7 +131,7 @@ class ManifestAndHook(unittest.TestCase):
                                                       "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN, "CONTEXT_ROOT": "/nonexistent/.context",
                                                       "KIT_SCRATCH": str(scratch)},
                                capture_output=True, text=True)
-            self.assertEqual((r.returncode, r.stdout), (0, NO_STORE_PROFILE_BLOCK))
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
             self.assertEqual(envfile.read_text(encoding="utf-8"),
                               f"# ai-baton session-env begin\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n"
                               "# ai-baton session-env end\n")

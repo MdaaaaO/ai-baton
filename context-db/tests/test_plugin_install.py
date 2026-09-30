@@ -25,8 +25,10 @@ OWNER = "octo-" + "org"
 SHA = "0123456789abcdef" * 2 + "01234567"
 UPDATED = "2026-09-26T21:02:14.934Z"
 
-# session-env --update also prints the "resolved profile" block to stdout — never the env file; with CONTEXT_ROOT
-# pointed at a store that does not exist (and a fresh KIT_SCRATCH: no session registered) every value is a placeholder.
+# session-env --update also prints the "resolved profile" block to stdout — never the env file — but only inside
+# a kit workspace (CLAUDE_PROJECT_DIR under a `.context/reference/env` dir, #370 review); with CONTEXT_ROOT
+# pointed at a store whose config.json does not exist (and a fresh KIT_SCRATCH: no session registered) every
+# value is a placeholder.
 NO_STORE_PROFILE_BLOCK = (
     "resolved profile (kit_profile.py get):\n"
     "  tracker: kind=<unset> key_regex=<unset> url_template=<unset>\n"
@@ -161,14 +163,15 @@ class SessionEnvHook(unittest.TestCase):
         base = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_PLUGIN_OPTION_", "WORKSPACE_", "CLAUDE_PROJECT_DIR"))}
         with tempfile.TemporaryDirectory() as tmp:
             envfile = Path(tmp) / "env"
-            ws = Path(tmp) / "my ws"
-            # KIT_SCRATCH isolates the "resolved profile" block's footer line from whatever session name another
-            # test in this same process may have registered under the ambient (unset) scratch key
+            ws = Path(tmp) / "my ws"  # no `.context/reference/env` anywhere under it — not a kit workspace at all
             r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CLAUDE_ENV_FILE": str(envfile),
                                                       "CLAUDE_PROJECT_DIR": str(ws), "CONTEXT_ROOT": "/nonexistent/.context",
                                                       "KIT_SCRATCH": str(Path(tmp) / "scratch")},
                                capture_output=True, text=True)
-            self.assertEqual((r.returncode, r.stdout), (0, NO_STORE_PROFILE_BLOCK))
+            # outside a kit workspace both SessionStart blocks are gated off (#370 review): the resolved-profile
+            # block (session-env --update) the same way workspace-rules already was — total silence, not a
+            # placeholder-filled block
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
             shown = subprocess.run(["sh", "-c", envfile.read_text(encoding="utf-8") + 'printf %s "$CLAUDE_PROJECT_DIR"'],
                                    capture_output=True, text=True)
             self.assertEqual(shown.stdout, str(ws))  # quoted: a path with a space survives the eval

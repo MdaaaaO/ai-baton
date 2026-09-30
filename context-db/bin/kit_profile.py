@@ -703,25 +703,33 @@ def update_session_env_file(path: str, environ: dict | None = None) -> None:
     atomic_write(path, kept + session_env_block(environ))
 
 
+def _workspace_env_root(environ: dict | None = None) -> Path | None:
+    """The nearest ancestor of `CLAUDE_PROJECT_DIR` (itself included) holding an env store — a directory at
+    `<ancestor>/.context/reference/env` — stopping below `$HOME` (never `~/.context`, #68); `None` when
+    `CLAUDE_PROJECT_DIR` is unset or no such ancestor exists. The ONE presence test for "is this session inside a
+    kit workspace" — `workspace_rules()` and `resolved_profile_block()` both call it, so a session outside a kit
+    workspace never gets one of the two SessionStart blocks without the other."""
+    env = os.environ if environ is None else environ
+    proj = str(env.get("CLAUDE_PROJECT_DIR", "")).strip()
+    if not proj:
+        return None
+    start, home = Path(proj).resolve(), Path.home().resolve()
+    for base in (start, *start.parents):
+        if base == home:  # never `~/.context` (#68)
+            break
+        if (base / ".context" / "reference" / "env").is_dir():
+            return base
+    return None
+
+
 def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str:
     """The kit's always-on body (`WORKSPACE.md`) for the plugin's SessionStart hook to print into the session's
     context — a plugin cannot ship a CLAUDE.md, and on a plugin install the seeded `@.claude/WORKSPACE.md` import has
     no file to load (#3). "" unless `CLAUDE_PROJECT_DIR` is, or sits below, a kit workspace (a dir holding an env store
     — the plugin is installed per user, so other projects get nothing; a repo inside the workspace gets it, as a clone's
     parent CLAUDE.md reaches it) that does not import its own copy (a `.claude/` clone)."""
-    env = os.environ if environ is None else environ
     kit = kit or KIT
-    proj = str(env.get("CLAUDE_PROJECT_DIR", "")).strip()
-    if not proj:
-        return ""
-    start, home = Path(proj).resolve(), Path.home().resolve()
-    root = None
-    for base in (start, *start.parents):
-        if base == home:  # never `~/.context` (#68)
-            break
-        if (base / ".context" / "reference" / "env").is_dir():
-            root = base
-            break
+    root = _workspace_env_root(environ)
     if root is None or (root / ".claude" / "WORKSPACE.md").is_file():
         return ""
     return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
@@ -790,18 +798,31 @@ def resolved_profile_lines() -> list[str]:
     return lines
 
 
-def resolved_profile_block() -> str:
+def resolved_profile_block(environ: dict | None = None) -> str:
     """`resolved_profile_lines()` joined into the text the SessionStart hook prints to stdout (the same channel as
     the WORKSPACE.md injection — never into `$CLAUDE_ENV_FILE`), always ending in a newline and never over
     `RESOLVED_PROFILE_BUDGET` bytes: under budget, unchanged; over it, cut to the budget minus the truncation
-    marker, with the marker appended, so a line is trimmed rather than silently dropped whole."""
-    text = "\n".join(resolved_profile_lines())
-    data = text.encode("utf-8")
-    if len(data) <= RESOLVED_PROFILE_BUDGET:
-        return text + "\n"
-    marker = RESOLVED_PROFILE_MARKER.encode("utf-8")
-    keep = max(RESOLVED_PROFILE_BUDGET - len(marker) - 1, 0)  # -1: the trailing newline every return carries
-    return data[:keep].decode("utf-8", errors="ignore") + RESOLVED_PROFILE_MARKER + "\n"
+    marker, with the marker appended, so a line is trimmed rather than silently dropped whole. "" outside a kit
+    workspace — gated on the SAME presence test `workspace_rules()` uses (`_workspace_env_root`), so a session in
+    an unrelated project never gets a stray block full of `<unset>` placeholders; a store that exists but lacks a
+    key still shows `<unset>` per key, unchanged. Never raises: any failure computing it (a malformed config.json —
+    e.g. `systems` holding a string instead of a mapping — or anything else) is caught whole, one line to stderr
+    (`kit_profile: resolved profile skipped: <ExcType>: <msg>`), "" returned instead — the SessionStart hook's
+    env-file write and exit code must never depend on this block (hooks.json's `||` fallback would otherwise blame
+    a successful write on the profile block's own crash)."""
+    if _workspace_env_root(environ) is None:
+        return ""
+    try:
+        text = "\n".join(resolved_profile_lines())
+        data = text.encode("utf-8")
+        if len(data) <= RESOLVED_PROFILE_BUDGET:
+            return text + "\n"
+        marker = RESOLVED_PROFILE_MARKER.encode("utf-8")
+        keep = max(RESOLVED_PROFILE_BUDGET - len(marker) - 1, 0)  # -1: the trailing newline every return carries
+        return data[:keep].decode("utf-8", errors="ignore") + RESOLVED_PROFILE_MARKER + "\n"
+    except Exception as e:
+        print(f"kit_profile: resolved profile skipped: {type(e).__name__}: {e}", file=sys.stderr)
+        return ""
 
 
 REPO_SLUG_RE = re.compile(r"^([A-Za-z0-9][\w.-]*)/([A-Za-z0-9][\w.-]*)$")

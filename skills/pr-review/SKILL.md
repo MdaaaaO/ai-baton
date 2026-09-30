@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "31"
+  version: "32"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
@@ -21,8 +21,8 @@ Scripts live in `scripts/`; references in `reference/` (`scope.md` — finding c
 proportionality, event policy, follow-up ledger; `review-writing.md` — how posted text reads;
 `slop.md` — AI-residue lens; `runner.md` — delegating steps 1–4 to the `review-runner` child). State: `.context/state/pr-review/` (config, ledger, `.submitted/`; override with `PR_REVIEW_HOME`). Knowledge:
 `.context/pr-reviews/<repo>.md` (+ `README.md` standards). The scripts apply `github.sandbox_token_prefix`.
-**Environment gates:** env-specific enrichment runs only where the env config turns it on — read `systems on: …` from the resolved-profile block already in your context (`<x>` missing there = false), or, once a compaction drops
-it, `python3 $BATON/context-db/bin/kit_profile.py get systems.<x>`; a false flag skips that step with one
+**Environment gates:** env-specific enrichment runs only where the env config turns it on — read `systems on: …` from the resolved-profile block already in your context (`<x>` missing there = false); once a compaction drops
+that block, or it never printed, fall back to `python3 $BATON/context-db/bin/kit_profile.py get systems.<x>`; a false flag skips that step with one
 `<System> enrichment: n/a in this environment` line in the 5a overview — never an improvised substitute.
 
 ## Where each step runs (cost model, 2026-09-19)
