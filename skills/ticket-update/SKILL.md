@@ -2,10 +2,10 @@
 name: ticket-update
 description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "8"
-  updated: "2026-09-28"
+  version: "9"
+  updated: "2026-09-30"
   reviewed: "2026-09-24"
-  facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link"
+  facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
 user-invocable: true
 ---
 
@@ -85,9 +85,10 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
 1. **Status** matches reality (adapter below). **Labels** stay honest (`ticket-open` § Labels / the
    repo's label set) — e.g. add `bug` once it turns out to be one, matching the PR label.
 2. **Pointer (thread ↔ ticket, when feasible).** The ticket carries the discussion with a *pointer*,
-   not a copy — a link to the thread or PR, or a one-line `**Thread** <url>` in the comment. No live
-   bidirectional sync exists; never paste thread contents back and forth (and never a local
-   `.context/` path).
+   not a copy — a one-line `**Thread** <url>` / `**PR** <url>` in the comment is the sanctioned form for
+   every adapter, no write scope needed. A tracker-native remote-link object (adapter below, where write
+   access exists) is additional, never a substitute. No live bidirectional sync exists; never paste
+   thread contents back and forth (and never a local `.context/` path).
 3. **Flush in lockstep.** The same delta goes to the context doc's Session log (`session-handoff`).
    The ticket is the team-facing trace; the context doc is the private handoff — keep them aligned,
    not identical (the ticket is not a mirror of `.context/`).
@@ -99,11 +100,15 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
 - **Status** via `tracker.mcp_tools.transition`: In Progress → **In Review**
   (`tracker.transitions.in_review`, when the PR is up — `pr-open` does this) → Done (`ticket-close`).
   Check the transitions actually available first via `tracker.mcp_tools.transitions_list` (ids drift).
-- **Pointer** = a remote issue link to the chat-thread permalink or PR — first list the links already there
-  via `tracker.mcp_tools.remote_link` (read-only) and stop if this URL is one of them; otherwise create it with
-  `POST /rest/api/3/issue/{key}/remotelink`, body `{"object": {"url": "<link>", "title": "<title>"}}`. Check,
-  then create: never create without checking, even when the read tool is missing (then read the links via
-  `GET` on the same endpoint).
+- **Pointer** = a `**Thread** <url>` / `**PR** <url>` line in the comment (Sync — core § 2) — the sanctioned
+  form here too; it needs no write scope and always lands. Only when `tracker.write_api` is also true, mirror
+  it as a real remote issue link: first list the links already there via `tracker.mcp_tools.remote_link`
+  (read-only) and stop if this URL is one of them; otherwise create it with `POST
+  /rest/api/3/issue/{key}/remotelink` — cloud id from the env fact `tracker.setting cloud_id` (config key
+  `tracker.cloud_id`) — body `{"object": {"url": "<link>", "title": "<title>"}}`. Check, then create: never
+  create without checking. `tracker.write_api` false or unset (the common case — a read-only roster exposes
+  only `getJiraIssueRemoteIssueLinks`, no write tool and no API token) → skip the POST silently, the comment
+  line already carries the pointer.
 
 ## Adapter — GitHub issues (tracker.kind = github)
 

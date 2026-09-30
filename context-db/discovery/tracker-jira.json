@@ -173,6 +173,15 @@
       "purpose": "MCP tool name suffix ticket-update uses to check for an existing pointer link before creating one via the remote-link REST endpoint"
     },
     {
+      "key": "tracker.write_api",
+      "target": "config",
+      "tool": "user",
+      "args": {},
+      "verify": "true only when this environment holds a real Jira write credential (an API token, or a write-scoped remote-link tool) that can call the remote-link REST endpoint; absent or false reads as off",
+      "ttl_days": 0,
+      "purpose": "gates ticket-update's Jira remote-link POST — a read-only roster (`getJiraIssueRemoteIssueLinks` only, no write tool) leaves this false, and the skill falls back to the `**Thread**`/`**PR**` line in the comment alone"
+    },
+    {
       "key": "tracker.user",
       "target": "row",
       "tool": "lookupJiraAccountId",

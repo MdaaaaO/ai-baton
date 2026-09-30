@@ -12,6 +12,7 @@
     "board_sprint_prefix": "<sprint name prefix to match on, jira only, or empty>",
     "sprint_field": "<customfield_… for Sprint — jira only, or empty>",
     "unplanned_field": "<customfield_… for the Unplanned flag — jira only, or empty>",
+    "write_api": false,
     "repos": [
       "<owner/repo tracked with GitHub issues — github only>"
     ],
