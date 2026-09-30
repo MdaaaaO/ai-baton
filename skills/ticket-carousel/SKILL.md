@@ -28,6 +28,10 @@ A ready list, free text, or a URL/repo to mine. A list or free text goes straigh
 goes through Mining (below) first. More than 12 real candidates from any source: ask once, before
 drafting any of them, which to narrow to — never draft all of them unasked.
 
+If the input does not already name a parent tracking issue / epic key, ask once, before drafting any
+candidate, for it — a key, or "none". Carry the answer through to Create and Summary below; never ask
+again mid-walk.
+
 ## Mining — the one forked step
 
 Given a URL or repo instead of a ready list, fork the read: `Agent(subagent_type: "triage")` reads it
@@ -47,11 +51,13 @@ unresolved and say so on its card.
 ## Draft
 
 Use the repo's own issue template where it has one; otherwise `ticket-open`'s opening block (Goal +
-Plan + Links + Sizing) — every draft carries a Sizing line regardless of template. Before a draft is
-ever shown, run the outgoing-text scan: `python3 $BATON/context-db/bin/kit_profile.py public-text-check
-<file> --repo <repo>` — exit 0 → show it; exit 1 → rewrite the hits generically (never show the flagged
-text) and re-check; exit 3 → say the check could not run and fix the store first, don't show an
-unchecked draft.
+Plan + Links + Sizing) — every draft carries a Sizing line regardless of template. On a GitHub tracker,
+before a draft is ever shown, run the outgoing-text scan against the target repo (mirror `ticket-open`'s
+GitHub adapter step): `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file> --repo
+<repo>` — exit 0 → show it; exit 1 → rewrite the hits generically (never show the flagged text) and
+re-check; exit 2 → a bad `--repo` slug or an unreadable file — fix the call or the file, never show the
+draft; exit 3 → say the check could not run and fix the store first, don't show an unchecked draft. On a
+Jira tracker there is no `<owner>/<repo>` to pass — the ticket has no public surface, so skip this step.
 
 ## Walk — AskUserQuestion, 4 cards per call
 
@@ -70,25 +76,30 @@ A later card's Merge or Skip can change what an earlier Submit should have been 
 out to be the same gap), so no issue is created mid-walk — not even when the user says "just file
 them" to skip ahead; that only pre-answers every remaining card as Submit, it does not skip this gate.
 Once every card has an answer:
-1. Each **Submit** goes through `ticket-open` in full — labels, milestone, parent link, and a parent
-   task-list line.
+1. Each **Submit** goes through `ticket-open` in full — labels, milestone, and, when Intake got a
+   parent, the parent link plus a parent task-list line. With "none", skip both — there is nothing to
+   link or add the line to.
 2. Each **Merge into #n** posts exactly one comment on `#n`, in `ticket-update`'s DELTA grammar (a
    `**Win**` or `**Next**` line naming what the candidate added) — never a new issue.
 3. Each **Skip** creates nothing; keep the user's stated reason, if one was given, for the summary.
 
 ## Summary
 
-One comment on the parent tracking issue: one line per candidate — created (`#<new>`), merged (`→
-#<n>`), or skipped — with the user's reason where they gave one. This is the single write the parent
-issue gets from this run, not a `ticket-update` DELTA (there is no progress on the parent itself, only
-this run's accounting).
+One line per candidate — created (`#<new>`), merged (`→ #<n>`), or skipped — with the user's reason
+where they gave one. With a parent from Intake, this goes as one comment on that tracking issue (the
+single write it gets from this run, not a `ticket-update` DELTA — there is no progress on the parent
+itself, only this run's accounting). With "none", there is no issue to comment on: give the same
+accounting in the chat reply instead.
 
 ## No tool — headless or scheduled runs
 
 No `AskUserQuestion` available → create nothing; follow `docs/carousel.md` § No tool instead: end the
-reply with a numbered `Decisions` block, one line per candidate, recommended option first, and write
-the drafts to the scratch dir (`python3 $BATON/context-db/bin/kit_profile.py scratch`) so the next
-interactive session's walk starts from them.
+reply with a numbered `Decisions` block, one line per candidate, recommended option first, and list the
+same candidates under `## Open decisions` in the session file, per that section, so the next
+interactive session's walk starts from them. Write the drafts to the **stable**, per-user scratch dir —
+`python3 $BATON/context-db/bin/kit_profile.py scratch --stable ticket-carousel` (mirrors how `pr-scan`
+keeps its own output dir) — never the per-session default, which the next interactive session cannot
+reach.
 
 ## Not in scope
 
