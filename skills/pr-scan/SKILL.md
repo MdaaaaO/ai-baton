@@ -2,7 +2,7 @@
 name: pr-scan
 description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row table (review state, threads, bot verdict, trivial PRs flagged `A`, `AUTO:` line) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
 metadata:
-  version: "16"
+  version: "17"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "github.display_names"
