@@ -2,8 +2,8 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "29"
-  updated: "2026-09-28"
+  version: "30"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
@@ -34,6 +34,7 @@ enter its prefix — everything read there is re-billed on every later tick. The
 |---|---|---|
 | 1–4 snapshot · KB · review pass · verification | **`review-runner` child** — `Agent(subagent_type: "review-runner")`, Opus `effort: medium`, ≤ 60 turns, no CLAUDE.md (`$BATON/agents/review-runner.md`; prompt + return contract in `reference/runner.md`). It works from the **bundle** `fetch-context.sh` writes (`head/`, `base/`, `diffs/`, `bundle.json`, `kb-traps.md`) plus the few named exceptions in § Contract | its return only: the 5a overview + `CTX:` / `NEEDS` / `NOTE:` lines (≤ 3K tokens) |
 | `--auto` trivial-PR pass | **`auto-runner` child** — Sonnet, ≤ 15 turns (`$BATON/agents/auto-runner.md`) | `AUTO:` / `CTX:` / `NEEDS` lines |
+| `--unattended` auto-COMMENT pass (opt-in) | same `review-runner` child as 1–4 — no shortcut on the review itself | its return only, same as 1–4 |
 | 5 walk · 6 post · 7 replies | **main session** — AskUserQuestion needs the user; the post carries their login | `$CTX/triage.json`, `request.json` / `replies.json`, the script previews |
 | 5b deep dives | one-question `opus` `Agent` spawned from the main session | its ≤ 10-line answer |
 | 8 KB write-back | main session, sourced from `triage.json` `evidence` + the walk decisions | the KB's `## Known traps` slice |
@@ -225,6 +226,15 @@ head and refuses unless `mode` is `live`) with a ≤3-line "Checked: …" body, 
 `shadow_approve`; any finding or doubt → `fallback`, and the PR runs through the normal walk. Gate
 criteria, modes and the ledger write: `reference/runner.md` § `--auto`.
 
+## Unattended auto-COMMENT path for direct review requests *(`review-runner` + main session; opt-in, `auto_comment.mode` off by default)*
+
+Chains `pr-scan` straight into a posted review with no hand-off, for the PRs `pr-scan` flags `C`
+(config block `auto_comment` in `config.json`). Not a shortcut on the review — steps 1–4 run exactly as
+in the interactive path (`--deep` included); only steps 5–6 (the walk, the Submit prompt) are skipped,
+and only for a `COMMENT` with no STOP finding. Spawn, `on_stop`, modes, logging, kill switch:
+`reference/runner.md` § `--unattended`.
+
 ## Not in scope
 Our own PRs (`pr-open`, `pr-watch`, `pr-event-brief`); merging (`pr-merge.sh` in `pr-watch`);
-re-requesting the `github.review_bot`; review asks — Slack drafts only where `systems.slack` (`pr-open`).
+re-requesting the `github.review_bot`; review asks — Slack drafts only where `systems.slack` (`pr-open`);
+unattended REQUEST_CHANGES (§ Unattended auto-COMMENT path — no owner decision covers it yet).

@@ -31,6 +31,10 @@ DAYS=$(jq -r .days "$CFG"); CAP=$(jq -r .enrich_cap "$CFG"); MAXROWS=$(jq -r .ma
 DEEP=$(jq -r .deep_lines "$CFG"); BOTS=$(jq -c .bots "$CFG")
 AUTO_MODE=$(jq -r '.auto_approve.mode // "off"' "$CFG"); AUTO_BOTS=$(jq -c '.auto_approve.bot_authors // []' "$CFG")
 AUTO_MAXF=$(jq -r '.auto_approve.max_files // 10' "$CFG"); AUTO_MAXL=$(jq -r '.auto_approve.max_lines // 200' "$CFG")
+# unattended auto-COMMENT gate for direct review requests (opt-in, default off) — no gh calls, computed
+# straight from the row's own prio/kind/author, same as the trivial-approve pre-filter above.
+AUTOC_MODE=$(jq -r '.auto_comment.mode // "off"' "$CFG"); AUTOC_PRIOS=$(jq -c '.auto_comment.prios // [1]' "$CFG")
+AUTOC_MAX=$(jq -r '.auto_comment.max_per_tick // 3' "$CFG")
 TRIVIAL=$(dirname "$0")/../pr-review/scripts/trivial-check.py
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 REPOS=()
@@ -96,7 +100,7 @@ cat "$OUT/direct.jsonl" "$OUT/team.jsonl" "$OUT/sweep.jsonl" | jq -sc '
 total=$(wc -l < "$OUT/union.jsonl")
 
 # 3. enrich (3 calls per candidate: pull, reviews, threads) — the cap counts surviving candidates only
-: > "$OUT/candidates.jsonl"; n=0; dropped_bot=$pre_bot; dropped_stale=$pre_stale; dropped_draft=0; dropped_done=$pre_done; dropped_skip=0; dropped_approved=0; dropped_cap=0; dropped_fail=0; degraded=0
+: > "$OUT/candidates.jsonl"; n=0; dropped_bot=$pre_bot; dropped_stale=$pre_stale; dropped_draft=0; dropped_done=$pre_done; dropped_skip=0; dropped_approved=0; dropped_cap=0; dropped_fail=0; degraded=0; ac_count=0
 threads_q='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved opener:comments(first:1){nodes{author{login}}} last:comments(last:1){nodes{author{login}}}}}}}}'
 while IFS= read -r row; do
   key=$(jq -r .key <<<"$row"); src=$(jq -r .src <<<"$row"); repo=${key%#*}; num=${key##*#}
@@ -162,16 +166,35 @@ while IFS= read -r row; do
   esac
   rm -f "$bot_err"
   n=$((n+1))
+  hlen=$(jq -r 'length' <<<"$humans")
+  if [ "$src" = direct ]; then prio_val=1
+  elif [ "$kind" != new ]; then prio_val=2
+  elif [ "$src" = team ] && [ "$hlen" = 0 ]; then prio_val=3
+  elif [ "$hlen" = 0 ]; then prio_val=4
+  else prio_val=5; fi
+  # unattended auto-COMMENT gate (opt-in, `auto_comment.mode`): direct review requests only by default
+  # (`prios`), never a follow-up, never a bot author, capped at `max_per_tick` runners this tick.
+  ac_eligible=false; ac_reason="mode off"
+  if [ "$AUTOC_MODE" != off ]; then
+    if [ "$kind" = follow_up ]; then ac_reason="follow-up"
+    elif in_list "$author" "$BOTS"; then ac_reason="bot author"
+    elif ! jq -ne --argjson p "$prio_val" --argjson list "$AUTOC_PRIOS" '$list | index($p) != null' >/dev/null; then ac_reason="prio $prio_val not in auto_comment.prios"
+    elif [ "$ac_count" -ge "$AUTOC_MAX" ]; then ac_reason="max_per_tick reached"
+    else ac_eligible=true; ac_reason=""; ac_count=$((ac_count+1))
+    fi
+  fi
   jq -nc --arg repo "$repo" --argjson pr "$num" --arg head "$head" --arg src "$src" --arg kind "$kind" --arg author "$author" \
     --arg title "$(jq -r .title <<<"$pr")" --arg upd "$upd" --arg base "$(jq -r .base.ref <<<"$pr")" \
     --argjson add "$(jq .additions <<<"$pr")" --argjson del "$(jq .deletions <<<"$pr")" --argjson files "$(jq .changed_files <<<"$pr")" \
     --argjson humans "$humans" --argjson approved "$approved" --argjson changes "$changes" --argjson threads "$threads" \
     --arg bot "$bot" --arg lstatus "$lstatus" --argjson surfaced "$surfaced" --argjson deg "$deg" --argjson deep "$DEEP" --arg url "$(jq -r .html_url <<<"$pr")" --argjson auto "$auto" \
     --argjson req "$(jq -c '[.requested_reviewers[].login] + [.requested_teams[].slug | "@"+.]' <<<"$pr")" \
+    --argjson prio "$prio_val" --argjson ac_eligible "$ac_eligible" --arg ac_reason "$ac_reason" \
     '{repo:$repo, pr:$pr, head:$head, src:$src, kind:$kind, author:$author, title:$title, updated:$upd, base:$base,
       lines:($add+$del), files:$files, humans:$humans, approved:$approved, changes_requested:$changes, threads:$threads,
       bot:$bot, ledger:$lstatus, surfaced:$surfaced, degraded:$deg, deep:(($add+$del)>$deep), url:$url, requested:$req, auto:$auto,
-      prio:(if $src=="direct" then 1 elif $kind!="new" then 2 elif $src=="team" and ($humans|length)==0 then 3 elif ($humans|length)==0 then 4 else 5 end)}' >> "$OUT/candidates.jsonl"
+      auto_comment: {eligible:$ac_eligible, reason:$ac_reason},
+      prio:$prio}' >> "$OUT/candidates.jsonl"
 done < "$OUT/union.jsonl"
 
 # 4. rank + present — `new` and `auto` are counted over the SHOWN rows, which are exactly the rows --mark records
@@ -179,18 +202,19 @@ jq -s 'sort_by([.prio, (.updated|explode|map(-.))])' "$OUT/candidates.jsonl" > "
 shown=$(jq --argjson m "$MAXROWS" '.[:$m] | length' "$OUT/queue.json"); cand=$(jq length "$OUT/queue.json")
 newc=$(jq --argjson m "$MAXROWS" '[.[:$m][] | select(.surfaced|not)] | length' "$OUT/queue.json")
 autoc=$(jq --argjson m "$MAXROWS" '[.[:$m][] | select(.auto.eligible // false)] | length' "$OUT/queue.json")
+autocmt=$(jq --argjson m "$MAXROWS" '[.[:$m][] | select(.auto_comment.eligible // false)] | length' "$OUT/queue.json")
 if [ "$QUIET" = 0 ]; then
   printf '%-4s %-28s %-10s %-4s %-18s %-9s %-7s %-14s %s\n' PRIO PR SRC KIND AUTHOR LINES/F HUMANS THREADS/BOT TITLE
   jq -r --argjson m "$MAXROWS" '.[:$m][]
       | (.repo|split("/")[1]) as $r | (if .surfaced then "" else " *" end) as $star
-      | (if .deep then "!" elif (.auto.eligible // false) then "A" else "" end) as $bang
+      | (if .deep then "!" elif (.auto.eligible // false) then "A" elif (.auto_comment.eligible // false) then "C" else "" end) as $bang
       | (if (.degraded|index("reviews")) then "?" else (.humans|map(.state[:3])|join(",")) end) as $h
       | ((.threads.open // "?")|tostring) as $t | ({green:"🟢",yellow:"🟡",red:"🔴"}[.bot] // "-") as $b
       | [(.prio|tostring), ($r+"#"+(.pr|tostring)+$star), .src, .kind[:4], .author[:18], ((.lines|tostring)+"/"+(.files|tostring)+$bang), (if $h=="" then "-" else $h end), ($t+"/"+$b), .title[:60]] | @tsv' "$OUT/queue.json" \
     | awk -F'\t' '{printf "%-4s %-28s %-10s %-4s %-18s %-9s %-7s %-14s %s\n",$1,$2,$3,$4,$5,$6,$7,$8,$9}'
-  echo "-- * = not surfaced before on this head; ! = over deep threshold ($DEEP lines); A = trivial-PR auto-approve eligible (mode=$AUTO_MODE); ? = review state unavailable (see errors); LINES/F = added+deleted / files; HUMANS = last state per human reviewer"
+  echo "-- * = not surfaced before on this head; ! = over deep threshold ($DEEP lines); A = trivial-PR auto-approve eligible (mode=$AUTO_MODE); C = unattended auto-COMMENT eligible (mode=$AUTOC_MODE); ? = review state unavailable (see errors); LINES/F = added+deleted / files; HUMANS = last state per human reviewer"
 fi
-echo "summary: union=$total candidates=$cand shown=$shown new=$newc auto=$autoc auto_mode=$AUTO_MODE dropped(bots=$dropped_bot draft=$dropped_draft stale>${DAYS}d=$dropped_stale done=$dropped_done skipped=$dropped_skip approved=$dropped_approved cap=$dropped_cap failed=$dropped_fail) degraded=$degraded errors=$FAILS retries=$RETRIES out=$OUT"
+echo "summary: union=$total candidates=$cand shown=$shown new=$newc auto=$autoc auto_mode=$AUTO_MODE auto_comment=$autocmt auto_comment_mode=$AUTOC_MODE dropped(bots=$dropped_bot draft=$dropped_draft stale>${DAYS}d=$dropped_stale done=$dropped_done skipped=$dropped_skip approved=$dropped_approved cap=$dropped_cap failed=$dropped_fail) degraded=$degraded errors=$FAILS retries=$RETRIES out=$OUT"
 if [ "$MARK" = 1 ] && [ "$newc" -gt 0 ]; then
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # the ledger is shared with pr-review's writers: flock where the host has it; without it (macOS/BSD) the

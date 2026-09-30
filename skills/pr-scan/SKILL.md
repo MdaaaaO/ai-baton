@@ -2,7 +2,7 @@
 name: pr-scan
 description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row table (review state, threads, bot verdict, trivial PRs flagged `A`, `AUTO:` line) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
 metadata:
-  version: "15"
+  version: "16"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "github.display_names"
@@ -40,7 +40,9 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
    already reviewed (new head or author replied), 3 = team request with no human review yet,
    4 = swept PR with no human review, 5 = the rest. `*` = first time surfaced. `!` = over the deep
    threshold (600 lines) — a `pr-review --deep` candidate. `A` = passed the trivial-PR auto-approve gate
-   (`.auto.eligible` in `queue.json`; the summary line carries `auto=<n> auto_mode=<mode>`). `HUMANS` = last state per human reviewer
+   (`.auto.eligible` in `queue.json`; the summary line carries `auto=<n> auto_mode=<mode>`). `C` = eligible
+   for the unattended auto-COMMENT path (`.auto_comment.eligible` in `queue.json`; the summary line carries
+   `auto_comment=<n> auto_comment_mode=<mode>`; § Unattended auto-COMMENT below — off by default). `HUMANS` = last state per human reviewer
    (`APP`, `CHA`, `COM`). `THREADS/BOT` = unresolved threads / review-bot (`github.review_bot`) Assessment on
    this head (`🟢`/`🟡`/`🔴`, `-` if none or no bot configured).
 3. Decide **NO-OP vs brief**: if the summary says `new=0`, answer with the single word `NO-OP` — nothing
@@ -61,6 +63,7 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
 …up to 8 rows, PRIO ascending, newest first within a prio…
 
 **Auto** (shadow) · none
+**AUTO-COMMENT** (off) · none
 **Follow-up** · [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) — you APPROVED `<sha-a>`, author pushed `<sha-b>`
 **Next** · `/pr-review <org>/<repo> <pr>` for the row you pick · errors 0
 
@@ -81,12 +84,14 @@ Column rules:
 - Header line: date **and** time as `YYYY-MM-DD HH:MM UTC` (from `date -u`), counts from the summary line; `dropped:` lists only
   non-zero buckets.
 - Trailing lines: `**Auto**` repeats the gate facts only (`class`, `packages`, CI, threads from `queue.json .auto`) or `none`;
+  `**AUTO-COMMENT**` is `(<auto_comment_mode>) · ` then every eligible row as a `[repo#n](url)` link (comma-joined) or `none` —
+  read `.auto_comment.eligible` off `queue.json`, never recompute the gate here;
   `**Follow-up**` lists every PRIO-2 row with the old and new short SHAs / the thread count, or `none`; `**Next**` carries the
   errors count. Nothing before the header line and nothing after `**Next**`.
 
 Rules: `Why now` is fact from the data, never an opinion on the PR's value. Author names follow the map
 in the column rules. Every PR is a clickable link. Do not read PR bodies or diffs — that is `pr-review`'s
-job. The `**Auto**` line repeats the gate's facts only — the decision belongs to the main session.
+job. The `**Auto**` and `**AUTO-COMMENT**` lines repeat the gate's facts only — the decision belongs to the main session.
 
 ## Trivial-PR auto-approve (owner's standing decision, 2026-09-19 — `shadow` until `auto_approve.shadow_review_due`)
 
@@ -112,6 +117,16 @@ the main session tells the user one line "would approve …", nothing is posted)
 `APPROVE` via `submit-review.sh --auto` with the runner's body — the script re-runs the gate on the exact head and
 refuses unless mode is `live` — then tells the user one line; ledger `auto_approved`).
 Kill switch: set `mode` to `off`. This is the one sanctioned exception to `scope.md` "APPROVE is never inferred".
+
+## Unattended auto-COMMENT (owner-decision scope, opt-in — off by default)
+
+Rows this fork flags `C` (config block `auto_comment` in `config.json`: `mode` off/shadow/live, `prios` — direct
+requests (`[1]`) by default, `max_per_tick`) are eligible for `pr-review`'s unattended auto-COMMENT path — a
+deterministic, gh-call-free pre-filter computed inline in `pr-scan.sh` alongside each row (prio in `prios`, `kind`
+not `follow_up`, author not a bot, capped at `max_per_tick` rows). This fork only computes and reports eligibility
+in the `**AUTO-COMMENT**` trailer — it never spawns a runner or decides anything; the full contract (what the main
+session does with an eligible row, the `on_stop` policy, the ledger status) is `pr-review/SKILL.md` § Unattended
+auto-COMMENT path for direct review requests.
 
 ## Skip / tune (the user's call, main session executes)
 

@@ -169,6 +169,16 @@
     ],
     "_docs_exclude_note": "SKILL.md, skills/*/reference/**, agents/**, commands/**, WORKSPACE.md, CLAUDE.md and AGENTS.md are Markdown but they are agent instructions: a change to them changes behaviour, so it is never docs-only. trivial-check.py enforces these exclusions even when a config omits them."
   },
+  "auto_comment": {
+    "mode": "off",
+    "_modes": "off (default — opt in explicitly) | shadow (gate + review-runner run, ledger gets shadow_comment, the main session reports 'would comment' and nothing is posted) | live (a COMMENT review is posted as login, no walk)",
+    "prios": [1],
+    "_prios_note": "pr-scan queue rows whose PRIO is in this list are eligible — [1] is direct review requests only; a repo-sweep or team row is never prio 1",
+    "on_stop": "hold",
+    "_on_stop_note": "hold (default) = a STOP finding posts nothing and leaves the PR as an ordinary queue row for the next interactive pr-review walk. comment = post a COMMENT review even with a STOP finding present (still never APPROVE/REQUEST_CHANGES — scope.md 'APPROVE is never inferred'). request_changes is accepted here as a config value but NOT implemented: no standing owner decision authorises an unattended REQUEST_CHANGES post, so the runner always falls back to hold behaviour and reports it as an owner question instead of guessing.",
+    "max_per_tick": 3,
+    "_max_per_tick_note": "cost cap — at most this many review-runner spawns (one Opus runner per PR) per pr-scan tick; the rest stay ordinary queue rows"
+  },
   "bundle_max_files": 60,
   "bundle_max_kb": 200,
   "submitted_retention_days": 14
