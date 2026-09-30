@@ -57,7 +57,7 @@ FOOTER_RE = re.compile(r"session `[^`\n]+`")
 ATTRIBUTION_RE = re.compile(
     r"Generated with \[Claude Code\]"
     r"|Co-Authored-By:\s*Claude(?:\s+(?:Code|Opus|Sonnet|Haiku|Fable)(?:[\s-]?\d+(?:\.\d+)*)?)?\s*<[^>\n]*>"
-    r"|Co-Authored-By:[^\n<]*<[^>\n]*@anthropic\.com>",  # any model name the family list does not know yet
+    r"|Co-Authored-By:[^\n<]*<noreply@anthropic\.com>",  # the vendor bot address, any model name; never a human there
     re.I,
 )
 LEAK_RE = re.compile(r"(?<![\w.])\.context/|(?<![\w.])\.worktrees/|(?<![\w])/(?:home|Users)/[^/\s`'\"]+/|(?<![\w/])~/")
