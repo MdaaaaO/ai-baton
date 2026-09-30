@@ -1,8 +1,8 @@
 ---
 name: pr-review
-description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
+description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads; a trivial PR auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "33"
+  version: "34"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
