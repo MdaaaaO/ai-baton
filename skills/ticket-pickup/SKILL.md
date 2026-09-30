@@ -65,9 +65,9 @@ scanning the same tracker does not start the same ticket twice.
 ## Adapter — Jira (tracker.kind = jira)
 
 1. **Read** the description and the comments via the tracker's read tool. `ticket-open` writes the Sizing
-   line into the description, so parse the description first; only fall back to the comments (oldest
-   first) for tickets opened before this change, where the block still landed in an opening comment. The
-   last line found still wins.
+   line into the description, and a sized or corrected line is added as a comment (step 2), so read the
+   description first and then every comment, oldest first: the last Sizing line found wins. (Tickets opened
+   before this change carry the opening block in their first comment; the same order covers them.)
 2. **Write a sized/corrected line** as a new comment (`tracker.mcp_tools.comment`), produced by
    `sizing.py format`, never hand-rolled. It overrides the earlier line because the last one wins.
 3. **Claim** by transitioning to the environment's in-progress state (`tracker.transitions`, if the env config

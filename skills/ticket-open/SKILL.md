@@ -47,7 +47,7 @@ kind X in this environment" and stop — never improvise.
 
 ## Adapter — Jira (tracker.kind = jira)
 
-Tools: `tracker.mcp_tools.create` / `.comment`; project `tracker.project`; links
+Tools: `tracker.mcp_tools.create` / `.edit` / `.comment`; project `tracker.project`; links
 `tracker.url_template` with `{key}`.
 
 1. **Create in the active sprint.** `tracker.mcp_tools.create` with `tracker.sprint_field` = the open
@@ -64,7 +64,7 @@ Tools: `tracker.mcp_tools.create` / `.comment`; project `tracker.project`; links
 3. **Link it.** Epic link / parent on create; related tickets via `createIssueLink`.
 4. **Opening block goes in the description** — write the Goal/Plan/Links/Sizing block into
    `tracker.mcp_tools.create`'s `description` field at creation, or set it right after with
-   `editJiraIssue` if create didn't take it. The description is the durable, always-visible home; it
+   `tracker.mcp_tools.edit` if create didn't take it. The description is the durable, always-visible home; it
    is never a comment. Post a comment only to cc someone who must act, a one-line ADF mention — never
    a copy of the block.
 
