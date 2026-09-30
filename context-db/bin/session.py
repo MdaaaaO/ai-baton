@@ -52,6 +52,7 @@ FIELDS = ["session", "session_id", "ref", "status", "epic", "repos",
 STATS_HEADING = "## Session stats"
 NEXT_HEADING = "## Next session"
 NOTES_HEADING = "## Notes"
+OPEN_PRS_HEADING = "## Open PRs"
 LEDGER = os.path.join(SESS_DIR, "_ledger.md")   # `_` prefix: gen_sessions.py skips it
 LEDGER_HEADER = """# Session ledger — one row per ended session (stats for geeks)
 
@@ -255,6 +256,30 @@ def _replace_section(body: str, heading: str, content: str) -> str:
     return "\n".join(out).rstrip("\n") + "\n"
 
 
+def _has_section(body: str, heading: str) -> bool:
+    """Whether a `## heading` section exists in the free-text body — fence-blind, same rule as
+    `_replace_section` (a heading quoted inside a pasted prompt's fenced block is text, not a section)."""
+    lines = body.rstrip("\n").split("\n")
+    track = sum(1 for ln in lines if ln.lstrip().startswith("```")) % 2 == 0
+    fence = False
+    for ln in lines:
+        if track and ln.lstrip().startswith("```"):
+            fence = not fence
+        if not fence and ln.strip() == heading:
+            return True
+    return False
+
+
+def _ensure_open_prs_heading(body: str) -> str:
+    """Guarantee `## Open PRs` exists in the body — `none` when nothing is filled in — so
+    session-register step 4 (a successor's re-arm step) can always find the heading and tell "no open
+    PRs" apart from "this session never got to filling it in". Never touches an existing section: only
+    a body with no `## Open PRs` heading at all gets one appended."""
+    if _has_section(body, OPEN_PRS_HEADING):
+        return body
+    return _replace_section(body, OPEN_PRS_HEADING, "none")
+
+
 def _ledger_append(meta: dict, st) -> None:
     import session_stats
     k = session_stats._k
@@ -326,6 +351,7 @@ def cmd_touch(a) -> None:
     nxt = _next_prompt(a)
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
+    body = _ensure_open_prs_heading(body)
     _apply_stats(meta, _stats(a))
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
@@ -363,6 +389,7 @@ def cmd_end(a) -> None:
         meta["working_on"] = a.working
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
+    body = _ensure_open_prs_heading(body)
     if meta.get("status") == "ended":
         # Already ended: allow the hand-off fields to be refined, but never a second ledger row.
         print(f"{a.name} already ended — no second ledger row", file=sys.stderr)

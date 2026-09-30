@@ -337,6 +337,35 @@ class NoSilentLoss(unittest.TestCase):
         self.assertNotIn("Register as t-next-none-2.", doc)
         self.assertIn("status: ended", doc)
 
+    def test_end_adds_a_missing_open_prs_heading(self):
+        # session-register step 4 (a successor's re-arm step) reads `## Open PRs` to know which watches
+        # to re-arm; a session that ends without ever writing the section must still leave it behind, so
+        # a missing heading is never mistaken for "nothing to re-arm".
+        run("session.py", "register", "--name", "t-end-noprs", "--no-stats", root=self.root)
+        doc_path = self.root / "sessions" / "t-end-noprs.md"
+        self.assertNotIn("## Open PRs", doc_path.read_text(encoding="utf-8"))
+        r = run("session.py", "end", "--name", "t-end-noprs", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("## Open PRs\n\nnone", doc_path.read_text(encoding="utf-8"))
+
+    def test_end_keeps_an_existing_open_prs_list(self):
+        run("session.py", "register", "--name", "t-end-hasprs", "--no-stats", root=self.root)
+        doc_path = self.root / "sessions" / "t-end-hasprs.md"
+        doc_path.write_text(doc_path.read_text(encoding="utf-8") + "\n## Open PRs\n- o/r#1 abc — waits\n", encoding="utf-8")
+        r = run("session.py", "end", "--name", "t-end-hasprs", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = doc_path.read_text(encoding="utf-8")
+        self.assertIn("## Open PRs\n- o/r#1 abc — waits", doc)
+        self.assertEqual(doc.count("## Open PRs"), 1)
+
+    def test_touch_adds_a_missing_open_prs_heading(self):
+        run("session.py", "register", "--name", "t-touch-noprs", "--no-stats", root=self.root)
+        doc_path = self.root / "sessions" / "t-touch-noprs.md"
+        self.assertNotIn("## Open PRs", doc_path.read_text(encoding="utf-8"))
+        r = run("session.py", "touch", "--name", "t-touch-noprs", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("## Open PRs\n\nnone", doc_path.read_text(encoding="utf-8"))
+
     def test_a_non_string_tracker_regex_does_not_break_the_registry(self):
         import json as _json
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},

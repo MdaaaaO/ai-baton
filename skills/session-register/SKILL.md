@@ -2,8 +2,8 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "18"
-  updated: "2026-09-28"
+  version: "19"
+  updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
 ---
@@ -62,9 +62,12 @@ worktree.
    responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
    edit the body directly (`sessions/` stays writable; the hook regenerates `SESSION_INDEX.md`).
 4. **Re-arm the PR watches.** `Monitor`s die with the session that armed them, so a restarted or
-   successor session owns PRs that nobody is watching. For **every open PR you now own** (the
-   `## Open PRs` list in the predecessor's session file, the context doc's *What was built* /
-   *Remaining work*, or `gh pr list --author @me`), verify the current head with
+   successor session owns PRs that nobody is watching. `session.py end`/`touch` always leave a
+   `## Open PRs` heading behind (`none` when there is nothing to list) — a predecessor file missing
+   the heading entirely predates that fix and is not the same as "no PRs": treat it as unknown and
+   check `gh pr list --author @me` before assuming there is nothing to re-arm. For **every open PR
+   you now own** (the `## Open PRs` list in the predecessor's session file, the context doc's *What
+   was built* / *Remaining work*, or `gh pr list --author @me`), verify the current head with
    `gh api repos/<o>/<r>/pulls/<n> --jq .head.sha` and arm **one** multi-PR `pr-watch` Monitor covering
    all of them (the `pr-watch` skill; `bash …/pr-watch.sh <o>/<r> <n> <head> [<n> <head> …]` under
    `Monitor`, persistent, `timeout_ms: 3600000` — one Monitor per repo, not per PR; owner decision, 2026-09-22).
