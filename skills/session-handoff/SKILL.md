@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "15"
+  version: "16"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -91,6 +91,8 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
     with nothing to hand over does not force one).** Decide first: does *this* session own follow-on work
     — an open PR, a ticket still in progress, or an agreed next step on its own epic? Work that belongs to
     another session, or that simply finished clean, does not count.
+    When it is genuinely unclear whether this session owns the follow-on work, ask it as an
+    `AskUserQuestion` carousel rather than deciding silently (`docs/carousel.md`).
     - **Nothing to hand over:** run `session-end` (or `session-touch`) with no `NEXT`, and say so plainly
       in your final message — "no follow-up from this session". If a stale prompt from earlier in the
       session is still on file and no longer true, withdraw it with `NEXT=none` rather than leaving it to
