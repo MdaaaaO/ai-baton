@@ -132,7 +132,7 @@ verify:
 test:
 	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; ctx="$$tmp/.context"; \
 	  CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py init --blank >/dev/null && CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py config-set environment ci >/dev/null && \
-	  cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" $(PY) -m unittest $(if $(T),tests.$(T),discover -s tests -t .) -v
+	  cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_JOB_DIR -u KIT_SCRATCH $(PY) -m unittest $(if $(T),tests.$(T),discover -s tests -t .) -v
 
 # make kit-verify [STALE=90]  — every skill/agent carries the versioning frontmatter
 kit-verify:
