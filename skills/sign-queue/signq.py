@@ -410,6 +410,8 @@ MILESTONES = [
     (re.compile(r"^pushed ([0-9a-f]+) (\S) (.*)"), None),  # final line, handled separately
 ]
 FAIL_HINTS = [
+    (re.compile(r"^UNSIGNED "), "a commit below HEAD would have pushed unsigned — the job refused the push "
+     "before it landed; a sandbox-made commit surviving a no-op re-stack is the usual cause"),
     (re.compile(r"non-fast-forward|fetch first|rejected"), "remote moved: re-enqueue with --rebase (or --force-with-lease after a rewrite)"),
     (re.compile(r"CONFLICT|could not apply"), "rebase conflict: the owning session resolves in the worktree, then re-enqueues"),
     (re.compile(r"gpg failed to sign|signing failed|No secret key|Couldn't load public key|failed to write commit object"),

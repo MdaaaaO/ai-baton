@@ -352,8 +352,9 @@ pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, e
 
 Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
 `context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
-kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
-is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
+kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
+`ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
+log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named

@@ -28,6 +28,11 @@
 #                  from the branch/topic, epic from the .context/ epic doc that mentions the ticket, PR via
 #                  `gh pr list --head`, summary = first line of the message file. Pass them when you know
 #                  better (a new branch has no PR yet; a ticket outside any context doc has no epic).
+#   --supersede    fold this fix into the newest PENDING job of the same topic (and, when --by is also given,
+#                  the same --by) instead of adding a second job for it: that job is deleted and its name
+#                  printed, then this enqueue proceeds as usual. Refuses (exit 2, nothing touched) when the
+#                  candidate already has a drain log or a parked `.failed` — it was attempted, not just queued,
+#                  and dropping it would lose that history. A round the owner has not drained yet stays one job.
 #
 # The job is a self-contained POSIX sh script under .context/state/sign-queue/ that sign.sh runs on the
 # host. Before enqueuing, verify `git -C <wt> status --short` shows exactly what the commit should
@@ -57,14 +62,15 @@ export SIGN_QUEUE_DIR
 Q=$SIGN_QUEUE_DIR
 topic=$1; wt=$2; br=$3; msg=$4; shift 4
 rebase=0; newbr=0; files=""; explicit_files=""; all=0; by="${SIGN_QUEUE_BY:-${WORKSPACE_USER:-?}}"; onto=""; lease=""
-ticket=""; epic=""; pr=""; summary=""
+ticket=""; epic=""; pr=""; summary=""; supersede=0; by_given=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --rebase) rebase=1;; --new-branch) newbr=1;; --files) files=$2; explicit_files=1; shift;; --all) all=1;;
-    --by) by=$2; shift;;
+    --by) by=$2; by_given=1; shift;;
     --onto) onto=$2; shift;;
     --force-with-lease) lease=$2; shift;;
     --ticket) ticket=$2; shift;; --epic) epic=$2; shift;; --pr) pr=$2; shift;; --summary) summary=$2; shift;;
+    --supersede) supersede=1;;
     *) echo "unknown flag $1" >&2; exit 2;;
   esac; shift
 done
@@ -95,6 +101,30 @@ case "$msg" in "$wt"/*)
   if [ -z "$files" ]; then echo "message file $msg is inside the worktree and no --files given: add -A would commit it. Put it under <workspace root>/.worktrees/ or pass --files" >&2; exit 2; fi;;
 esac
 case "$topic" in *[!A-Za-z0-9._-]*) echo "topic must be [A-Za-z0-9._-]" >&2; exit 2;; esac
+if [ $supersede = 1 ]; then
+  # every job's line 2 is `# sign-queue job: <topic>  (enqueued <date> by session <by>)` (fixed shape,
+  # written below) — the newest PENDING job (job names sort chronologically: a UTC timestamp prefix)
+  # whose topic (and, when --by was given, whose by) matches is the fold target.
+  cand=""
+  for f in "$Q"/*.sh; do
+    [ -e "$f" ] || continue
+    hdr=$(sed -n '2p' "$f" 2>/dev/null || true)
+    case "$hdr" in "# sign-queue job: $topic  "*) ;; *) continue;; esac
+    if [ -n "$by_given" ]; then
+      case "$hdr" in *" by session $by)") ;; *) continue;; esac
+    fi
+    cand=$f  # "$Q"/*.sh globs in sorted order: the last match is the newest
+  done
+  if [ -n "$cand" ]; then
+    cbase=$(basename "$cand")
+    if [ -f "$Q/logs/$cbase.log" ] || [ -f "$Q/$cbase.failed" ]; then
+      echo "enqueue.sh: --supersede refuses $cbase — it already has a drain log or a parked failure; resolve it by hand (make sign_show / sign_log / sign_retry) first" >&2
+      exit 2
+    fi
+    # deletion itself is deferred to just before the new job is installed (below the --onto/--force-with-lease/
+    # --files/signq.py meta checks): any of those can still `exit 2` and must leave the pending job untouched.
+  fi
+fi
 if [ -n "$onto" ]; then
   case "$onto" in *:*) ;; *) echo "--onto expects <upstream-branch>:<old-base-sha>" >&2; exit 2;; esac
   onto_br=${onto%%:*}; onto_base=${onto#*:}
@@ -158,19 +188,57 @@ tmp="$job.tmp"
     echo 'git -C "$WT" fetch origin "$BR"'
     # FETCH_HEAD, not origin/$BR: a single-branch / partial clone (refspec = main only)
     # never creates refs/remotes/origin/<branch>, so origin/$BR is an "invalid upstream".
-    echo 'git -C "$WT" rebase -S FETCH_HEAD'
+    # -f/--force-rebase: without it, a rebase whose upstream did not move since the branch was last
+    # based on it is a no-op — git leaves every existing commit exactly as it is, sandbox-made ones
+    # included, instead of replaying (and re-signing) them. -f always replays the range, so a commit
+    # made unsigned in a sandbox comes out signed on this, the host side of the queue.
+    echo 'git -C "$WT" rebase -S -f FETCH_HEAD'
   fi
   if [ -n "$onto" ]; then
     echo "UP=$(sq "$onto_br")"; echo "OLD_BASE=$(sq "$onto_base")"
     echo '# stacked branch: replay our commits on the upstream branch'"'"'s pushed tip, dropping the local placeholder'
     echo 'git -C "$WT" fetch origin "$UP"'
-    echo 'git -C "$WT" rebase -S --onto FETCH_HEAD "$OLD_BASE"'
+    # -f: same trap as --rebase above — a re-stack whose upstream tip has not moved since the last
+    # enqueue is otherwise a no-op and leaves sandbox-made commits unsigned.
+    echo 'git -C "$WT" rebase -S -f --onto FETCH_HEAD "$OLD_BASE"'
+  fi
+  # Belt and braces on top of -f above: verify every commit about to be pushed, not just HEAD (a
+  # signed HEAD says nothing about the commits beneath it). OLDTIP is the remote tip the push is
+  # landing on: FETCH_HEAD when a rebase/re-stack just ran (it fetched the relevant remote tip),
+  # else the inspected --force-with-lease sha. A plain push / --new-branch has no such known tip to
+  # diff against here and is left to the existing per-commit `commit -S` guarantee.
+  if [ -n "$onto" ] || [ $rebase = 1 ]; then
+    echo 'OLDTIP=$(git -C "$WT" rev-parse FETCH_HEAD)'
+  elif [ -n "$lease" ]; then
+    echo "OLDTIP=$(sq "$lease")"
+  fi
+  if [ -n "$onto" ] || [ $rebase = 1 ] || [ -n "$lease" ]; then
+    echo 'unsigned=""'
+    # revs on its own line: a `for … in $(cmd)` list does not propagate cmd'"'"'s exit under `set -e` (the shell
+    # only checks the exit of the whole pipeline/expansion at the point of the simple command it feeds), so a
+    # bad OLDTIP (e.g. an unfetched --force-with-lease sha) would otherwise empty the loop instead of failing.
+    echo 'revs=$(git -C "$WT" log --format="%H:%G?" "$OLDTIP..HEAD")'
+    echo 'for sc in $revs; do'
+    echo '  sig=${sc##*:}'
+    echo '  # N = no signature, B = bad one: never push those. G/U/E carry a signature (U = key not in the allowed'
+    echo '  # signers, E = this host cannot verify it, e.g. no gpg.ssh.allowedSignersFile) — the drain reports which.'
+    echo '  case "$sig" in N|B) unsigned="$unsigned ${sc%%:*}" ;; esac'
+    echo 'done'
+    echo '# never push a row the drain would have to report as unsigned: refuse and park the job instead'
+    echo 'if [ -n "$unsigned" ]; then echo "UNSIGNED$unsigned"; exit 1; fi'
   fi
   if [ $newbr = 1 ]; then echo 'git -C "$WT" push -u origin "$BR"'
   elif [ -n "$lease" ]; then echo "LEASE=$(sq "$lease")"; echo '# rewritten history of an already-pushed branch: land only if the remote tip is still the one we inspected'; echo 'git -C "$WT" push --force-with-lease="refs/heads/$BR:$LEASE" origin "$BR"'
   else echo 'git -C "$WT" push origin "$BR"'; fi
   echo 'git -C "$WT" log --format="pushed %h %G? %s" -1'
 } > "$tmp"
+# --supersede's actual deletion: every check above (--onto, --force-with-lease, --files, signq.py meta) has
+# now had its chance to `exit 2` — only past this point is the new job guaranteed to be installed, so only
+# past this point is dropping the old one safe.
+if [ -n "${cand:-}" ]; then
+  rm -f "$cand"
+  echo "enqueue.sh: --supersede dropped $cbase" >&2
+fi
 mv "$tmp" "$job"
 [ -n "$meta" ] && printf '%s' "$meta" | python3 -c '
 import json,sys; m=json.load(sys.stdin)
