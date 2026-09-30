@@ -452,7 +452,7 @@ class NoPrivateValueInName(unittest.TestCase):
         (env_dir / "config.json").write_text(json.dumps({
             "environment": "t",
             "tracker": {"kind": "github", "repos": ["acme" + "corp/widgets" + "-app"], "key_regex": r"\bKEY-\d+\b"},
-            "domains": ["ig" + "bot", "on-call"],
+            "domains": ["zebra" + "fin", "on-call"],
         }), encoding="utf-8")
 
     def tearDown(self):
@@ -465,7 +465,7 @@ class NoPrivateValueInName(unittest.TestCase):
         self.assertFalse((self.root / "sessions" / "widgets-app-hardening.md").exists())
 
     def test_a_name_embedding_a_private_domain_is_refused(self):
-        r = run("session.py", "register", "--name", "igbot-followers", "--no-stats", root=self.root, env=self.env)
+        r = run("session.py", "register", "--name", "zebrafin-followers", "--no-stats", root=self.root, env=self.env)
         self.assertNotEqual(r.returncode, 0, r.stderr)
         self.assertIn("own repo/project name", r.stderr)
 
@@ -494,14 +494,14 @@ class NoPrivateValueInName(unittest.TestCase):
 
     def test_rename_target_is_checked_too(self):
         run("session.py", "register", "--name", "kit-clean-lane", "--no-stats", root=self.root, env=self.env)
-        r = run("session.py", "rename", "--from", "kit-clean-lane", "--to", "igbot-rename", root=self.root, env=self.env)
+        r = run("session.py", "rename", "--from", "kit-clean-lane", "--to", "zebrafin-rename", root=self.root, env=self.env)
         self.assertNotEqual(r.returncode, 0, r.stderr)
         self.assertIn("own repo/project name", r.stderr)
 
     def test_no_store_does_not_block_registration(self):
         empty_root = Path(self.tmp.name) / "no-store" / ".context"
         (empty_root / "sessions").mkdir(parents=True)
-        r = run("session.py", "register", "--name", "igbot-nostore", "--no-stats", root=empty_root, env=self.env)
+        r = run("session.py", "register", "--name", "zebrafin-nostore", "--no-stats", root=empty_root, env=self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
 
 
