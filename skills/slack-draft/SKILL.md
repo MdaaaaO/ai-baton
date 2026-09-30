@@ -21,9 +21,9 @@ answered.
 
 ## 1. Create
 
-Whether to send the message now, edit it first, or skip it is the user's call — ask it as a carousel
-question, recommended option marked, per `docs/carousel.md`; never a paste of the draft text as a
-prose question.
+Whether a draft is wanted now, its wording changed first, or the message skipped is the user's call —
+ask it as a carousel question, recommended option marked, per `docs/carousel.md`; never a paste of
+the draft text as a prose question. The session only ever creates the draft; sending stays the user's.
 
 - `slack_send_message_draft` into the target channel / DM / thread (`thread_ts` for replies).
   Never paste draft text in the terminal (WORKSPACE.md § Rules). Formatting: `reference/formatting.md`

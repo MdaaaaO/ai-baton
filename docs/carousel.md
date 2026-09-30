@@ -42,15 +42,16 @@ still open, not the evidence behind them.
 ## After the answer
 
 Act on every answer **in the same turn** — an approved choice is never banked for later. Write one
-dated line per answer under the context doc's *Key decisions* section, so the choice can be defended
+dated line per answer under the context doc's *Key decisions & gotchas* section, so the choice can be defended
 later without re-deriving it.
 
 ## No tool — headless or scheduled runs
 
 A run with no `AskUserQuestion` (a headless CLI run, a scheduled Routine) ends its reply with a
 numbered `Decisions` block in the same shape — recommended option first — and lists the same items
-under `## Open decisions` in the session file, so the next interactive session asks them (#56
-re-prints that list after a compaction, so a batched decision is never silently dropped):
+under `## Open decisions` in the session file, so the next interactive session asks them at its
+start (re-read that list yourself after a compaction until the kit re-prints it — #56 — so a batched
+decision is never silently dropped):
 
 ```
 Decisions
