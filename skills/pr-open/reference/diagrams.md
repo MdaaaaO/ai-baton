@@ -1,6 +1,7 @@
 # Diagrams — exit codes, the facet matrix, and the rules for every block
 
-Loaded from `SKILL.md` § Diagrams.
+Loaded from `SKILL.md` § Diagrams. The contract every diagram surface follows (tickets, reviews, the epic doc) is
+[`docs/diagrams.md`](../../../docs/diagrams.md); this file covers the PR body's plan only.
 
 **Exit codes** (`diagram-plan.py`, also in `--help`): `0` success (a plan printed, or `--check` found the
 marker current) · `1` a `gh`/`git` call failed · `2` bad usage (no changed files, or `--check` without
