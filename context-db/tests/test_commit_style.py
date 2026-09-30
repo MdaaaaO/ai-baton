@@ -71,6 +71,32 @@ class Subjects(BlankStore):
         self.assertEqual(cs.check_message("# only comments\n", "conventional"), ["empty message"])
         self.assertEqual(cs.check_message("; hint\nfeat: x\n", "conventional", comment=";"), [])
 
+    def test_message_rejects_ai_attribution_but_not_a_human_coauthor(self):
+        gen = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+        self.assertTrue(any("AI attribution" in p for p in
+                             cs.check_message(f"feat(kb): add x\n\nbody\n\n{gen}\n", "conventional")))
+        self.assertTrue(any("AI attribution" in p for p in
+                             cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude <noreply@example.invalid>\n", "conventional")))
+        self.assertEqual(cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Alex Doe <alex@example.invalid>\n", "conventional"), [])
+        # a human co-author whose first name happens to be Claude — surname distinguishes them from the AI trailer
+        self.assertEqual(
+            cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude Martin <claude.martin@example.invalid>\n",
+                              "conventional"), [])
+        self.assertTrue(any("AI attribution" in p for p in
+                             cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude Sonnet 5 <noreply@example.invalid>\n",
+                                               "conventional")))
+        # the trailers actually seen carry a dotted version, and a new model family must not slip past the list:
+        # an address at the vendor's domain is attribution whatever name precedes it (assembled: no email literal)
+        vendor = "noreply@" + "anthropic" + ".com"
+        for name in ("Claude Opus 4.5", "Claude Sonnet 4.5", "Claude Haiku 4.5", "Claude Mythos 2"):
+            self.assertTrue(any("AI attribution" in p for p in cs.check_message(
+                f"feat(kb): add x\n\nbody\n\nCo-Authored-By: {name} <{vendor}>\n", "conventional")), name)
+        self.assertTrue(any("AI attribution" in p for p in cs.check_message(
+            "feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude Opus 4.5 <noreply@example.invalid>\n", "conventional")))
+        human = "jane.doe@" + "anthropic" + ".com"  # a person at the vendor's domain is a real co-author
+        self.assertEqual(cs.check_message(f"feat(kb): add x\n\nbody\n\nCo-Authored-By: Jane Doe <{human}>\n",
+                                          "conventional"), [])
+
     def test_label_for(self):
         self.assertEqual(cs.label_for("feat(kb): add x"), "enhancement")
         self.assertEqual(cs.label_for("fix: y"), "bug")

@@ -30,6 +30,7 @@ Live session registry (who is working on what, right now — see SESSION_INDEX.m
                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
+  make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
   make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
@@ -295,7 +296,7 @@ options:
 ## `session.py`
 
 ```text
-usage: session.py [-h] {register,touch,end,stats} ...
+usage: session.py [-h] {register,touch,end,stats,rename} ...
 
 session.py — maintain a session's self-reported entry in the live session
 registry. Each active Claude session that works on an epic/feature keeps ONE
@@ -314,18 +315,25 @@ FILE) the `## Next session` hand-off prompt — omit --next when the session has
 nothing to hand over, and pass --next none to withdraw a prompt already on
 file — and appends one row to sessions/_ledger.md (the cross-session
 cost/activity ledger) stats print this session's stats (block) without
-touching the registry Every subcommand also refreshes the `stats:` field (one
-line: turns, context, tokens, rough spend, PRs/tickets/sign jobs/drafts — see
-session_stats.py) when the session's transcript is discoverable via
-$CLAUDE_CODE_SESSION_ID / --session-id; `--no-stats` skips it. Stats are
-derived from the transcript with zero model turns, so the live registry row is
-always current. The content root is kit_profile.context_root() (CONTEXT_ROOT,
-which the Makefile sets from CONTEXT, else docs/layout.md's "Content root"
-default). Empty CLI values are treated as "leave unchanged" so the Makefile
-can pass every flag unconditionally. Stdlib only.
+touching the registry rename --from <old> --to <new>: move sessions/<old>.md
+to <new>.md, rewrite the `session:` frontmatter and the `# Session: <name>`
+title, re-record the scratch session name, and when a heartbeat was running
+for <old>, restart heartbeat.sh under the new name with the same focus (best-
+effort — a heartbeat outside a live session has nothing to attach to and is
+reported, not fatal); refuses when <new> already has an entry or does not
+follow the session naming convention. Every subcommand also refreshes the
+`stats:` field (one line: turns, context, tokens, rough spend,
+PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's
+transcript is discoverable via $CLAUDE_CODE_SESSION_ID / --session-id; `--no-
+stats` skips it. Stats are derived from the transcript with zero model turns,
+so the live registry row is always current. The content root is
+kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets from
+CONTEXT, else docs/layout.md's "Content root" default). Empty CLI values are
+treated as "leave unchanged" so the Makefile can pass every flag
+unconditionally. Stdlib only.
 
 positional arguments:
-  {register,touch,end,stats}
+  {register,touch,end,stats,rename}
 
 options:
   -h, --help            show this help message and exit
@@ -467,8 +475,12 @@ WORKSPACE.md § Rules and the skills the session invoked. It extracts
   - failed commands (any other tool result marked as an error);
 and runs the rule checks a script can decide (`rule_hits`), each a CANDIDATE the fork confirms against the rule text:
   pr-no-labels        a `gh pr create` without `--label`, and no label added later in the session
-  pr-no-footer        a PR body (inline or a body file the session wrote) without the attribution footer line
-  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style)
+  pr-no-footer        a PR body (inline or a body file the session wrote) without the `session `<name>`` self-identifier
+  attribution-leak    a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer in a PR/issue
+                      title, body, comment or review, or a commit message — dropped on purpose (WORKSPACE.md § Rules);
+                      the self-identifier from `kit_profile.py footer` is the only thing that stays
+  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style);
+                      a `git commit` under a temp dir or alongside a pytest invocation is fixture setup, not a hit
   agent-no-model      an `Agent` call without `model` (it inherits the main session's, the most expensive one)
   workspace-path      a `.context/`, `.worktrees/` or home-directory path in a title or body posted to GitHub
   store-write-no-root a writing `kb.py` / `session.py` call from a worktree without an explicit `CONTEXT_ROOT=`
@@ -566,6 +578,10 @@ Styles:
   free          anything non-empty.
 `Merge …`, `Revert "…"` and `fixup!/squash! …` subjects always pass (git writes them).
 
+`check` also refuses a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer anywhere in the
+message (owner decision, 2026-09-28: no AI attribution anywhere — the `session `<name>`` self-identifier from
+`kit_profile.py footer` is the only thing that stays), same as a bad subject.
+
 Usage:
   commit_style.py resolve  [--dir <repo-dir>] [--repo <owner/repo>]
   commit_style.py check    [--dir …] [--repo …] [--style <s>] <msg-file | ->      exit 0 ok / 1 style / 2 usage, config or I/O
@@ -594,8 +610,9 @@ usage: sizing.py [-h] {parse,check,format,models} ...
 
 sizing.py — parse and format a ticket's Sizing line (docs/delegation.md § The Sizing line).
 
-`ticket-open` writes the line into the opening comment when a ticket is created; `ticket-pickup` reads it back
-when the ticket is picked up, verifies it still holds, and sizes a missing one. One line, anywhere in the body:
+`ticket-open` writes the line into the opening block when a ticket is created (the GitHub issue body, the Jira
+description); `ticket-pickup` reads it back when the ticket is picked up, verifies it still holds, and sizes a
+missing one. One line, anywhere in the body/description:
 
   **Sizing:** `<model>`, <delegate|main session>. <one-line reason>
 

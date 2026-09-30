@@ -1,9 +1,9 @@
 ---
 name: ticket-open
-description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues) — placement (sprint, or labels + milestone), labels, epic/parent link, a lean opening comment (Goal + Plan + Links + Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating the ticket."
+description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues) — placement (sprint, or labels + milestone), labels, epic/parent link, a lean opening block (Goal + Plan + Links + Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating the ticket."
 metadata:
-  version: "7"
-  updated: "2026-09-27"
+  version: "8"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
 user-invocable: true
@@ -11,7 +11,7 @@ user-invocable: true
 
 # ticket-open — what "the ticket is open" means here
 
-Create a ticket with its fields already right and one lean opening comment, so the board and
+Create a ticket with its fields already right and one lean opening block, so the board and
 every session can read intent at a glance. Mirrors `pr-open`. The shared mechanics live in the
 env config / `.context/reference/environment.md` — this skill *sequences* them, it does not
 restate them.
@@ -23,9 +23,10 @@ kind X in this environment" and stop — never improvise.
 ## Core — every tracker
 
 1. **Create it placed** — in the current planning bucket, typed, labelled (adapter steps).
-2. **Link it** to its epic / parent and related tickets. Every key in the body/comment is clickable,
-   rendered from `tracker.url_template`.
-3. **One lean opening comment** — intent, not an essay (grammar lives in `ticket-update`):
+2. **Link it** to its epic / parent and related tickets. Every key in the body/description/comment is
+   clickable, rendered from `tracker.url_template`.
+3. **One lean opening block** — intent, not an essay (grammar lives in `ticket-update`); where it lives
+   is adapter-specific — the GitHub issue body, the Jira description (adapters below):
    ```
    **Goal** — one line: what this delivers and why
    **Plan** — 2–4 terse steps
@@ -46,7 +47,7 @@ kind X in this environment" and stop — never improvise.
 
 ## Adapter — Jira (tracker.kind = jira)
 
-Tools: `tracker.mcp_tools.create` / `.comment`; project `tracker.project`; links
+Tools: `tracker.mcp_tools.create` / `.edit` / `.comment`; project `tracker.project`; links
 `tracker.url_template` with `{key}`.
 
 1. **Create in the active sprint.** `tracker.mcp_tools.create` with `tracker.sprint_field` = the open
@@ -61,8 +62,11 @@ Tools: `tracker.mcp_tools.create` / `.comment`; project `tracker.project`; links
    `bug`/`documentation`/`data-migration` spelled identically to the PR labels so ticket and PR
    carry matching signal.
 3. **Link it.** Epic link / parent on create; related tickets via `createIssueLink`.
-4. **Opening comment** via `tracker.mcp_tools.comment`; cc anyone who must act via a one-line ADF
-   mention comment.
+4. **Opening block goes in the description** — write the Goal/Plan/Links/Sizing block into
+   `tracker.mcp_tools.create`'s `description` field at creation, or set it right after with
+   `tracker.mcp_tools.edit` if create didn't take it. The description is the durable, always-visible home; it
+   is never a comment. Post a comment only to cc someone who must act, a one-line ADF mention — never
+   a copy of the block.
 
 ### Labels — the ticket vocabulary (Jira environments)
 
@@ -87,9 +91,9 @@ in terminal replies, bare `#162` (auto-linked) inside GitHub.
 2. **Parent instead of epic link.** Put `Parent: #<n>` in the body **and** add a task-list line
    `- [ ] #<new>` to the parent/tracking issue (`gh issue edit <n> -R <repo> --body-file …`, after
    reading its current body). Related issues: a `Related: #a, #b` line.
-3. **Opening comment** = the Goal/Plan/Links block — put it in the issue body itself (the body is the
-   opening comment on GitHub); `gh issue comment` only when the body was written by someone else.
-   Mention whoever must act with `@login` on one line.
+3. **Opening block goes in the body** — the Goal/Plan/Links/Sizing block is the issue body itself (the
+   body is the opening comment on GitHub); `gh issue comment` only when the body was written by someone
+   else. Mention whoever must act with `@login` on one line.
 
 ## Not in scope
 Verifying the Sizing line and launching the work → `ticket-pickup`. Posting updates → `ticket-update`.
