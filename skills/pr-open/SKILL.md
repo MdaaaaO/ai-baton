@@ -102,8 +102,12 @@ without reading the diff — and nothing that the PR does not raise.
    ```
    `--repo` takes the clone's **directory** (the worktree you are about to push): `git diff` runs there and
    the env-config overlay key is read from its `origin` — sessions run from the workspace root, so a bare
-   `git diff` in the cwd would answer "not a git repo". An `owner/repo` slug is still accepted with `--files`.
-   It prints the facets with their weight, the dominant one, the plan (`WHERE` / `WHAT` / `RUNS`, a `?`
+   `git diff` in the cwd would answer "not a git repo". Before the first commit (writing the body, nothing
+   pushed yet), the same `--repo <repo-dir>` call still plans correctly — the diff is `--base…HEAD` plus the
+   working tree and untracked files by default (`--committed-only` drops back to history only). An
+   `owner/repo` slug is still accepted with `--files-from`; `--files <path> <path>…` takes changed paths
+   directly, not a list file (`--files-from <list.txt>` is the list-file form). It prints the facets with
+   their weight, the dominant one, the plan (`WHERE` / `WHAT` / `RUNS`, a `?`
    suffix = conditional on its "only when" clause), notes, and the `<!-- diagram-plan: … -->` marker. `--type`
    is the PR *intent* (paths cannot show it); with `--pr` it is read from the type label (`bug`/`hotfix` →
    bugfix, `tech-debt`/`refactor` → refactor, else feature).
