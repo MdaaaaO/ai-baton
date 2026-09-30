@@ -296,7 +296,7 @@ options:
 ## `session.py`
 
 ```text
-usage: session.py [-h] {register,touch,end,stats} ...
+usage: session.py [-h] {register,touch,end,stats,rename} ...
 
 session.py — maintain a session's self-reported entry in the live session
 registry. Each active Claude session that works on an epic/feature keeps ONE
@@ -315,18 +315,24 @@ FILE) the `## Next session` hand-off prompt — omit --next when the session has
 nothing to hand over, and pass --next none to withdraw a prompt already on
 file — and appends one row to sessions/_ledger.md (the cross-session
 cost/activity ledger) stats print this session's stats (block) without
-touching the registry Every subcommand also refreshes the `stats:` field (one
-line: turns, context, tokens, rough spend, PRs/tickets/sign jobs/drafts — see
-session_stats.py) when the session's transcript is discoverable via
-$CLAUDE_CODE_SESSION_ID / --session-id; `--no-stats` skips it. Stats are
-derived from the transcript with zero model turns, so the live registry row is
-always current. The content root is kit_profile.context_root() (CONTEXT_ROOT,
-which the Makefile sets from CONTEXT, else docs/layout.md's "Content root"
-default). Empty CLI values are treated as "leave unchanged" so the Makefile
-can pass every flag unconditionally. Stdlib only.
+touching the registry rename --from <old> --to <new>: move sessions/<old>.md
+to <new>.md, rewrite the `session:` frontmatter and the `# Session: <name>`
+title, re-record the scratch session name, and restart heartbeat.sh under the
+new name with the same focus (best-effort — a heartbeat outside a live session
+has nothing to attach to and is reported, not fatal); refuses when <new>
+already has an entry or does not follow the session naming convention. Every
+subcommand also refreshes the `stats:` field (one line: turns, context,
+tokens, rough spend, PRs/tickets/sign jobs/drafts — see session_stats.py) when
+the session's transcript is discoverable via $CLAUDE_CODE_SESSION_ID /
+--session-id; `--no-stats` skips it. Stats are derived from the transcript
+with zero model turns, so the live registry row is always current. The content
+root is kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets from
+CONTEXT, else docs/layout.md's "Content root" default). Empty CLI values are
+treated as "leave unchanged" so the Makefile can pass every flag
+unconditionally. Stdlib only.
 
 positional arguments:
-  {register,touch,end,stats}
+  {register,touch,end,stats,rename}
 
 options:
   -h, --help            show this help message and exit

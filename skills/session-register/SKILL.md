@@ -49,8 +49,9 @@ worktree.
    what you own (`hardening`, a ticket number, a feature); a successor on the same lane adds `-2`, `-3`
    (`kit-hardening`, `kit-216-changelog`, `<repo>-weekly-2`). `session-register` refuses a new name outside it; a
    successor takes the name its predecessor's prompt proposes. The name ends every PR body and PR comment you post on
-   your own PRs (`kit_profile.py footer`, below), so it is public: no person, org or private project in it. Get your
-   `ref` from `ListAgents` (your own row):
+   your own PRs (`kit_profile.py footer`, below), so it is public: no person, org or private project in it. A generic
+   placeholder still matches the regex and is not exempt — `<lane>-lane-<n>` (e.g. `thales-lane-6`) is not a topic;
+   the *topic* part must name what you actually own. Get your `ref` from `ListAgents` (your own row):
 
    ```sh
    make -C $BATON/context-db session-register NAME=<name> REF=<ref> EPIC=<tracker-key> \
@@ -61,6 +62,13 @@ worktree.
    needs (what you own vs. don't, in-flight worktrees/PRs). **Override it whenever your
    responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
    edit the body directly (`sessions/` stays writable; the hook regenerates `SESSION_INDEX.md`).
+   **Rename** a session already registered under a generic or wrong name instead of leaving it and
+   re-registering fresh — this moves the file, rewrites its frontmatter and title, and restarts the
+   backstop heartbeat (below) under the new name with the same focus in one step:
+   ```sh
+   make -C $BATON/context-db session-rename FROM=<old-name> TO=<new-name>
+   ```
+   `<new-name>` follows the same convention and is refused if another entry already has it.
 4. **Re-arm the PR watches.** `Monitor`s die with the session that armed them, so a restarted or
    successor session owns PRs that nobody is watching. `session.py end`/`touch` always leave a
    `## Open PRs` heading behind (`none` when there is nothing to list) — a predecessor file missing

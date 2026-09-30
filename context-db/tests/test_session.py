@@ -1,6 +1,7 @@
 """session.py / kit_profile without an env store, with a broken one, and the registry doc round trip. Stdlib unittest.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import argparse
 import importlib.util
 import os
 import subprocess
@@ -431,3 +432,117 @@ class NameConventionAndFooter(unittest.TestCase):
         self.assertEqual(run("kit_profile.py", "session-name", root=self.root, env=self.env).stdout.strip(), "kit-footer-test")
         self.assertTrue(run("kit_profile.py", "footer", root=self.root, env=self.env).stdout.strip()
                         .endswith("· session `kit-footer-test`"))
+
+
+def _load_session_module(root: Path):
+    """A fresh `session` module bound to `root` as CONTEXT_ROOT — same pattern the fence tests above use.
+    Rename tests import the module directly (never `run()`/subprocess) so `_restart_heartbeat` can be
+    monkeypatched: a real `session.py rename` subprocess would invoke the real heartbeat.sh, which — run
+    from inside an actual Claude session, as these tests are — finds the real owning `claude` process and
+    spawns a genuine background heartbeat that outlives the test. Never do that from a test."""
+    spec = importlib.util.spec_from_file_location(f"session_mod_{id(root)}", BIN / "session.py")
+    with unittest.mock.patch.dict(os.environ, {"CONTEXT_ROOT": str(root)}):
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+class RenameSubcommand(unittest.TestCase):
+    """session.py rename --from <old> --to <new>: moves sessions/<old>.md, rewrites the `session:`
+    frontmatter and the `# Session: <name>` title, and (best-effort) restarts the heartbeat under the
+    new name. `_restart_heartbeat` is always monkeypatched here — see `_load_session_module`."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        (self.root / "sessions").mkdir(parents=True)
+        self.mod = _load_session_module(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _register(self, name: str, working: str = "") -> None:
+        a = argparse.Namespace(name=name, session_id="", no_stats=True, ref="", status="", epic="",
+                                repos="", working=working, resp="", note="", next="")
+        self.mod.cmd_register(a)
+
+    def test_rename_moves_the_file_and_rewrites_frontmatter_and_title(self):
+        self._register("t-old-lane", working="on something")
+        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
+            self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-real-topic"))
+        rh.assert_called_once_with("t-old-lane", "kit-real-topic", "on something")
+        self.assertFalse((self.root / "sessions" / "t-old-lane.md").exists())
+        doc = (self.root / "sessions" / "kit-real-topic.md").read_text(encoding="utf-8")
+        self.assertIn("session: kit-real-topic", doc)
+        self.assertIn("# Session: kit-real-topic", doc)
+        self.assertNotIn("t-old-lane", doc)
+
+    def test_rename_refuses_when_the_target_already_has_an_entry(self):
+        self._register("t-old-lane")
+        self._register("kit-taken-name")
+        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True):
+            with self.assertRaises(SystemExit):
+                self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-taken-name"))
+        self.assertTrue((self.root / "sessions" / "t-old-lane.md").exists())  # untouched
+        self.assertIn("session: kit-taken-name", (self.root / "sessions" / "kit-taken-name.md").read_text())
+
+    def test_rename_rejects_a_new_name_outside_the_convention(self):
+        self._register("t-old-lane")
+        with self.assertRaises(SystemExit):
+            self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="NotKebabCase"))
+        self.assertTrue((self.root / "sessions" / "t-old-lane.md").exists())  # untouched, nothing renamed
+
+    def test_rename_reports_but_does_not_fail_when_the_heartbeat_restart_fails(self):
+        self._register("t-old-lane")
+        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=False):
+            self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-real-topic"))  # no raise
+        self.assertTrue((self.root / "sessions" / "kit-real-topic.md").exists())  # the move still happened
+
+
+class HeartbeatRestartHelpers(unittest.TestCase):
+    """`_kill_heartbeat` / `_restart_heartbeat` in isolation. `_restart_heartbeat`'s subprocess call is
+    always mocked — see `_load_session_module` above for why a real invocation must never happen in a test."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.mod = _load_session_module(Path(self.tmp.name) / ".context")  # content root unused by these helpers
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_kill_heartbeat_stops_a_live_process_and_removes_the_pidfile(self):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            pidfile = Path(self.tmp.name) / f"heartbeat-t-live.pid"
+            pidfile.write_text(str(proc.pid), encoding="utf-8")
+            with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+                self.assertTrue(self.mod._kill_heartbeat("t-live"))
+            proc.wait(timeout=5)
+            self.assertFalse(pidfile.exists())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+    def test_kill_heartbeat_cleans_up_a_stale_pidfile(self):
+        pidfile = Path(self.tmp.name) / "heartbeat-t-stale.pid"
+        pidfile.write_text("999999999", encoding="utf-8")  # practically guaranteed not to exist
+        with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+            self.assertFalse(self.mod._kill_heartbeat("t-stale"))
+        self.assertFalse(pidfile.exists())
+
+    def test_kill_heartbeat_with_no_pidfile_is_a_noop(self):
+        with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+            self.assertFalse(self.mod._kill_heartbeat("t-never-started"))
+
+    def test_restart_heartbeat_reports_success(self):
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=False), \
+             unittest.mock.patch.object(self.mod.subprocess, "run",
+                                         return_value=subprocess.CompletedProcess([], 0, "heartbeat for kit-x started", "")):
+            self.assertTrue(self.mod._restart_heartbeat("old", "kit-x", "focus"))
+
+    def test_restart_heartbeat_reports_failure_without_raising(self):
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=True), \
+             unittest.mock.patch.object(self.mod.subprocess, "run",
+                                         return_value=subprocess.CompletedProcess([], 1, "", "could not find the owning claude process")):
+            self.assertFalse(self.mod._restart_heartbeat("old", "kit-x", "focus"))
