@@ -11,7 +11,7 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
 | `PR_WATCH_KNOWN_RED` | unset | extended regex; mutes a `CHECK NOT GREEN` whose failure annotations all match a cause you already know about |
 | `PR_WATCH_REPLAY` | unset | `1` re-emits the current bot verdict / `CHECK NOT GREEN` on start; by default a re-arm on a head the state dir already knows is silent about what it already reported |
 
-- **`CHECK NOT GREEN` fires at most once per head** (reset on `HEAD MOVED`) and only once the suite has
+- **`CHECK NOT GREEN` fires at most once per head** (reset whenever the head moves) and only once the suite has
   settled — no check run still `queued`/`in_progress` — listing every failing check at that moment.
   Before 2026-09-22 it re-fired whenever the *set* of failing names changed, i.e. once per check that
   finished red — ~10 wake-ups for one cause. The rollup mixes check runs with legacy commit statuses (a
@@ -29,6 +29,8 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
   process, so a watcher re-armed on a head it already reported emits nothing until something changes —
   before 2026-09-22 every re-arm replayed the `BOT REVIEW` line for an unchanged head (one wasted wake-up per
   PR per re-arm; a third of one night's burn in the incident behind the park rule in `SKILL.md`). A different
-  head, a missing state dir, or `PR_WATCH_REPLAY=1` restores the replay. The dir is shared by every session
+  head, a missing state dir, or `PR_WATCH_REPLAY=1` restores the replay — except when the state's head is the
+  PR's live head: then the watcher already followed that move and the argument is only the arming command's
+  original head, reused on the re-arm, so the state is kept (re-arming used to report the same move twice). The dir is shared by every session
   on the same machine: a successor taking over a PR inherits the silence and reads the current verdict from the
   predecessor's `## Open PRs` list instead.
