@@ -38,7 +38,8 @@ class RegisteringFixtureNeverWritesTheRealRuntimeDir(unittest.TestCase):
             # The ambient env a real Claude Code session exports into every command it runs — what `make
             # test`'s Python process would inherit if run from inside one.
             ambient = {**os.environ, "XDG_RUNTIME_DIR": str(real_runtime), "CLAUDE_CODE_SESSION_ID": real_session}
-            ambient.pop("TMPDIR", None)
+            # TMPDIR stays: CONTEXT_ROOT (the suite's blank store) lives under it, and the package init refuses a
+            # store outside the temp dir (on macOS TMPDIR is /var/folders/…, not /tmp)
 
             # Runs entirely inside that ambient env: importing `tests` first (as `python3 -m unittest discover`
             # does for every module) must neutralize it before the inner registering fixture — built the way
