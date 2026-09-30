@@ -80,7 +80,10 @@ class Grep(unittest.TestCase):
         allowed_words = ("kit_profile", "profile.", "aws.profile", "--profile", "AWS_PROFILE", "Claude Code profile", "profile of the Agent",
                          "read_user_profile", "LEGACY_PROFILES", "RETIRED_KEYS", "## profile", '"profile"', "per-profile", "Profile names",
                          "profile row", "which profile", "profile or", "profiles share", "profiles must", "profiles reach", "profile/session",
-                         "the profile", "any profile", "profile <", "(no profile", "no leftover", ".claude/profiles/", "SSO profile", "for that profile", "profiles.yml")
+                         "the profile", "any profile", "profile <", "(no profile", "no leftover", ".claude/profiles/", "SSO profile", "for that profile", "profiles.yml",
+                         # the SessionStart hook's "resolved profile" block — an unrelated, current feature
+                         # (tracker/github.review_bot/systems.*/footer), not the retired config-profiles layer
+                         "resolved profile", "resolved-profile", "resolved_profile", "_profile_value")
         with tempfile.TemporaryDirectory() as tmp:
             out = subprocess.run(["git", "grep", "-i", "-n", "profile", "--", "*.py", "*.sh", "*.md", ".gitignore", "*.json", "Makefile", "*.mk"],
                                  cwd=KIT, capture_output=True, text=True, env=hermetic_env(tmp, trust=KIT)).stdout

@@ -3,8 +3,8 @@ name: notion-page-review
 description: "Reviews a Notion page tree (page, sub-pages, every comment thread) against the user's position, walks each proposed comment (Comment, Update wording, Skip, batches of 4), posts only approved ones as thread replies or inline comments. Invoke when the user asks to \"go through\", \"catch up on\" or \"comment on\" a Notion page."
 compatibility: "Designed for Claude Code; needs notion (systems.*)"
 metadata:
-  version: "11"
-  updated: "2026-09-28"
+  version: "12"
+  updated: "2026-09-30"
   reviewed: "2026-09-28"
   requires: "notion"
   facts: "systems.slack"
@@ -43,7 +43,9 @@ Rules for the proposals:
   notified. New inline comments only on rows nobody has touched.
 - One idea per comment. Team-meeting rulings may be cited ("today's session", "<colleague> on <date>"); **private
   1:1 agreements are not claimed** — leave those "open for discussion" unless the user says otherwise.
-- Questions for one expert are **not** a Notion comment. Before building the list, read
+- Questions for one expert are **not** a Notion comment. Before building the list, check the resolved-profile
+  block already in your SessionStart context (`systems on: …` — `slack` present means true); once a
+  compaction drops that block, or it never printed, fall back to
   `python3 $BATON/context-db/bin/kit_profile.py get systems.slack` once — never infer Slack from loaded MCP
   tools. Where it is true they become a Slack draft to that person (`slack-draft`) with the page link + the
   exact section to comment on; otherwise they go in the overview below as *redirected* — recipient,

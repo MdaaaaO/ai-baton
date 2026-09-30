@@ -2,7 +2,7 @@
 name: ticket-close
 description: "Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues): a final outcome comment (Delivered / Verified / Out-of-scope), the right transition or close reason (Done / Won't Do / Cancelled), the delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
@@ -14,8 +14,7 @@ user-invocable: true
 A closed ticket should let anyone reconstruct what shipped and what was deliberately left, from the
 ticket alone. One final comment, the correct transition, links intact.
 
-**Pick the adapter first:** `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the
-workspace root). Follow **exactly one** adapter below. Any other kind → say "no tracker adapter for
+**Pick the adapter first:** the resolved-profile block already in your SessionStart context names `tracker: kind=…`; once a compaction drops that block, or it never printed, fall back to `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the workspace root). Follow **exactly one** adapter below. Any other kind → say "no tracker adapter for
 kind X in this environment" and stop.
 
 ## Core — every tracker

@@ -1,8 +1,10 @@
 # Rules this encodes (verified on a strict-ruleset repo with a review bot)
 
 - The repo blocks merge on any unresolved thread, even a non-blocking LOW one — reply and resolve every thread.
-  Every reply and comment on your own PR ends with `python3 $BATON/context-db/bin/kit_profile.py footer` (the session
-  that wrote it); reviews on someone else's PR (`pr-review`) carry no footer. Before posting a reply, write it to a
+  Every reply and comment on your own PR ends with the footer line from the resolved-profile block already in
+  your SessionStart context (`` footer: session `<name>` ``, the session that wrote it); once a compaction drops
+  that block, or it never printed, fall back to `python3 $BATON/context-db/bin/kit_profile.py footer`. Reviews
+  on someone else's PR (`pr-review`) carry no footer. Before posting a reply, write it to a
   file and run `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file> --repo <o>/<r>` — exit 0 →
   post; exit 1 → rewrite the hits generically (never post the reply as is) and re-check; exit 3 → do not post —
   the env store could not be loaded, so the check did not run; fix the store or check the reply by hand before

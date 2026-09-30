@@ -2,7 +2,7 @@
 name: ticket-open
 description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues) — placement (sprint, or labels + milestone), labels, epic/parent link, a lean opening block (Goal + Plan + Links + Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating the ticket."
 metadata:
-  version: "9"
+  version: "10"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
@@ -16,8 +16,7 @@ every session can read intent at a glance. Mirrors `pr-open`. The shared mechani
 env config / `.context/reference/environment.md` — this skill *sequences* them, it does not
 restate them.
 
-**Pick the adapter first:** `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the
-workspace root). Follow **exactly one** adapter below. Any other kind → say "no tracker adapter for
+**Pick the adapter first:** the resolved-profile block already in your SessionStart context names `tracker: kind=…`; once a compaction drops that block, or it never printed, fall back to `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the workspace root). Follow **exactly one** adapter below. Any other kind → say "no tracker adapter for
 kind X in this environment" and stop — never improvise.
 
 ## Core — every tracker

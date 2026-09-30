@@ -2,7 +2,7 @@
 name: ticket-pickup
 description: "Verifies a ticket's Sizing line against the default branch, decides main session vs a background sub-agent and model, sizes a missing line, and claims the ticket. Use when picking up, starting or resuming a tracker ticket. Not for creating one (`ticket-open`) or posting a progress update (`ticket-update`)."
 metadata:
-  version: "2"
+  version: "3"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
@@ -17,8 +17,7 @@ re-derived from scratch at pickup. This skill is the other end: it reads that ca
 holds, and acts on it. Inline, not forked — it decides and launches, so its reasoning has to stay in the
 main session's turn.
 
-**Pick the adapter first:** `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the
-workspace root). Follow **exactly one** adapter below. Any other kind → say "no tracker adapter for
+**Pick the adapter first:** the resolved-profile block already in your SessionStart context names `tracker: kind=…`; once a compaction drops that block, or it never printed, fall back to `python3 $BATON/context-db/bin/kit_profile.py get tracker.kind` (from the workspace root). Follow **exactly one** adapter below. Any other kind → say "no tracker adapter for
 kind X in this environment" and stop — never improvise.
 
 ## 1. Read the ticket

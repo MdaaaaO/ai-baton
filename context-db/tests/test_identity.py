@@ -27,6 +27,16 @@ TOKYO = "Asia/" + "Tokyo"
 BERLIN = "Europe/" + "Berlin"
 DM = "D0" + "1ABCDEF"
 
+# session-env --update also prints the "resolved profile" block to stdout — never into the env file;
+# with CONTEXT_ROOT pointed at a store that does not exist, every value is a placeholder.
+NO_STORE_PROFILE_BLOCK = (
+    "resolved profile (kit_profile.py get):\n"
+    "  tracker: kind=<unset> key_regex=<unset> url_template=<unset>\n"
+    "  github.review_bot=<unset>\n"
+    "  systems on: <none>\n"
+    "  footer: none yet — it appears here after `session-register`\n"
+)
+
 
 class Resolver(unittest.TestCase):
     def test_option_wins_then_variable_then_empty(self):
@@ -115,7 +125,7 @@ class ManifestAndHook(unittest.TestCase):
                                                       "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN, "CONTEXT_ROOT": "/nonexistent/.context",
                                                       "KIT_SCRATCH": str(scratch)},
                                capture_output=True, text=True)
-            self.assertEqual((r.returncode, r.stdout), (0, ""))
+            self.assertEqual((r.returncode, r.stdout), (0, NO_STORE_PROFILE_BLOCK))
             self.assertEqual(envfile.read_text(encoding="utf-8"),
                               f"# ai-baton session-env begin\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n"
                               "# ai-baton session-env end\n")
@@ -126,7 +136,7 @@ class ManifestAndHook(unittest.TestCase):
                                                       "CLAUDE_PLUGIN_OPTION_GITHUB_LOGIN": LOGIN, "CONTEXT_ROOT": "/nonexistent/.context",
                                                       "KIT_SCRATCH": str(scratch)},
                                capture_output=True, text=True)
-            self.assertEqual((r.returncode, r.stdout), (0, ""))
+            self.assertEqual((r.returncode, r.stdout), (0, NO_STORE_PROFILE_BLOCK))
             self.assertEqual(envfile.read_text(encoding="utf-8"),
                               f"# ai-baton session-env begin\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n"
                               "# ai-baton session-env end\n")
