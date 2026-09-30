@@ -41,9 +41,20 @@ still open, not the evidence behind them.
 
 ## After the answer
 
-Act on every answer **in the same turn** — an approved choice is never banked for later. Write one
-dated line per answer under the context doc's *Key decisions & gotchas* section, so the choice can be defended
-later without re-deriving it.
+Act on every answer **in the same turn** — an approved choice is never banked for later. Then, for
+every question answered, append one ledger line to the epic context doc's *Key decisions & gotchas*
+section, in this grammar:
+
+```
+YYYY-MM-DD · <question> → <chosen>; not <rejected options> — <one clause why>
+```
+
+so the choice can be defended later without re-deriving it. Write it through the store's write
+tools — `ctx_log` with `--section "Key decisions & gotchas"`, or `ctx_insert`; Bash fallback
+`ctx_adapter.py ctx …` — never a direct edit of the doc. Work with no epic context doc: the line
+goes into the ticket's next delta comment instead (`ticket-update`), same grammar. A decision asked
+through the headless `Decisions` block (below) is ledgered when it is answered, by the session that
+receives the answer.
 
 ## No tool — headless or scheduled runs
 

@@ -579,6 +579,11 @@ Checks every content doc for:
   - an ISO `updated` date that parses,
   - INDEX.md being up to date (regenerate and diff).
 
+Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & gotchas*
+(`docs/carousel.md` § After the answer) — a line that already looks like a ledger entry (starts
+with a date, then has `→`) but is missing its date or its `; not <rejected>` clause. A free-form
+gotcha line in that section (no `→`) never warns.
+
 Operates on the content root gen_index takes from kit_profile.context_root() (docs/layout.md's
 "Content root" paragraph). Run via `make -C $BATON/context-db verify`. Stdlib only.
 ```
