@@ -41,7 +41,8 @@ Review-runner for <owner/repo>#<pr>. Flags: <--deep | none>. Mode is decided by 
 Follow your agent definition ($BATON/agents/review-runner.md): pr-review steps 1–4 only, write
 $CTX/triage.json (+ traps.json, ff.json), return the REVIEW SHEET block with CTX/NEEDS/NOTE lines
 and nothing else. Do not post anything anywhere and do not ask questions.
-Before any live `gh` read: `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"`. An auth
+Prefix every live `gh` read with `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)" &&` in the same
+command (an export does not survive into the next Bash call). An auth
 failure on one of those reads is `NEEDS gh reauth`, not `unverified`.
 Extra context from the queue: <pr-scan row: prio, why-now, size, human reviews, threads/bot>.
 <modelling PR: "Modelling PR — the datalake data pass and the 4b stakeholder-impact map are mandatory; write impact.json.">

@@ -41,7 +41,8 @@ so you spend them on judgment, not on fetching.
    findings unless the user asked; the walk is about replies).
 2. First `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"` — the same line `fetch-context.sh`
    already runs, exporting `github.sandbox_token_prefix` where a sandbox needs it and nothing where `gh` is
-   logged in natively — once, before any of the four live `gh` reads below (this step's `head/AGENTS.md`
+   logged in natively — in the same Bash command as each of the four live `gh` reads below
+   (`eval "$(…gh-env)" && gh api …`: an export does not survive into the next Bash call) (this step's `head/AGENTS.md`
    fallback; step 4's base blob and external-repo file; step 4b's `ref()` search). An auth failure on one of
    them (not an empty result or a 404 — `gh` reporting unauthenticated) is not `unverified`: stop that read
    and return `NEEDS gh reauth` (see the Return block below) instead of listing the trap it would

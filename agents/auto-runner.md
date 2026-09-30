@@ -26,7 +26,8 @@ gate's output object. Do this:
    Everything you need is under `$CTX`: `head/<path>` (file at head), `base/<path>`, `diffs/`, `bundle.json`.
 2. First `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"` — the same line `fetch-context.sh`
    already runs, exporting `github.sandbox_token_prefix` where a sandbox needs it and nothing where `gh` is
-   logged in natively — once, before either live `gh api` read below.
+   logged in natively — in the same Bash command as each live `gh api` read below (`eval "$(…gh-env)" &&
+   gh api …`: an export does not survive into the next Bash call).
    **docs**: every path, command, flag, table, DAG id or model name the changed text names must exist at
    the head ref — grep `head/` first, then at most 5 `gh api repos/<o>/<r>/contents/<path>?ref=<HEAD>`
    existence checks for paths outside the bundle. No statement may contradict the code it describes; no

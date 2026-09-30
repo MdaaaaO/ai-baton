@@ -66,6 +66,13 @@ class GhEnvBeforeLiveReads(unittest.TestCase):
     the main session spawns it with carry the same setup line `fetch-context.sh` already runs, and an auth
     failure on one of those reads is a `NEEDS` hand-back — never folded into an `unverified` trap."""
 
+    def test_gh_env_is_prefixed_per_command_not_run_once(self):
+        # an export in one Bash call does not reach the next: "once, before the reads" leaves them unauthenticated
+        for rel in ("agents/review-runner.md", "agents/auto-runner.md", "skills/pr-review/reference/runner.md"):
+            text = (KIT / rel).read_text(encoding="utf-8")
+            self.assertIn("does not survive into the next Bash call", text, rel)
+            self.assertNotRegex(text, r"gh-env[^\n]*\n?[^\n]*\bonce, before", rel)
+
     def test_the_auth_line_is_a_named_reason_not_a_fact_handback(self):
         # a line matching kb.NEEDS_HANDBACK is routed to env-init as a missing fact; an auth failure is not one
         sys.path.insert(0, str(KIT / "context-db" / "bin"))
