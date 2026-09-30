@@ -56,7 +56,8 @@ FOOTER_RE = re.compile(r"session `[^`\n]+`")
 # so a human co-author named Claude is never caught; same pattern as commit_style.py's ATTRIBUTION_RE
 ATTRIBUTION_RE = re.compile(
     r"Generated with \[Claude Code\]"
-    r"|Co-Authored-By:\s*Claude(?:\s+(?:Code|Opus|Sonnet|Haiku|Fable)(?:[\s-]?\d+)?)?\s*<[^>\n]*>",
+    r"|Co-Authored-By:\s*Claude(?:\s+(?:Code|Opus|Sonnet|Haiku|Fable)(?:[\s-]?\d+(?:\.\d+)*)?)?\s*<[^>\n]*>"
+    r"|Co-Authored-By:[^\n<]*<[^>\n]*@anthropic\.com>",  # any model name the family list does not know yet
     re.I,
 )
 LEAK_RE = re.compile(r"(?<![\w.])\.context/|(?<![\w.])\.worktrees/|(?<![\w])/(?:home|Users)/[^/\s`'\"]+/|(?<![\w/])~/")

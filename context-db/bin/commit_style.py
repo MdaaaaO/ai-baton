@@ -60,7 +60,8 @@ CREL_TABLE = re.compile(r"^\[\[?tool\.conventional-release[\].]", re.M)
 # Claude (a "Claude <Surname> <email>" shape) is never caught.
 ATTRIBUTION_RE = re.compile(
     r"Generated with \[Claude Code\]"
-    r"|Co-Authored-By:\s*Claude(?:\s+(?:Code|Opus|Sonnet|Haiku|Fable)(?:[\s-]?\d+)?)?\s*<[^>\n]*>",
+    r"|Co-Authored-By:\s*Claude(?:\s+(?:Code|Opus|Sonnet|Haiku|Fable)(?:[\s-]?\d+(?:\.\d+)*)?)?\s*<[^>\n]*>"
+    r"|Co-Authored-By:[^\n<]*<[^>\n]*@anthropic\.com>",  # any model name the family list does not know yet
     re.I,
 )
 

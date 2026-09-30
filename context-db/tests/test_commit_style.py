@@ -85,6 +85,14 @@ class Subjects(BlankStore):
         self.assertTrue(any("AI attribution" in p for p in
                              cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude Sonnet 5 <noreply@example.invalid>\n",
                                                "conventional")))
+        # the trailers actually seen carry a dotted version, and a new model family must not slip past the list:
+        # an address at the vendor's domain is attribution whatever name precedes it (assembled: no email literal)
+        vendor = "noreply@" + "anthropic" + ".com"
+        for name in ("Claude Opus 4.5", "Claude Sonnet 4.5", "Claude Haiku 4.5", "Claude Mythos 2"):
+            self.assertTrue(any("AI attribution" in p for p in cs.check_message(
+                f"feat(kb): add x\n\nbody\n\nCo-Authored-By: {name} <{vendor}>\n", "conventional")), name)
+        self.assertTrue(any("AI attribution" in p for p in cs.check_message(
+            "feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude Opus 4.5 <noreply@example.invalid>\n", "conventional")))
 
     def test_label_for(self):
         self.assertEqual(cs.label_for("feat(kb): add x"), "enhancement")

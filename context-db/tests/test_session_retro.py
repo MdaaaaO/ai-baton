@@ -133,6 +133,9 @@ class RuleChecks(RetroCase):
         self.assertIn("attribution-leak", self.rules(comment))
         mcp = Builder().user("go").call("mcp__github__create_issue", title="x", body="see below\nCo-Authored-By: Claude <noreply@example.invalid>")
         self.assertIn("attribution-leak", self.rules(mcp))
+        dotted = Builder().user("go").call("mcp__github__create_issue", title="x",
+                                           body="done\nCo-Authored-By: Claude Opus 4.5 <noreply@example.invalid>")
+        self.assertIn("attribution-leak", self.rules(dotted))  # the dotted version the real trailer carries
         human_coauthor = Builder().user("go").bash(
             "git commit -qm \"$(cat <<'EOF'\nfix(sync): release the lock\n\nCo-Authored-By: Alex Doe <alex@example.invalid>\nEOF\n)\"")
         self.assertNotIn("attribution-leak", self.rules(human_coauthor))
