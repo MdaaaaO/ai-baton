@@ -17,7 +17,7 @@
 #                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
 #   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
 #   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
-#   make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry, restart heartbeat.sh under TO
+#   make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
 #   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
 #   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
 #   make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only

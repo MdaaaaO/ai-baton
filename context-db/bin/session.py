@@ -19,8 +19,9 @@ Subcommands (each regenerates SESSION_INDEX.md):
   stats     print this session's stats (block) without touching the registry
   rename    --from <old> --to <new>: move sessions/<old>.md to <new>.md, rewrite the `session:`
             frontmatter and the `# Session: <name>` title, re-record the scratch session name, and
-            restart heartbeat.sh under the new name with the same focus (best-effort — a heartbeat
-            outside a live session has nothing to attach to and is reported, not fatal); refuses when
+            when a heartbeat was running for <old>, restart heartbeat.sh under the new name with the same
+            focus (best-effort — a heartbeat outside a live session has nothing to attach to and is reported,
+            not fatal); refuses when
             <new> already has an entry or does not follow the session naming convention.
 
 Every subcommand also refreshes the `stats:` field (one line: turns, context, tokens, rough
