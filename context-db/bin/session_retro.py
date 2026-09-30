@@ -52,7 +52,13 @@ DENIAL_RE = re.compile(
     r"|denied by (?:the )?(?:user|policy|rule|hook)|blocked by (?:a |the )?(?:hook|policy|rule|permission)"
     r"|hook (?:error|blocked)|pretooluse\S* .*?(?:denied|blocked)", re.I | re.S)
 FOOTER_RE = re.compile(r"session `[^`\n]+`")
-ATTRIBUTION_RE = re.compile(r"Generated with \[Claude Code\]|Co-Authored-By:\s*Claude\b", re.I)
+# matched narrowly — bare "Claude" or "Claude <model family>" immediately followed by the trailer's `<email>` —
+# so a human co-author named Claude is never caught; same pattern as commit_style.py's ATTRIBUTION_RE
+ATTRIBUTION_RE = re.compile(
+    r"Generated with \[Claude Code\]"
+    r"|Co-Authored-By:\s*Claude(?:\s+(?:Code|Opus|Sonnet|Haiku|Fable)(?:[\s-]?\d+)?)?\s*<[^>\n]*>",
+    re.I,
+)
 LEAK_RE = re.compile(r"(?<![\w.])\.context/|(?<![\w.])\.worktrees/|(?<![\w])/(?:home|Users)/[^/\s`'\"]+/|(?<![\w/])~/")
 STORE_WRITES = {"kb.py": ("set", "rm", "config-set", "init", "migrate"), "session.py": ("register", "touch", "end")}
 MAKE_WRITES = ("session-register", "session-touch", "session-end")

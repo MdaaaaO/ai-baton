@@ -76,7 +76,7 @@ no_nl worktree "$wt"; no_nl branch "$br"; no_nl "message path" "$msg"; no_nl --f
 # commit_style.py from the worktree's repo marker / commitlint / env config. SIGN_QUEUE_SKIP_STYLE=1 = deliberate one-off.
 if [ "${SIGN_QUEUE_SKIP_STYLE:-0}" != "1" ]; then
   python3 "$(cd "$(dirname "$0")/../.." && pwd)/context-db/bin/commit_style.py" check --quiet --dir "$wt" "$msg" \
-    || { echo "message file $msg does not follow the repo's commit style — fix the subject (or SIGN_QUEUE_SKIP_STYLE=1 for a deliberate one-off)" >&2; exit 2; }
+    || { echo "message file $msg does not follow the repo's commit style — fix the message (or SIGN_QUEUE_SKIP_STYLE=1 for a deliberate one-off)" >&2; exit 2; }
 fi
 if [ -z "$(git -C "$wt" status --short)" ]; then
   # clean worktree: allow a push-only retry (commit already made on a previous drain, push failed)

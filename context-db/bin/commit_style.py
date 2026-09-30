@@ -55,8 +55,14 @@ COMMITLINT = ("commitlint.config.js", "commitlint.config.cjs", "commitlint.confi
 CREL_TABLE = re.compile(r"^\[\[?tool\.conventional-release[\].]", re.M)
 # no AI attribution anywhere (owner decision, 2026-09-28): the session self-identifier from `kit_profile.py footer`
 # (`session `<name>``) is the only thing that stays — a "Generated with" line or a `Co-Authored-By: Claude …`
-# trailer is refused on every commit, same as a bad subject
-ATTRIBUTION_RE = re.compile(r"Generated with \[Claude Code\]|Co-Authored-By:\s*Claude\b", re.I)
+# trailer is refused on every commit, same as a bad subject. Matched narrowly — bare "Claude" or "Claude <model
+# family>" immediately followed by the trailer's `<email>` — so a human co-author whose first name happens to be
+# Claude (a "Claude <Surname> <email>" shape) is never caught.
+ATTRIBUTION_RE = re.compile(
+    r"Generated with \[Claude Code\]"
+    r"|Co-Authored-By:\s*Claude(?:\s+(?:Code|Opus|Sonnet|Haiku|Fable)(?:[\s-]?\d+)?)?\s*<[^>\n]*>",
+    re.I,
+)
 
 
 def _config() -> dict:

@@ -78,6 +78,13 @@ class Subjects(BlankStore):
         self.assertTrue(any("AI attribution" in p for p in
                              cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude <noreply@example.invalid>\n", "conventional")))
         self.assertEqual(cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Alex Doe <alex@example.invalid>\n", "conventional"), [])
+        # a human co-author whose first name happens to be Claude — surname distinguishes them from the AI trailer
+        self.assertEqual(
+            cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude Martin <claude.martin@example.invalid>\n",
+                              "conventional"), [])
+        self.assertTrue(any("AI attribution" in p for p in
+                             cs.check_message("feat(kb): add x\n\nbody\n\nCo-Authored-By: Claude Sonnet 5 <noreply@example.invalid>\n",
+                                               "conventional")))
 
     def test_label_for(self):
         self.assertEqual(cs.label_for("feat(kb): add x"), "enhancement")

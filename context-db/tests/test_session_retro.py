@@ -120,6 +120,8 @@ class RuleChecks(RetroCase):
         home = "/" + "home" + "/someone/"  # assembled: no path-shaped literal in the source
         mcp = Builder().user("go").call("mcp__github__create_issue", title="x", body=f"from {home}proj")
         self.assertIn("workspace-path", self.rules(mcp))
+        clean = Builder().user("go").bash("gh issue comment 5 -R acme/widgets --body 'fixed in #6'")
+        self.assertNotIn("workspace-path", self.rules(clean))
 
     def test_attribution_leak_in_pr_body_comment_and_commit(self):
         gen = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
@@ -134,11 +136,13 @@ class RuleChecks(RetroCase):
         human_coauthor = Builder().user("go").bash(
             "git commit -qm \"$(cat <<'EOF'\nfix(sync): release the lock\n\nCo-Authored-By: Alex Doe <alex@example.invalid>\nEOF\n)\"")
         self.assertNotIn("attribution-leak", self.rules(human_coauthor))
+        # a human co-author whose first name happens to be Claude — surname distinguishes them from the AI trailer
+        human_claude = Builder().user("go").bash(
+            "git commit -qm \"$(cat <<'EOF'\nfix(sync): release the lock\n\nCo-Authored-By: Claude Martin <claude.martin@example.invalid>\nEOF\n)\"")
+        self.assertNotIn("attribution-leak", self.rules(human_claude))
         commit = Builder().user("go").bash(
             "git commit -qm \"$(cat <<'EOF'\nfix(sync): release the lock\n\nCo-Authored-By: Claude <noreply@example.invalid>\nEOF\n)\"")
         self.assertIn("attribution-leak", self.rules(commit))
-        clean = Builder().user("go").bash("gh issue comment 5 -R acme/widgets --body 'fixed in #6'")
-        self.assertNotIn("workspace-path", self.rules(clean))
 
     def test_store_write_from_worktree_without_context_root(self):
         wt = "/work/.worktrees/kit_x"
