@@ -1,8 +1,8 @@
 ---
 name: cost-report
-description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7 by default, named phases on request. Org mode reports billed cost with an anonymous aggregate control; private mode estimates list price from local transcripts. Opens with a Basis block; never names anyone. Invoke as \"cost report\" or \"how efficient was last week\"."
+description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7, or named phases. Org mode reports billed cost with an aggregate control; private mode estimates from local transcripts. Never names anyone. Invoke as \"cost report\" or \"how efficient was last week\"."
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-09-30"
   reviewed: "2026-09-25"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
