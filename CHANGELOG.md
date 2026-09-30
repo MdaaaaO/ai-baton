@@ -4,6 +4,66 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.6.0 (2026-09-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **engine:** route .context/ writes through ctx verbs (#215) ([#322](https://github.com/MdaaaaO/ai-baton/issues/322))
+* **engine:** chronological session logs via ctx v0.5.0 (#215) ([#359](https://github.com/MdaaaaO/ai-baton/issues/359))
+
+
+### Features
+
+* **engine:** add the ctx-store adapter, pin and session-id stamp (#215) ([#311](https://github.com/MdaaaaO/ai-baton/issues/311)) ([a4d29cf](https://github.com/MdaaaaO/ai-baton/commit/a4d29cfbbe8f538cbdda48aed6920768e48e6368))
+* **engine:** route .context/ writes through ctx verbs (#215) ([#322](https://github.com/MdaaaaO/ai-baton/issues/322)) ([31e2925](https://github.com/MdaaaaO/ai-baton/commit/31e2925be46ff9cb8af5725249cce3079b512b5c))
+* **engine:** pin ctx v0.4.0 and adopt with init --upgrade (#215) ([#324](https://github.com/MdaaaaO/ai-baton/issues/324)) ([c4d92e6](https://github.com/MdaaaaO/ai-baton/commit/c4d92e6813bcb2174cde9b15b98dddefd0856f27))
+* **engine:** verify ctx writes and check the ctx pin (#215) ([#325](https://github.com/MdaaaaO/ai-baton/issues/325)) ([eabf4c1](https://github.com/MdaaaaO/ai-baton/commit/eabf4c175ce460fde8f43b2eaeae2bb44ddbb5af))
+* **engine:** chronological session logs via ctx v0.5.0 (#215) ([#359](https://github.com/MdaaaaO/ai-baton/issues/359)) ([341506f](https://github.com/MdaaaaO/ai-baton/commit/341506f515c4345126e4b546ee26935aa2ff11c4))
+* **ticket-open:** jira opening block goes in the description (#339) ([#372](https://github.com/MdaaaaO/ai-baton/issues/372)) ([0d411c9](https://github.com/MdaaaaO/ai-baton/commit/0d411c94cd473a0d334cf3a510e87b72676ea315))
+* **engine:** drop ai attribution footer, keep session self-id (#336) ([#364](https://github.com/MdaaaaO/ai-baton/issues/364)) ([dc47c31](https://github.com/MdaaaaO/ai-baton/commit/dc47c31ca06be95cb3bcde6bd66c724b039e5e52))
+* **pr-review:** add opt-in unattended auto-comment path (#352) ([#373](https://github.com/MdaaaaO/ai-baton/issues/373)) ([a83d24c](https://github.com/MdaaaaO/ai-baton/commit/a83d24c4d6add6191d19df1bd0d95dcd38d0a364))
+* **kit-health:** low-disk warning; leak scan skips ignored paths (#343) ([#365](https://github.com/MdaaaaO/ai-baton/issues/365)) ([3c2d3fd](https://github.com/MdaaaaO/ai-baton/commit/3c2d3fd58bc4822e40042c28b172bb098d33a79f))
+* **engine:** scan outgoing issue/PR text for env-private values (#357) ([#376](https://github.com/MdaaaaO/ai-baton/issues/376)) ([37a70d1](https://github.com/MdaaaaO/ai-baton/commit/37a70d10a74cd694dd50c65c9de3b613c53d6c78))
+
+
+### Bug Fixes
+
+* **kit-health:** treat the pinned ctx-store repo as a dependency (#312) ([#313](https://github.com/MdaaaaO/ai-baton/issues/313)) ([822933c](https://github.com/MdaaaaO/ai-baton/commit/822933c0e4b92513c40dbd4d4b9e10d69e25a9a5))
+* **plugin:** pin marketplace source to the release tag (#319) ([#328](https://github.com/MdaaaaO/ai-baton/issues/328)) ([8a6a5c0](https://github.com/MdaaaaO/ai-baton/commit/8a6a5c03d3c78d0ed6961c907fa281692d4fd1c3))
+* **tests:** isolate the scratch dir from the running session (#326) ([#330](https://github.com/MdaaaaO/ai-baton/issues/330)) ([b27521a](https://github.com/MdaaaaO/ai-baton/commit/b27521afa2fb4096387799f30d7798bc925a2921))
+* **pr-review:** eval gh-env before the runner's live gh reads (#329) ([#332](https://github.com/MdaaaaO/ai-baton/issues/332)) ([947002a](https://github.com/MdaaaaO/ai-baton/commit/947002a5b9086c9338d914f33e3a2a92c10a2052))
+* **engine:** ignore nested _templates and add ledger frontmatter (#327) ([#331](https://github.com/MdaaaaO/ai-baton/issues/331)) ([e24e5e8](https://github.com/MdaaaaO/ai-baton/commit/e24e5e82a63504dfcbe602449919c1b578049c63))
+* **cost-report:** make control sql week bucketing engine-portable (#353) ([#358](https://github.com/MdaaaaO/ai-baton/issues/358)) ([6958508](https://github.com/MdaaaaO/ai-baton/commit/6958508e65294e9961b9016c688a1366280db2c7))
+* **pr-open:** mermaid deps hint, diagram-plan inputs, sizing (#342) ([#362](https://github.com/MdaaaaO/ai-baton/issues/362)) ([664c77c](https://github.com/MdaaaaO/ai-baton/commit/664c77c56ceb4c2319a575d01da16a89c02da58c))
+* **sign-queue:** verify every pushed commit; add --supersede (#334) ([#371](https://github.com/MdaaaaO/ai-baton/issues/371)) ([9eb538e](https://github.com/MdaaaaO/ai-baton/commit/9eb538e9482a43c531f2effc6055f4636129a305))
+* **engine:** session index links, Open PRs heading, rename (#335) ([#366](https://github.com/MdaaaaO/ai-baton/issues/366)) ([84d9448](https://github.com/MdaaaaO/ai-baton/commit/84d9448248fdc202958913f173585ab1590c2686))
+* **pr-event-brief:** check bot threads before re-requesting (#341) ([#360](https://github.com/MdaaaaO/ai-baton/issues/360)) ([b1dd4d3](https://github.com/MdaaaaO/ai-baton/commit/b1dd4d3378cede2b8383dd7a7fdb56fa0464f312))
+* **skills:** slack-draft thread read, pr-scan in background (#347) ([#361](https://github.com/MdaaaaO/ai-baton/issues/361)) ([9a1e9a9](https://github.com/MdaaaaO/ai-baton/commit/9a1e9a94bb805299186bc9c93283db245130c198))
+* **session-retro:** skip commits in temp dirs or alongside pytest (#346) ([#363](https://github.com/MdaaaaO/ai-baton/issues/363)) ([1382e07](https://github.com/MdaaaaO/ai-baton/commit/1382e07f566c29178c77fdf15521d681d0b96c3c))
+* **ticket-update:** gate jira remotelink pointer on write_api (#340) ([#368](https://github.com/MdaaaaO/ai-baton/issues/368)) ([e23d1fe](https://github.com/MdaaaaO/ai-baton/commit/e23d1feb8c4dca23c3b67c562cadf4d8609c8e37))
+* **pr-watch:** 30-min monitor cap, silent own-sync head move (#337) ([#369](https://github.com/MdaaaaO/ai-baton/issues/369)) ([6cdd4ab](https://github.com/MdaaaaO/ai-baton/commit/6cdd4ab26589bbedbeb9db8609328f8713c0e6ca))
+* **engine:** expand session-id default instead of literal ref (#367) ([#375](https://github.com/MdaaaaO/ai-baton/issues/375)) ([c567a54](https://github.com/MdaaaaO/ai-baton/commit/c567a54054f2c4cb18c16961d5d0390b95eb27ff))
+* **pr-scan:** loop over an empty repo list on bash 3.2 (#352) ([#377](https://github.com/MdaaaaO/ai-baton/issues/377)) ([f0bf527](https://github.com/MdaaaaO/ai-baton/commit/f0bf52759d0012a3d47d3e7296a89bf50d50e700))
+
+
+### Documentation
+
+* **workspace:** name every skill in the § Skills trigger table (#314) ([#315](https://github.com/MdaaaaO/ai-baton/issues/315)) ([709699a](https://github.com/MdaaaaO/ai-baton/commit/709699a873845a1f155e2a406d2e8d0123401009))
+* **decisions:** add ADR notes for env store, sign-queue, runner (#192) ([#318](https://github.com/MdaaaaO/ai-baton/issues/318)) ([223002b](https://github.com/MdaaaaO/ai-baton/commit/223002b8b9f38cfa17c87c634767fd6e1299af8a))
+* **repo:** name the maintainer email as the conduct contact (#317) ([#323](https://github.com/MdaaaaO/ai-baton/issues/323)) ([09ca839](https://github.com/MdaaaaO/ai-baton/commit/09ca8393460dc1d1ede54520380fdc51e6fd342e))
+
+
+### Tests
+
+* **evals:** behaviour cases for gated skills and merge paths (#186) ([#321](https://github.com/MdaaaaO/ai-baton/issues/321)) ([69d489e](https://github.com/MdaaaaO/ai-baton/commit/69d489e11a83ed4558a7d612334decb6f769849a))
+* **engine:** use made-up values in the session-name guard tests (#357) ([#391](https://github.com/MdaaaaO/ai-baton/issues/391)) ([44fd9ed](https://github.com/MdaaaaO/ai-baton/commit/44fd9edd63acbf1de6e97e82ba908a41e0ef88af))
+
+
+### Chore
+
+* **kit-health:** allow the maintainer email as conduct contact (#317) ([#320](https://github.com/MdaaaaO/ai-baton/issues/320)) ([d5b5fbc](https://github.com/MdaaaaO/ai-baton/commit/d5b5fbca660d750513518090acf1f9447e3d1261))
+
 ## 0.5.0 (2026-09-28)
 
 
