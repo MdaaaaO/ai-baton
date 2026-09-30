@@ -70,7 +70,10 @@ SKIP_LINE = re.compile(r"^\s*(requires|facts):")  # not `tools:`: an agent's ros
 SKIP_FILES = frozenset({"leak_shapes.py", "kit-health.py", "allow.txt"})
 # One skip rule for every scanner — kit-health's tree walk and the review gate (diff and --tree) decide the same:
 # a `fixtures/` directory holds deliberate test data (decoy leaks the tests must see), a binary suffix has no lines.
-SKIP_DIRS = frozenset({"fixtures", "__pycache__"})
+# `node_modules` is a vendored dependency tree (`skills/pr-open/mermaid-check.mjs` needs `npm ci` there): third-party
+# text changes with every dependency bump, so an allow.txt entry per hit is not workable — the tree is skipped
+# outright, the same way `fixtures/` is, rather than scanned and allowed.
+SKIP_DIRS = frozenset({"fixtures", "__pycache__", "node_modules"})
 SKIP_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".gz", ".woff", ".woff2", ".jsonl", ".pyc"})
 
 

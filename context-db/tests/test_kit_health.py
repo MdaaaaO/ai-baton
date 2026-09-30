@@ -16,10 +16,13 @@ from pathlib import Path
 KIT = Path(__file__).resolve().parents[2]
 BIN = KIT / "context-db" / "bin"
 sys.path.insert(0, str(BIN))
+sys.path.insert(0, str(KIT / "context-db"))
 
 import kb  # noqa: E402
 import kit_profile  # noqa: E402
 import leak_shapes  # noqa: E402
+
+from tests import hermetic_env  # noqa: E402
 
 LEAK = "C0" + "AB12CD3EF"  # a Slack-shaped id, assembled so no scanner reads this file as a leak
 TICKET = "DATA-" + "1234"  # a ticket-shaped key, likewise
@@ -175,6 +178,104 @@ class Helpers(unittest.TestCase):
             kh.kb.all_facts = saved
         self.assertTrue(any("env-store tables could not be read (bad table)" in e for e in errors), errors)
         self.assertIsInstance(pats, list)
+
+
+class GitIgnoredScan(unittest.TestCase):
+    """`git_ignored()` — the fallback that drops a git-ignored vendored/build tree from `scan_files()` beyond the
+    fixed `SKIP_DIRS` list (`node_modules` there catches the common case; this catches any other one this
+    environment's own `.gitignore` names)."""
+
+    def test_reports_the_paths_the_gitignore_excludes(self):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True, env=hermetic_env(root))
+            (root / "vendor").mkdir()
+            (root / "vendor" / "x.js").write_text("x", encoding="utf-8")
+            (root / "kept.md").write_text("x", encoding="utf-8")
+            (root / ".gitignore").write_text("vendor/\n", encoding="utf-8")
+            self.assertEqual(kh.git_ignored(root, ["vendor/x.js", "kept.md"]), {"vendor/x.js"})
+
+    def test_falls_back_to_empty_without_a_git_checkout(self):
+        # a plugin install has no `.git` — check-ignore has nothing to compare against, so scan_files() keeps
+        # scanning everything SKIP_DIRS/SKIP_FILES don't already exclude, exactly as before this existed
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "x.md").write_text("x", encoding="utf-8")
+            self.assertEqual(kh.git_ignored(root, ["x.md"]), set())
+
+    def test_empty_input_short_circuits(self):
+        kh = load_kit_health()
+        self.assertEqual(kh.git_ignored(KIT, []), set())
+
+    def test_a_parent_repo_that_ignores_the_kit_never_empties_the_scan(self):
+        # the kit has no .git of its own and sits inside a repo whose .gitignore excludes it: that parent's rules
+        # are not the kit's, and honouring them would drop every kit file and read as a clean GREEN scan
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as td:
+            parent = Path(td)
+            subprocess.run(["git", "init", "-q"], cwd=parent, check=True, env=hermetic_env(parent))
+            (parent / ".gitignore").write_text("kit/\n", encoding="utf-8")
+            root = parent / "kit"
+            root.mkdir()
+            (root / "SKILL.md").write_text("x", encoding="utf-8")
+            with mock.patch.dict(os.environ, hermetic_env(parent)):
+                self.assertEqual(kh.git_ignored(root, ["SKILL.md"]), set())
+
+
+class DiskCheck(unittest.TestCase):
+    """`disk_wiring()` — free-disk on `/`, `$HOME` and the scratch root, plus the top-cache sizes above
+    `DISK_WARN_PCT` (a sandbox root overlay filled silently from an untended build cache; the first symptom was
+    an ENOSPC inside an unrelated skill step, so kit-health looks at the machine, not only at the kit)."""
+
+    def test_human_size(self):
+        kh = load_kit_health()
+        self.assertEqual(kh.human_size(0), "0B")
+        self.assertEqual(kh.human_size(512), "512B")
+        self.assertEqual(kh.human_size(2048), "2.0K")
+        self.assertEqual(kh.human_size(5 * 1024 * 1024), "5.0M")
+
+    def test_du_sums_file_sizes_recursively(self):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a.o").write_bytes(b"x" * 100)
+            (root / "sub").mkdir()
+            (root / "sub" / "b.o").write_bytes(b"y" * 50)
+            self.assertEqual(kh.du(root), 150)
+
+    def test_below_threshold_is_ok_and_lists_no_caches(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        Usage = type(kh.shutil.disk_usage(Path.cwd()))  # the real namedtuple type, any real path will do
+        with mock.patch.object(kh.shutil, "disk_usage", return_value=Usage(total=100, used=50, free=50)):
+            kh.disk_wiring(r, targets=[("/", Path("/"))])
+        text = "\n".join(r.lines)
+        self.assertIn("✅", text)
+        self.assertIn("50% full on `/`", text)
+        self.assertEqual(r.counts[kh.WARN], 0)
+
+    def test_above_threshold_warns_and_lists_cache_sizes_once(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        Usage = type(kh.shutil.disk_usage(Path.cwd()))
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".cache" / "go-build").mkdir(parents=True)
+            (home / ".cache" / "go-build" / "b.o").write_bytes(b"x" * 4096)
+            (home / ".npm").mkdir()  # present but empty — no size, no line
+            with mock.patch.object(kh.shutil, "disk_usage", return_value=Usage(total=100, used=96, free=4)), \
+                 mock.patch.object(kh.Path, "home", return_value=home):
+                kh.disk_wiring(r, targets=[("/", Path("/a")), ("$HOME", Path("/b"))])
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 2)  # both targets over DISK_WARN_PCT
+        self.assertIn("96% full on `/`", text)
+        self.assertIn("96% full on `$HOME`", text)
+        self.assertIn("go-build", text)
+        self.assertIn("rm -rf ~/.cache/go-build", text)
+        self.assertEqual(text.count("safe to remove"), 1)  # listed once, not once per over-threshold target
+        self.assertNotIn("~/.npm`", text)  # empty cache dir: no size to report, no line at all
 
 
 class ReadOnlyRun(unittest.TestCase):

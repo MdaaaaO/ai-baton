@@ -80,7 +80,7 @@ fi
 if [ -s "$LEDGER" ]; then
   LEDGER_JSON=$(jq -sc . "$LEDGER" 2>"$OUT/ledger.err") || { echo "FAIL ledger parse: $LEDGER is not valid JSONL ($(head -c 200 "$OUT/ledger.err"))"; exit 4; }
 else LEDGER_JSON='[]'; fi
-for r in "${REPOS[@]}"; do
+for r in ${REPOS[@]+"${REPOS[@]}"}; do  # bash 3.2 (macOS): an empty array under set -u is "unbound"
   gh_json "list $r" pr list --repo "$r" --state open --draft=false --limit 100 --json number,updatedAt,isDraft,author,headRefOid || continue
   rows=$(jq -c --arg r "$r" --arg me "$ME" --arg since "$since" --argjson bots "$BOTS" --argjson led "$LEDGER_JSON" '
     .[] | select(.author.login!=$me)

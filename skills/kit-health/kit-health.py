@@ -18,8 +18,10 @@ Sections:
   3. config     — the env fact store (`.context/reference/env/`): config completeness, renamed flags,
                   a retired capability key (`slack.enabled`, `github.signed_commits`) still in config.json
   4. machine    — this machine's wiring: environment name, CLAUDE.md imports, Makefile include, memory
-                  symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell;
-                  one legacy line: a leftover `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
+                  symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell,
+                  free disk on `/`/`$HOME`/the scratch root with the usual build/package caches named above
+                  DISK_WARN_PCT; one legacy line: a leftover `.claude/profiles/` clone (the layer retired
+                  2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
                   scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
                   and the pinned `ctx --version` answers the API the adapter expects
@@ -452,6 +454,31 @@ COMMON_REPO_NAMES = leak_shapes.COMMON_REPO_NAMES  # kept as names here too: sev
 IDENTITY = "identity"  # `what` prefix of patterns whose match is never printed (settings.local.json values)
 
 
+def git_ignored(root: Path, rels: list[str]) -> set[str]:
+    """The subset of `rels` (root-relative, `/`-separated) that `git check-ignore` reports: a vendored or build
+    tree the project's own `.gitignore` excludes, beyond the fixed `SKIP_DIRS` list (e.g. a dependency directory
+    other than `node_modules`, or one nested deeper than one level). Third-party text changes with every
+    dependency bump, so it is dropped from the scan rather than accepted per hit. Empty set when `root` is not a
+    git checkout (a plugin install has no `.git`: `check-ignore` exits >1) or the check otherwise fails to run —
+    `scan_files()` then falls back to `SKIP_DIRS`/`SKIP_FILES` alone, same as before this existed."""
+    if not rels:
+        return set()
+    try:
+        # only the kit's OWN repo decides: a kit with no .git of its own inside a parent repo that ignores it
+        # would otherwise drop every kit file from the scan, and an empty scan reads as GREEN
+        top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, timeout=30)
+        if top.returncode != 0 or Path(top.stdout.strip()).resolve() != Path(root).resolve():
+            return set()
+        p = subprocess.run(["git", "-C", str(root), "check-ignore", "--stdin"], input="\n".join(rels),
+                            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return set()
+    if p.returncode not in (0, 1):  # 0 = some ignored, 1 = none ignored, other = no .git / fatal error
+        return set()
+    return {line for line in p.stdout.splitlines() if line}
+
+
 def scan_files() -> list[Path]:
     files = [KIT / "WORKSPACE.md", KIT / "README.md", KIT / "setup.sh", KIT / "sync.sh", KIT / "sync-check.sh",
              KIT / "hooks" / "pre-push", KIT / "hooks" / "commit-msg",
@@ -460,8 +487,10 @@ def scan_files() -> list[Path]:
     for sub in ("context-db", "agents", "environment-template", "docs", "skills", ".github"):
         files += [p for p in (KIT / sub).rglob("*") if p.is_file()]
     # leak_shapes.skip_path is the one rule; `fixtures/` files stay in the list so section 2 can count them
-    return sorted({f for f in files if f.is_file() and "__pycache__" not in f.parts
-                   and ("fixtures" in f.relative_to(KIT).parts or not leak_shapes.skip_path(str(f.relative_to(KIT))))})
+    candidates = sorted({f for f in files if f.is_file() and "__pycache__" not in f.parts
+                         and ("fixtures" in f.relative_to(KIT).parts or not leak_shapes.skip_path(str(f.relative_to(KIT))))})
+    ignored = git_ignored(KIT, [str(f.relative_to(KIT)) for f in candidates])
+    return [f for f in candidates if str(f.relative_to(KIT)) not in ignored]
 
 
 def kit_repo() -> str:
@@ -844,6 +873,73 @@ def seed_wiring(r: Report) -> None:
         r.add(OK, "machine", "seeded files (.context/README.md, environment.md, CLAUDE.md, the self-assessment charter) are not older than their templates")
 
 
+DISK_WARN_PCT = 85
+CACHE_DIRS = (  # (label, safe-to-remove command) — the usual build/package caches that fill silently
+    ("~/.cache/go-build", "rm -rf ~/.cache/go-build"),
+    ("~/.npm", "npm cache clean --force"),
+    ("~/.cache/pip", "pip cache purge"),
+)
+
+
+def human_size(n: float) -> str:
+    for unit in ("B", "K", "M", "G"):
+        if abs(n) < 1024 or unit == "G":
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}T"
+
+
+def du(path: Path) -> int:
+    """Total bytes of the files under `path` (symlinks not followed) — `du -sb` without the shell-out."""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path, followlinks=False):
+        for name in filenames:
+            try:
+                total += (Path(dirpath) / name).lstat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def disk_targets() -> list[tuple[str, Path]]:
+    """(label, path) pairs `disk_wiring` checks: root, `$HOME`, and the scratch root when one can be resolved
+    (a machine where it cannot is section 5's problem, not this one's)."""
+    targets = [("/", Path("/")), ("$HOME", Path.home())]
+    try:
+        targets.append(("scratch", kit_profile.scratch()))
+    except Exception:
+        pass
+    return targets
+
+
+def disk_wiring(r: Report, targets: list[tuple[str, Path]] | None = None) -> None:
+    """`df -P` on `/`, `$HOME` and the scratch root — the free-disk check kit-health lacked: a sandbox root
+    overlay filled silently from `~/.cache/go-build` (~4 GB) plus the npm cache, and the first symptom was an
+    ENOSPC inside an unrelated skill step, because nothing here looked at the machine, only at the kit. Above
+    `DISK_WARN_PCT` full, names the usual caches with their size and the safe command to clear each one; a `du`
+    walk of those caches only runs once a filesystem IS tight, never on a healthy machine."""
+    shown_caches = False
+    for label, path in (disk_targets() if targets is None else targets):
+        try:
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue
+        pct = (usage.used / usage.total * 100) if usage.total else 0.0
+        if pct < DISK_WARN_PCT:
+            r.add(OK, "machine", f"disk {pct:.0f}% full on `{label}`")
+            continue
+        r.add(WARN, "machine", f"disk {pct:.0f}% full on `{label}` ({human_size(usage.used)} / {human_size(usage.total)})")
+        if shown_caches:
+            continue
+        shown_caches = True
+        for clabel, cmd in CACHE_DIRS:
+            p = Path(clabel.replace("~", str(Path.home()), 1))
+            if p.is_dir():
+                size = du(p)
+                if size:
+                    r.raw(f"  - `{clabel}`: {human_size(size)} — safe to remove: `{cmd}`")
+
+
 def pr_review_example_edited(example: Path | None = None) -> list[str]:
     """Keys in `pr-review/config.example.json` that no longer hold their placeholder shape (a leading `<`) —
     a sign the file itself was hand-edited instead of the seeded `.context/state/pr-review/config.json`
@@ -1014,6 +1110,7 @@ def sec_machine(r: Report) -> str:
     mcp = [k for k in kb.MCP_BACKED if systems.get(k)]  # kb.py owns the list, beside kb.SYSTEMS
     if mcp:
         r.raw(f"- MCP-backed systems ({', '.join(mcp)}): not probeable from a shell — the skill's step 3 checks the servers are connected in this session")
+    disk_wiring(r)
     return envname
 
 
