@@ -18,6 +18,5 @@
     "heartbeat": {
       "kind": "timestamp"
     }
-  },
-  "owner": "session"
+  }
 }
