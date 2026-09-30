@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "14"
+  version: "15"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -28,12 +28,15 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
      *Infra/secrets locations*; *Remaining work*) with anything durable you learned or shipped
      (`ctx_str_replace` of the exact old text, or `ctx_insert` after a line). Keep
      the doc lean — long history goes to `.context/archive/<slug>-log.md`.
-   - **Cap the Session log.** Keep only the newest entries in the doc (roughly the last few days,
-     ~6 max); move the oldest ones (the top of the log) verbatim to `.context/archive/<slug>-log.md`,
-     which reads newest-first (the `log` type's order), so reverse the moved block:
-     `ctx_insert` it there (`ctx_create` when the archive doc is new), then `ctx_str_replace` it out.
-     `make -C $BATON/context-db verify` warns when an active doc tops **30KB** — an oversized doc thrashes
-     any session that re-reads it after a compact, so split it when you see the warning (or before).
+   - **Cap the Session log.** If `.context/archive/<slug>-log.md` does not exist yet, create it first
+     (`ctx_new` TYPE=log, same DOMAIN as the context doc, SLUG=`<slug>-log`) — `maintain`'s own fallback for a
+     missing archive doc fills in only `title`/`type`/`updated`, which the `log` type's `domain`/`status`
+     rules would then refuse. Then run `ctx_maintain` on the doc's store (Bash fallback: `ctx_adapter.py ctx
+     maintain`) — a no-op below the store's size guard (30KB); past it, it keeps the newest ~6 entries
+     (`maintain.keep_log` in `ctx-store.json`) in the doc, oldest-first, and moves the rest verbatim into the
+     archive doc, newest-first (the `log` type's order) — no manual move-and-reverse.
+     `make -C $BATON/context-db verify` warns at the same **30KB** — an oversized doc thrashes any session
+     that re-reads it after a compact, so run `maintain` (or split the doc) as soon as you see the warning.
    - Reference every ticket/PR as a clickable link (§ Rules).
 2. **Priorities** — where `.context/reference/priorities.md` exists, tick the matching checkbox(es)
    (`ctx_str_replace`) and add the next step if one emerged (`ctx_insert`) (an environment without that

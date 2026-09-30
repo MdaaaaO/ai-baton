@@ -376,7 +376,21 @@ Adopt — makes the content root a store and keeps its settings and type schemas
 `context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
 kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
 `ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
-log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
+log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check`
+is the read-only probe kit-health runs. The kit never writes a store file itself — except `ctx-store.json`'s `mcp`
+key (`_strip_mcp_for_upgrade`/`_apply_mcp_setting`, below): the pinned ctx's own `init` does not accept it in
+`--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file. Every other
+key follows `init`'s own kept rule above; `mcp` does not — a local edit to it is not supported, because the kit owns
+this key (its `actors` pattern is `session.py`'s own NAME_RE — a local pattern would break session writes), so
+`adopt` always replaces it with the kit's value, never silently: `updated: ctx-store.json mcp — the kit owns this
+key (session.py's name pattern); the previous value was replaced` prints (exit code unaffected: a kit release that
+changes its own pattern looks the same as a local edit, and neither is a `kept` file) whenever the value replaced
+was not already the kit's; an equal value prints nothing. `--upgrade` decides
+`kept` vs `written` by the marker's digest, not its content (ctx-store#73), so before it runs the adapter strips its
+own last `mcp` patch off the marker (the digest then matches what `init` last wrote) and puts the kit's `mcp` value
+back once `init` is done, reporting the swap as above. The marker is written atomically (`_write_marker`, a temp
+file in the same directory then `os.replace`) and, if it does not parse, `adopt` says so and stops before `init`
+runs rather than skip the problem.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
@@ -403,9 +417,12 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
   python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
-  python3 ctx_adapter.py mcp              # the ctx MCP server on the store; audit actor `claude` unless CTX_ACTOR is set
+  python3 ctx_adapter.py mcp              # the ctx MCP server on the store; each write tool call names its own `actor`
+                                           # (the caller's registered session name) — MCP_ACTOR (or CTX_ACTOR) is
+                                           # only the floor for a write that names none
   python3 ctx_adapter.py mcp-json <file>  # add that server to a .mcp.json (clone installs; never replaces an entry)
-  python3 ctx_adapter.py ctx <verb> …     # run one ctx verb on the store (the Bash route when the MCP tools are absent)
+  python3 ctx_adapter.py ctx <verb> …     # run one ctx verb on the store (the Bash route when the MCP tools are absent);
+                                           # CTX_ACTOR defaults to the registered session name when one is on file
   python3 ctx_adapter.py hook <name>      # one of the hooks above; hook JSON on stdin
 
 Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
