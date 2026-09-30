@@ -1,9 +1,9 @@
 ---
 name: gh-cli
-description: "Querying GitHub with `gh` without the known traps: auth (native login vs a proxy token prefix), `--jq` has no `--arg`, search rate limits, `reviewed-by`/`review-requested` semantics, review pagination, `--json` fields older gh lacks (`wait-checks.sh`), writes that silently fail. Load before non-trivial `gh api`/`search`/`pr` work."
+description: "Querying GitHub with `gh` without the known traps: auth (native vs proxy token), `--jq` has no `--arg`, search rate limits, `reviewed-by`/`review-requested` semantics, review pagination, `--json` fields older gh lacks, writes that silently fail. Load before non-trivial `gh api`/`search`/`pr` work."
 metadata:
-  version: "14"
-  updated: "2026-09-28"
+  version: "15"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "github.org,github.sandbox_token_prefix"
 ---

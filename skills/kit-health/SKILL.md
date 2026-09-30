@@ -1,8 +1,8 @@
 ---
 name: kit-health
-description: "Audits the kit on this machine: versioning frontmatter, env-value leaks, env-store coverage/stale rows, wiring (CLAUDE.md imports, memory symlink, CLIs, systems), an engine smoke. Walks each finding (Fix, Ticket, Accept), reports to `.context/kit-health/`, stamps `HEALTH-<env>.md`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
+description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Walks each finding (Fix, Ticket, Accept), reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
 metadata:
-  version: "60"
+  version: "61"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "aws.profile kit-health"
