@@ -50,6 +50,7 @@ TOOLS = (
     "verify.py",
     "commit_style.py",
     "sizing.py",
+    "evidence_check.py",
     "migrate_frontmatter.py",
     "check_links.py",
     "transcripts.py",

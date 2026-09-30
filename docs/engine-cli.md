@@ -664,6 +664,23 @@ options:
   -h, --help            show this help message and exit
 ```
 
+## `evidence_check.py`
+
+```text
+usage: evidence_check.py [-h] file
+
+evidence_check.py — every Verified claim in a ticket comment or PR body cites an evidence item
+(`ticket-update` § Comment grammar): `**Verified** — <claim> · <evidence>`, one line, or a bulleted list of
+claims — `**Verified**` followed by one `- <claim> · <evidence>` line per claim. `<evidence>` is one of three
+shapes:
+
+positional arguments:
+  file        comment/body file, or - for stdin
+
+options:
+  -h, --help  show this help message and exit
+```
+
 ## `migrate_frontmatter.py`
 
 ```text

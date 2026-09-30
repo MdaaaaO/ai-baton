@@ -2,7 +2,7 @@
 name: ticket-close
 description: "Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues): a final outcome comment (Delivered / Verified / Out-of-scope), the right transition or close reason (Done / Won't Do / Cancelled), the delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
@@ -27,7 +27,8 @@ kind X in this environment" and stop.
    **Verified** — the final check against the system of record (numbers table if applicable)
    **Out of scope / left as is** — anything deliberately not done, so it doesn't read as missed
    ```
-   Evidence-dense, not narrative. Links rendered from `tracker.url_template`.
+   Evidence-dense, not narrative. Links rendered from `tracker.url_template`. Each Verified claim
+   carries an evidence item, the grammar `ticket-update` § Comment grammar defines.
 2. **Confirm delivering PRs are linked** and merged; don't resolve a PR review thread that's waiting
    on a third party (`WORKSPACE.md` § Rules — the open thread is the gate).
 3. **Close with the right outcome** — one of three, each a key under the adapter's config:
@@ -50,7 +51,9 @@ kind X in this environment" and stop.
 
 `gh` with the token per skill `gh-cli` (`github.sandbox_token_prefix`), in one of `tracker.repos`.
 
-- Final comment: before posting, `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
+- Final comment: before posting, `python3 $BATON/context-db/bin/evidence_check.py <file>` — exit 0 →
+  continue; exit 3 → fix the comment (add the missing evidence item(s), named on stderr) and re-check, never
+  post as is. Then `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
   --repo <repo>` — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
   re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run; fix the
   store or check the file by hand before posting; a no-op when `<repo>` is one of `tracker.repos` or not

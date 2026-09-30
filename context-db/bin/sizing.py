@@ -23,6 +23,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fsutil  # noqa: E402 — the one `<file | ->` reader
+
 MODELS = ("haiku", "sonnet", "opus")
 DECISIONS = ("delegate", "main session")
 # A well-formed line, matched anywhere in the body (MULTILINE `$` stops at the newline, so the reason never
@@ -69,10 +72,6 @@ def format_line(model: str, decision: str, reason: str) -> str:
     return f"**Sizing:** `{model}`, {decision}. {reason}"
 
 
-def _read(arg: str) -> str:
-    return sys.stdin.read() if arg == "-" else Path(arg).read_text(encoding="utf-8", errors="replace")
-
-
 def _main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -97,7 +96,7 @@ def _main(argv: list[str]) -> int:
             print(f"sizing: {e}", file=sys.stderr)
             return 2
 
-    body = _read(a.file)
+    body = fsutil.read_arg(a.file)
     try:
         model, decision, reason = parse(body)
     except ValueError as e:

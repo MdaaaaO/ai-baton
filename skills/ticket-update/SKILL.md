@@ -2,7 +2,7 @@
 name: ticket-update
 description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
@@ -30,7 +30,7 @@ sections that have something new. Never restate a prior comment.
 **Win** — what landed (linked PR / commit / query result)
 **Pivot** — ONLY when direction changed, and why   ← the "indication" marker; scan for these
 **Next** — the next concrete step + who owns it
-**Verified** — what was checked against the system of record, and how
+**Verified** — <claim> · <evidence>
 ```
 
 - **Omit empty sections.** A quiet update may be just `🟢 … — **Next** …`. Don't scaffold blanks.
@@ -40,6 +40,11 @@ sections that have something new. Never restate a prior comment.
   can scan *where* the work turned without reading every comment.
 - **Verified is anchored to the system of record** — label it `(system of record)`: deploy
   imageTag/health, SQL result, CI check — never a proxy signal (`WORKSPACE.md` § Verification).
+- **Every Verified claim carries an evidence item** — one line, `**Verified** — <claim> · <evidence>`,
+  or a bulleted list when there is more than one claim: `**Verified**` then one `- <claim> ·
+  <evidence>` per claim. `<evidence>` is a command with its output line (`` `cmd` → `output` ``), a
+  URL, or a PR / commit reference (`#<n>`, `<owner>/<repo>#<n>`, a commit hash, or a PR URL) —
+  `context-db/bin/evidence_check.py` checks that shape is there, never that the claim is true.
 - **Links clickable** everywhere — keys rendered from `tracker.url_template`, PRs by full URL.
   Mentions follow the adapter.
 - **Status glyphs, one leading:** 🟢 progressing · 🟡 waiting/soft-blocked · ⛔ blocked · 🔵 pivot · ✅ done.
@@ -113,7 +118,9 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
 
 ## Adapter — GitHub issues (tracker.kind = github)
 
-- Comment: before posting `<file>`, `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
+- Comment: before posting `<file>`, `python3 $BATON/context-db/bin/evidence_check.py <file>` — exit 0 →
+  continue; exit 3 → fix the comment (add the missing evidence item(s), named on stderr) and re-check, never
+  post as is. Then `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
   --repo <repo>` — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
   re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run; fix the
   store or check the file by hand before posting; a no-op when `<repo>` is one of `tracker.repos` or not
