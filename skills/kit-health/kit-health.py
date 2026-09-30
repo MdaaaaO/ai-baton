@@ -470,6 +470,12 @@ def git_ignored(root: Path, rels: list[str]) -> set[str]:
     if not rels:
         return set()
     try:
+        # only the kit's OWN repo decides: a kit with no .git of its own inside a parent repo that ignores it
+        # would otherwise drop every kit file from the scan, and an empty scan reads as GREEN
+        top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, timeout=30)
+        if top.returncode != 0 or Path(top.stdout.strip()).resolve() != Path(root).resolve():
+            return set()
         p = subprocess.run(["git", "-C", str(root), "check-ignore", "--stdin"], input="\n".join(rels),
                             capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):

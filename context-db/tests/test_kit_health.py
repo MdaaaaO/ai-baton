@@ -209,6 +209,20 @@ class GitIgnoredScan(unittest.TestCase):
         kh = load_kit_health()
         self.assertEqual(kh.git_ignored(KIT, []), set())
 
+    def test_a_parent_repo_that_ignores_the_kit_never_empties_the_scan(self):
+        # the kit has no .git of its own and sits inside a repo whose .gitignore excludes it: that parent's rules
+        # are not the kit's, and honouring them would drop every kit file and read as a clean GREEN scan
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as td:
+            parent = Path(td)
+            subprocess.run(["git", "init", "-q"], cwd=parent, check=True, env=hermetic_env(parent))
+            (parent / ".gitignore").write_text("kit/\n", encoding="utf-8")
+            root = parent / "kit"
+            root.mkdir()
+            (root / "SKILL.md").write_text("x", encoding="utf-8")
+            with mock.patch.dict(os.environ, hermetic_env(parent)):
+                self.assertEqual(kh.git_ignored(root, ["SKILL.md"]), set())
+
 
 class DiskCheck(unittest.TestCase):
     """`disk_wiring()` — free-disk on `/`, `$HOME` and the scratch root, plus the top-cache sizes above
