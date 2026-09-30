@@ -109,6 +109,51 @@ itself re-runs `trivial-check.py --head <sha>` and refuses unless the gate still
 `auto_approve.mode == live`; it writes the `auto_approved` ledger row. Tell the user one line with the review link. On
 `fallback`, the PR stays in the queue as an ordinary row. `NEEDS` lines are handled like any other runner.
 
+## `--unattended` (direct review requests flagged `C` by pr-scan)
+
+Chains `pr-scan` straight into a posted review with no hand-off — opt-in, off by default
+(`auto_comment.mode` in `.context/state/pr-review/config.json`: `mode` off/shadow/live, `prios` —
+direct requests (`[1]`) by default, `on_stop`, `max_per_tick`). Unlike `--auto`, this is **not** a
+shortcut on the review: steps 1–4 run in full (`--deep` included, when the row is over `deep_lines`).
+Only steps 5–6 (the interactive walk and the Submit prompt) are skipped, and only for a `COMMENT` event.
+
+1. **Spawn.** The normal **`review-runner`** child (§ Spawn above, not `auto-runner`) — one per `C` row,
+   up to `auto_comment.max_per_tick` per tick. Skip a row whose ledger already carries `auto_commented` /
+   `shadow_comment` / `skipped` / `held` for this exact head, so a quiet queue does not re-spawn a runner
+   every tick. Never for the user's own PR — `pr-scan` already excludes every row whose author is the
+   login, for every prio, before it ever reaches the `C` gate.
+2. **Decide from the sheet.** Read `$CTX/triage.json` (exactly as in the interactive path) for a STOP
+   finding (`scope.md` § Classify):
+   - **No STOP** → build `$CTX/request.json` with `event: "COMMENT"` (body: the same overview + numbered
+     findings + FF pointers 5c would show a human), preview with `submit-review.sh preview`, then submit
+     with `submit-review.sh submit … --auto-comment --confirm <digest>` — no `AskUserQuestion`, that is
+     the "no hand-off" this path exists for. The script re-runs its own gate at submit time (event must
+     be `COMMENT`, `auto_comment.mode` must be `live`, the live PR author must not be the login) and
+     refuses otherwise. Ledger status `auto_commented`.
+   - **Any STOP** → `on_stop` (config): `hold` (default) — post nothing; append ledger status `held` for
+     this head (under `flock "$ROOT/.ledger.lock"`, the same append path `shadow_comment` uses) so the
+     next tick does not spawn a runner on the same head again, then the row stays an ordinary queue row
+     for the next interactive `pr-review` walk. `comment` — post the COMMENT review
+     anyway, the STOP finding included in the body as a flagged item (still never APPROVE/REQUEST_CHANGES
+     — the event is always `COMMENT` on this path, whatever `on_stop` says). `request_changes` is
+     accepted as a config value but **not implemented**: no standing owner decision authorises an
+     unattended REQUEST_CHANGES post (`scope.md` "APPROVE is never inferred"), so the runner always falls
+     back to `hold` when it sees that value — an open owner question, not a guess this skill makes.
+3. **Modes** (same three-state shape as `auto_approve.mode`): `off` (default) — `pr-scan` still computes
+   `.auto_comment.eligible` for visibility, nothing is spawned. `shadow` — the runner runs and the
+   decision is computed, nothing is posted; a would-COMMENT decision logs ledger `shadow_comment` and the
+   main session reports "would comment on `<repo>#<n>` — <one line>"; an `on_stop: hold` decision in
+   shadow mode logs `held` too, same as live's hold (§ step 2) — a STOP finding is worth surfacing to the
+   next interactive walk whether or not the path would actually have posted. `live` — posts for real, per
+   step 2.
+4. **Logging.** Same ledger as `--auto`: `.context/state/pr-review/ledger.jsonl`
+   (`{"repo","pr","head","status":"auto_commented"|"shadow_comment"|"held","ts",...}`, written by
+   `submit-review.sh` for `auto_commented`, by the main session under `flock "$ROOT/.ledger.lock"` for
+   `shadow_comment` and `held`).
+5. Step 8 KB write-back still runs for every row this path posts or shadow-decides.
+6. Kill switch: `auto_comment.mode: off`. Never APPROVE / REQUEST_CHANGES on this path, whatever the
+   sheet recommends — `COMMENT` only, always.
+
 ## `--local`
 
 Runs steps 1–4 in the main session instead. Only for a session that exists for this one review and
