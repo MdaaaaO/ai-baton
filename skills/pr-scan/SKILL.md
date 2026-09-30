@@ -2,8 +2,8 @@
 name: pr-scan
 description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row table (review state, threads, bot verdict, trivial PRs flagged `A`, `AUTO:` line) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
 metadata:
-  version: "14"
-  updated: "2026-09-28"
+  version: "15"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "github.display_names"
 argument-hint: "[--days N] [--limit N] [--repo owner/name]"
@@ -21,7 +21,12 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
 
 ## Steps
 
-1. Run the sweep (it takes 1–4 minutes; set the Bash timeout to 300000):
+1. Run the sweep in the foreground (wall time ~3–4 minutes; set the Bash timeout to 300000). This step
+   runs inside the forked triage worker itself, and steps 2–3 below need the table, the `summary:` line
+   and the exit code the script produces on completion — backgrounding it here would return before that
+   output exists. ("Run under Monitor or in the background, never foreground" is the right advice only
+   for a main session invoking `pr-scan.sh` directly, outside this fork; nothing in this skill currently
+   does that.)
    ```sh
    bash $BATON/skills/pr-scan/pr-scan.sh --mark $ARGUMENTS
    ```

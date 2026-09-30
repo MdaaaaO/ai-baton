@@ -3,21 +3,33 @@
 // (`npm ci --no-audit --no-fund` — modules resolve from the CURRENT DIRECTORY, not from this file's location).
 // Parses every ```mermaid block in each file (CRLF- and LF-terminated fences alike); prints
 // `OK (<type>)` / `FAIL <error>` per block; exits 1 on any FAIL. A file with zero blocks also exits 1
-// (a plan called for diagrams that never got drawn) unless --allow-none is passed. See SKILL.md § Diagrams.
+// (a plan called for diagrams that never got drawn) unless --allow-none is passed. Exits 2, with an
+// install hint on stderr, when jsdom/dompurify/mermaid do not resolve from the CWD (deps not installed
+// here yet, or the script was run from the wrong directory). See SKILL.md § Diagrams.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const req = createRequire(path.join(process.cwd(), '/'));
 const load = async (name) => (await import(pathToFileURL(req.resolve(name)).href)).default;
 
-const { JSDOM } = await load('jsdom');
+let JSDOM, DOMPurifyFactory, mermaid;
+try {
+  ({ JSDOM } = await load('jsdom'));
+  DOMPurifyFactory = await load('dompurify');
+  mermaid = await load('mermaid');
+} catch (e) {
+  const skillDir = path.dirname(fileURLToPath(import.meta.url));
+  console.error(`FAIL cannot resolve jsdom/dompurify/mermaid from ${process.cwd()}: ${String(e.message).split('\n')[0]}`);
+  console.error(`install first: copy ${skillDir}/package.json and package-lock.json into a scratch dir, ` +
+    `\`npm ci --no-audit --no-fund\` there, then run this script with that dir as your CWD.`);
+  process.exit(2);
+}
 const dom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
-globalThis.DOMPurify = (await load('dompurify'))(dom.window);
-const mermaid = await load('mermaid');
+globalThis.DOMPurify = DOMPurifyFactory(dom.window);
 mermaid.initialize({ startOnLoad: false });
 
 const args = process.argv.slice(2);

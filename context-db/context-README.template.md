@@ -88,8 +88,9 @@ active (non-`archive/`, non-`status: archived`) doc exceeds **30KB** (~8k tokens
 is a *handoff* — a cold session re-reads it whole to re-ground, so an oversized one pulled in
 after a compact is what makes autocompact **thrash** (context refills to the limit within a few
 turns of every compact). When verify flags a doc, split it: keep the newest **Session log**
-entries in the doc (roughly the last few days, ~6 entries max) and move the older tail to
-`archive/<slug>-log.md` (newest-first, verbatim — relocate, don't rewrite). The archive tail can
+entries in the doc (roughly the last few days, ~6 entries max) and move the oldest ones — the top of
+the log, which reads oldest-first — to `archive/<slug>-log.md` (newest-first: reverse the moved block;
+verbatim — relocate, don't rewrite). The archive tail can
 grow without limit; it is exempt because it is never read by default.
 
 ## Live session registry (operational, not knowledge)

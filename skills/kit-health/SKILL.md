@@ -39,7 +39,7 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    and each finding's outcome with `ctx_insert` (doc key `kit-health/<YYYY-MM-DD>-<env>`, after the title line) —
    a direct `Write`/`Edit` of a `.context/` doc is denied. When that log already exists (an earlier run today, or
    the re-run after a Fix), `new` refuses to clobber it: `ctx_insert` a `## Run <HH:MM>` section with the same
-   content at the top of its body instead (newest first, as in every log).
+   content at the top of its body instead (a report's runs read newest first).
 6. **Stamp.** Re-run step 1 with `--stamp`: it refuses on any error **or un-accepted leak hit**, else
    writes the HEALTH doc (`last_green`, `kit_commit`, `kit_version`, `install_mode`, `warnings`) and re-indexes.
 7. **PR.** Kit files the walk touched go out as one PR from that worktree (`pr-open`); after the merge (and

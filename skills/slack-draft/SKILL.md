@@ -3,8 +3,8 @@ name: slack-draft
 description: "Lifecycle of every Slack message a session drafts for the user: create it as a draft (never paste text), record it, and READ the channel or thread before any follow-up, recreate or status claim, because the user edits drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
-  version: "7"
-  updated: "2026-09-28"
+  version: "8"
+  updated: "2026-09-30"
   reviewed: "2026-09-24"
   requires: "slack"
 ---
@@ -41,8 +41,14 @@ The gist is what §3 diffs against once it goes out.
 Run this **before** any of: re-creating the draft, updating it, reporting its status, drafting a
 follow-up to the same people, or acting on "no reply yet".
 
-1. `slack_read_thread` (thread draft) or `slack_read_channel` (top-level) on the target, from
-   the draft's creation time. Look for a message **from the user** whose substance matches the gist.
+1. `slack_read_thread` (thread draft) or `slack_read_channel` (top-level) on the target.
+   - Thread draft: `slack_read_thread`, omitting `oldest=` — the parameter is unreliable there — and
+     filter by timestamp locally to find messages after the draft's creation time.
+   - Top-level draft: `slack_read_channel` **with a time bound** (`oldest=` at or before the draft's
+     creation time); an unbounded read on a busy channel returns only the latest page, so a message
+     sent earlier would be missed and misreported as "not sent". Page back through the results until
+     you reach the draft's creation time, not just the first page.
+   Look for a message **from the user** whose substance matches the gist.
 2. Outcomes:
    - **Sent** → record *sent* + timestamp + **what they changed** (dropped/added points, wording
      shifts). Their edits are signal: they tell you which of your positions they did not want stated,

@@ -2,8 +2,8 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "13"
-  updated: "2026-09-28"
+  version: "14"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
 user-invocable: true
 ---
@@ -23,13 +23,14 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    Every write below goes through the ctx tools (`WORKSPACE.md` § The `.context/` DB; a direct `Write`/`Edit`
    of a context doc is denied), keyed by the doc's path without `.md`:
    - Add a dated one-liner to the **Session log**: `ctx_log` with the doc key and the text (the epic type
-     puts it first — newest first — and dates it).
+     appends it — oldest first — and dates it).
    - Update the relevant fixed section (*What was built* — PRs per repo; *Key decisions & gotchas*;
      *Infra/secrets locations*; *Remaining work*) with anything durable you learned or shipped
      (`ctx_str_replace` of the exact old text, or `ctx_insert` after a line). Keep
      the doc lean — long history goes to `.context/archive/<slug>-log.md`.
    - **Cap the Session log.** Keep only the newest entries in the doc (roughly the last few days,
-     ~6 max); move the older tail verbatim to `.context/archive/<slug>-log.md` (newest-first):
+     ~6 max); move the oldest ones (the top of the log) verbatim to `.context/archive/<slug>-log.md`,
+     which reads newest-first (the `log` type's order), so reverse the moved block:
      `ctx_insert` it there (`ctx_create` when the archive doc is new), then `ctx_str_replace` it out.
      `make -C $BATON/context-db verify` warns when an active doc tops **30KB** — an oversized doc thrashes
      any session that re-reads it after a compact, so split it when you see the warning (or before).
