@@ -3,8 +3,8 @@ name: notion-page-review
 description: "Reviews a Notion page tree (page, sub-pages, every comment thread) against the user's position, walks each proposed comment (Comment, Update wording, Skip, batches of 4), posts only approved ones as thread replies or inline comments. Invoke when the user asks to \"go through\", \"catch up on\" or \"comment on\" a Notion page."
 compatibility: "Designed for Claude Code; needs notion (systems.*)"
 metadata:
-  version: "11"
-  updated: "2026-09-28"
+  version: "12"
+  updated: "2026-09-30"
   reviewed: "2026-09-28"
   requires: "notion"
   facts: "systems.slack"
@@ -53,7 +53,7 @@ Rules for the proposals:
 
 ## 3. The approval loop
 
-`AskUserQuestion`, **4 items per call**, in page order:
+`AskUserQuestion`, **4 items per call**, in page order (shape: `docs/carousel.md`):
 
 - `header`: `"<n> · <topic>"` (≤ 12 chars; revisions become `"<n> v2 · <topic>"`).
 - `question`: `PAGE → section → anchor` line, blank line, `Proposed text:` + the exact text in quotes,

@@ -2,7 +2,7 @@
 name: kit-health
 description: "Audits the kit on this machine: versioning frontmatter, env-value leaks, env-store coverage/stale rows, wiring (CLAUDE.md imports, memory symlink, CLIs, systems), an engine smoke. Walks each finding (Fix, Ticket, Accept), reports to `.context/kit-health/`, stamps `HEALTH-<env>.md`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
 metadata:
-  version: "59"
+  version: "60"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "aws.profile kit-health"
@@ -27,7 +27,7 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    `description` still what the body does?"* Everything else is machine-checked.
 3. **MCP systems**: one cheap read call per enabled MCP-backed `systems.*`; a missing tool is one WARN
    `<system>: enabled but not connected here`. Never a write.
-4. **Walk the findings** — one `AskUserQuestion` per finding (batch trivial ones): **Fix** (do it, re-run), **Ticket** (`ticket-open`, title `[KIT] …`, unassigned), **Accept** (leaks only: add the
+4. **Walk the findings** — one `AskUserQuestion` per finding (batch trivial ones; shape: `docs/carousel.md`): **Fix** (do it, re-run), **Ticket** (`ticket-open`, title `[KIT] …`, unassigned), **Accept** (leaks only: add the
    anchored `path:value` regex to `skills/kit-health/allow.txt` with a `# reason`; a stale unit is accepted
    by bumping `metadata.reviewed` after re-reading it). A leak's Fix: `kb.py set …`, then the skill
    reads it back. A Fix that touches a skill bumps `metadata.version` + `metadata.updated`. **Every edit to a kit

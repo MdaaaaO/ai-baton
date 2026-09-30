@@ -172,6 +172,7 @@ It also ships three agents (`triage`, `review-runner`, `auto-runner`) and the `c
 |---|---|
 | [layout](docs/layout.md) | What every file and directory is |
 | [conventions](docs/conventions.md) | The six rules that keep the kit portable |
+| [carousel](docs/carousel.md) | The `AskUserQuestion` shape for every open decision a session hands back |
 | [architecture](docs/architecture.md) | One diagram: session → imports → skills → engine → context DB |
 | [env-facts](docs/env-facts.md) | The env fact store, `kb.py`, and how a skill resolves a fact |
 | [env-vars](docs/env-vars.md) | Every environment variable a kit script reads: default, reader, purpose |

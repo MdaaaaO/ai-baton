@@ -2,7 +2,7 @@
 name: pr-event-brief
 description: "Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN line a pr-watch Monitor emits; the main session then performs the action."
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "github.review_bot"
@@ -84,6 +84,9 @@ HUMANS: <login STATE, …> | none
 ACTION: <REPLY+RESOLVE | FIX+PUSH | RE-REQUEST-BOT | UPDATE-BRANCH | MERGE | WAIT(<who/what>) | INVESTIGATE-CHECK>
 WHY: <one sentence, the single decisive fact>
 ```
+
+The main session performs `ACTION` directly only when standing go already covers it; otherwise the
+`ACTION` becomes the recommended option of the carousel question it asks the user (`docs/carousel.md`).
 
 Pick one ACTION: `RE-REQUEST-BOT` when a bot is configured, the head has no Assessment, **and** no
 unresolved thread is bot-authored (when a bot-authored thread is open, this rule does not fire — the
