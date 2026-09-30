@@ -786,7 +786,7 @@ def resolved_profile_lines() -> list[str]:
         f"  systems on: {', '.join(on) if on else '<none>'}",
     ]
     lines.append(f"  footer: {footer()}" if session_name() else
-                 "  footer: none yet — it appears here after `session-register`")
+                 "  footer: none yet — `session-register` records the name; then `kit_profile.py footer` (this block shows it from the next session start)")
     return lines
 
 

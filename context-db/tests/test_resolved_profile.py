@@ -75,7 +75,7 @@ class HookOutput(unittest.TestCase):
         envfile = Path(self.tmp.name) / "envfile"
         r = run("kit_profile.py", "session-env", "--update", str(envfile), root=self.root, env=self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("footer: none yet — it appears here after `session-register`", r.stdout)
+        self.assertIn("footer: none yet — `session-register` records the name", r.stdout)
         (self.root / "sessions").mkdir(parents=True, exist_ok=True)
         r = run("session.py", "register", "--name", "kit-resolved-profile-test", "--no-stats", root=self.root, env=self.env)
         self.assertEqual(r.returncode, 0, r.stderr)

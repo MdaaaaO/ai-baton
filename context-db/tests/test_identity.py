@@ -34,7 +34,7 @@ NO_STORE_PROFILE_BLOCK = (
     "  tracker: kind=<unset> key_regex=<unset> url_template=<unset>\n"
     "  github.review_bot=<unset>\n"
     "  systems on: <none>\n"
-    "  footer: none yet — it appears here after `session-register`\n"
+    "  footer: none yet — `session-register` records the name; then `kit_profile.py footer` (this block shows it from the next session start)\n"
 )
 
 
