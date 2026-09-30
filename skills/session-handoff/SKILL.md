@@ -30,7 +30,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
      the doc lean — long history goes to `.context/archive/<slug>-log.md`.
    - **Cap the Session log.** Keep only the newest entries in the doc (roughly the last few days,
      ~6 max); move the oldest ones (the top of the log) verbatim to `.context/archive/<slug>-log.md`,
-     in date order:
+     which reads newest-first (the `log` type's order), so reverse the moved block:
      `ctx_insert` it there (`ctx_create` when the archive doc is new), then `ctx_str_replace` it out.
      `make -C $BATON/context-db verify` warns when an active doc tops **30KB** — an oversized doc thrashes
      any session that re-reads it after a compact, so split it when you see the warning (or before).

@@ -85,7 +85,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
    - **`.context/` history — always; sweep BOTH live docs AND `.context/archive/*-log.md`.** Since the 30KB
      guardrail (`make -C $BATON/context-db verify` warns past 30KB), a live doc keeps only the newest tail;
      **recent-but-not-newest history — including a just-finished week after a trim — lives in
-     `archive/<slug>-log.md`** (older archives read newest-first, newer ones oldest-first: date-grep,
+     `archive/<slug>-log.md`** (newest-first, while the live Session log reads oldest-first: date-grep,
      never rely on position). Archive↔live pairs share the slug
      (`archive/<slug>-log.md` ↔ `<domain>/<slug>.md`). Date-grep both, using **the window's own year —
      step 1's Monday, never `` $(date +%Y) ``** (today's year is wrong for a January run composing last
