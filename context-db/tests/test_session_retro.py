@@ -121,6 +121,22 @@ class RuleChecks(RetroCase):
         # the same bad subject, outside a temp dir and with no pytest alongside: still a hit
         self.assertIn("title-style", self.rules(Builder().user("go").bash(bad_subject)))
 
+    def test_title_style_pytest_before_the_commit_still_counts(self):
+        # the pytest exemption must only cover "commit && pytest" (the commit seeds a repo the suite then
+        # runs against) — not the reverse "pytest && commit", the usual "test, then ship the real work"
+        # chain, where the commit is the change under review.
+        bad_subject = "git commit -qm \"$(cat <<'EOF'\nUpdated stuff\n\nbody\nEOF\n)\""
+        tested_then_shipped = Builder().user("go").bash(f"python -m pytest tests && {bad_subject}")
+        self.assertIn("title-style", self.rules(tested_then_shipped))
+
+    def test_title_style_skips_tmp_even_when_tmpdir_points_elsewhere(self):
+        # on macOS, $TMPDIR is /var/folders/…/T/, never /tmp itself. /tmp must still be recognised as a temp
+        # dir rather than only checked as a fallback for an unset $TMPDIR.
+        bad_subject = "git commit -qm \"$(cat <<'EOF'\nUpdated stuff\n\nbody\nEOF\n)\""
+        with tempfile.TemporaryDirectory() as alt, unittest.mock.patch.dict(os.environ, {"TMPDIR": alt}):
+            cd_into_tmp = Builder().user("go").bash(f"cd /tmp/x && {bad_subject}")
+            self.assertNotIn("title-style", self.rules(cd_into_tmp))
+
     def test_agent_no_model(self):
         self.assertIn("agent-no-model", self.rules(Builder().user("go").call("Agent", description="fix it", prompt="x")))
         self.assertNotIn("agent-no-model", self.rules(Builder().user("go").call("Agent", description="fix it", prompt="x", model="sonnet")))

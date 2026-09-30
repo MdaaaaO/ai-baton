@@ -32,6 +32,7 @@ import os
 import re
 import shlex
 import sys
+import tempfile
 from pathlib import Path
 
 import commit_style  # same dir — the title / subject check pr-open uses
@@ -140,19 +141,27 @@ def _opts(args: list[str]) -> dict[str, list[str]]:
 
 
 def _in_temp_dir(path: str) -> bool:
-    """True when `path` sits under `$TMPDIR` (default `/tmp`), `$KIT_SCRATCH`, the kit scratch root
+    """True when `path` sits under `/tmp`, `$TMPDIR` (macOS sets this to `/var/folders/…/T/`, never `/tmp`
+    itself — both must be checked, not one as a fallback for the other), `$KIT_SCRATCH`, the kit scratch root
     (`ai-baton-kit[-<uid>]`) or a pytest temp dir (`tmp_path` / `tmpdir` land under `pytest-of-<user>/pytest-<n>/…`,
     itself under the system temp root) — a `git commit` there is test-fixture setup, not one the session means to
     ship, so it is not a commit-style candidate."""
     if not path:
         return False
     p = os.path.normpath(path)
-    for var, default in (("TMPDIR", "/tmp"), ("KIT_SCRATCH", None)):
-        base = os.environ.get(var) or default
-        if base:
-            base = os.path.normpath(base)
-            if p == base or p.startswith(base + os.sep):
-                return True
+    rp = os.path.realpath(path)
+    bases = ["/tmp", tempfile.gettempdir(), os.environ.get("TMPDIR") or "", os.environ.get("KIT_SCRATCH") or ""]
+    for base in bases:
+        if not base:
+            continue
+        base = os.path.normpath(base)
+        if p == base or p.startswith(base + os.sep):
+            return True
+        # `/tmp` is a symlink to `/private/tmp` on macOS — compare resolved forms too, so a path built from
+        # the unresolved side (or vice versa) still matches.
+        rbase = os.path.realpath(base)
+        if rp == rbase or rp.startswith(rbase + os.sep):
+            return True
     return bool(TEMP_DIR_RE.search(p))
 
 
@@ -343,7 +352,8 @@ class Retro:
                 continue
             cmd = inp.get("command", "")
             cwd = c["cwd"]
-            for seg in _segments(_tokens(cmd)):
+            segs = _segments(_tokens(cmd))
+            for si, seg in enumerate(segs):
                 if seg[0] == "cd" and len(seg) > 1:  # later segments of this command run there
                     cwd = os.path.normpath(os.path.join(cwd, os.path.expanduser(seg[1])))
                 w = _store_call(seg)
@@ -370,9 +380,13 @@ class Retro:
                     msg = _unheredoc(m[0]) if m else (body_of(o, inline=(), files=("-F", "--file")) or "")
                     subject = msg.strip().splitlines()[0] if msg.strip() else ""
                     wd = pre[pre.index("-C") + 1] if "-C" in pre[:-1] else cwd
-                    # a fixture/test-setup commit (temp dir, or the same Bash call also runs pytest) is not a
-                    # candidate: it never ships, so the repo's title style does not apply to it
-                    fixture = _in_temp_dir(wd) or _in_temp_dir(cwd) or bool(PYTEST_RUN_RE.search(cmd))
+                    # a fixture/test-setup commit (temp dir, or a pytest run LATER in the same Bash call —
+                    # "commit && pytest" seeds a repo the suite then runs against) is not a candidate: it
+                    # never ships. "pytest && commit" is the opposite order — pytest ran first, the commit is
+                    # the real work — and must still be checked, or the usual "test, then commit" chain would
+                    # never get title-style coverage.
+                    later = " ; ".join(" ".join(s) for s in segs[si + 1:])
+                    fixture = _in_temp_dir(wd) or _in_temp_dir(cwd) or bool(PYTEST_RUN_RE.search(later))
                     if subject and "$" not in subject and not fixture:  # an unexpanded variable: the real subject is unknown
                         probs = commit_style.check_subject(subject, style(wd))
                         if probs:
