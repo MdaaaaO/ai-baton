@@ -34,7 +34,9 @@ route modules that are UI) go into the env config — `diagrams.repos.<owner/rep
                 # (e.g. a language toolchain's build cache) first, then retry
   cp $BATON/skills/pr-open/package.json $BATON/skills/pr-open/package-lock.json "$D"/
   ( cd "$D" && npm ci --no-audit --no-fund )   # pinned versions, not the day's latest — Dependabot bumps the lockfile
-  ( cd "$D" && node $BATON/skills/pr-open/mermaid-check.mjs <body.md>… )
+  S="$(cd "$BATON" && pwd)/skills/pr-open"    # $BATON (e.g. .claude) is relative to the workspace root —
+  B="$(realpath <body.md>)"                   # resolve both before the cd, or the node call can't find them
+  ( cd "$D" && node "$S/mermaid-check.mjs" "$B" )
   ```
   Prints `OK (<type>)` / `FAIL <error>` per block; handles CRLF-terminated fences; exits 1 on any failure, or
   on a file with zero mermaid blocks unless `--allow-none` is passed (a docs/config-only push has none on
