@@ -85,7 +85,7 @@ for r in "${REPOS[@]}"; do
   rows=$(jq -c --arg r "$r" --arg me "$ME" --arg since "$since" --argjson bots "$BOTS" --argjson led "$LEDGER_JSON" '
     .[] | select(.author.login!=$me)
     | . as $p | .author.login as $a | ((.author.is_bot // false) or (($bots|index($a))!=null)) as $isbot
-    | ($led | map(select(.repo==$r and .pr==$p.number and .head==$p.headRefOid and (.status|IN("skipped","shadow_approve","auto_approved")))) | length) as $term
+    | ($led | map(select(.repo==$r and .pr==$p.number and .head==$p.headRefOid and (.status|IN("skipped","shadow_approve","auto_approved","shadow_comment")))) | length) as $term
     | {key: "\($r)#\(.number)", src: "sweep", updated: .updatedAt, author: $a, bot: $isbot,
        drop: (if $isbot then "bot" elif .updatedAt < $since then "stale" elif $term>0 then "done" else "" end)}' <<<"$RESP") || { FAILS=$((FAILS+1)); echo "FAIL prefilter $r: jq error on pr list output" >> "$ERR"; continue; }
   pre_bot=$((pre_bot + $(grep -c '"drop":"bot"' <<<"$rows" || true)))
@@ -143,12 +143,12 @@ while IFS= read -r row; do
   # ledger: every status ever recorded for THIS head (order-independent — no grep on serialised key order)
   lset=$(jq -c --arg repo "$repo" --argjson pr "$num" --arg h "$head" '[.[] | select(.repo==$repo and .pr==$pr and .head==$h)]' <<<"$LEDGER_JSON")
   has(){ jq -e --arg s "$1" 'map(.status) | index($s)' >/dev/null <<<"$lset"; }
-  lstatus=$(jq -r 'map(.status) | (if index("reviewed") then "reviewed" elif index("replied") then "replied" elif index("skipped") then "skipped" elif index("auto_approved") then "auto_approved" elif index("shadow_approve") then "shadow_approve" elif index("shadow_fallback") then "shadow_fallback" elif index("surfaced") then "surfaced" else "" end)' <<<"$lset")
+  lstatus=$(jq -r 'map(.status) | (if index("reviewed") then "reviewed" elif index("replied") then "replied" elif index("skipped") then "skipped" elif index("auto_approved") then "auto_approved" elif index("shadow_approve") then "shadow_approve" elif index("shadow_fallback") then "shadow_fallback" elif index("held") then "held" elif index("shadow_comment") then "shadow_comment" elif index("surfaced") then "surfaced" else "" end)' <<<"$lset")
   if [ "$my_head" = "$head" ] || has reviewed; then
     if [ "$(jq -r .mine <<<"$threads")" != "0" ] && [ "$(jq -r .mine <<<"$threads")" != "null" ]; then kind=follow_up; else dropped_done=$((dropped_done+1)); continue; fi
   elif [ -n "$my_head" ]; then kind=re_review
   elif has skipped; then dropped_skip=$((dropped_skip+1)); continue
-  elif has shadow_approve || has auto_approved; then dropped_done=$((dropped_done+1)); continue   # shadow_fallback stays: it is an ordinary row
+  elif has shadow_approve || has auto_approved || has shadow_comment; then dropped_done=$((dropped_done+1)); continue   # shadow_fallback stays: it is an ordinary row; a `held` row stays too (interactive pr-review still needs it)
   else kind=new; fi
   if [ "$deg" = '[]' ] && [ "$approved" -gt 0 ] && [ "$src" != "direct" ] && [ "$kind" = "new" ]; then dropped_approved=$((dropped_approved+1)); continue; fi
   surfaced=$(jq -r --arg k "$kind" '[.[] | select(.status=="surfaced" and .kind==$k)] | length > 0' <<<"$lset")
@@ -173,10 +173,13 @@ while IFS= read -r row; do
   elif [ "$hlen" = 0 ]; then prio_val=4
   else prio_val=5; fi
   # unattended auto-COMMENT gate (opt-in, `auto_comment.mode`): direct review requests only by default
-  # (`prios`), never a follow-up, never a bot author, capped at `max_per_tick` runners this tick.
+  # (`prios`), never a follow-up, never a bot author, never a head already `held` (a STOP finding sent it
+  # back to the interactive walk — it stays an ordinary row but never re-counts toward the cap), capped at
+  # `max_per_tick` runners this tick.
   ac_eligible=false; ac_reason="mode off"
   if [ "$AUTOC_MODE" != off ]; then
     if [ "$kind" = follow_up ]; then ac_reason="follow-up"
+    elif has held; then ac_reason="held"
     elif in_list "$author" "$BOTS"; then ac_reason="bot author"
     elif ! jq -ne --argjson p "$prio_val" --argjson list "$AUTOC_PRIOS" '$list | index($p) != null' >/dev/null; then ac_reason="prio $prio_val not in auto_comment.prios"
     elif [ "$ac_count" -ge "$AUTOC_MAX" ]; then ac_reason="max_per_tick reached"

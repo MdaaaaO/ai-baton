@@ -276,6 +276,65 @@ class AutoCommentGate(unittest.TestCase):
         self.assertFalse(row["auto_comment"]["eligible"])
         self.assertIn("auto_comment=0", r.stdout)
 
+    # --- a head already `shadow_comment`-decided is fully "done" for this path, the same way a
+    # `shadow_approve` head already is (PR#373 review): it must not resurface as `kind=new` and steal a
+    # `max_per_tick` slot a fresh direct request needs ---
+
+    def write_ledger(self, rows: list) -> None:
+        self.state_dir.joinpath("ledger.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows))
+
+    def test_shadow_comment_row_is_dropped_and_never_counts_toward_cap(self):
+        self.write_config(prios=[1], max_per_tick=1)
+        shadow_head = "2" * 40
+        fresh_head = "3" * 40
+        self.write_ledger([{"repo": REPO, "pr": 301, "head": shadow_head, "status": "shadow_comment",
+                             "ts": "2026-01-01T00:00:00Z"}])
+        env = self.env(
+            STUB_DIRECT_JSON=json.dumps([
+                direct_entry(301, "alice", "2026-01-03T00:00:00Z"),   # newer — processed first, already shadow-decided
+                direct_entry(302, "bob", "2026-01-02T00:00:00Z"),
+            ]),
+            STUB_PR_301_JSON=json.dumps(pr_json(301, "alice", shadow_head)),
+            STUB_REVIEWS_301_JSON="[]",
+            STUB_PR_302_JSON=json.dumps(pr_json(302, "bob", fresh_head)),
+            STUB_REVIEWS_302_JSON="[]",
+        )
+        r = self.run_scan(env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        nums = [row["pr"] for row in self.queue()]
+        self.assertNotIn(301, nums, self.queue())        # dropped like shadow_approve — done for this head
+        row302 = self.row(302)
+        self.assertTrue(row302["auto_comment"]["eligible"], row302["auto_comment"])  # cap slot not stolen
+
+    # --- a head already `held` (an `on_stop: hold` STOP decision) must stay an ordinary queue row for the
+    # next interactive `pr-review` walk, but must never be re-flagged `C` or counted toward `max_per_tick`
+    # again until the head changes (PR#373 review) ---
+
+    def test_held_row_stays_visible_but_is_never_reflagged_or_counted(self):
+        self.write_config(prios=[1], max_per_tick=1)
+        held_head = "4" * 40
+        fresh_head = "5" * 40
+        self.write_ledger([{"repo": REPO, "pr": 401, "head": held_head, "status": "held",
+                             "ts": "2026-01-01T00:00:00Z"}])
+        env = self.env(
+            STUB_DIRECT_JSON=json.dumps([
+                direct_entry(401, "alice", "2026-01-03T00:00:00Z"),   # newer — processed first, already held
+                direct_entry(402, "bob", "2026-01-02T00:00:00Z"),
+            ]),
+            STUB_PR_401_JSON=json.dumps(pr_json(401, "alice", held_head)),
+            STUB_REVIEWS_401_JSON="[]",
+            STUB_PR_402_JSON=json.dumps(pr_json(402, "bob", fresh_head)),
+            STUB_REVIEWS_402_JSON="[]",
+        )
+        r = self.run_scan(env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        row401 = self.row(401)   # still an ordinary row — the interactive walk still needs to see it
+        self.assertFalse(row401["auto_comment"]["eligible"])
+        self.assertEqual(row401["auto_comment"]["reason"], "held")
+        row402 = self.row(402)
+        self.assertTrue(row402["auto_comment"]["eligible"], row402["auto_comment"])  # cap slot not stolen
+
 
 if __name__ == "__main__":
     unittest.main()

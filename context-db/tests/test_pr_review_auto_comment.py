@@ -7,6 +7,7 @@ Against a stub `gh` on PATH — no network. Stdlib unittest. Run: make -C .claud
 from __future__ import annotations
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,7 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parents[2]
 SUBMIT = KIT / "skills" / "pr-review" / "scripts" / "submit-review.sh"
+RUNNER_REF = KIT / "skills" / "pr-review" / "reference" / "runner.md"
 REPO = "acme/widgets"
 PR = "9"
 HEAD = "a" * 40
@@ -211,6 +213,45 @@ class AutoCommentSubmit(unittest.TestCase):
         self.assertEqual(submit.returncode, 0, submit.stdout + submit.stderr)
         rows = self.ledger_rows()
         self.assertEqual(rows[0]["status"], "reviewed")
+
+
+def norm(text: str) -> str:
+    """Collapse whitespace (including line wraps) so a search string does not depend on exactly where the
+    prose happens to wrap."""
+    return re.sub(r"\s+", " ", text)
+
+
+class HeldLedgerStatus(unittest.TestCase):
+    """`reference/runner.md` § `--unattended`: an `on_stop: hold` decision (in either mode) must write a
+    `held` ledger row for the head, the same append path `shadow_comment` uses — otherwise a held PR gets
+    `C` again on every tick and the main session re-spawns a full review-runner on the same head every
+    tick until it changes (PR#373 review). Text-shape checks only (no model judgement, no script: the
+    write itself happens in the main session, not in a script this test can stub)."""
+
+    def setUp(self):
+        self.runner = norm(RUNNER_REF.read_text(encoding="utf-8"))
+
+    def test_on_stop_hold_writes_a_held_ledger_row(self):
+        self.assertIn("status `held`", self.runner,
+                      "runner.md's `on_stop: hold` step no longer says it writes a `held` ledger status "
+                      "for the head — a held PR would get `C` again on the next tick")
+        self.assertNotIn("no ledger write", self.runner,
+                          "runner.md still says the hold path makes no ledger write")
+
+    def test_shadow_mode_hold_also_logs_held(self):
+        self.assertNotIn("mode logs nothing (same as live's hold)", self.runner,
+                          "runner.md's shadow-mode note still says an on_stop: hold decision logs "
+                          "nothing — it must log `held` too, the same as live's hold")
+
+    def test_step_1_skip_list_includes_held(self):
+        skip_list = self.runner.split("Skip a row whose ledger already carries", 1)[1].split(".", 1)[0]
+        self.assertIn("`held`", skip_list,
+                      "runner.md step 1's skip list does not name `held` — a held row would be "
+                      "re-flagged `C` and get a new runner spawned on every tick")
+
+    def test_logging_schema_lists_held(self):
+        self.assertIn('"auto_commented"|"shadow_comment"|"held"', self.runner,
+                      "runner.md § Logging does not list `held` among the ledger statuses this path writes")
 
 
 if __name__ == "__main__":
