@@ -145,8 +145,9 @@ def main() -> int:
               f"session start; trim the active rows' working_on/responsibilities or lower MAX_ENDED",
               file=sys.stderr)
 
-    # Decision-ledger shape (non-fatal) — a line that already looks like a ledger entry but is
-    # missing its date or its rejected-option clause (docs/carousel.md § After the answer).
+    # Decision-ledger shape (non-fatal) — a line that already starts with a date and has the
+    # `→` arrow (so it looks like a ledger entry) but is missing its `; not <rejected>` clause
+    # (docs/carousel.md § After the answer).
     bad_ledger = ledger_warnings(gi.ROOT, rows)
     if bad_ledger:
         print(f"⚠ {len(bad_ledger)} Key decisions & gotchas line(s) look ledger-shaped (a date, "

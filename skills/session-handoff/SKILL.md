@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "17"
+  version: "18"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -106,8 +106,10 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       name>`), the epic and tickets *this session* owned, the files to read first (context doc sections,
       exports), what it owns and must NOT touch, the first task with its ticket, open follow-ups (drafts by
       `draft_id`, pending verdicts), this session's ledger lines — the *Key decisions & gotchas* lines dated
-      today, or since the last handoff, quoted verbatim (`docs/carousel.md`) — and the open PRs / watchers to
-      re-arm (or "none"). Run `python3
+      today, or since the last handoff, quoted verbatim (`docs/carousel.md`), and the open PRs / watchers to
+      re-arm (or "none"). The ledger lines count toward the ≤12-line cap: when they do not all fit, quote
+      only the newest ones that do and point at the context doc's *Key decisions & gotchas* section for the
+      rest — never a paraphrase, only verbatim lines or that pointer. Run `python3
       $BATON/context-db/bin/kit_profile.py scratch` once and use the **printed path** (a per-session dir
       that exists on every machine — never a bare `/tmp` path, which sessions overwrite; shell variables do
       not survive between tool calls, so the Write call takes the literal path) for `<dir>/next.md`, then
