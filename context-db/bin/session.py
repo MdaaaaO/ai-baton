@@ -472,11 +472,19 @@ def _kill_heartbeat(name: str) -> bool:
 
 
 def _restart_heartbeat(old_name: str, new_name: str, working: str) -> bool:
-    """Stop the old name's heartbeat (if any) and start a fresh one for the new name with the same
-    focus. Best-effort: heartbeat.sh needs a `claude`/`node` ancestor process to attach to — a bare CLI
-    invocation (no owning session, e.g. this being run outside a Claude session) fails that lookup;
-    the failure is reported to stderr and never fails the rename itself."""
+    """Stop the old name's heartbeat (if any) and, only when one was actually running, start a fresh one
+    for the new name with the same focus. An ended (or archived, `restore_from_archive`-brought-back)
+    session, or someone else's, has no heartbeat of its own to restart — starting one anyway would attach
+    heartbeat.sh to the CALLER's `claude` process and `CLAUDE_CODE_SESSION_ID`, so every touch would write
+    the caller's transcript stats into the renamed row, and the caller's own session-end would later end
+    an entry that was never theirs. Best-effort otherwise: heartbeat.sh needs a `claude`/`node` ancestor
+    process to attach to — a bare CLI invocation (no owning session, e.g. this being run outside a Claude
+    session) fails that lookup; the failure is reported to stderr and never fails the rename itself."""
     was_running = _kill_heartbeat(old_name)
+    if not was_running:
+        print(f"session.py: no heartbeat was running for {old_name} — none started for {new_name} either "
+              f"(start one by hand if this session should have one)", file=sys.stderr)
+        return False
     script = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                             "..", "..", "skills", "session-register", "heartbeat.sh"))
     if not os.path.isfile(script):
@@ -490,7 +498,7 @@ def _restart_heartbeat(old_name: str, new_name: str, working: str) -> bool:
     if r.returncode != 0:
         detail = (r.stderr or r.stdout).strip()
         print(f"session.py: heartbeat restart for {new_name} did not start ({detail or 'no output'})"
-              + (" — the old one was stopped" if was_running else "") + " — start it by hand", file=sys.stderr)
+              " — the old one was stopped — start it by hand", file=sys.stderr)
         return False
     return True
 

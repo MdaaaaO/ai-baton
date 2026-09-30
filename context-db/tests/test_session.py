@@ -536,7 +536,7 @@ class HeartbeatRestartHelpers(unittest.TestCase):
             self.assertFalse(self.mod._kill_heartbeat("t-never-started"))
 
     def test_restart_heartbeat_reports_success(self):
-        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=False), \
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=True), \
              unittest.mock.patch.object(self.mod.subprocess, "run",
                                          return_value=subprocess.CompletedProcess([], 0, "heartbeat for kit-x started", "")):
             self.assertTrue(self.mod._restart_heartbeat("old", "kit-x", "focus"))
@@ -546,3 +546,12 @@ class HeartbeatRestartHelpers(unittest.TestCase):
              unittest.mock.patch.object(self.mod.subprocess, "run",
                                          return_value=subprocess.CompletedProcess([], 1, "", "could not find the owning claude process")):
             self.assertFalse(self.mod._restart_heartbeat("old", "kit-x", "focus"))
+
+    def test_restart_heartbeat_starts_nothing_when_none_was_running(self):
+        """No heartbeat for the OLD name means the rename isn't of a live session of the caller's own — for
+        an ended session, or someone else's, starting one anyway would attach heartbeat.sh to the caller's
+        own `claude` process and stats (REVIEW.md § 2.3): it must not even try."""
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=False), \
+             unittest.mock.patch.object(self.mod.subprocess, "run") as run:
+            self.assertFalse(self.mod._restart_heartbeat("old", "kit-x", "focus"))
+        run.assert_not_called()

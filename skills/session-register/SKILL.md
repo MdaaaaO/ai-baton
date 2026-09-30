@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "19"
+  version: "20"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -50,7 +50,7 @@ worktree.
    (`kit-hardening`, `kit-216-changelog`, `<repo>-weekly-2`). `session-register` refuses a new name outside it; a
    successor takes the name its predecessor's prompt proposes. The name ends every PR body and PR comment you post on
    your own PRs (`kit_profile.py footer`, below), so it is public: no person, org or private project in it. A generic
-   placeholder still matches the regex and is not exempt — `<lane>-lane-<n>` (e.g. `thales-lane-6`) is not a topic;
+   placeholder still matches the regex and is not exempt — `<lane>-lane-<n>` (e.g. `kit-lane-6`) is not a topic;
    the *topic* part must name what you actually own. Get your `ref` from `ListAgents` (your own row):
 
    ```sh
@@ -64,8 +64,11 @@ worktree.
    responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
    edit the body directly (`sessions/` stays writable; the hook regenerates `SESSION_INDEX.md`).
    **Rename** a session already registered under a generic or wrong name instead of leaving it and
-   re-registering fresh — this moves the file, rewrites its frontmatter and title, and restarts the
-   backstop heartbeat (below) under the new name with the same focus in one step:
+   re-registering fresh — this moves the file, rewrites its frontmatter and title, and, only when your
+   own backstop heartbeat (below) was actually running for the old name, restarts it under the new name
+   with the same focus in one step. Only rename **your own live session** — renaming an ended or someone
+   else's entry moves the file but starts no heartbeat (there is none of yours to restart), so do that by
+   hand if it still needs one:
    ```sh
    make -C $BATON/context-db session-rename FROM=<old-name> TO=<new-name>
    ```
