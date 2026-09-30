@@ -37,15 +37,27 @@ class NoStaleClaudeMdSectionRefs(unittest.TestCase):
         self.assertEqual(hits, [], f"still cites a section of CLAUDE.md (should be WORKSPACE.md): {hits}")
 
 
-class PrWatchCadenceMatchesItsOwnMonitorCap(unittest.TestCase):
-    def test_no_stale_30_min_wording_next_to_a_3600000ms_cap(self):
-        """`timeout_ms: 3600000` (60 min, "the maximum") is the skill's own arming value; prose
-        elsewhere in the same file must not still call that cap "30-min" — the actual cadence before
-        the 2026-09-22 multi-PR consolidation, left behind when the value was raised."""
-        text = (KIT / "skills" / "pr-watch" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("timeout_ms: 3600000", text, "fixture assumption broke — the skill no longer arms at 3600000ms")
-        self.assertNotIn("30-min Monitor cap", text)
-        self.assertNotIn("30-min Monitors", text)
+class PrWatchCadenceMatchesTheHarnessMonitorCap(unittest.TestCase):
+    """The Monitor tool caps `timeout_ms` at 1800000 (30 min) — a larger value is silently capped. The skills
+    used to prescribe 3600000 as "the maximum" and priced idle watching at one expiry per hour, while every
+    watch really expired (and cost a wake-up) every 30 min. Every arming call and the cost prose must say 30 min."""
+
+    FILES = (("skills", "pr-watch", "SKILL.md"), ("skills", "session-register", "SKILL.md"),
+             ("skills", "pr-watch", "reference", "auto-sync.md"))
+
+    def test_arming_calls_use_the_real_cap(self):
+        for parts in self.FILES[:2]:
+            with self.subTest(file="/".join(parts)):
+                text = KIT.joinpath(*parts).read_text(encoding="utf-8")
+                self.assertIn("timeout_ms: 1800000", text)
+                self.assertNotIn("timeout_ms: 3600000", text)
+
+    def test_no_prose_still_claims_a_60_min_monitor(self):
+        for parts in self.FILES:
+            with self.subTest(file="/".join(parts)):
+                text = KIT.joinpath(*parts).read_text(encoding="utf-8")
+                for stale in ("60-min Monitor", "one expiry per hour", "1 h multi-PR Monitor"):
+                    self.assertNotIn(stale, text)
 
 
 class SessionSpendWordingIsOneDefinition(unittest.TestCase):

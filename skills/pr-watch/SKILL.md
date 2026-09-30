@@ -2,8 +2,8 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "17"
-  updated: "2026-09-28"
+  version: "18"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
 ---
 
@@ -13,7 +13,7 @@ metadata:
 decision, 2026-09-22 — the script takes one repo; one process round-robins the PRs, one `sleep 120` per
 cycle). The script polls GitHub every 120 s and prints
 one line per actionable event; the harness turns each line into a notification, so the polling is free
-and only real events — plus the Monitor's own expiry — cost a wake-up at full prefix (~$0.30 each).
+and only real events — plus the Monitor's own expiry, every 30 min — cost a wake-up at full prefix (~$0.30 each).
 
 ## Watches are session-scoped — re-arm on every session start
 
@@ -29,9 +29,13 @@ list before ending. Never assume a watch exists because the context doc says one
 Monitor({
   command: "bash $BATON/skills/pr-watch/pr-watch.sh <org>/<repo> <pr1> <head1> <pr2> <head2> <pr3> <head3>",   // always via `bash …`: the file's execute bit is not reliable on this mount (exit 126). The script is POSIX-safe since 2026-09-14 (a bash-only `${cur:0:9}` in the HEAD MOVED branch crashed a `sh`-run watcher with "Bad substitution" on the first head move)
   description: "<repo> #<pr1>/#<pr2>/#<pr3>: actionable events only, until merged",
-  persistent: true, timeout_ms: 3600000   // the maximum — one expiry per hour, not two per hour per PR
+  timeout_ms: 1800000   // the harness caps every Monitor at 30 min (a larger value is silently capped)
 })
 ```
+
+**Re-arm on expiry = the identical call**, same command, original heads: the state dir makes it silent
+(nothing already reported is replayed, and a head the watcher already followed is kept, not reported
+again), so an expiry costs its one wake-up and nothing more. Never look the heads up again for it.
 
 Arguments: `<owner/repo> <pr_number> <head_sha_prefix> [<pr_number> <head_sha_prefix> …]` — all PRs of
 one repo in one process. The single-PR form (`… <owner>/<repo> <pr> <sha>`) still works unchanged;
@@ -75,12 +79,12 @@ behaviour that motivates it: `reference/cost-controls.md`.
 
 ## Park when the gates are not yours (2026-09-22)
 
-Arm **one** Monitor per repo per session for all its PRs there, `timeout_ms: 3600000` (the maximum). On each expiry,
+Arm **one** Monitor per repo per session for all its PRs there, `timeout_ms: 1800000` (the harness maximum). On each expiry,
 look back: if the previous **two consecutive windows** delivered zero actionable events (only expiries,
 muted CI lines), do **not** re-arm — run the `session-handoff` skill and end the session. The successor
 re-arms from the `## Open PRs` list (`session-register` step 4) when the user reports the gate moved.
 
-Arithmetic: 3 PRs × 60-min Monitors ≈ 3 wake-ups/h ≈ $0.90/h idle; one 1 h multi-PR Monitor ≈ $0.30/h;
+Arithmetic: 3 PRs × one Monitor each ≈ 6 expiry wake-ups/h ≈ $1.80/h idle; one multi-PR Monitor ≈ 2/h ≈ $0.60/h;
 parked = $0. A PR waiting on an `update-branch` only the user's machine can run, a human review or a third party is not
 something a live session makes happen faster.
 
@@ -103,7 +107,8 @@ Don't read the PR yourself at full prefix when a line lands. Invoke the forked s
 low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line brief ending in one
 `ACTION:` (`REPLY+RESOLVE` / `FIX+PUSH` / `RE-REQUEST-BOT` / `UPDATE-BRANCH` / `MERGE` / `WAIT(<who>)` /
 `INVESTIGATE-CHECK`). **You perform the action** — replies, resolves, re-requests, merges post to
-GitHub and stay on the main model. Skip the fork for `HEAD MOVED` (just re-request the bot),
+GitHub and stay on the main model. Skip the fork for `HEAD MOVED` (just re-request the bot; the
+watcher's own sync emits none — it re-requests the bot itself),
 `MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork
 `pr-event-brief` for it — it is not a PR event, there is nothing on the PR to triage). A brief slot
 marked `unverified` means fetch it yourself.
@@ -121,7 +126,7 @@ re-request the bot with DELETE+POST; test the bot verdict on its own, never mixe
 Monitor({
   command: "bash $BATON/skills/pr-watch/pr-merge.sh <org>/<repo> <n>",
   description: "#<n> merge sequence: bot verdict → update-branch → forced review → squash-merge when CLEAN",
-  persistent: true, timeout_ms: 3600000
+  timeout_ms: 1800000   // an expiry kills the script: rerun it, every gate is re-read from the PR
 })
 ```
 

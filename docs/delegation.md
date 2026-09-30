@@ -33,8 +33,8 @@ When unsure, start with `sonnet` and escalate the one ticket that comes back unc
 ## The Sizing line — the call, written once, read at pickup
 
 The model and delegation call is made **once**, when the ticket is written, from the table above — not
-re-derived every time a session opens the ticket. `ticket-open` writes one line into the opening comment,
-anywhere in the body:
+re-derived every time a session opens the ticket. `ticket-open` writes one line into the opening block
+(the GitHub issue body, the Jira description), anywhere in it:
 
 ```
 **Sizing:** `<model>`, <delegate|main session>. <one-line reason>

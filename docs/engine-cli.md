@@ -475,8 +475,12 @@ WORKSPACE.md § Rules and the skills the session invoked. It extracts
   - failed commands (any other tool result marked as an error);
 and runs the rule checks a script can decide (`rule_hits`), each a CANDIDATE the fork confirms against the rule text:
   pr-no-labels        a `gh pr create` without `--label`, and no label added later in the session
-  pr-no-footer        a PR body (inline or a body file the session wrote) without the attribution footer line
-  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style)
+  pr-no-footer        a PR body (inline or a body file the session wrote) without the `session `<name>`` self-identifier
+  attribution-leak    a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer in a PR/issue
+                      title, body, comment or review, or a commit message — dropped on purpose (WORKSPACE.md § Rules);
+                      the self-identifier from `kit_profile.py footer` is the only thing that stays
+  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style);
+                      a `git commit` under a temp dir or alongside a pytest invocation is fixture setup, not a hit
   agent-no-model      an `Agent` call without `model` (it inherits the main session's, the most expensive one)
   workspace-path      a `.context/`, `.worktrees/` or home-directory path in a title or body posted to GitHub
   store-write-no-root a writing `kb.py` / `session.py` call from a worktree without an explicit `CONTEXT_ROOT=`
@@ -574,6 +578,10 @@ Styles:
   free          anything non-empty.
 `Merge …`, `Revert "…"` and `fixup!/squash! …` subjects always pass (git writes them).
 
+`check` also refuses a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer anywhere in the
+message (owner decision, 2026-09-28: no AI attribution anywhere — the `session `<name>`` self-identifier from
+`kit_profile.py footer` is the only thing that stays), same as a bad subject.
+
 Usage:
   commit_style.py resolve  [--dir <repo-dir>] [--repo <owner/repo>]
   commit_style.py check    [--dir …] [--repo …] [--style <s>] <msg-file | ->      exit 0 ok / 1 style / 2 usage, config or I/O
@@ -602,8 +610,9 @@ usage: sizing.py [-h] {parse,check,format,models} ...
 
 sizing.py — parse and format a ticket's Sizing line (docs/delegation.md § The Sizing line).
 
-`ticket-open` writes the line into the opening comment when a ticket is created; `ticket-pickup` reads it back
-when the ticket is picked up, verifies it still holds, and sizes a missing one. One line, anywhere in the body:
+`ticket-open` writes the line into the opening block when a ticket is created (the GitHub issue body, the Jira
+description); `ticket-pickup` reads it back when the ticket is picked up, verifies it still holds, and sizes a
+missing one. One line, anywhere in the body/description:
 
   **Sizing:** `<model>`, <delegate|main session>. <one-line reason>
 

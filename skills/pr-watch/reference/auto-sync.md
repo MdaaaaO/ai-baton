@@ -14,10 +14,17 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
   BEHIND, bot-approved PR that never reaches auto-merge. One attempt per head; `PR_WATCH_SYNC_COOLDOWN`
   (default 3600 s) stops a busy `main` from restarting the PR's CI every two minutes; the cooldown is
   seeded from the head commit when it is a GitHub `web-flow` merge commit, so a re-armed watcher
-  (60-min Monitor cap) does not restart the clock at zero. `PR_WATCH_SYNC=0` turns it off (e.g. a PR
+  (every 30-min Monitor expiry) does not restart the clock at zero. `PR_WATCH_SYNC=0` turns it off (e.g. a PR
   someone is mid-review on, or a branch the user is about to force-push).
 - A failure (403 workflow scope, 422 conflict) is reported once per head and not retried — act per
   `reference/events.md`. `mergeable_state=dirty` is reported as `CONFLICTS` and never touched.
+- The merge commit it lands is not reported again: the next poll recognises it (a two-parent `web-flow`
+  commit whose first parent is the head it synced from) and tracks it silently — no `HEAD MOVED` after
+  `SYNCED`. In bot mode the watcher then removes and re-adds `github.review_bot` as a requested reviewer
+  itself (DELETE then POST, as `pr-merge.sh` does — a plain POST is a no-op on a merge-commit head), only
+  once that commit is the head, since a request sent earlier would review a head about to be replaced.
+  A failed re-request is a `RE-REQUEST … failed` line. Any other move — a push landing in between — is a
+  normal `HEAD MOVED`, and the session re-requests as before.
 - Consequences you own: a merge commit lands on the branch, so any further push from the worktree needs
-  `sign-queue --rebase`; the bot must review the new head (`HEAD MOVED` rule); CI re-runs on the PR.
+  `sign-queue --rebase`; CI re-runs on the PR.
   The sync never fires on an approved PR — on approval, `pr-merge.sh` / `update-branch` by hand is the path.

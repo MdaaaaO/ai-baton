@@ -17,7 +17,7 @@ sys.path.insert(0, str(BIN))
 
 import session_retro as sr  # noqa: E402
 
-FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+FOOTER = "session `kit-test`"
 TS = "2026-09-26T10:{:02d}:00Z"
 
 
@@ -108,6 +108,35 @@ class RuleChecks(RetroCase):
         unexpanded = Builder().user("go").bash('git commit -m "$t"')
         self.assertNotIn("title-style", self.rules(unexpanded))
 
+    def test_title_style_skips_fixture_commits(self):
+        bad_subject = "git commit -qm \"$(cat <<'EOF'\nUpdated stuff\n\nbody\nEOF\n)\""
+        pytest_tmp = Builder().user("go").bash(bad_subject, cwd="/tmp/pytest-of-me/pytest-3/test_x0")
+        self.assertNotIn("title-style", self.rules(pytest_tmp))
+        kit_scratch = Builder().user("go").bash(bad_subject, cwd="/run/user/1000/ai-baton-kit/sess")
+        self.assertNotIn("title-style", self.rules(kit_scratch))
+        cd_into_tmp = Builder().user("go").bash(f"cd /tmp/x && {bad_subject}")
+        self.assertNotIn("title-style", self.rules(cd_into_tmp))
+        alongside_pytest = Builder().user("go").bash(f"{bad_subject} && pytest tests/test_x.py")
+        self.assertNotIn("title-style", self.rules(alongside_pytest))
+        # the same bad subject, outside a temp dir and with no pytest alongside: still a hit
+        self.assertIn("title-style", self.rules(Builder().user("go").bash(bad_subject)))
+
+    def test_title_style_pytest_before_the_commit_still_counts(self):
+        # the pytest exemption must only cover "commit && pytest" (the commit seeds a repo the suite then
+        # runs against) — not the reverse "pytest && commit", the usual "test, then ship the real work"
+        # chain, where the commit is the change under review.
+        bad_subject = "git commit -qm \"$(cat <<'EOF'\nUpdated stuff\n\nbody\nEOF\n)\""
+        tested_then_shipped = Builder().user("go").bash(f"python -m pytest tests && {bad_subject}")
+        self.assertIn("title-style", self.rules(tested_then_shipped))
+
+    def test_title_style_skips_tmp_even_when_tmpdir_points_elsewhere(self):
+        # on macOS, $TMPDIR is /var/folders/…/T/, never /tmp itself. /tmp must still be recognised as a temp
+        # dir rather than only checked as a fallback for an unset $TMPDIR.
+        bad_subject = "git commit -qm \"$(cat <<'EOF'\nUpdated stuff\n\nbody\nEOF\n)\""
+        with tempfile.TemporaryDirectory() as alt, unittest.mock.patch.dict(os.environ, {"TMPDIR": alt}):
+            cd_into_tmp = Builder().user("go").bash(f"cd /tmp/x && {bad_subject}")
+            self.assertNotIn("title-style", self.rules(cd_into_tmp))
+
     def test_agent_no_model(self):
         self.assertIn("agent-no-model", self.rules(Builder().user("go").call("Agent", description="fix it", prompt="x")))
         self.assertNotIn("agent-no-model", self.rules(Builder().user("go").call("Agent", description="fix it", prompt="x", model="sonnet")))
@@ -122,6 +151,30 @@ class RuleChecks(RetroCase):
         self.assertIn("workspace-path", self.rules(mcp))
         clean = Builder().user("go").bash("gh issue comment 5 -R acme/widgets --body 'fixed in #6'")
         self.assertNotIn("workspace-path", self.rules(clean))
+
+    def test_attribution_leak_in_pr_body_comment_and_commit(self):
+        gen = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+        leak_body = self.pr_body(f"Closes #5\n\n{gen}").bash(self.PR + " -l x")
+        self.assertIn("attribution-leak", self.rules(leak_body))
+        clean_body = self.pr_body(f"Closes #5\n\n{FOOTER}").bash(self.PR + " -l x")
+        self.assertNotIn("attribution-leak", self.rules(clean_body))
+        comment = Builder().user("go").bash(f"gh issue comment 5 -R acme/widgets --body 'thanks! {gen}'")
+        self.assertIn("attribution-leak", self.rules(comment))
+        mcp = Builder().user("go").call("mcp__github__create_issue", title="x", body="see below\nCo-Authored-By: Claude <noreply@example.invalid>")
+        self.assertIn("attribution-leak", self.rules(mcp))
+        dotted = Builder().user("go").call("mcp__github__create_issue", title="x",
+                                           body="done\nCo-Authored-By: Claude Opus 4.5 <noreply@example.invalid>")
+        self.assertIn("attribution-leak", self.rules(dotted))  # the dotted version the real trailer carries
+        human_coauthor = Builder().user("go").bash(
+            "git commit -qm \"$(cat <<'EOF'\nfix(sync): release the lock\n\nCo-Authored-By: Alex Doe <alex@example.invalid>\nEOF\n)\"")
+        self.assertNotIn("attribution-leak", self.rules(human_coauthor))
+        # a human co-author whose first name happens to be Claude — surname distinguishes them from the AI trailer
+        human_claude = Builder().user("go").bash(
+            "git commit -qm \"$(cat <<'EOF'\nfix(sync): release the lock\n\nCo-Authored-By: Claude Martin <claude.martin@example.invalid>\nEOF\n)\"")
+        self.assertNotIn("attribution-leak", self.rules(human_claude))
+        commit = Builder().user("go").bash(
+            "git commit -qm \"$(cat <<'EOF'\nfix(sync): release the lock\n\nCo-Authored-By: Claude <noreply@example.invalid>\nEOF\n)\"")
+        self.assertIn("attribution-leak", self.rules(commit))
 
     def test_store_write_from_worktree_without_context_root(self):
         wt = "/work/.worktrees/kit_x"

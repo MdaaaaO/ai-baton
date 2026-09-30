@@ -14,6 +14,6 @@ python3 "$checker" check --quiet --dir "$top" "$1"
 rc=$?
 case $rc in
   0) ;;
-  1) echo "commit refused — fix the subject (or KIT_SKIP_COMMIT_STYLE=1 for a deliberate one-off)" >&2; exit 1 ;;
+  1) echo "commit refused — fix the message (problem above; or KIT_SKIP_COMMIT_STYLE=1 for a deliberate one-off)" >&2; exit 1 ;;
   *) echo "commit refused — the style check itself failed (exit $rc, reason above): fix that, or KIT_SKIP_COMMIT_STYLE=1" >&2; exit 1 ;;
 esac

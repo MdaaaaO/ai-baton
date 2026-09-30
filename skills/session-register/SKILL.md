@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "20"
+  version: "22"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -82,8 +82,9 @@ worktree.
    was built* / *Remaining work*, or `gh pr list --author @me`), verify the current head with
    `gh api repos/<o>/<r>/pulls/<n> --jq .head.sha` and arm **one** multi-PR `pr-watch` Monitor covering
    all of them (the `pr-watch` skill; `bash …/pr-watch.sh <o>/<r> <n> <head> [<n> <head> …]` under
-   `Monitor`, persistent, `timeout_ms: 3600000` — one Monitor per repo, not per PR; owner decision, 2026-09-22).
-   On expiry, re-arm — unless the last **two** windows brought zero actionable events, in which case
+   `Monitor`, `timeout_ms: 1800000` — the harness caps a Monitor at 30 min, and each expiry is a
+   billed wake-up; one Monitor per repo, not per PR; owner decision, 2026-09-22).
+   On expiry, re-arm with the identical call (same command and heads; the watcher stays silent) — unless the last **two** windows brought zero actionable events, in which case
    park instead: `session-handoff` and end the session (`pr-watch` § Park when the gates are not yours).
    Park at once — do not wait for two windows — the moment the user signs off, or when the only pending event
    is a human approval / host-only gate (2026-09-22).
@@ -94,8 +95,8 @@ worktree.
    prevents (owner decision, 2026-09-18).
 
 Registering records the name for this session: `python3 $BATON/context-db/bin/kit_profile.py session-name` prints it,
-and `kit_profile.py footer` prints the attribution line with it — `🤖 Generated with [Claude Code](…) · session
-\`<name>\`` — the last line of every PR body and PR comment on your own PRs (`pr-open`, `pr-watch`).
+and `kit_profile.py footer` prints the session self-identifier with it — `session \`<name>\`` — the last line of
+every PR body and PR comment on your own PRs (`pr-open`, `pr-watch`); never an AI attribution line.
 
 ## 2. Keep the heartbeat fresh (≤12h)
 

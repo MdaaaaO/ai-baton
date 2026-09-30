@@ -12,6 +12,12 @@ every event the poll body can emit still runs first. Covers three regressions:
   - with neither PR_WATCH_SELF nor WORKSPACE_GITHUB_LOGIN set and `gh api user` failing, the watcher used to
     fall back to the literal string "unknown" and keep running — every reply this session posted then came
     back as a NEW event forever.
+  - the watcher's own update-branch merge used to come back as a HEAD MOVED wake-up (after the SYNCED one had
+    already said so), and the review-bot re-request that head needs was left to the session — two model turns
+    for nothing the session could decide. It is now tracked silently and, in bot mode, re-requested by the
+    watcher; a real push after a sync still reports HEAD MOVED, and a failed re-request is a line.
+  - an expiry re-arm with the arming command reused verbatim (its original head) after the watcher had already
+    followed a head move used to reset the state: HEAD MOVED again, the bot verdict replayed.
 Stdlib unittest, no network. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import json
@@ -57,6 +63,9 @@ if [ "$1" = api ]; then
     */issues/*/comments\?per_page=100)
       [ -n "${STUB_ISSUE_FAIL:-}" ] && { echo "stub gh: simulated issue-comments failure" >&2; exit 1; }
       body=$STUB_ISSUE_COMMENTS_JSON ;;
+    */pulls/*/requested_reviewers)
+      [ -n "${STUB_RR_FAIL:-}" ] && { echo "stub gh: simulated re-request failure" >&2; exit 1; }
+      exit 0 ;;
     */pulls/*/update-branch)
       [ "$method" = PUT ] || { echo "stub gh: unexpected method $method for $path" >&2; exit 9; }
       [ -n "${STUB_UPDATE_BRANCH_FAIL:-}" ] && { echo "${STUB_UPDATE_BRANCH_FAIL}" >&2; exit 1; }
@@ -123,7 +132,8 @@ class PrWatchStub(unittest.TestCase):
 
     def run_watch(self, *, state="MERGED", rollup="[]", reviews="[]", comments="[]", issue_comments="[]",
                   compare_behind=0, me_login="tester", identity_env: dict | None = None,
-                  extra_env: dict | None = None, timeout=30) -> subprocess.CompletedProcess:
+                  extra_env: dict | None = None, timeout=30, live_head: str = FULL, arg_head: str = HEAD9,
+                  commit: dict | None = None) -> subprocess.CompletedProcess:
         drop = ("PR_WATCH_SELF", "WORKSPACE_GITHUB_LOGIN", "PR_WATCH_BOT_LOGIN", "GH_TOKEN", "PR_WATCH_SYNC_COOLDOWN")
         env = {k: v for k, v in os.environ.items() if k not in drop}
         env.update(
@@ -136,9 +146,11 @@ class PrWatchStub(unittest.TestCase):
             STUB_COMMENTS_JSON=comments,
             STUB_ISSUE_COMMENTS_JSON=issue_comments,
             STUB_COMPARE_JSON=json.dumps({"behind_by": compare_behind}),
-            STUB_PR_JSON=json.dumps({"head": {"sha": FULL}, "base": {"ref": "main"}, "mergeable_state": "clean"}),
-            STUB_COMMIT_JSON=json.dumps({"parents": [{"sha": "b" * 40}], "committer": {"login": "someone"},
-                                         "commit": {"committer": {"date": "2026-01-01T00:00:00Z"}}}),
+            STUB_PR_JSON=json.dumps({"head": {"sha": live_head}, "base": {"ref": "main"}, "mergeable_state": "clean"}),
+            STUB_COMMIT_JSON=json.dumps(commit if commit is not None else {
+                "parents": [{"sha": "b" * 40}], "committer": {"login": "someone"},
+                "commit": {"committer": {"date": "2026-01-01T00:00:00Z"}}}),
+            TMPDIR=str(self.tmp),  # per-test state dir, never the shared ${TMPDIR:-/tmp}/pr-watch-* of a live watcher
             STUB_ME_JSON=json.dumps({"login": me_login}),
             PR_WATCH_SYNC_COOLDOWN="0",
         )
@@ -146,7 +158,23 @@ class PrWatchStub(unittest.TestCase):
             env.update(identity_env)
         if extra_env:
             env.update(extra_env)
-        return subprocess.run(["bash", str(SCRIPT), REPO, PR, HEAD9], env=env, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(["bash", str(SCRIPT), REPO, PR, arg_head], env=env, capture_output=True, text=True, timeout=timeout)
+
+    def state_dir(self) -> Path:
+        return self.tmp / f"pr-watch-{REPO.replace('/', '-')}-{PR}"
+
+    def seed_state(self, **files: str) -> None:
+        """A state dir as a previous run of the watcher left it (a re-arm, not a first arming)."""
+        d = self.state_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        base = {"init": "1", "seen_bot": "0", "seen_c": "", "seen_r": "", "seen_i": "", "last_sync": "0"}
+        for name, value in {**base, **files}.items():
+            (d / name).write_text(value + "\n" if value else "")
+
+    @staticmethod
+    def merge_commit(first_parent: str, committer: str = "web-flow") -> dict:
+        return {"parents": [{"sha": first_parent}, {"sha": "c" * 40}], "committer": {"login": committer},
+                "commit": {"committer": {"date": "2026-01-01T00:00:00Z"}}}
 
     @staticmethod
     def check_run(name: str, conclusion: str) -> dict:
@@ -229,6 +257,89 @@ class PrWatchStub(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("ERROR", r.stdout)
         self.assertIn("github.bots", r.stdout)
+
+    # --- the watcher's own update-branch: no HEAD MOVED wake-up, the bot re-requested by the watcher itself ---
+
+    OLD = "d" * 40      # the head the watcher synced FROM
+    NEW = FULL          # the merge commit update-branch landed (the live head)
+
+    def test_a_sync_records_the_head_it_synced_from_and_promises_no_head_moved(self):
+        r = self.run_watch(compare_behind=3, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} SYNCED with main", r.stdout)
+        self.assertIn("no HEAD MOVED follows", r.stdout)
+        self.assertEqual((self.state_dir() / "sync_from").read_text().strip(), FULL)
+
+    def test_own_sync_merge_head_is_silent_and_the_bot_is_re_requested(self):
+        self.write_config(review_bot="rev-bot[bot]")
+        self.seed_state(head=self.OLD[:9], sync_from=self.OLD)
+        r = self.run_watch(arg_head=self.OLD[:9], commit=self.merge_commit(self.OLD),
+                           identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("HEAD MOVED", r.stdout)
+        self.assertNotIn("RE-REQUEST", r.stdout)
+        calls = self.calls().splitlines()
+        rr = [c for c in calls if "requested_reviewers" in c]
+        self.assertEqual(len(rr), 2, calls)
+        self.assertIn("-X DELETE", rr[0]); self.assertIn("-X POST", rr[1])
+        self.assertTrue(all("reviewers[]=rev-bot[bot]" in c for c in rr), rr)
+        self.assertEqual((self.state_dir() / "head").read_text().strip(), self.NEW[:9])
+        self.assertFalse((self.state_dir() / "sync_from").exists())
+
+    def test_own_sync_merge_head_in_no_bot_mode_is_silent_and_requests_nobody(self):
+        self.seed_state(head=self.OLD[:9], sync_from=self.OLD)
+        r = self.run_watch(arg_head=self.OLD[:9], commit=self.merge_commit(self.OLD),
+                           identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("HEAD MOVED", r.stdout)
+        self.assertNotIn("requested_reviewers", self.calls())
+
+    def test_a_failed_re_request_after_the_sync_is_a_line_not_silence(self):
+        self.write_config(review_bot="rev-bot[bot]")
+        self.seed_state(head=self.OLD[:9], sync_from=self.OLD)
+        r = self.run_watch(arg_head=self.OLD[:9], commit=self.merge_commit(self.OLD),
+                           identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"STUB_RR_FAIL": "1"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} RE-REQUEST of rev-bot[bot] on {self.NEW[:9]} failed", r.stdout)
+        self.assertIn("simulated re-request failure", r.stdout)
+        self.assertNotIn("HEAD MOVED", r.stdout)
+
+    def test_a_push_after_a_sync_is_still_head_moved_and_clears_the_sync_marker(self):
+        # the new head is NOT the sync's merge commit (one parent: someone pushed) — a real move, reported;
+        # the marker must not linger and misclassify a later move either, and nobody is re-requested.
+        self.write_config(review_bot="rev-bot[bot]")
+        self.seed_state(head=self.OLD[:9], sync_from=self.OLD)
+        push = {"parents": [{"sha": self.OLD}], "committer": {"login": "tester"},
+                "commit": {"committer": {"date": "2026-01-01T00:00:00Z"}}}
+        r = self.run_watch(arg_head=self.OLD[:9], commit=push, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} HEAD MOVED to {self.NEW[:9]}", r.stdout)
+        self.assertNotIn("requested_reviewers", self.calls())
+        self.assertFalse((self.state_dir() / "sync_from").exists())
+
+    def test_a_merge_head_by_someone_else_is_still_head_moved(self):
+        # a merge commit whose first parent is NOT the head this watcher synced from (someone merged by hand
+        # from another head) — not the watcher's own sync.
+        self.seed_state(head=self.OLD[:9], sync_from="e" * 40)
+        r = self.run_watch(arg_head=self.OLD[:9], commit=self.merge_commit(self.OLD),
+                           identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} HEAD MOVED to {self.NEW[:9]}", r.stdout)
+        self.assertFalse((self.state_dir() / "sync_from").exists())
+
+    # --- an expiry re-arm with the original command must stay silent once the watcher followed the move ---
+
+    def test_re_arm_with_the_original_head_after_a_followed_move_is_silent(self):
+        self.write_config(review_bot="rev-bot[bot]")
+        # the watcher already followed the move to NEW and reported its bot verdict there
+        self.seed_state(head=self.NEW[:9], seen_bot="1")
+        green = [{"user": {"login": "rev-bot[bot]"}, "state": "COMMENTED", "commit_id": self.NEW,
+                  "body": "### Assessment: " + chr(0x1F7E2) + " good"}]  # the green circle, built at run time
+        r = self.run_watch(arg_head=self.OLD[:9], reviews=json.dumps(green), identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("HEAD MOVED", r.stdout)
+        self.assertNotIn("BOT REVIEW", r.stdout)
+        self.assertEqual((self.state_dir() / "head").read_text().strip(), self.NEW[:9])
 
 
 if __name__ == "__main__":

@@ -18,6 +18,10 @@ Styles:
   free          anything non-empty.
 `Merge …`, `Revert "…"` and `fixup!/squash! …` subjects always pass (git writes them).
 
+`check` also refuses a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer anywhere in the
+message (owner decision, 2026-09-28: no AI attribution anywhere — the `session `<name>`` self-identifier from
+`kit_profile.py footer` is the only thing that stays), same as a bad subject.
+
 Usage:
   commit_style.py resolve  [--dir <repo-dir>] [--repo <owner/repo>]
   commit_style.py check    [--dir …] [--repo …] [--style <s>] <msg-file | ->      exit 0 ok / 1 style / 2 usage, config or I/O
@@ -49,6 +53,17 @@ MAX_SUBJECT = 72
 COMMITLINT = ("commitlint.config.js", "commitlint.config.cjs", "commitlint.config.mjs", "commitlint.config.ts",
               ".commitlintrc", ".commitlintrc.json", ".commitlintrc.yml", ".commitlintrc.yaml", ".commitlintrc.js")
 CREL_TABLE = re.compile(r"^\[\[?tool\.conventional-release[\].]", re.M)
+# no AI attribution anywhere (owner decision, 2026-09-28): the session self-identifier from `kit_profile.py footer`
+# (`session `<name>``) is the only thing that stays — a "Generated with" line or a `Co-Authored-By: Claude …`
+# trailer is refused on every commit, same as a bad subject. Matched narrowly — bare "Claude" or "Claude <model
+# family>" immediately followed by the trailer's `<email>` — so a human co-author whose first name happens to be
+# Claude (a "Claude <Surname> <email>" shape) is never caught.
+ATTRIBUTION_RE = re.compile(
+    r"Generated with \[Claude Code\]"
+    r"|Co-Authored-By:\s*Claude(?:\s+(?:Code|Opus|Sonnet|Haiku|Fable)(?:[\s-]?\d+(?:\.\d+)*)?)?\s*<[^>\n]*>"
+    r"|Co-Authored-By:[^\n<]*<noreply@anthropic\.com>",  # the vendor bot address, any model name; never a human there
+    re.I,
+)
 
 
 def _config() -> dict:
@@ -188,6 +203,10 @@ def check_message(text: str, style: str, comment: str = "#") -> list[str]:
     problems = check_subject(lines[0], style)
     if len(lines) > 1 and lines[1].strip():
         problems.append("second line must be blank (subject / blank / body)")
+    m = ATTRIBUTION_RE.search("\n".join(lines))
+    if m:
+        problems.append(f"AI attribution (`{m.group(0)}`) — no attribution anywhere; the session self-identifier "
+                         f"from `kit_profile.py footer` is the only thing that stays")
     return problems
 
 
