@@ -20,8 +20,8 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't lo
    task needs. Narrow with `make -C $BATON/context-db find DOMAIN=<domain>` or `find TAG=<tag>`.
 2. **Persist:** new doc `make -C $BATON/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug>
    TITLE="…"` (types: `.context/README.md`). **Writes to `.context/` docs go through ctx tools** —
-   `ctx_str_replace`, `ctx_insert`, `ctx_log`, `ctx_fm`, `ctx_create` (Bash: `ctx_adapter.py ctx
-   <verb>`); `Write`/`Edit` is denied. Hooks validate and re-index.
+   `ctx_str_replace`, `ctx_insert`, `ctx_log`, `ctx_fm`, `ctx_create` (Bash: `$BATON/context-db/bin/ctx_adapter.py
+   ctx <verb>`); `Write`/`Edit` is denied outside `sessions/`. Hooks validate and re-index.
 3. **Domains are folders:** core `reference/`, `repos/`, `pr-reviews/`, `meetings/`, `1on1/`,
    `self-assessment/`, `on-call/`, `archive/`; the environment adds its own (`domains` in the env
    config). Repo deep-dives are `.context/repos/<repo>.md` (links + TLDRs; the repo's own `CLAUDE.md`
@@ -30,7 +30,7 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't lo
 **Context doc** = the private living doc for one epic / tracking issue (not the tracker item, which
 gets its own update). One per initiative, `TYPE=epic`, fixed sections *Tracker & links · Goal · What
 was built (PRs per repo) · Key decisions & gotchas · Infra/secrets locations · Remaining work · Session
-log* (dated one-liners, newest first). Keep it the lean current state — history goes to
+log* (dated one-liners, oldest first). Keep it the lean current state — history goes to
 `.context/archive/<slug>-log.md`; `verify` warns past 30 KB. It is the **handoff document**: a cold
 session must pick up from it alone, so it is updated at every step, not only at the end.
 
@@ -41,9 +41,9 @@ session must pick up from it alone, so it is updated at every step, not only at 
   table per system. Scripts read them (`kit_profile.py get <key>`, `kb.py get <system>.<kind> <name>`);
   prose cites keys. A value that differs between environments never appears in a SKILL.md, agent,
   engine script or this file (`kit-health` scans for leaks).
-- **A fact a skill needs** (channel id, field id, account id…): `kb.py get` → missing → `kb.py discover
-  <system>.<kind> <name>` prints the discovery plan (tool, verify clause) → run it and verify → only if
-  no tool settles it, ask the user **once** → `kb.py set … --from tool:<name>|user|derived:<key>`.
+- **A fact a skill needs** (an id…): `kb.py get` → missing → `kb.py discover <system>.<kind> <name>`
+  prints the plan (tool, verify clause) → run it, verify → only if no tool settles it, ask the user
+  **once** → `kb.py set … --from tool:<name>|user|derived:<key>`.
   A forked worker returns `NEEDS <system>.<kind> <name>`; the main session resolves it (`env-init`).
 - **`requires` is the only gate.** The kit never names an environment; a skill that needs a system
   says `metadata.requires: "slack"` (a `systems.*` flag). A false flag means **not applicable here**: say

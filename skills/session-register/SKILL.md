@@ -2,8 +2,8 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "18"
-  updated: "2026-09-28"
+  version: "19"
+  updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
 ---
@@ -57,7 +57,8 @@ worktree.
         REPOS=<repo[,repo]> WORKING="<current ticket/PR in one line>" \
         RESP="<what you own; what others should coordinate with you on>"
    ```
-   Then open `.context/sessions/<name>.md` and fill the body with anything another session
+   Then fill the body of `.context/sessions/<name>.md` (a direct `Edit` or the ctx tools — `sessions/` is
+   exempt from the write deny, and the session type has no owner rule) with anything another session
    needs (what you own vs. don't, in-flight worktrees/PRs). **Override it whenever your
    responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
    edit the body directly (`sessions/` stays writable; the hook regenerates `SESSION_INDEX.md`).
