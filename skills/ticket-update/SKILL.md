@@ -103,12 +103,12 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
 - **Pointer** = a `**Thread** <url>` / `**PR** <url>` line in the comment (Sync — core § 2) — the sanctioned
   form here too; it needs no write scope and always lands. Only when `tracker.write_api` is also true, mirror
   it as a real remote issue link: first list the links already there via `tracker.mcp_tools.remote_link`
-  (read-only) and stop if this URL is one of them; otherwise create it with `POST
-  /rest/api/3/issue/{key}/remotelink` — cloud id from the env fact `tracker.setting cloud_id` (config key
-  `tracker.cloud_id`) — body `{"object": {"url": "<link>", "title": "<title>"}}`. Check, then create: never
-  create without checking. `tracker.write_api` false or unset (the common case — a read-only roster exposes
-  only `getJiraIssueRemoteIssueLinks`, no write tool and no API token) → skip the POST silently, the comment
-  line already carries the pointer.
+  (read-only) and stop if this URL is one of them, even when the read tool is missing (then read the links
+  via `GET` on the same endpoint); otherwise create it with `POST /rest/api/3/issue/{key}/remotelink` —
+  cloud id from the env fact `tracker.setting cloud_id` — body `{"object": {"url": "<link>", "title":
+  "<title>"}}`. Check, then create: never create without checking. `tracker.write_api` false or unset (the
+  common case — a read-only roster exposes only `getJiraIssueRemoteIssueLinks`, no write tool and no API
+  token) → skip the POST silently, the comment line already carries the pointer.
 
 ## Adapter — GitHub issues (tracker.kind = github)
 
