@@ -25,12 +25,23 @@ route modules that are UI) go into the env config — `diagrams.repos.<owner/rep
 **Rules that hold for every block**
 - **GitHub renders ```` ```mermaid ```` natively** on PR bodies and comments — no images, nothing to upload.
   Jira does **not**: a ticket gets the PR link, never the diagram source.
-- **Validate before publishing.** A syntax error renders as a red box for every reviewer. Parse every block
-  with the mermaid library: `node $BATON/skills/pr-open/mermaid-check.mjs <body.md>…` from a scratchpad dir
-  after copying `$BATON/skills/pr-open/package.json` and `package-lock.json` there and running
-  `npm ci --no-audit --no-fund` (pinned versions, not the day's latest — Dependabot bumps the lockfile; prints `OK (<type>)` / `FAIL <error>` per
-  block; handles CRLF-terminated fences; exits 1 on any failure, or on a file with zero mermaid blocks unless
-  `--allow-none` is passed — a docs/config-only push has none on purpose) — or, if that is impossible, re-read against these traps: a `;` inside sequence
+- **Validate before publishing.** A syntax error renders as a red box for every reviewer. Deps first, in a
+  scratch dir — module resolution is CWD-relative, so the check must also **run** from that same dir (`cd`
+  back to the repo root before the `node` call is the usual miss):
+  ```
+  D="$(python3 $BATON/context-db/bin/kit_profile.py scratch mm)"
+  df -h "$D"    # low free space here is usually a build cache, not this install — clear the largest one
+                # (e.g. a language toolchain's build cache) first, then retry
+  cp $BATON/skills/pr-open/package.json $BATON/skills/pr-open/package-lock.json "$D"/
+  ( cd "$D" && npm ci --no-audit --no-fund )   # pinned versions, not the day's latest — Dependabot bumps the lockfile
+  S="$(cd "$BATON" && pwd)/skills/pr-open"    # $BATON (e.g. .claude) is relative to the workspace root —
+  B="$(realpath <body.md>)"                   # resolve both before the cd, or the node call can't find them
+  ( cd "$D" && node "$S/mermaid-check.mjs" "$B" )
+  ```
+  Prints `OK (<type>)` / `FAIL <error>` per block; handles CRLF-terminated fences; exits 1 on any failure, or
+  on a file with zero mermaid blocks unless `--allow-none` is passed (a docs/config-only push has none on
+  purpose); exits 2 with its own install hint when the deps above are not on the CWD yet. Or, if all that is
+  impossible, re-read against these traps: a `;` inside sequence
   text **terminates the statement** (use `—`/`,` or parentheses); one message per line; quote node labels with
   `(`, `)`, `/`, `$`, `·`; `<br/>` for line breaks; edge labels `A -- text --> B` / `A -. text .-> B`.
 - **Honest labels.** Tag nodes `(existing)` / `(this PR)` / `(follow-up <key>)`; highlight the changed nodes

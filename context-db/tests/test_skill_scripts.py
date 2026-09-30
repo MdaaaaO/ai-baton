@@ -438,7 +438,7 @@ class DiagramPlan(unittest.TestCase):
             f = Path(tmp) / "files.txt"
             f.write_text("20\t0\tsrc/service/orders.py\n5\t0\tmodels/marts/fct_orders.sql\n", encoding="utf-8")
             script = KIT / "skills" / "pr-open" / "diagram-plan.py"
-            run = lambda *a: subprocess.run([sys.executable, str(script), "--files", str(f), "--json", *a],
+            run = lambda *a: subprocess.run([sys.executable, str(script), "--files-from", str(f), "--json", *a],
                                              capture_output=True, text=True)
             r = run()
             self.assertEqual(r.returncode, 0, r.stderr)
@@ -446,6 +446,45 @@ class DiagramPlan(unittest.TestCase):
             r2 = run("--trivial-lines", "3")
             self.assertEqual(r2.returncode, 0, r2.stderr)
             self.assertEqual(json.loads(r2.stdout)["questions"]["what"]["facet"], "dbt-model")
+
+    def test_files_flag_takes_changed_paths_directly_not_a_list_file(self):
+        # #348: `--files` used to be a LIST FILE (a path to a file of paths), not the changed paths
+        # themselves — the flag name and the skill text read as if it took paths. `--files-from` is now the
+        # list-file form (covered by test_cli_trivial_lines_flag_is_wired_through and
+        # test_files_from_list_reads_numstat_and_plain_lines above); this is the direct-paths form.
+        script = KIT / "skills" / "pr-open" / "diagram-plan.py"
+        r = subprocess.run([sys.executable, str(script), "--files", "app/api/orders.py", "app/api/users.py",
+                             "--type", "feature"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("facets:   api(2)", r.stdout)
+        self.assertIn("dominant: api", r.stdout)
+
+    def test_repo_dir_mode_sees_the_working_tree_before_the_first_commit(self):
+        # the other half of #348: a plan run before the first commit (the moment the PR body is written) used
+        # to see only `--base...HEAD` (committed history) and report no changed files. The default now also
+        # diffs the working tree against HEAD and lists untracked files; `--committed-only` opts back out.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "clone"
+            repo.mkdir()
+            git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, check=True,
+                                            env=hermetic_env(repo))
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "t@example.invalid"); git("config", "user.name", "t")
+            (repo / "README.md").write_text("x\n"); git("add", "."); git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "init")
+            git("checkout", "-q", "-b", "feat")
+            (repo / "app" / "api").mkdir(parents=True)
+            (repo / "app" / "api" / "orders.py").write_text("def handler():\n    pass\n")
+            git("add", "app/api/orders.py")  # staged, never committed
+            (repo / "app" / "api" / "users.py").write_text("def other():\n    pass\n")  # untracked, on purpose
+            script = KIT / "skills" / "pr-open" / "diagram-plan.py"
+            r = subprocess.run([sys.executable, str(script), "--repo", str(repo), "--base", "main", "--type", "feature"],
+                                capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("facets:   api(2", r.stdout)
+            r_committed = subprocess.run([sys.executable, str(script), "--repo", str(repo), "--base", "main",
+                                           "--type", "feature", "--committed-only"], capture_output=True, text=True)
+            self.assertEqual(r_committed.returncode, 2, r_committed.stdout)
+            self.assertIn("no changed files", r_committed.stderr)
 
     def test_help_documents_exit_codes_and_new_flags(self):
         script = KIT / "skills" / "pr-open" / "diagram-plan.py"

@@ -437,7 +437,14 @@ class StoreData(unittest.TestCase):
         for t in types:
             self.assertIsInstance(json.loads((data / "types" / f"{t}.json").read_text(encoding="utf-8")), dict, t)
         epic = json.loads((data / "types" / "epic.json").read_text(encoding="utf-8"))
-        self.assertEqual(epic["log"], {"section": "Session log", "order": "newest-first"})  # ctx_log keeps the rule
+        # the Session log reads oldest first; version 1 migrates a newest-first log, one-date logs included
+        self.assertEqual(epic["log"], {"section": "Session log", "order": "oldest-first"})
+        self.assertEqual(epic["version"], 1)
+        self.assertEqual(epic["migrations"][0]["log_order_from"], "newest-first")
+        log = json.loads((data / "types" / "log.json").read_text(encoding="utf-8"))
+        self.assertEqual(log["log"]["section"], "Log")  # ctx_log on a log doc needs no --section
+        session = json.loads((data / "types" / "session.json").read_text(encoding="utf-8"))
+        self.assertNotIn("owner", session)  # every model write runs as one MCP actor: an owner rule refused them all
 
     def test_the_plugin_ships_the_mcp_server(self):
         servers = json.loads((KIT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["mcpServers"]
@@ -474,7 +481,7 @@ class Adopt(Base):
         data = KIT / "context-db" / "ctx-store"
         self.assertEqual([c["argv"][2:] for c in self.calls()],
                          [["init", "--settings", str(data / "ctx-store.json"), "--types", str(data / "types"), "--upgrade"],
-                          ["validate"], ["validate", "--changed", "--adopt"]])
+                          ["migrate", "--apply"], ["validate"], ["validate", "--changed", "--adopt"]])
         self.assertEqual({c["argv"][1] for c in self.calls()}, {str(self.root)})
         self.assertFalse((self.root / "ctx-store.json").exists())
         self.assertFalse((self.root / ".ctx").exists())
@@ -530,12 +537,48 @@ class Adopt(Base):
                          self.data()[".ctx/types/log.json"])
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_adopt_migrates_a_newest_first_session_log_to_chronological(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        body = EPIC.replace("- 2026-01-05 — first\n", "- 2026-01-06 — later\n- 2026-01-06 — same day, earlier\n"
+                            "- 2026-01-05 — first\n")
+        (self.root / "d" / "a.md").write_text(body, encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("migrated:", r.stdout)
+        text = (self.root / "d" / "a.md").read_text(encoding="utf-8")
+        log = [ln for ln in text.splitlines() if ln.startswith("- 2026-")]
+        self.assertEqual(log, ["- 2026-01-05 — first", "- 2026-01-06 — same day, earlier", "- 2026-01-06 — later"])
+        self.assertIn("schema_version: epic.v1", text)
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)  # a second run changes nothing
+        self.assertEqual((self.root / "d" / "a.md").read_text(encoding="utf-8"), text)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_the_model_can_log_to_a_log_doc_and_write_its_session_doc(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        (self.root / "d" / "l.md").write_text("---\ntitle: L\ntype: log\ndomain: d\nstatus: active\n"
+                                              "updated: 2026-01-05\n---\n# L\n\n## Log\n\n", encoding="utf-8")
+        (self.root / "sessions").mkdir(exist_ok=True)
+        (self.root / "sessions" / "lane-topic.md").write_text(
+            "---\nsession: lane-topic\nstatus: active\n---\n\n## Owns\n\n- x\n", encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        mcp_env = dict(env, CTX_ACTOR="claude")  # the MCP server's actor, never the session's name
+        r = self.adapter("ctx", "log", "d/l", "no --section needed", **mcp_env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.adapter("ctx", "insert", "sessions/lane-topic", "- y", "--line", "7", **mcp_env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("NOT_OWNER", r.stdout + r.stderr)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_findings_are_printed_and_exit_3(self):
         (self.root / "d").mkdir()
         (self.root / "d" / "bad.md").write_text(EPIC.replace("status: active", "status: someday"), encoding="utf-8")
         r = self.adapter("adopt", KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
-        self.assertRegex(r.stdout, r"(?m)^finding: SCHEMA_VIOLATION d/bad")
+        # an invalid epic cannot take the schema step: validate names the doc, migrate names the violation
+        self.assertRegex(r.stdout, r"(?m)^finding: MIGRATION_PENDING d/bad")
+        self.assertRegex(r.stdout, r"(?m)^finding: migrate: SCHEMA_VIOLATION status")
         self.assertTrue((self.root / "ctx-store.json").exists())
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")

@@ -14,8 +14,9 @@ pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, e
 
 Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
 `context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
-kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
-is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
+kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
+`ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
+log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
@@ -63,7 +64,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-CTX_VERSION = "v0.4.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
+CTX_VERSION = "v0.5.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
 CTX_API = 1             # the ctx API `ctx --version` must report (its `(api N)` suffix) — bump only alongside a
                          # verb/output change the adapter now relies on; `ctx_adapter.py version`'s second line
                          # exposes it so kit-health can catch a pinned install answering a different one
@@ -167,7 +168,7 @@ def adopt(check: bool = False, replace: bool = False) -> int:
         print(f"ctx_adapter.py adopt: no content root at {root} — run setup.sh first", file=sys.stderr)
         return 2
     store = ["--store", str(root)]
-    differs = False
+    differs, blocked = False, []
     if check:
         r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
         if _code(r) == "NO_STORE":
@@ -186,6 +187,16 @@ def adopt(check: bool = False, replace: bool = False) -> int:
         differs = bool(kept)
         for f in kept:
             print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
+        # a type the kit moved to a new schema version leaves its docs MIGRATION_PENDING, and ctx refuses writes to
+        # those: bring them along now (ctx's migrations are idempotent; a doc it cannot migrate is a finding below)
+        m = _ctx(ctx, store, "migrate", "--apply", timeout=ADOPT_TIMEOUT)
+        for ln in _lines(m.stdout):
+            print(f"migrated: {ln}")
+        blocked = _lines(m.stderr) if m.returncode == 3 else []  # a doc invalid on its own cannot take the step
+        if m.returncode not in (0, 3):
+            print(f"ctx_adapter.py adopt: ctx migrate failed: {(_lines(m.stderr) or [f'exit {m.returncode}'])[0]}",
+                  file=sys.stderr)
+            return 2
         r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
     if r.returncode not in (0, 3):
         print(f"ctx_adapter.py adopt: ctx validate failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
@@ -195,6 +206,9 @@ def adopt(check: bool = False, replace: bool = False) -> int:
     print(f"store {root}: " + (_lines(r.stdout) or ["ok"])[0])
     for f in findings:
         print(f"finding: {f}")
+    for f in [] if check else blocked:
+        print(f"finding: migrate: {f} (fix the doc, then re-run adopt)")
+    findings = findings + ([] if check else blocked)
     if not check:
         a = _ctx(ctx, store, "validate", "--changed", "--adopt", timeout=ADOPT_TIMEOUT)
         print("adopt: " + ((_lines(a.stdout) or ["ok"])[0] if a.returncode in (0, 3) else

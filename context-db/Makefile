@@ -17,6 +17,7 @@
 #                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
 #   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
 #   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
+#   make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
 #   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
 #   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
 #   make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
@@ -80,7 +81,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
+.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
 SESSION_ID ?= $(CLAUDE_CODE_SESSION_ID)
 STATSFLAGS  = $(if $(value SESSION_ID),--session-id $(call sq,SESSION_ID),) $(if $(value NOSTATS),--no-stats,)
 
@@ -245,7 +246,7 @@ endif
 # Free text (WORKING="…", RESP="…") reaches session.py verbatim (#132): `$(call sq,VAR)` is the variable's
 # UNEXPANDED value as one single-quoted sh word, and `unexport` keeps make from expanding it into the recipe
 # environment (a `$(shell …)` inside the text would otherwise run). So quotes, `$(…)` and backticks are data.
-SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING RESP NOTE NEXT SESSION_ID NOSTATS
+SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING RESP NOTE NEXT SESSION_ID NOSTATS FROM TO
 unexport $(SESSION_VARS)
 override sq = '$(subst ','\'',$(value $(1)))'
 SESSION_ARGS = --ref $(call sq,REF) --status $(call sq,STATUS) --epic $(call sq,EPIC) --repos $(call sq,REPOS) \
@@ -262,6 +263,11 @@ session-touch:
 session-end:
 	@test -n $(call sq,NAME) || { echo "usage: make session-end NAME=<session> [NEXT=<file with the next-session prompt>|none] [WORKING=]"; exit 2; }
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py end --name $(call sq,NAME) --working $(call sq,WORKING) --next $(call sq,NEXT) $(STATSFLAGS)
+
+session-rename:
+	@test -n $(call sq,FROM) || { echo "usage: make session-rename FROM=<old-name> TO=<new-name>"; exit 2; }
+	@test -n $(call sq,TO) || { echo "usage: make session-rename FROM=<old-name> TO=<new-name>"; exit 2; }
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py rename --from $(call sq,FROM) --to $(call sq,TO)
 
 # make session-stats [SESSION_ID=<uuid>] — the stats block for the handoff (no registry write)
 session-stats:

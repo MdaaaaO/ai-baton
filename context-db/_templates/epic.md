@@ -32,5 +32,5 @@ current state.
 ## Remaining work
 
 ## Session log
-<!-- Dated one-liners, newest first. -->
+<!-- Dated one-liners, oldest first (`ctx_log` appends). -->
 - {{DATE}} — created.
