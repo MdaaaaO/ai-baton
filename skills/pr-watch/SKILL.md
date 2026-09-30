@@ -29,7 +29,7 @@ list before ending. Never assume a watch exists because the context doc says one
 Monitor({
   command: "bash $BATON/skills/pr-watch/pr-watch.sh <org>/<repo> <pr1> <head1> <pr2> <head2> <pr3> <head3>",   // always via `bash …`: the file's execute bit is not reliable on this mount (exit 126). The script is POSIX-safe since 2026-09-14 (a bash-only `${cur:0:9}` in the HEAD MOVED branch crashed a `sh`-run watcher with "Bad substitution" on the first head move)
   description: "<repo> #<pr1>/#<pr2>/#<pr3>: actionable events only, until merged",
-  persistent: true, timeout_ms: 1800000   // the harness caps every Monitor at 30 min (a larger value is silently capped)
+  timeout_ms: 1800000   // the harness caps every Monitor at 30 min (a larger value is silently capped)
 })
 ```
 
@@ -126,7 +126,7 @@ re-request the bot with DELETE+POST; test the bot verdict on its own, never mixe
 Monitor({
   command: "bash $BATON/skills/pr-watch/pr-merge.sh <org>/<repo> <n>",
   description: "#<n> merge sequence: bot verdict → update-branch → forced review → squash-merge when CLEAN",
-  persistent: true, timeout_ms: 1800000   // an expiry kills the script: rerun it, every gate is re-read from the PR
+  timeout_ms: 1800000   // an expiry kills the script: rerun it, every gate is re-read from the PR
 })
 ```
 

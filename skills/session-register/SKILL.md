@@ -67,7 +67,7 @@ worktree.
    *Remaining work*, or `gh pr list --author @me`), verify the current head with
    `gh api repos/<o>/<r>/pulls/<n> --jq .head.sha` and arm **one** multi-PR `pr-watch` Monitor covering
    all of them (the `pr-watch` skill; `bash …/pr-watch.sh <o>/<r> <n> <head> [<n> <head> …]` under
-   `Monitor`, persistent, `timeout_ms: 1800000` — the harness caps a Monitor at 30 min, and each expiry is a
+   `Monitor`, `timeout_ms: 1800000` — the harness caps a Monitor at 30 min, and each expiry is a
    billed wake-up; one Monitor per repo, not per PR; owner decision, 2026-09-22).
    On expiry, re-arm with the identical call (same command and heads; the watcher stays silent) — unless the last **two** windows brought zero actionable events, in which case
    park instead: `session-handoff` and end the session (`pr-watch` § Park when the gates are not yours).
