@@ -36,6 +36,20 @@
   ],
   "log": {
     "section": "Session log",
-    "order": "newest-first"
-  }
+    "order": "oldest-first"
+  },
+  "version": 1,
+  "migrations": [
+    {
+      "to": 1,
+      "log_order": "oldest-first",
+      "log_order_from": "newest-first",
+      "replace_comments": [
+        {
+          "old": "newest first",
+          "new": "oldest first"
+        }
+      ]
+    }
+  ]
 }

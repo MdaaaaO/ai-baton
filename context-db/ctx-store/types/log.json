@@ -27,5 +27,9 @@
       "required": true,
       "kind": "date"
     }
+  },
+  "log": {
+    "section": "Log",
+    "order": "newest-first"
   }
 }

@@ -30,6 +30,7 @@ Live session registry (who is working on what, right now — see SESSION_INDEX.m
                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
+  make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
   make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
@@ -295,7 +296,7 @@ options:
 ## `session.py`
 
 ```text
-usage: session.py [-h] {register,touch,end,stats} ...
+usage: session.py [-h] {register,touch,end,stats,rename} ...
 
 session.py — maintain a session's self-reported entry in the live session
 registry. Each active Claude session that works on an epic/feature keeps ONE
@@ -314,18 +315,25 @@ FILE) the `## Next session` hand-off prompt — omit --next when the session has
 nothing to hand over, and pass --next none to withdraw a prompt already on
 file — and appends one row to sessions/_ledger.md (the cross-session
 cost/activity ledger) stats print this session's stats (block) without
-touching the registry Every subcommand also refreshes the `stats:` field (one
-line: turns, context, tokens, rough spend, PRs/tickets/sign jobs/drafts — see
-session_stats.py) when the session's transcript is discoverable via
-$CLAUDE_CODE_SESSION_ID / --session-id; `--no-stats` skips it. Stats are
-derived from the transcript with zero model turns, so the live registry row is
-always current. The content root is kit_profile.context_root() (CONTEXT_ROOT,
-which the Makefile sets from CONTEXT, else docs/layout.md's "Content root"
-default). Empty CLI values are treated as "leave unchanged" so the Makefile
-can pass every flag unconditionally. Stdlib only.
+touching the registry rename --from <old> --to <new>: move sessions/<old>.md
+to <new>.md, rewrite the `session:` frontmatter and the `# Session: <name>`
+title, re-record the scratch session name, and when a heartbeat was running
+for <old>, restart heartbeat.sh under the new name with the same focus (best-
+effort — a heartbeat outside a live session has nothing to attach to and is
+reported, not fatal); refuses when <new> already has an entry or does not
+follow the session naming convention. Every subcommand also refreshes the
+`stats:` field (one line: turns, context, tokens, rough spend,
+PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's
+transcript is discoverable via $CLAUDE_CODE_SESSION_ID / --session-id; `--no-
+stats` skips it. Stats are derived from the transcript with zero model turns,
+so the live registry row is always current. The content root is
+kit_profile.context_root() (CONTEXT_ROOT, which the Makefile sets from
+CONTEXT, else docs/layout.md's "Content root" default). Empty CLI values are
+treated as "leave unchanged" so the Makefile can pass every flag
+unconditionally. Stdlib only.
 
 positional arguments:
-  {register,touch,end,stats}
+  {register,touch,end,stats,rename}
 
 options:
   -h, --help            show this help message and exit
@@ -352,8 +360,9 @@ pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, e
 
 Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
 `context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
-kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it
-is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
+kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
+`ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
+log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named

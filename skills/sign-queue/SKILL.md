@@ -3,8 +3,8 @@ name: sign-queue
 description: "Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains it with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners. Inert where `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "17"
-  updated: "2026-09-28"
+  version: "19"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
   requires: "signed_commits"
 ---
@@ -33,8 +33,10 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
   clone never creates that ref). Check with
   `gh api repos/<o>/<r>/branches/<branch> -q .commit.sha` vs local `git rev-parse HEAD` before enqueuing.
 - `--new-branch` for the first push (`push -u`).
-- `--force-with-lease <remote-sha>` when an **already-pushed** branch gets its history rewritten — a second
-  `--onto` re-stack after the upstream branch moved, a fixup — the plain push is rejected as non-fast-forward. The job pushes `--force-with-lease=refs/heads/<branch>:<remote-sha>`,
+- `--force-with-lease <remote-sha>` whenever an **already-pushed** branch is about to run `--onto`/`--rebase`
+  again, or gets a fixup — not only "the upstream moved": the job's `-f` (see the no-op re-stack trap below)
+  always replays and re-signs the whole range, so every commit gets a new sha even when the upstream tip has
+  not moved since the last re-stack, and the plain push is rejected as non-fast-forward either way. The job pushes `--force-with-lease=refs/heads/<branch>:<remote-sha>`,
   so it lands only if the remote tip is still the sha you read via `gh api repos/<o>/<r>/branches/<branch>`;
   a moved remote parks the job as `.failed` instead of clobbering someone's push. Exclusive with `--new-branch`.
 - `--onto <upstream-branch>:<old-base-sha>` for a **stacked** branch whose upstream is itself unsigned/unpushed
@@ -44,6 +46,13 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
   the real upstream and the placeholder is dropped. Enqueue the upstream's job first (same drain is fine — jobs run
   in enqueue order); if that job fails, this one fails on the fetch and is parked, nothing is pushed on a stale base.
   Exclusive with `--rebase`.
+  - **The no-op re-stack trap:** if the upstream tip has not moved since your own worktree was last rebased onto
+    it (wherever that ran — signing key absent, so no `-S`), a plain `rebase --onto`/`--rebase` is a no-op: git
+    leaves every existing commit exactly as it is instead of replaying it, so that earlier unsigned commit stays
+    unsigned even though the job reports a signed HEAD. The job always force-rebases (`-S -f`) so the range is
+    replayed — and re-signed — every time, and it verifies every commit about to be pushed (not just HEAD) before
+    pushing at all, refusing (parked, `UNSIGNED <sha>`) rather than land one with no signature or a bad one
+    (`%G?` N or B; U and E carry a signature this host cannot fully trust or check, and the drain reports them).
 - **One staging rule, same as `signed-git-commits`: stage explicit paths, never a silent `add -A`.**
   `--files "a b"` stages only those paths — the norm, especially in a worktree with unrelated noise. Each
   path is single-quoted in the job: route dirs of some web frameworks contain `$param`, and the unquoted
@@ -76,6 +85,21 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
 - `--files` and deletions: a `git rm`-staged deletion is in neither worktree nor index, so `git add -- <path>`
   fails on it; enqueue.sh drops such paths (they are already in the commit) and refuses paths that are
   neither present nor tracked. Check `git status --short` before enqueuing (first column = already staged).
+
+### Folding fixes into an unsigned job
+
+A review round (fix → enqueue → wait for `make sign` → reply) that gets another round of fixes before the
+owner drains would otherwise mean two jobs for one topic — or a hand check of the log/`.failed` state
+before deleting the old `.sh` yourself. `--supersede` does this in one step: it finds the newest PENDING
+job with the same `topic` (and, when you also pass `--by`, the same `--by`), deletes it, prints which job
+it dropped, then enqueues as usual. It refuses (exit 2, nothing touched) when that job already has a drain
+log or is parked as `<job>.failed` — it was attempted, not just sitting in the queue, and folding into it
+would lose that history; resolve it (`make sign_show` / `sign_log` / `sign_retry`) first instead. No match
+for the topic (and `--by`) is not an error: the job just enqueues normally, same as without the flag.
+**Folding does not merge the dropped job's own content** — its `--files`, message file and
+`--rebase`/`--onto`/`--force-with-lease` flags are gone with it, not carried onto the new enqueue. Pass the
+union of both rounds' `--files` (and whichever of those flags the earlier round needed) on the new call, or
+the earlier round's paths are left uncommitted and never pushed.
 
 ## User side — drain
 
