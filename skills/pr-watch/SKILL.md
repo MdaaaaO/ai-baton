@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "20"
+  version: "21"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 ---
@@ -112,6 +112,9 @@ watcher's own sync emits none — it re-requests the bot itself),
 `MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork
 `pr-event-brief` for it — it is not a PR event, there is nothing on the PR to triage). A brief slot
 marked `unverified` means fetch it yourself.
+
+Whether to merge past a settled red check (a known-flaky test, an annotation you already judged
+harmless) or wait for the rerun is the user's call, not a default — ask it per `docs/carousel.md`.
 
 ## Rules this encodes (verified on a strict-ruleset repo with a review bot)
 

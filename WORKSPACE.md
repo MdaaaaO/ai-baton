@@ -2,7 +2,7 @@
 
 The **environment-agnostic body** of the workspace `CLAUDE.md`. The root `CLAUDE.md` (personal) says
 who the user is, then imports this file and the environment's prose (`.context/reference/environment.md`).
-Everything below holds everywhere; whatever differs between environments lives in the env store (values) and `environment.md` (prose), local to the machine.
+Everything below holds everywhere; whatever differs between environments lives in the env store (values) and `environment.md` (prose).
 Identity is `WORKSPACE_*` (`/plugin configure ai-baton`, else `.claude/settings.local.json`), never here.
 Kit reference: `$BATON/README.md`.
 
@@ -10,7 +10,7 @@ Kit reference: `$BATON/README.md`.
 
 The workspace root holds the repos, `CLAUDE.md`, a `Makefile` and the infra dirs `.claude/` (this kit,
 its own git repo), `.context/` (the knowledge base, below), `.worktrees/` and `exports/`.
-**Nothing new at the root** — durable knowledge goes under `.context/`, raw data under `exports/`.
+**Nothing new at the root.**
 
 ## The `.context/` DB — find first, persist durable knowledge
 
@@ -80,6 +80,8 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
 ## Rules (always on)
 
 **Communication**
+- Open decisions go in one `AskUserQuestion` carousel (recommended option first, marked
+  `(Recommended)`), never a prose question; no tool → a numbered `Decisions` block (`docs/carousel.md`).
 - No AI attribution anywhere; own PRs + PR comments end with `kit_profile.py footer` only.
 - Asks/status pings default to 1–3 plain sentences — link + one clause + who must act, no bold
   field-label templates; point to where detail already lives, never restate it. Reserve
@@ -95,8 +97,8 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
   compare in-shell, print only match/no-match.
 
 **Workflow & scope**
-- A misrouted prompt (another session's lane/repo/ticket/PR) → ask "handle here or ignore?" before
-  reading, editing, relaying or drafting anything.
+- A misrouted prompt (another session's lane/repo/ticket/PR) → ask before reading, editing, relaying
+  or drafting anything.
 - Standing go: once a step is on the agreed order and its gates are met, start it and prep everything —
   stop only for signing, unplanned destructive prod actions, or genuine scope changes.
 - Every PR a session opens carries labels — type + area (+ risk when it applies) from the repo's own
@@ -118,9 +120,9 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
 
 ## Cost & context hygiene
 
-Caching: a stable prefix re-reads each turn at ~0.1× input (writes 1.25×, 5-min TTL; 2×, 1 h). The
-cliff is invalidation (tools → system → messages): editing `CLAUDE.md`, an import, a skill description
-or the tool list re-bills every open session in full next turn — **batch always-on edits into one PR**.
+Caching: a stable prefix re-reads each turn at ~0.1× input; editing `CLAUDE.md`, an import, a skill
+description or the tool list invalidates it, re-billing every open session in full next turn —
+**batch always-on edits into one PR**.
 
 - **Load by task:** `INDEX.md` first, then only the leaf docs needed. **Read slices** (`grep`,
   `Read` with offset+limit) and pipe big output to a count or scratch file.

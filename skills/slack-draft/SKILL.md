@@ -3,7 +3,7 @@ name: slack-draft
 description: "Lifecycle of every Slack message a session drafts for the user: create it as a draft (never paste text), record it, and READ the channel or thread before any follow-up, recreate or status claim, because the user edits drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   requires: "slack"
@@ -20,6 +20,10 @@ answered.
 > On a machine where `slack` is false, print `slack-draft: not applicable here — slack is false` and stop.
 
 ## 1. Create
+
+Whether a draft is wanted now, its wording changed first, or the message skipped is the user's call —
+ask it as a carousel question, recommended option marked, per `docs/carousel.md`; never a paste of
+the draft text as a prose question. The session only ever creates the draft; sending stays the user's.
 
 - `slack_send_message_draft` into the target channel / DM / thread (`thread_ts` for replies).
   Never paste draft text in the terminal (WORKSPACE.md § Rules). Formatting: `reference/formatting.md`

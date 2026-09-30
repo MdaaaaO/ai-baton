@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, verified claims, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads, writes back learnings; a trivial PR (pr-scan `A`) auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "32"
+  version: "33"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
@@ -123,8 +123,8 @@ and the exact search per kind: `reference/stakeholder-impact.md`.
 
 ## 5. Triage — overview, then walk every finding with the user (in the terminal, not on GitHub) *(main session)*
 
-Same shape as `notion-page-review`: an overview first, then **one `AskUserQuestion` per batch of
-4 findings**, so the user approves, rewrites, deep-dives or drops each item before anything is posted.
+Same shape as `notion-page-review` (docs/carousel.md): an overview first, then **one `AskUserQuestion`
+per batch of 4 findings**, so the user approves, rewrites, deep-dives or drops each item before anything is posted.
 Numbers are assigned once and never change — the user refers to "#3" later.
 
 **5a. Overview** (plain text, before the first question):

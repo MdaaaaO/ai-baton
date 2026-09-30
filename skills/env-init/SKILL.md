@@ -2,8 +2,8 @@
 name: env-init
 description: "Fill or refresh this machine's env fact store from the discovery manifests: run the named tool per missing or stale fact, verify, write back with provenance, and ask the user once for what no tool settles. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact."
 metadata:
-  version: "9"
-  updated: "2026-09-28"
+  version: "10"
+  updated: "2026-09-30"
   reviewed: "2026-09-26"
 user-invocable: true
 ---
@@ -71,7 +71,7 @@ secret, and asks the user only for what no tool can settle — once, batched.
    verify is dropped, not stored. Exactly one verified candidate → write it. Several → the manifest's
    `note:` heuristic (exact-name match first, …); still ambiguous → step 4 with the candidates.
 4. **One user round.** Collect everything left — `user` facts, ambiguous picks, unavailable tools — into
-   **one** `AskUserQuestion` call, ≤ 4 questions and never one question per fact: when more facts are open,
+   **one** `AskUserQuestion` call (shape: `docs/carousel.md`), ≤ 4 questions and never one question per fact: when more facts are open,
    group them by system (one question per system, its candidates as the options). What still does not fit
    in that one call is *left unset* and named in the report — the next `/env-init` picks it up. Each
    question lists the verified candidates as options with the `purpose` from the manifest; a `user` fact
