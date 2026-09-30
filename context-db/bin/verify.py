@@ -9,9 +9,9 @@ Checks every content doc for:
   - INDEX.md being up to date (regenerate and diff).
 
 Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & gotchas*
-(`docs/carousel.md` § After the answer) — a line that already looks like a ledger entry (starts
-with a date, then has `→`) but is missing its date or its `; not <rejected>` clause. A free-form
-gotcha line in that section (no `→`) never warns.
+(`docs/carousel.md` § After the answer) — a line that is ledger-shaped (starts with a bare date,
+then has `→`) but is missing its `; not <rejected>` clause. Any other line in that section (a
+free-form gotcha, an arrow in prose, a date in parentheses) never warns.
 
 Operates on the content root gen_index takes from kit_profile.context_root() (docs/layout.md's
 "Content root" paragraph). Run via `make -C $BATON/context-db verify`. Stdlib only.
@@ -46,7 +46,7 @@ SESSION_INDEX_WARN = 10 * 1024
 
 # Decision-ledger shape (docs/carousel.md § After the answer): "YYYY-MM-DD · <question> → <chosen>;
 # not <rejected options> — <one clause why>". A line only counts as ledger-shaped (and so only then
-# gets checked for the rest) once it has the arrow — a free-form gotcha line never has one.
+# gets checked for the rest) when it starts with a bare date AND has the arrow — arrows in prose are common.
 LEDGER_SECTION_RE = re.compile(r"^##\s+Key decisions & gotchas\s*$", re.MULTILINE)
 NEXT_HEADING_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
 LEDGER_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\b")
@@ -75,11 +75,10 @@ def ledger_warnings(root: str, rows: list[dict]) -> list[tuple[str, str]]:
             if not line:
                 continue
             candidate = line[2:].strip() if line[:2] in ("- ", "* ") else line
-            if LEDGER_ARROW not in candidate:
-                continue  # free-form gotcha line — never warns
-            if LEDGER_DATE_RE.match(candidate) and LEDGER_REJECTED in candidate:
-                continue  # a well-formed ledger line
-            found.append((r["_path"], line))
+            if not (LEDGER_DATE_RE.match(candidate) and LEDGER_ARROW in candidate):
+                continue  # not ledger-shaped (a free-form gotcha, or a date in parentheses) — never warns
+            if LEDGER_REJECTED not in candidate:
+                found.append((r["_path"], line))  # a ledger line without its rejected options
     return found
 
 
@@ -151,7 +150,7 @@ def main() -> int:
     bad_ledger = ledger_warnings(gi.ROOT, rows)
     if bad_ledger:
         print(f"⚠ {len(bad_ledger)} Key decisions & gotchas line(s) look ledger-shaped (a date, "
-              f"then `→`) but miss the date or the `; not <rejected>` clause:", file=sys.stderr)
+              f"then `→`) but miss the `; not <rejected>` clause:", file=sys.stderr)
         for p, line in bad_ledger:
             print(f"  - {p}: {line}", file=sys.stderr)
 

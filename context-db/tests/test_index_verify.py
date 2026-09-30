@@ -152,8 +152,9 @@ class LedgerWarnings(ContextRoot):
     def test_ledger_shaped_line_without_rejected_option_warns_once(self):
         good = "2026-09-29 · pick a queue → SQS; not Kafka — ops already run SQS elsewhere"
         no_reject = "2026-09-28 · pick a cache → Redis — it was already in the stack"
+        arrows_in_prose = "(2026-09-27) the cliff is invalidation (tools → system → messages); batch always-on edits"
         free_form = "watch out, the fixture loader is order-dependent"
-        self.ledger_doc("repos/ledger.md", good, no_reject, free_form)
+        self.ledger_doc("repos/ledger.md", good, no_reject, free_form + "\n- " + arrows_in_prose)
         run(self.root, "gen_index.py")
         v = run(self.root, "verify.py")
         self.assertEqual(v.returncode, 0, v.stderr)  # non-fatal — a warning, not a FAIL
