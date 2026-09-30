@@ -9,13 +9,17 @@ push is compared against the marker (`--check`) so the diagrams are redrawn when
 
 Usage (from the workspace root; stdlib only):
   diagram-plan.py --pr <owner/repo> <n> [--check] [--json]      # files + labels + body via gh
-  diagram-plan.py --repo <dir | owner/repo> [--base <ref>] [--type <t>] [--json]   # local git diff
-  diagram-plan.py --files <list.txt> [--repo …] [--type …]        # one path per line (name-status ok)
+  diagram-plan.py --repo <dir | owner/repo> [--base <ref>] [--committed-only] [--type <t>] [--json]  # local git diff
+  diagram-plan.py --files <path>... [--repo …] [--type …]         # changed paths, given directly
+  diagram-plan.py --files-from <list.txt> [--repo …] [--type …]   # one path per line (numstat/name-status ok)
   diagram-plan.py --explain                                       # the facet globs and the facet → question matrix
 
   --repo   a DIRECTORY (the clone to diff — `git diff` runs there, the env-config overlay key is read
-           from its `origin`), or an `owner/repo` slug when the diff is the cwd's or comes from --files.
-           Sessions run from the workspace root, so a local-diff run names the repo dir.
+           from its `origin`), or an `owner/repo` slug when the diff is the cwd's or comes from --files/--files-from.
+           Sessions run from the workspace root, so a local-diff run names the repo dir. The diff is
+           `--base…HEAD` (committed history) plus, unless `--committed-only`, the working tree against
+           HEAD and untracked files — a run before the first commit (writing the PR body) still sees a
+           plan instead of "no changed files".
 
   --type   bugfix | refactor | feature — the PR *intent*, which paths cannot show. Read from the
            type label with --pr (bug/hotfix → bugfix; tech-debt/refactor → refactor), else feature.
@@ -233,16 +237,7 @@ def resolve_repo(arg: str | None) -> tuple[Path | None, str | None]:
     return None, arg
 
 
-def files_from_git(base: str, cwd: Path | None = None) -> list[tuple[str, int]]:
-    if cwd is not None and not (cwd / ".git").exists():
-        try:
-            is_repo = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--git-dir"], capture_output=True, timeout=60).returncode == 0
-        except subprocess.TimeoutExpired:
-            print(f"FAIL git -C {cwd} rev-parse --git-dir timed out after 60s", file=sys.stderr)
-            raise SystemExit(2)
-        if not is_repo:
-            raise SystemExit(f"FAIL {cwd} is not a git repo")
-    out = sh(["git", *(["-C", str(cwd)] if cwd else []), "diff", "--numstat", f"{base}...HEAD"])
+def _parse_numstat(out: str) -> list[tuple[str, int]]:
     files = []
     for line in out.splitlines():
         parts = line.split("\t")
@@ -257,7 +252,54 @@ def files_from_git(base: str, cwd: Path | None = None) -> list[tuple[str, int]]:
     return files
 
 
+def _merge_weights(*groups: list[tuple[str, int]]) -> list[tuple[str, int]]:
+    """Sum weights for the same path across several (path, n) lists — a file changed both in a committed
+    diff and again in the working tree still counts once, at its combined weight."""
+    totals: dict[str, int] = {}
+    order: list[str] = []
+    for group in groups:
+        for name, n in group:
+            if name not in totals:
+                order.append(name)
+            totals[name] = totals.get(name, 0) + n
+    return [(name, totals[name]) for name in order]
+
+
+def files_from_git(base: str, cwd: Path | None = None, committed_only: bool = False) -> list[tuple[str, int]]:
+    """Changed files for the local-diff mode: `base...HEAD` (committed history) plus, unless
+    `committed_only`, the working tree against `HEAD` (staged + unstaged) and untracked files — so a plan
+    run before the first commit (the moment the PR body is written) still sees the diff instead of reporting
+    no changed files."""
+    git = ["git", *(["-C", str(cwd)] if cwd else [])]
+    if cwd is not None and not (cwd / ".git").exists():
+        try:
+            is_repo = subprocess.run([*git, "rev-parse", "--git-dir"], capture_output=True, timeout=60).returncode == 0
+        except subprocess.TimeoutExpired:
+            print(f"FAIL git -C {cwd} rev-parse --git-dir timed out after 60s", file=sys.stderr)
+            raise SystemExit(2)
+        if not is_repo:
+            raise SystemExit(f"FAIL {cwd} is not a git repo")
+    committed = _parse_numstat(sh([*git, "diff", "--numstat", f"{base}...HEAD"]))
+    if committed_only:
+        return committed
+    working = _parse_numstat(sh([*git, "diff", "HEAD", "--numstat"]))
+    untracked_out = sh([*git, "status", "--porcelain", "--untracked-files=all"])
+    untracked = []
+    for line in untracked_out.splitlines():
+        if not line.startswith("??"):
+            continue
+        name = line[3:].strip().strip('"')
+        try:
+            text = (cwd / name if cwd else Path(name)).read_text(encoding="utf-8", errors="replace")
+            n = len(text.splitlines()) or 1
+        except OSError:
+            n = 0
+        untracked.append((name, n))
+    return _merge_weights(committed, working, untracked)
+
+
 def files_from_list(path: str) -> list[tuple[str, int]]:
+    """`--files-from LISTFILE`: one path per line, plain or numstat/name-status-shaped (`<add>\\t<del>\\tpath`)."""
     files = []
     for raw in Path(path).read_text(encoding="utf-8").splitlines():
         line = raw.strip()
@@ -270,6 +312,12 @@ def files_from_list(path: str) -> list[tuple[str, int]]:
             n = int(parts[0]) + int(parts[1])
         files.append((name, n))
     return files
+
+
+def files_from_paths(paths: list[str]) -> list[tuple[str, int]]:
+    """`--files PATH...`: the changed paths directly, weight 0 each (the plan falls back to a per-facet file
+    count when no path carries a line weight — see `plan()`)."""
+    return [(p, 0) for p in paths]
 
 
 # ── classification ──────────────────────────────────────────────────────────────────────────
@@ -464,7 +512,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--repo", help="the clone to diff (a directory; its origin names the env-config overlay), or an owner/repo slug")
     ap.add_argument("--explain", action="store_true", help="print the facet globs and the facet → question matrix, then exit")
     ap.add_argument("--base", default="origin/main", help="diff base for the local git mode")
-    ap.add_argument("--files", help="path list file (plain paths, name-status or numstat lines)")
+    ap.add_argument("--committed-only", action="store_true",
+                     help="local git mode: only --base…HEAD, skip the working tree and untracked files")
+    ap.add_argument("--files", nargs="+", metavar="PATH", help="the changed paths, given directly")
+    ap.add_argument("--files-from", metavar="LISTFILE", help="a file of paths, one per line (plain, name-status or numstat lines)")
     ap.add_argument("--type", choices=sorted(INTENT), help="PR intent; overrides the label-derived one")
     ap.add_argument("--check", action="store_true", help="with --pr: compare the body marker to the fresh plan")
     ap.add_argument("--json", action="store_true")
@@ -484,9 +535,11 @@ def main(argv: list[str]) -> int:
         repo, n = a.pr[0], int(a.pr[1])
         files, labels, body = files_from_pr(repo, n)
     elif a.files:
-        files = files_from_list(a.files)
+        files = files_from_paths(a.files)
+    elif a.files_from:
+        files = files_from_list(a.files_from)
     else:
-        files = files_from_git(a.base, repo_dir)
+        files = files_from_git(a.base, repo_dir, committed_only=a.committed_only)
     if not files:
         print("FAIL no changed files found", file=sys.stderr)
         return 2

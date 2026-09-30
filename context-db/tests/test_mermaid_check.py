@@ -87,6 +87,21 @@ class MermaidCheckTest(unittest.TestCase):
         r2 = self.run_check("empty2.md", "no diagrams here\n", "--allow-none")
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
 
+    def test_missing_deps_print_install_hint_and_exit_2(self):
+        # run from a bare scratch dir with none of the stub node_modules — the trap the second bug report
+        # described: the check silently fails (an uncaught exception, exit 1, no guidance) when run from a
+        # dir that never had `npm ci` run in it, or from the wrong CWD after it was.
+        bare = Path(tempfile.mkdtemp())
+        try:
+            f = bare / "body.md"
+            f.write_text("no diagrams here\n", encoding="utf-8")
+            r = subprocess.run([NODE, str(SCRIPT), str(f)], cwd=bare, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("npm ci", r.stderr)
+            self.assertIn("package.json", r.stderr)
+        finally:
+            shutil.rmtree(bare, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

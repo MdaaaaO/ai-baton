@@ -19,7 +19,18 @@ only where the environment has Slack (`systems.slack`); everything else holds in
 `systems.signed_commits`, `labels.shared`, `labels.repos.<repo>` (may be absent), `systems.slack`,
 `slack.repo_channels.<owner/repo>`, `commits.default` / `commits.repos.<owner/repo>` (§ Commit style). Never hardcode any of these values.
 
-0. **Branch & push**: work in a worktree under `.worktrees/`. **Commit style first**: `python3
+0. **Sizing, then branch & push.** First, sizing: when the PR opens against an existing ticket that was never
+   sized — an umbrella/epic ticket that predates `ticket-open`, or one no `ticket-pickup` ran on — the work
+   still gets sized once before it is built, the same read/verify/decide/write-back as `ticket-pickup` §§ 1–4
+   (reuse its adapter, don't duplicate it here): `python3 $BATON/context-db/bin/sizing.py parse <ticket body +
+   comments, oldest first>`. Exit 0 → honour the line as read (§ 3 there). Exit 1/2 (no line, or malformed) →
+   size it now from the table in `docs/delegation.md` § Sizing and post `sizing.py format <model>
+   "<delegate|main session>" "<reason>"` as a ticket comment (`ticket-update`; "last Sizing line wins" already
+   covers a later correction). `delegate` → the build goes to a worker per `docs/delegation.md` § The worker
+   brief and this session only reviews the diff and opens the PR; `main session` → build here. No ticket in the
+   arguments (a branch with nothing to size) → nothing to do, say so and continue.
+
+   Then, branch & push: work in a worktree under `.worktrees/`. **Commit style first**: `python3
    $BATON/context-db/bin/commit_style.py resolve --dir <worktree>` names the convention (Conventional Commits
    unless the repo overrides it — § Commit style); every commit subject passes `commit_style.py check --dir
    <worktree> <msg-file>` before it is made or enqueued, and the PR title passes `commit_style.py title --dir
@@ -72,7 +83,8 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    duplicated.** The exact one-sentence shape, the no-emoji/no-ticket-key/no-CI-status rule, and
    thread-vs-DM routing for related asks: `reference/slack-review-request.md`.
 7. **Tell the user** in one line: PR link + labels + where the ask went ("review-request draft is in
-   #<channel>" or "reviewers requested: …").
+   #<channel>" or "reviewers requested: …") + the resolved Sizing line from step 0 when a ticket was sized
+   ("sizing: `sonnet`, delegate") — a main-session build is then a visible choice, not a silent default.
 
 ## Diagrams — the right set for this PR's content, derived from the diff (owner decisions 2026-09-17 / 2026-09-25)
 
@@ -103,8 +115,12 @@ without reading the diff — and nothing that the PR does not raise.
    ```
    `--repo` takes the clone's **directory** (the worktree you are about to push): `git diff` runs there and
    the env-config overlay key is read from its `origin` — sessions run from the workspace root, so a bare
-   `git diff` in the cwd would answer "not a git repo". An `owner/repo` slug is still accepted with `--files`.
-   It prints the facets with their weight, the dominant one, the plan (`WHERE` / `WHAT` / `RUNS`, a `?`
+   `git diff` in the cwd would answer "not a git repo". Before the first commit (writing the body, nothing
+   pushed yet), the same `--repo <repo-dir>` call still plans correctly — the diff is `--base…HEAD` plus the
+   working tree and untracked files by default (`--committed-only` drops back to history only). An
+   `owner/repo` slug is still accepted with `--files-from`; `--files <path> <path>…` takes changed paths
+   directly, not a list file (`--files-from <list.txt>` is the list-file form). It prints the facets with
+   their weight, the dominant one, the plan (`WHERE` / `WHAT` / `RUNS`, a `?`
    suffix = conditional on its "only when" clause), notes, and the `<!-- diagram-plan: … -->` marker. `--type`
    is the PR *intent* (paths cannot show it); with `--pr` it is read from the type label (`bug`/`hotfix` →
    bugfix, `tech-debt`/`refactor` → refactor, else feature).
