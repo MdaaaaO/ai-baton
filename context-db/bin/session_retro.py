@@ -10,7 +10,10 @@ WORKSPACE.md § Rules and the skills the session invoked. It extracts
   - failed commands (any other tool result marked as an error);
 and runs the rule checks a script can decide (`rule_hits`), each a CANDIDATE the fork confirms against the rule text:
   pr-no-labels        a `gh pr create` without `--label`, and no label added later in the session
-  pr-no-footer        a PR body (inline or a body file the session wrote) without the attribution footer line
+  pr-no-footer        a PR body (inline or a body file the session wrote) without the `session `<name>`` self-identifier
+  attribution-leak    a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer in a PR/issue
+                      title, body, comment or review, or a commit message — dropped on purpose (WORKSPACE.md § Rules);
+                      the self-identifier from `kit_profile.py footer` is the only thing that stays
   title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style)
   agent-no-model      an `Agent` call without `model` (it inherits the main session's, the most expensive one)
   workspace-path      a `.context/`, `.worktrees/` or home-directory path in a title or body posted to GitHub
@@ -48,7 +51,8 @@ DENIAL_RE = re.compile(
     r"doesn'?t want to (?:proceed|take this action)|tool use was rejected|permission (?:to use|for) .{0,80}?(?:has been|was|is) denied"
     r"|denied by (?:the )?(?:user|policy|rule|hook)|blocked by (?:a |the )?(?:hook|policy|rule|permission)"
     r"|hook (?:error|blocked)|pretooluse\S* .*?(?:denied|blocked)", re.I | re.S)
-FOOTER_RE = re.compile(r"Generated with \[Claude Code\]")
+FOOTER_RE = re.compile(r"session `[^`\n]+`")
+ATTRIBUTION_RE = re.compile(r"Generated with \[Claude Code\]|Co-Authored-By:\s*Claude\b", re.I)
 LEAK_RE = re.compile(r"(?<![\w.])\.context/|(?<![\w.])\.worktrees/|(?<![\w])/(?:home|Users)/[^/\s`'\"]+/|(?<![\w/])~/")
 STORE_WRITES = {"kb.py": ("set", "rm", "config-set", "init", "migrate"), "session.py": ("register", "touch", "end")}
 MAKE_WRITES = ("session-register", "session-touch", "session-end")
@@ -285,6 +289,11 @@ class Retro:
             elif home_cwd and len(home_cwd) > 1 and home_cwd in (text or ""):
                 hit("workspace-path", c, f"{where} contains the session's working directory")
 
+        def attribution(c: dict, where: str, text: str) -> None:
+            m = ATTRIBUTION_RE.search(text or "")
+            if m:
+                hit("attribution-leak", c, f"{where} carries an AI attribution line (`{m.group(0)}`)")
+
         def body_of(o: dict[str, list[str]], inline=("--body", "-b"), files=("--body-file", "-F")) -> str | None:
             for k in inline:
                 if o.get(k):
@@ -319,6 +328,7 @@ class Retro:
                 for k in ("title", "body", "comment"):
                     if isinstance(inp.get(k), str):
                         leak(c, f"{c['tool'].split('__')[-1]} {k}", inp[k])
+                        attribution(c, f"{c['tool'].split('__')[-1]} {k}", inp[k])
             if c["tool"] != "Bash":
                 continue
             cmd = inp.get("command", "")
@@ -354,6 +364,7 @@ class Retro:
                         probs = commit_style.check_subject(subject, style(wd))
                         if probs:
                             hit("title-style", c, f"commit subject `{subject}`: {probs[0]}")
+                    attribution(c, "commit message", msg)
                 if g is None:
                     continue
                 kind, verb, rest = g
@@ -368,6 +379,7 @@ class Retro:
                             if val.startswith("@"):
                                 val = self.writes.get(val[1:], "")
                             leak(c, f"gh api {k}", val)
+                            attribution(c, f"gh api {k}", val)
                     continue
                 if verb == "edit" and (o.get("--add-label") or o.get("--label")):
                     unlabelled = []
@@ -377,6 +389,8 @@ class Retro:
                 body = body_of(o)
                 leak(c, f"gh {kind} {verb} title", title)
                 leak(c, f"gh {kind} {verb} body", body or "")
+                attribution(c, f"gh {kind} {verb} title", title)
+                attribution(c, f"gh {kind} {verb} body", body or "")
                 if kind == "pr" and verb in ("create", "edit") and title and "$" not in title:
                     probs = commit_style.check_subject(title, style(c["cwd"]))
                     if probs:
@@ -385,7 +399,7 @@ class Retro:
                     if not (o.get("--label") or o.get("-l")):
                         unlabelled.append(c)
                     if body is not None and not FOOTER_RE.search(body):
-                        hit("pr-no-footer", c, "PR body has no `Generated with [Claude Code]` footer line")
+                        hit("pr-no-footer", c, "PR body has no `session `<name>`` self-identifier line")
         for c in unlabelled:
             hit("pr-no-labels", c, "gh pr create without --label and no label added later in the session")
         for c in merges:

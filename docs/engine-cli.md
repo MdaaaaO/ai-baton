@@ -466,7 +466,10 @@ WORKSPACE.md § Rules and the skills the session invoked. It extracts
   - failed commands (any other tool result marked as an error);
 and runs the rule checks a script can decide (`rule_hits`), each a CANDIDATE the fork confirms against the rule text:
   pr-no-labels        a `gh pr create` without `--label`, and no label added later in the session
-  pr-no-footer        a PR body (inline or a body file the session wrote) without the attribution footer line
+  pr-no-footer        a PR body (inline or a body file the session wrote) without the `session `<name>`` self-identifier
+  attribution-leak    a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer in a PR/issue
+                      title, body, comment or review, or a commit message — dropped on purpose (WORKSPACE.md § Rules);
+                      the self-identifier from `kit_profile.py footer` is the only thing that stays
   title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style)
   agent-no-model      an `Agent` call without `model` (it inherits the main session's, the most expensive one)
   workspace-path      a `.context/`, `.worktrees/` or home-directory path in a title or body posted to GitHub
@@ -564,6 +567,10 @@ Styles:
   ticket-key    `<KEY>: <description>` — the key matches the env config's `tracker.key_regex`.
   free          anything non-empty.
 `Merge …`, `Revert "…"` and `fixup!/squash! …` subjects always pass (git writes them).
+
+`check` also refuses a "Generated with [Claude Code]" line or a `Co-Authored-By: Claude …` trailer anywhere in the
+message (owner decision, 2026-09-28: no AI attribution anywhere — the `session `<name>`` self-identifier from
+`kit_profile.py footer` is the only thing that stays), same as a bad subject.
 
 Usage:
   commit_style.py resolve  [--dir <repo-dir>] [--repo <owner/repo>]

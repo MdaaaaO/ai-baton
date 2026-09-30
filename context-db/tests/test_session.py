@@ -395,10 +395,11 @@ class NameConventionAndFooter(unittest.TestCase):
         self.assertNotIn("legacy1", run("kit_profile.py", "footer", root=self.root, env=self.env).stdout)
 
     def test_the_footer_names_the_registered_session(self):
+        # no attribution anywhere (owner decision, 2026-09-28): without a registered session, the footer is bare
         r = run("kit_profile.py", "footer", root=self.root, env=self.env)
-        self.assertEqual(r.stdout.strip(), "🤖 Generated with [Claude Code](https://claude.com/claude-code)")
+        self.assertEqual(r.stdout.strip(), "")
         self.assertEqual(run("kit_profile.py", "session-name", root=self.root, env=self.env).returncode, 1)
         run("session.py", "register", "--name", "kit-footer-test", "--no-stats", root=self.root, env=self.env)
         self.assertEqual(run("kit_profile.py", "session-name", root=self.root, env=self.env).stdout.strip(), "kit-footer-test")
-        self.assertTrue(run("kit_profile.py", "footer", root=self.root, env=self.env).stdout.strip()
-                        .endswith("· session `kit-footer-test`"))
+        self.assertEqual(run("kit_profile.py", "footer", root=self.root, env=self.env).stdout.strip(),
+                          "session `kit-footer-test`")
