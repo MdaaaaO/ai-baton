@@ -372,8 +372,12 @@ Adopt — makes the content root a store and keeps its settings and type schemas
 kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
 `ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
 log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself — except `ctx-store.json`'s
-`mcp` key (`_settings_for_init`/`_apply_mcp_setting`, below): the pinned ctx's own `init` does not accept it in
-`--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file.
+`mcp` key (`_strip_mcp_for_upgrade`/`_apply_mcp_setting`, below): the pinned ctx's own `init` does not accept it in
+`--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file. `--upgrade`
+decides `kept` vs `written` by the marker's digest, not its content (ctx-store#73), so before it runs the adapter
+undoes its own last `mcp` patch (the marker's bytes then match what `init` last wrote) and puts the kit's `mcp`
+value back once `init` is done — a kit settings change still reaches an already-patched store, while a marker
+someone genuinely hand-edited still differs and is still reported `kept`.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named

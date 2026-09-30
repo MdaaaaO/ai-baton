@@ -17,8 +17,12 @@ Adopt — makes the content root a store and keeps its settings and type schemas
 kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
 `ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
 log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself — except `ctx-store.json`'s
-`mcp` key (`_settings_for_init`/`_apply_mcp_setting`, below): the pinned ctx's own `init` does not accept it in
-`--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file.
+`mcp` key (`_strip_mcp_for_upgrade`/`_apply_mcp_setting`, below): the pinned ctx's own `init` does not accept it in
+`--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file. `--upgrade`
+decides `kept` vs `written` by the marker's digest, not its content (ctx-store#73), so before it runs the adapter
+undoes its own last `mcp` patch (the marker's bytes then match what `init` last wrote) and puts the kit's `mcp`
+value back once `init` is done — a kit settings change still reaches an already-patched store, while a marker
+someone genuinely hand-edited still differs and is still reported `kept`.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
@@ -179,28 +183,47 @@ def _settings_for_init() -> tuple[Path, dict | None]:
     return Path(name), mcp
 
 
-def _apply_mcp_setting(root: Path, mcp: dict, kept: list[str]) -> list[str]:
-    """`ctx-store.json`'s `mcp` key, since `init` cannot write it (`_settings_for_init` above): read the marker
-    `init` just wrote, kept or left unchanged, and set `mcp` to the kit's value when it differs. `init`'s own
-    kept/differs tracking has no idea this key exists, so a store this adapter already patched looks "edited"
-    (`kept: ctx-store.json`) on every later run; when the only difference from what `--settings` asked for *is*
-    this key — this adapter's own earlier patch, not someone's hand edit — drop it from `kept` so a clean re-run
-    reports no differs at all. A file someone genuinely edited elsewhere still reports kept, `mcp` included."""
+def _init_marker(data: dict) -> bytes:
+    """The exact bytes `ctx init` itself writes for a settings marker (`ctxstore.bootstrap._marker`, pinned
+    CTX_VERSION) — matched byte for byte, so a file this writes digests to what `init`'s own audit row records
+    for it (ctx-store#73)."""
+    return (json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _strip_mcp_for_upgrade(root: Path) -> None:
+    """Before `ctx init --upgrade` runs (never for a fresh init or `--replace`, where this cannot matter): undo
+    `_apply_mcp_setting`'s own earlier patch, if the marker parses and still carries one, so the file's bytes go
+    back to exactly what the last `init` wrote. `init --upgrade` (ctxstore.bootstrap) decides `kept` vs
+    `written`/`unchanged` by comparing the marker's digest to the hash its own audit row recorded, not by reading
+    the file itself — undone, that digest lines up again and a kit settings change reaches the store normally
+    (ctx-store#73); a marker someone actually hand-edited still differs from what `init` wrote and is still
+    reported `kept`, `mcp` included, exactly as `ctx init` itself says. `_apply_mcp_setting`, below, puts `mcp`
+    back once `init` has run — whether it succeeded or not."""
     marker = root / "ctx-store.json"
     try:
         current = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return kept
-    if marker.name in kept:
-        canonical = json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8"))
-        canonical.pop("mcp", None)
-        without_mcp = {k: v for k, v in current.items() if k != "mcp"}
-        if without_mcp == canonical:
-            kept = [f for f in kept if f != marker.name]
+        return
+    if not isinstance(current, dict) or "mcp" not in current:
+        return
+    del current["mcp"]
+    marker.write_bytes(_init_marker(current))
+
+
+def _apply_mcp_setting(root: Path, mcp: dict) -> None:
+    """`ctx-store.json`'s `mcp` key, since `init` cannot write it (`_settings_for_init` above): put the kit's
+    value back in, using `init`'s own serialiser (`_init_marker`) — after `init` has run, whether it succeeded
+    or not, so a failed upgrade never leaves the store without its actors pattern."""
+    marker = root / "ctx-store.json"
+    try:
+        current = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(current, dict):
+        return
     if current.get("mcp") != mcp:
         current["mcp"] = mcp
-        marker.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return kept
+        marker.write_bytes(_init_marker(current))
 
 
 def adopt(check: bool = False, replace: bool = False) -> int:
@@ -221,12 +244,15 @@ def adopt(check: bool = False, replace: bool = False) -> int:
             return 4
     else:
         settings_path, mcp = _settings_for_init()
+        if not replace and mcp is not None:
+            _strip_mcp_for_upgrade(root)  # undo the last patch so --upgrade's digest check sees init's own bytes
         try:
             r = _ctx(ctx, store, "init", "--settings", str(settings_path),
                      "--types", str(STORE_DATA / "types"), "--replace" if replace else "--upgrade", timeout=ADOPT_TIMEOUT)
         finally:
             if mcp is not None:
                 settings_path.unlink(missing_ok=True)  # the temp file _settings_for_init wrote; never the kit's own
+                _apply_mcp_setting(root, mcp)  # ctx-store#73: put it back whatever init just did to the file
         if r.returncode != 0:
             print(f"ctx_adapter.py adopt: ctx init failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
                   file=sys.stderr)
@@ -234,8 +260,6 @@ def adopt(check: bool = False, replace: bool = False) -> int:
         out = _lines(r.stdout)
         print((out or [f"ok: store {root}"])[0])
         kept = [ln.split(":", 1)[1].strip() for ln in out if ln.startswith("kept:")]  # edited here: it stays
-        if mcp is not None:
-            kept = _apply_mcp_setting(root, mcp, kept)
         differs = bool(kept)
         for f in kept:
             print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")

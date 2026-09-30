@@ -561,6 +561,53 @@ class Adopt(Base):
                          self.data()[".ctx/types/log.json"])
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_kit_settings_change_reaches_an_already_mcp_patched_store(self):
+        """`_apply_mcp_setting`'s own earlier patch must not itself look like a hand edit to the next
+        `init --upgrade` (ctx-store#73): a later kit settings change still reaches the store without --replace,
+        and the marker keeps carrying `mcp`."""
+        import contextlib
+        import io
+        import shutil
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        marker = self.root / "ctx-store.json"
+        self.assertIn("mcp", json.loads(marker.read_text(encoding="utf-8")))
+        changed = self.t / "changed-kit-data"
+        shutil.copytree(KIT / "context-db" / "ctx-store", changed)
+        settings = json.loads((changed / "ctx-store.json").read_text(encoding="utf-8"))
+        settings["maintain"]["keep_log"] = 5  # a kit settings change with nothing to do with mcp
+        (changed / "ctx-store.json").write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n",
+                                                 encoding="utf-8")
+        mod = load_adapter()
+        mod.STORE_DATA = changed
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(self.root)}), contextlib.redirect_stdout(out):
+            rc = mod.adopt()
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertNotIn("differs:", out.getvalue())
+        after = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(after["maintain"], {"keep_log": 5})
+        self.assertEqual(after["mcp"], settings["mcp"])
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_hand_edited_marker_still_reports_kept_and_keeps_mcp(self):
+        """A marker someone genuinely edited — not this adapter's own `mcp` patch — still reports `kept`/`differs`,
+        exit 5, and the adapter still restores `mcp` on top of whatever `init` left there (ctx-store#73)."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        marker = self.root / "ctx-store.json"
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        data["maintain"]["keep_log"] = 99  # a hand edit to a real value, not the adapter's own mcp patch
+        marker.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("differs: ctx-store.json", r.stdout)
+        self.assertIn("adopt --replace", r.stdout)
+        after = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(after["maintain"], {"keep_log": 99})
+        self.assertIn("mcp", after)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_adopt_migrates_a_newest_first_session_log_to_chronological(self):
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         (self.root / "d").mkdir()
