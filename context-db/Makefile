@@ -82,7 +82,12 @@ endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
 .PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
-SESSION_ID ?= $(CLAUDE_CODE_SESSION_ID)
+# An explicit `SESSION_ID=` (command line or shell environment) wins as-is; otherwise take the CURRENT, expanded
+# value of CLAUDE_CODE_SESSION_ID (`:=`, not `?=`/`=`, which would store the unexpanded reference text — `sq` below
+# reads SESSION_ID with $(value …), so a lazily-expanded default would leak the literal "$(CLAUDE_CODE_SESSION_ID)").
+ifeq ($(origin SESSION_ID),undefined)
+SESSION_ID := $(CLAUDE_CODE_SESSION_ID)
+endif
 STATSFLAGS  = $(if $(value SESSION_ID),--session-id $(call sq,SESSION_ID),) $(if $(value NOSTATS),--no-stats,)
 
 help:
