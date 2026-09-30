@@ -594,8 +594,9 @@ usage: sizing.py [-h] {parse,check,format,models} ...
 
 sizing.py — parse and format a ticket's Sizing line (docs/delegation.md § The Sizing line).
 
-`ticket-open` writes the line into the opening comment when a ticket is created; `ticket-pickup` reads it back
-when the ticket is picked up, verifies it still holds, and sizes a missing one. One line, anywhere in the body:
+`ticket-open` writes the line into the opening block when a ticket is created (the GitHub issue body, the Jira
+description); `ticket-pickup` reads it back when the ticket is picked up, verifies it still holds, and sizes a
+missing one. One line, anywhere in the body/description:
 
   **Sizing:** `<model>`, <delegate|main session>. <one-line reason>
 

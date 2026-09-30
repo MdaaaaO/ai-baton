@@ -30,7 +30,7 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 
 ## Tracker
 
-- **ticket-open** — creating a ticket: type, placement, labels, parent, a lean opening comment.
+- **ticket-open** — creating a ticket: type, placement, labels, parent, a lean opening block.
 - **ticket-update** — one dated delta comment per progress step.
 - **ticket-close** — closing a ticket: outcome comment, close reason, linked PRs, context-doc flush.
 
