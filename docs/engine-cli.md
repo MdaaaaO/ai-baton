@@ -180,7 +180,12 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py identity-env   # `export WORKSPACE_*=…` for identity set via plugin userConfig
                         python3 kit_profile.py identity-source <WORKSPACE_* var>  # option | env | `` (unset) — where the value comes from, never the value
                         python3 kit_profile.py session-env    # identity-env + CLAUDE_PROJECT_DIR — the plugin's SessionStart hook (#3)
-                        python3 kit_profile.py session-env --update <file>  # replace <file>'s begin/end block in place, atomically; other lines untouched
+                        python3 kit_profile.py session-env --update <file>  # replace <file>'s begin/end block in place, atomically; other lines
+                                                               #   untouched; also prints the "resolved profile" block to stdout — tracker
+                                                               #   kind/key_regex/url_template, github.review_bot, the true systems.* flags, the
+                                                               #   footer line (or a note that it appears after session-register) — for the
+                                                               #   SessionStart context, never into <file>; byte-budgeted and value-safe
+                                                               #   (kit_profile.py get's own values; a secret-shaped one prints <redacted>)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
@@ -741,6 +746,11 @@ into scan-ready patterns (org, tracker repos/site/project, Slack channels/domain
 kit-health's leak scan and `kit_profile.py public-text-check` so the two never disagree about what counts as
 this environment's own value. `cross_org_shapes(owner)` is public-text-check's one extra shape: an inline
 `<org>/<repo>#<n>` naming a different org than the repo the text is being posted to.
+
+`SECRET_SHAPES` is narrower still: values that look like they grant access (a GitHub/Slack/GitLab token, an AWS
+access key, a private key header), never an environment fact. Shared by `review_gate.py`'s diff scan
+(`PII_SHAPES`, which adds its own e-mail and home-path shapes) and `kit_profile.py`'s resolved-profile block,
+so a config value shaped like a secret is redacted before it ever reaches a session's own context.
 Stdlib only.
 ```
 

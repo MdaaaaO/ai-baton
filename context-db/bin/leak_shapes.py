@@ -18,6 +18,11 @@ into scan-ready patterns (org, tracker repos/site/project, Slack channels/domain
 kit-health's leak scan and `kit_profile.py public-text-check` so the two never disagree about what counts as
 this environment's own value. `cross_org_shapes(owner)` is public-text-check's one extra shape: an inline
 `<org>/<repo>#<n>` naming a different org than the repo the text is being posted to.
+
+`SECRET_SHAPES` is narrower still: values that look like they grant access (a GitHub/Slack/GitLab token, an AWS
+access key, a private key header), never an environment fact. Shared by `review_gate.py`'s diff scan
+(`PII_SHAPES`, which adds its own e-mail and home-path shapes) and `kit_profile.py`'s resolved-profile block,
+so a config value shaped like a secret is redacted before it ever reaches a session's own context.
 Stdlib only.
 """
 from __future__ import annotations
@@ -65,6 +70,17 @@ LEAK_SHAPES = [
     # machine, so a body says what is true generically or makes it a conditional — "where … (a sandbox), …"
     (r"\b(?:[Tt]his|[Tt]he|[Ii]n the|[Oo]n the|[Ff]rom the) sandbox\b|\bsandbox-only\b|\b[Ss]andbox (?:can(?:'|\u2019)?t|cannot|has no|lacks)\b",
      "universal sandbox wording (the kit runs on any machine) — say what is true generically, or make it a conditional"),
+]
+# Secret/token shapes only (see the module docstring) — a value that looks like it grants access, checked on its
+# own (never folded into LEAK_SHAPES, which is about environment facts, not credentials).
+SECRET_SHAPES = [
+    (r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", "GitHub token"),
+    (r"\bgithub_pat_[A-Za-z0-9_]{20,}\b", "GitHub fine-grained token"),
+    (r"\bxox[baprs]-[A-Za-z0-9-]{10,}", "Slack token"),
+    (r"\bAKIA[0-9A-Z]{16}\b", "AWS access key id"),
+    (r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b", "API key"),
+    (r"\bglpat-[A-Za-z0-9_-]{20,}\b", "GitLab token"),
+    (r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "private key"),
 ]
 SKIP_LINE = re.compile(r"^\s*(requires|facts):")  # not `tools:`: an agent's roster is where an install-specific MCP id hides (#94)
 SKIP_FILES = frozenset({"leak_shapes.py", "kit-health.py", "allow.txt"})

@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "19"
+  version: "20"
   updated: "2026-09-30"
   reviewed: "2026-09-25"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
@@ -41,10 +41,11 @@ only where the environment has Slack (`systems.slack`); everything else holds in
 1. **Create** with a body file (`gh pr create --body-file …`): Overview with the tracker link (§ Links),
    Changes, **Diagrams** (§ Diagrams below — the set `diagram-plan.py` derives from the diff, plus its marker),
    Rollout/Test plan. Detail lives here, not in chat. Where `tracker.kind` is `github`, add
-   `Closes #<n>` (or `Refs #<n>` for a partial step) so the issue links itself. The body's last line is
-   `python3 $BATON/context-db/bin/kit_profile.py footer` — the session self-identifier, `session `<name>``
-   (`session-register` records the name), never an AI attribution line; every comment you post on this PR
-   ends with it too. **Before `gh pr create`** (and before any later `gh pr comment`/`gh pr edit --body-file`
+   `Closes #<n>` (or `Refs #<n>` for a partial step) so the issue links itself. The body's last line is the
+   footer from the resolved-profile block already in your SessionStart context — the session self-identifier,
+   `session `<name>`` (`session-register` records the name); once a compaction drops that block, or it never
+   printed, fall back to `python3 $BATON/context-db/bin/kit_profile.py footer`. Never an AI attribution line;
+   every comment you post on this PR ends with it too. **Before `gh pr create`** (and before any later `gh pr comment`/`gh pr edit --body-file`
    on this PR), run `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file> --repo <o>/<r>` on
    the body file — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
    re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run; fix the

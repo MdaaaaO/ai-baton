@@ -48,17 +48,12 @@ ALLOW = "skills/kit-health/allow.txt"
 
 # Shapes a diff scan adds to the shared list: they are PII/secret shapes, not environment facts, so kit-health's
 # every-file scan (which has this machine's real values) does not need them, and a diff scan has nothing else.
+# The token/key shapes themselves live in leak_shapes.SECRET_SHAPES (kit_profile.py's resolved-profile block
+# reuses the same list), so the two never drift apart on what counts as a secret.
 PII_SHAPES = [
     (r"(?<![\w.+-])(?!git@)[\w.+-]+@(?!example\.(?:com|org|net)\b)(?![\w-]+(?:\.[\w-]+)*\.(?:invalid|test|example)(?!\.?[\w-]))(?!users\.noreply\.github\.com\b)(?!noreply\.github\.com\b)[\w-]+(?:\.[\w-]+)+(?![\w-])", "e-mail address"),
     (r"(?<![\w-])/(?:home|Users)/(?!<)(?!user\b)(?!runner\b)(?!\$)[A-Za-z][\w.-]*(?=[/\s`'\")]|$)", "home path (use `~`, `$HOME` or `<user>`)"),
-    (r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", "GitHub token"),
-    (r"\bgithub_pat_[A-Za-z0-9_]{20,}\b", "GitHub fine-grained token"),
-    (r"\bxox[baprs]-[A-Za-z0-9-]{10,}", "Slack token"),
-    (r"\bAKIA[0-9A-Z]{16}\b", "AWS access key id"),
-    (r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b", "API key"),
-    (r"\bglpat-[A-Za-z0-9_-]{20,}\b", "GitLab token"),
-    (r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "private key"),
-]
+] + leak_shapes.SECRET_SHAPES
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
