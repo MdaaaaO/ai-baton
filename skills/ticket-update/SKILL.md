@@ -2,7 +2,7 @@
 name: ticket-update
 description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "9"
+  version: "10"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
@@ -89,6 +89,8 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
    every adapter, no write scope needed. A tracker-native remote-link object (adapter below, where write
    access exists) is additional, never a substitute. No live bidirectional sync exists; never paste
    thread contents back and forth (and never a local `.context/` path).
+   The opening block's own Links — epic/parent, related tickets — already live in the description (Jira) or
+   body (GitHub); a DELTA comment adds a *new* pointer, it never restates them.
 3. **Flush in lockstep.** The same delta goes to the context doc's Session log (`session-handoff`).
    The ticket is the team-facing trace; the context doc is the private handoff — keep them aligned,
    not identical (the ticket is not a mirror of `.context/`).

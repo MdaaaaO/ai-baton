@@ -100,7 +100,7 @@ class ArchiveSweep(unittest.TestCase):
         self.assertNotIn("Register as bad-2", idx)
         aidx = (self.root / "sessions" / "archive" / "INDEX.md").read_text()
         self.assertIn("| `old-with-prompt` | E-1 |", aidx)
-        self.assertIn("[.context/sessions/archive/old-with-prompt.md](.context/sessions/archive/old-with-prompt.md)", aidx)
+        self.assertIn("[.context/sessions/archive/old-with-prompt.md](old-with-prompt.md)", aidx)
         self.assertNotIn("Register as old-2.", aidx)
         self.assertIn("2 archived_", aidx)
         # a second run is a no-op that keeps the archive index in step
@@ -246,9 +246,25 @@ class EndedTablePromptPointer(unittest.TestCase):
         # the starter: paste-ready, points at the file — never the stored sentence's own words
         self.assertIn("Register as the successor of has-prompt; your prompt is in "
                       ".context/sessions/has-prompt.md § Next session.", text)
-        self.assertIn("[.context/sessions/has-prompt.md](.context/sessions/has-prompt.md)", text)
+        # label = the root-relative paste-able path; href = relative to SESSION_INDEX.md's own directory
+        # (.context/) — a Markdown renderer resolves the link against the linking file, not the workspace root
+        self.assertIn("[.context/sessions/has-prompt.md](sessions/has-prompt.md)", text)
         self.assertNotIn("re-arm the watch on the release PR", text)
         self.assertNotIn("finish the migration", text)
+
+    def test_session_link_href_resolves_from_the_index_file_not_the_root(self):
+        # the label must stay the root-relative, paste-able path (what session-register's startup step
+        # resolves), but the href must resolve against SESSION_INDEX.md's own directory — a root-relative
+        # href here 404s in a Markdown renderer (VS Code preview, GitHub, Obsidian), which looks for
+        # <content-root>/<content-root>/sessions/<name>.md.
+        session_file(self.root, "has-prompt", "ended", 0.1, "Register as has-prompt-2.")
+        run(self.root)
+        text = (self.root / "SESSION_INDEX.md").read_text()
+        m = re.search(r"\[(\.context/sessions/has-prompt\.md)\]\(([^)]+)\)", text)
+        self.assertIsNotNone(m, text)
+        label, href = m.group(1), m.group(2)
+        self.assertTrue(label.startswith(".context/"))  # the content root's own basename
+        self.assertEqual(href, "sessions/has-prompt.md")
 
     def test_starter_path_follows_a_content_root_not_named_dot_context(self):
         tmp, root = blank_root("kb-store")
@@ -306,7 +322,7 @@ class EndedTablePromptPointer(unittest.TestCase):
         self.assertIn("<details>", idx)
         fold = idx.split("<details>", 1)[1]
         self.assertIn("`older`", fold)
-        self.assertIn("[.context/sessions/older.md](.context/sessions/older.md)", fold)
+        self.assertIn("[.context/sessions/older.md](sessions/older.md)", fold)
         self.assertNotIn("```", fold)  # no starter block for a folded, older entry
         self.assertNotIn("Register as older-2", idx)  # the prompt's own words never appear anywhere
 
@@ -315,7 +331,8 @@ class EndedTablePromptPointer(unittest.TestCase):
         session_file(self.root, "old-blank", "ended", 30, "")
         run(self.root, days="7")
         aidx = (self.root / "sessions" / "archive" / "INDEX.md").read_text()
-        self.assertIn("[.context/sessions/archive/old-real.md](.context/sessions/archive/old-real.md)", aidx)
+        # label = the root-relative path; href = relative to archive/INDEX.md's own directory
+        self.assertIn("[.context/sessions/archive/old-real.md](old-real.md)", aidx)
         self.assertNotIn("finish the audit", aidx)
         self.assertIn("| `old-blank` | E-1 |", aidx)
         # old-blank's row still ends in a bare "-" for the Prompt column, not a link
