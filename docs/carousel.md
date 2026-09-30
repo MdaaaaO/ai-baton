@@ -50,7 +50,7 @@ YYYY-MM-DD · <question> → <chosen>; not <rejected options> — <one clause wh
 ```
 
 so the choice can be defended later without re-deriving it. Write it through the store's write
-tools — `ctx_log` with `--section "Key decisions & gotchas"`, or `ctx_insert`; Bash fallback
+tools — `ctx_log` with `--section "Key decisions & gotchas"` (`ctx help log`: `[--section <heading>]`), or `ctx_insert`; Bash fallback
 `ctx_adapter.py ctx …` — never a direct edit of the doc. Work with no epic context doc: the line
 goes into the ticket's next delta comment instead (`ticket-update`), same grammar. A decision asked
 through the headless `Decisions` block (below) is ledgered when it is answered, by the session that
