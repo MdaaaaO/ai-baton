@@ -585,6 +585,7 @@ class Adopt(Base):
             rc = mod.adopt()
         self.assertEqual(rc, 0, out.getvalue())
         self.assertNotIn("differs:", out.getvalue())
+        self.assertNotIn("replaced:", out.getvalue())  # mcp itself did not change, only an unrelated setting
         after = json.loads(marker.read_text(encoding="utf-8"))
         self.assertEqual(after["maintain"], {"keep_log": 5})
         self.assertEqual(after["mcp"], settings["mcp"])
@@ -603,9 +604,55 @@ class Adopt(Base):
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
         self.assertIn("differs: ctx-store.json", r.stdout)
         self.assertIn("adopt --replace", r.stdout)
+        self.assertNotIn("replaced:", r.stdout)  # mcp itself was not the hand edit, only maintain.keep_log
         after = json.loads(marker.read_text(encoding="utf-8"))
         self.assertEqual(after["maintain"], {"keep_log": 99})
         self.assertIn("mcp", after)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_locally_edited_mcp_is_replaced_loudly(self):
+        """The kit owns `mcp` (`session.py`'s own NAME_RE): unlike every other key, a local edit to it is not
+        supported. `adopt` still replaces it with the kit's value (it must — a local `actors` pattern would break
+        session writes), but never silently: `replaced:` prints and counts toward exit 5, same as a `differs:`
+        line, so the swap is never invisible."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        marker = self.root / "ctx-store.json"
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        data["mcp"] = {"actors": "^nobody-writes-through-this-pattern$"}  # a local edit to the one owned key
+        marker.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("replaced: ctx-store.json mcp", r.stdout)
+        self.assertNotIn("differs: ctx-store.json", r.stdout)  # only mcp moved; every other key still matches init's
+        kit_mcp = json.loads((KIT / "context-db" / "ctx-store" / "ctx-store.json").read_text(encoding="utf-8"))["mcp"]
+        after = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(after["mcp"], kit_mcp)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_an_unchanged_mcp_prints_nothing(self):
+        """The ordinary idempotent case (no local edit at all): `mcp` still matches the kit's, so nothing about it
+        is reported — `replaced:` is for a local value actually being dropped, not routine bookkeeping."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("replaced:", r.stdout)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_an_unparsable_marker_stops_before_init_runs(self):
+        """A marker that does not parse — the non-atomic write e28beb1 shipped could leave exactly this behind on
+        an interrupted write — is never skipped silently: `adopt` reports it on stderr and exits 2 before `ctx
+        init` runs, leaving the file exactly as broken as it found it."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        marker = self.root / "ctx-store.json"
+        broken = '{"mcp": {"actors": "x"'  # truncated — not valid JSON
+        marker.write_text(broken, encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("ctx_adapter.py adopt: ctx-store.json does not parse", r.stderr)
+        self.assertEqual(marker.read_text(encoding="utf-8"), broken)  # untouched: init never ran
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_adopt_migrates_a_newest_first_session_log_to_chronological(self):
