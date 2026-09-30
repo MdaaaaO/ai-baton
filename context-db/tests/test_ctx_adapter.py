@@ -585,7 +585,7 @@ class Adopt(Base):
             rc = mod.adopt()
         self.assertEqual(rc, 0, out.getvalue())
         self.assertNotIn("differs:", out.getvalue())
-        self.assertNotIn("replaced:", out.getvalue())  # mcp itself did not change, only an unrelated setting
+        self.assertNotIn("updated:", out.getvalue())  # mcp itself did not change, only an unrelated setting
         after = json.loads(marker.read_text(encoding="utf-8"))
         self.assertEqual(after["maintain"], {"keep_log": 5})
         self.assertEqual(after["mcp"], settings["mcp"])
@@ -604,17 +604,18 @@ class Adopt(Base):
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
         self.assertIn("differs: ctx-store.json", r.stdout)
         self.assertIn("adopt --replace", r.stdout)
-        self.assertNotIn("replaced:", r.stdout)  # mcp itself was not the hand edit, only maintain.keep_log
+        self.assertNotIn("updated:", r.stdout)  # mcp itself was not the hand edit, only maintain.keep_log
         after = json.loads(marker.read_text(encoding="utf-8"))
         self.assertEqual(after["maintain"], {"keep_log": 99})
         self.assertIn("mcp", after)
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
-    def test_a_locally_edited_mcp_is_replaced_loudly(self):
+    def test_a_differing_mcp_is_replaced_with_a_line_not_an_exit_code(self):
         """The kit owns `mcp` (`session.py`'s own NAME_RE): unlike every other key, a local edit to it is not
-        supported. `adopt` still replaces it with the kit's value (it must — a local `actors` pattern would break
-        session writes), but never silently: `replaced:` prints and counts toward exit 5, same as a `differs:`
-        line, so the swap is never invisible."""
+        supported. `adopt` replaces it with the kit's value (it must — a local `actors` pattern would break
+        session writes), never silently: an `updated:` line prints. The exit code stays 0 — a kit release that
+        changes its own pattern is indistinguishable from a local edit, and neither is a `kept` file that
+        `adopt --replace` could do anything about."""
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
         marker = self.root / "ctx-store.json"
@@ -622,8 +623,8 @@ class Adopt(Base):
         data["mcp"] = {"actors": "^nobody-writes-through-this-pattern$"}  # a local edit to the one owned key
         marker.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         r = self.adapter("adopt", **env)
-        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
-        self.assertIn("replaced: ctx-store.json mcp", r.stdout)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("updated: ctx-store.json mcp", r.stdout)
         self.assertNotIn("differs: ctx-store.json", r.stdout)  # only mcp moved; every other key still matches init's
         kit_mcp = json.loads((KIT / "context-db" / "ctx-store" / "ctx-store.json").read_text(encoding="utf-8"))["mcp"]
         after = json.loads(marker.read_text(encoding="utf-8"))
@@ -632,12 +633,12 @@ class Adopt(Base):
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_an_unchanged_mcp_prints_nothing(self):
         """The ordinary idempotent case (no local edit at all): `mcp` still matches the kit's, so nothing about it
-        is reported — `replaced:` is for a local value actually being dropped, not routine bookkeeping."""
+        is reported — `updated:` is for a value actually being swapped, not routine bookkeeping."""
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
         r = self.adapter("adopt", **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertNotIn("replaced:", r.stdout)
+        self.assertNotIn("updated:", r.stdout)
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_an_unparsable_marker_stops_before_init_runs(self):

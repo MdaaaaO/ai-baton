@@ -22,9 +22,10 @@ key (`_strip_mcp_for_upgrade`/`_apply_mcp_setting`, below): the pinned ctx's own
 `--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file. Every other
 key follows `init`'s own kept rule above; `mcp` does not — a local edit to it is not supported, because the kit owns
 this key (its `actors` pattern is `session.py`'s own NAME_RE — a local pattern would break session writes), so
-`adopt` always replaces it with the kit's value, never silently: `replaced: ctx-store.json mcp — the kit owns this
-key (session.py's name pattern); a local value is not kept` prints, and counts toward exit 5 same as a `differs:`
-line, whenever the value replaced was not already the kit's; an equal value prints nothing. `--upgrade` decides
+`adopt` always replaces it with the kit's value, never silently: `updated: ctx-store.json mcp — the kit owns this
+key (session.py's name pattern); the previous value was replaced` prints (exit code unaffected: a kit release that
+changes its own pattern looks the same as a local edit, and neither is a `kept` file) whenever the value replaced
+was not already the kit's; an equal value prints nothing. `--upgrade` decides
 `kept` vs `written` by the marker's digest, not its content (ctx-store#73), so before it runs the adapter strips its
 own last `mcp` patch off the marker (the digest then matches what `init` last wrote) and puts the kit's `mcp` value
 back once `init` is done, reporting the swap as above. The marker is written atomically (`_write_marker`, a temp
@@ -309,11 +310,10 @@ def adopt(check: bool = False, replace: bool = False) -> int:
         out = _lines(r.stdout)
         print((out or [f"ok: store {root}"])[0])
         kept = [ln.split(":", 1)[1].strip() for ln in out if ln.startswith("kept:")]  # edited here: it stays
-        mcp_replaced = removed_mcp is not None and removed_mcp != mcp  # a local mcp is not supported: always ours
-        if mcp_replaced:
-            print("replaced: ctx-store.json mcp — the kit owns this key (session.py's name pattern); "
-                  "a local value is not kept")
-        differs = bool(kept) or mcp_replaced
+        if removed_mcp is not None and removed_mcp != mcp:  # a local mcp is not supported: always the kit's; say so,
+            print("updated: ctx-store.json mcp — the kit owns this key (session.py's name pattern); "  # never exit 5 —
+                  "the previous value was replaced")  # the kit's own next pattern would trip a "kept" message otherwise
+        differs = bool(kept)
         for f in kept:
             print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
         # a type the kit moved to a new schema version leaves its docs MIGRATION_PENDING, and ctx refuses writes to
