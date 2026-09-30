@@ -87,11 +87,13 @@ rules do **not** live here — they live in `.claude/WORKSPACE.md` § Rules (imp
 active (non-`archive/`, non-`status: archived`) doc exceeds **30KB** (~8k tokens). A context doc
 is a *handoff* — a cold session re-reads it whole to re-ground, so an oversized one pulled in
 after a compact is what makes autocompact **thrash** (context refills to the limit within a few
-turns of every compact). When verify flags a doc, split it: keep the newest **Session log**
-entries in the doc (roughly the last few days, ~6 entries max) and move the oldest ones — the top of
-the log, which reads oldest-first — to `archive/<slug>-log.md` (newest-first: reverse the moved block;
-verbatim — relocate, don't rewrite). The archive tail can
-grow without limit; it is exempt because it is never read by default.
+turns of every compact). When verify flags a doc, create `archive/<slug>-log.md` first if it does not exist
+yet (`ctx_new` TYPE=log, same DOMAIN, SLUG=`<slug>-log` — `maintain`'s own fallback for a missing archive doc
+only fills in `title`/`type`/`updated`, short of what the `log` type requires), then run `ctx_maintain` (Bash
+fallback: `ctx_adapter.py ctx maintain`): it keeps the newest **Session log** entries in the doc
+(`maintain.keep_log`, ~6) — oldest-first, as the log already reads — and moves the rest, verbatim, into the
+archive doc, newest-first (the `log` type's order); no manual move-and-reverse. The archive tail can grow
+without limit; it is exempt because it is never read by default.
 
 ## Live session registry (operational, not knowledge)
 

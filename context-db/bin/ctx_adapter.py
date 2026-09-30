@@ -16,7 +16,9 @@ Adopt — makes the content root a store and keeps its settings and type schemas
 `context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
 kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
 `ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
-log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself.
+log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check` is the read-only probe kit-health runs. The kit never writes a store file itself — except `ctx-store.json`'s
+`mcp` key (`_settings_for_init`/`_apply_mcp_setting`, below): the pinned ctx's own `init` does not accept it in
+`--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
@@ -43,9 +45,12 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
   python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
-  python3 ctx_adapter.py mcp              # the ctx MCP server on the store; audit actor `claude` unless CTX_ACTOR is set
+  python3 ctx_adapter.py mcp              # the ctx MCP server on the store; each write tool call names its own `actor`
+                                           # (the caller's registered session name) — MCP_ACTOR (or CTX_ACTOR) is
+                                           # only the floor for a write that names none
   python3 ctx_adapter.py mcp-json <file>  # add that server to a .mcp.json (clone installs; never replaces an entry)
-  python3 ctx_adapter.py ctx <verb> …     # run one ctx verb on the store (the Bash route when the MCP tools are absent)
+  python3 ctx_adapter.py ctx <verb> …     # run one ctx verb on the store (the Bash route when the MCP tools are absent);
+                                           # CTX_ACTOR defaults to the registered session name when one is on file
   python3 ctx_adapter.py hook <name>      # one of the hooks above; hook JSON on stdin
 
 Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
@@ -64,7 +69,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-CTX_VERSION = "v0.5.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
+CTX_VERSION = "v0.6.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
 CTX_API = 1             # the ctx API `ctx --version` must report (its `(api N)` suffix) — bump only alongside a
                          # verb/output change the adapter now relies on; `ctx_adapter.py version`'s second line
                          # exposes it so kit-health can catch a pinned install answering a different one
@@ -158,6 +163,46 @@ def _lines(text: str) -> list[str]:
     return [ln.strip() for ln in text.splitlines() if ln.strip()]
 
 
+def _settings_for_init() -> tuple[Path, dict | None]:
+    """The file `ctx init --settings` gets: the kit's `ctx-store.json`, minus `mcp` when it has one. The pinned
+    ctx's `init` bootstrap predates the `mcp.actors` setting (ctx-store#66/#71) and refuses any settings file
+    that names it (`SCHEMA_VIOLATION mcp`), even though every other ctx entry point reads `mcp.actors` straight
+    from `ctx-store.json` once it is there. `adopt` hands `init` everything `init` knows and applies `mcp`
+    itself, below — until `init` catches up, the one exception to "the kit never writes a store file"."""
+    data = json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8"))
+    mcp = data.pop("mcp", None)
+    if mcp is None:
+        return STORE_DATA / "ctx-store.json", None
+    fd, name = tempfile.mkstemp(prefix="ctx-store-settings-", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    return Path(name), mcp
+
+
+def _apply_mcp_setting(root: Path, mcp: dict, kept: list[str]) -> list[str]:
+    """`ctx-store.json`'s `mcp` key, since `init` cannot write it (`_settings_for_init` above): read the marker
+    `init` just wrote, kept or left unchanged, and set `mcp` to the kit's value when it differs. `init`'s own
+    kept/differs tracking has no idea this key exists, so a store this adapter already patched looks "edited"
+    (`kept: ctx-store.json`) on every later run; when the only difference from what `--settings` asked for *is*
+    this key — this adapter's own earlier patch, not someone's hand edit — drop it from `kept` so a clean re-run
+    reports no differs at all. A file someone genuinely edited elsewhere still reports kept, `mcp` included."""
+    marker = root / "ctx-store.json"
+    try:
+        current = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return kept
+    if marker.name in kept:
+        canonical = json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8"))
+        canonical.pop("mcp", None)
+        without_mcp = {k: v for k, v in current.items() if k != "mcp"}
+        if without_mcp == canonical:
+            kept = [f for f in kept if f != marker.name]
+    if current.get("mcp") != mcp:
+        current["mcp"] = mcp
+        marker.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return kept
+
+
 def adopt(check: bool = False, replace: bool = False) -> int:
     ctx, why = resolve()
     if ctx is None:
@@ -175,8 +220,13 @@ def adopt(check: bool = False, replace: bool = False) -> int:
             print(f"not adopted: {root} is not a ctx store — run `python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
             return 4
     else:
-        r = _ctx(ctx, store, "init", "--settings", str(STORE_DATA / "ctx-store.json"),
-                 "--types", str(STORE_DATA / "types"), "--replace" if replace else "--upgrade", timeout=ADOPT_TIMEOUT)
+        settings_path, mcp = _settings_for_init()
+        try:
+            r = _ctx(ctx, store, "init", "--settings", str(settings_path),
+                     "--types", str(STORE_DATA / "types"), "--replace" if replace else "--upgrade", timeout=ADOPT_TIMEOUT)
+        finally:
+            if mcp is not None:
+                settings_path.unlink(missing_ok=True)  # the temp file _settings_for_init wrote; never the kit's own
         if r.returncode != 0:
             print(f"ctx_adapter.py adopt: ctx init failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
                   file=sys.stderr)
@@ -184,6 +234,8 @@ def adopt(check: bool = False, replace: bool = False) -> int:
         out = _lines(r.stdout)
         print((out or [f"ok: store {root}"])[0])
         kept = [ln.split(":", 1)[1].strip() for ln in out if ln.startswith("kept:")]  # edited here: it stays
+        if mcp is not None:
+            kept = _apply_mcp_setting(root, mcp, kept)
         differs = bool(kept)
         for f in kept:
             print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
@@ -245,7 +297,12 @@ def _null_mcp(why: str) -> int:
 
 
 def run_ctx(args: list[str], mcp: bool = False) -> int:
-    """Exec ctx on the store (`CTX_STORE`, else `--store <content root>`); the MCP server writes as MCP_ACTOR."""
+    """Exec ctx on the store (`CTX_STORE`, else `--store <content root>`). The MCP server's own CTX_ACTOR default
+    is MCP_ACTOR — a per-tool-call `actor` (the store's `mcp.actors` pattern) is what the owner rule and the audit
+    row actually see, so this is only the floor for a write that names none. The Bash fallback
+    (`ctx_adapter.py ctx <verb> …`) has no per-call actor, so it defaults CTX_ACTOR to this session's registered
+    name (`kit_profile.py session-name`) when one is on file — an unregistered session still falls through to
+    ctx's own default ($USER/$LOGNAME)."""
     ctx, why = resolve()
     root = _context_root()
     store = _store_args(root)
@@ -258,6 +315,12 @@ def run_ctx(args: list[str], mcp: bool = False) -> int:
     env = dict(os.environ)
     if mcp:
         env.setdefault("CTX_ACTOR", MCP_ACTOR)
+    elif "CTX_ACTOR" not in env:
+        sys.path.insert(0, str(BIN))
+        import kit_profile  # same dir
+        name = kit_profile.session_name()
+        if name:
+            env["CTX_ACTOR"] = name
     sys.stdout.flush()
     os.execve(str(ctx), [str(ctx), *store, *args], env)
     return 0  # not reached

@@ -29,8 +29,16 @@ from tests import hermetic_env  # noqa: E402
 
 FAKE_CTX = f"""#!{sys.executable}
 import json, os, sys
+argv = sys.argv[1:]
+settings = None
+if "--settings" in argv:  # read it now: adopt's temp file (_settings_for_init) is gone by the time a test looks
+    try:
+        with open(argv[argv.index("--settings") + 1], encoding="utf-8") as sf:
+            settings = sf.read()
+    except OSError:
+        pass
 with open(os.environ["FAKE_CTX_LOG"], "a", encoding="utf-8") as f:
-    f.write(json.dumps({{"argv": sys.argv[1:], "store": os.environ.get("CTX_STORE"),
+    f.write(json.dumps({{"argv": argv, "store": os.environ.get("CTX_STORE"), "settings": settings,
                          "lock": os.environ.get("CTX_LOCK_TIMEOUT"), "actor": os.environ.get("CTX_ACTOR")}}) + "\\n")
 sys.stdout.write(os.environ.get("FAKE_CTX_OUT", ""))
 sys.stderr.write(os.environ.get("FAKE_CTX_ERR", ""))
@@ -432,6 +440,12 @@ class StoreData(unittest.TestCase):
         self.assertEqual(settings["schema_version"], 1)
         self.assertTrue({"INDEX.md", "SESSION_INDEX.md"} <= set(settings["generated"]))  # the kit's generators write them
         self.assertIn("memory/**", settings["ignore"])  # the harness auto-memory is never a store doc
+        # every MCP write names its own actor (the caller's registered session name), checked in full against this
+        # pattern — the same one session.py's own NAME_RE enforces on a session name, so the two never drift apart.
+        sys.path.insert(0, str(BIN))
+        import session  # noqa: E402  — same dir
+        self.assertEqual(settings["mcp"]["actors"], session.NAME_RE.pattern)
+        self.assertEqual(settings["maintain"]["keep_log"], 6)  # session-handoff's "~6 max" Session-log cap
         types = sorted(p.stem for p in (data / "types").glob("*.json"))
         self.assertTrue({"epic", "session", "ledger", "log", "self-assessment"} <= set(types), types)
         for t in types:
@@ -442,9 +456,10 @@ class StoreData(unittest.TestCase):
         self.assertEqual(epic["version"], 1)
         self.assertEqual(epic["migrations"][0]["log_order_from"], "newest-first")
         log = json.loads((data / "types" / "log.json").read_text(encoding="utf-8"))
-        self.assertEqual(log["log"]["section"], "Log")  # ctx_log on a log doc needs no --section
+        # no section: `ctx log`/`maintain`'s archive moves work the body-level dated list, newest entry first
+        self.assertEqual(log["log"], {"order": "newest-first"})
         session = json.loads((data / "types" / "session.json").read_text(encoding="utf-8"))
-        self.assertNotIn("owner", session)  # every model write runs as one MCP actor: an owner rule refused them all
+        self.assertEqual(session["owner"], "session")  # back since v0.6.0 (#356): a per-call MCP actor names the owner
 
     def test_the_plugin_ships_the_mcp_server(self):
         servers = json.loads((KIT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["mcpServers"]
@@ -479,10 +494,19 @@ class Adopt(Base):
         r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
         self.assertEqual(r.returncode, 0, r.stderr)
         data = KIT / "context-db" / "ctx-store"
-        self.assertEqual([c["argv"][2:] for c in self.calls()],
-                         [["init", "--settings", str(data / "ctx-store.json"), "--types", str(data / "types"), "--upgrade"],
+        calls = self.calls()
+        settings_path = calls[0]["argv"][4]  # argv == ["--store", root, "init", "--settings", <path>, "--types", …]
+        self.assertEqual([c["argv"][2:] for c in calls],
+                         [["init", "--settings", settings_path, "--types", str(data / "types"), "--upgrade"],
                           ["migrate", "--apply"], ["validate"], ["validate", "--changed", "--adopt"]])
-        self.assertEqual({c["argv"][1] for c in self.calls()}, {str(self.root)})
+        self.assertEqual({c["argv"][1] for c in calls}, {str(self.root)})
+        # ctx-store v0.6.0's `init` does not accept `mcp` in `--settings` yet (ctx-store#66/#71): adopt hands it
+        # a temp file with everything else, never the kit's own ctx-store.json (`_settings_for_init`).
+        self.assertNotEqual(settings_path, str(data / "ctx-store.json"))
+        canonical = json.loads((data / "ctx-store.json").read_text(encoding="utf-8"))
+        del canonical["mcp"]
+        self.assertEqual(json.loads(calls[0]["settings"]), canonical)
+        self.assertFalse(Path(settings_path).exists())  # cleaned up once `init` has read it
         self.assertFalse((self.root / "ctx-store.json").exists())
         self.assertFalse((self.root / ".ctx").exists())
 
@@ -554,19 +578,15 @@ class Adopt(Base):
         self.assertEqual((self.root / "d" / "a.md").read_text(encoding="utf-8"), text)
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
-    def test_the_model_can_log_to_a_log_doc_and_write_its_session_doc(self):
+    def test_the_model_can_write_its_own_session_doc_by_naming_its_actor(self):
+        """The session type's owner rule (back since v0.6.0, #356): a write to a session's own file succeeds
+        when it names that session as the actor — the Bash fallback reads CTX_ACTOR, not a default identity."""
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
-        (self.root / "d").mkdir()
-        (self.root / "d" / "l.md").write_text("---\ntitle: L\ntype: log\ndomain: d\nstatus: active\n"
-                                              "updated: 2026-01-05\n---\n# L\n\n## Log\n\n", encoding="utf-8")
         (self.root / "sessions").mkdir(exist_ok=True)
         (self.root / "sessions" / "lane-topic.md").write_text(
             "---\nsession: lane-topic\nstatus: active\n---\n\n## Owns\n\n- x\n", encoding="utf-8")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
-        mcp_env = dict(env, CTX_ACTOR="claude")  # the MCP server's actor, never the session's name
-        r = self.adapter("ctx", "log", "d/l", "no --section needed", **mcp_env)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        r = self.adapter("ctx", "insert", "sessions/lane-topic", "- y", "--line", "7", **mcp_env)
+        r = self.adapter("ctx", "insert", "sessions/lane-topic", "- y", "--line", "7", **dict(env, CTX_ACTOR="lane-topic"))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("NOT_OWNER", r.stdout + r.stderr)
 
@@ -578,7 +598,8 @@ class Adopt(Base):
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         # an invalid epic cannot take the schema step: validate names the doc, migrate names the violation
         self.assertRegex(r.stdout, r"(?m)^finding: MIGRATION_PENDING d/bad")
-        self.assertRegex(r.stdout, r"(?m)^finding: migrate: SCHEMA_VIOLATION status")
+        self.assertRegex(r.stdout, r"(?m)^finding: migrate: SCHEMA_VIOLATION d/bad status")  # ctx-store v0.6.0
+        # names the doc that blocks the step (ctx-store#63/#65), not just the field
         self.assertTrue((self.root / "ctx-store.json").exists())
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
@@ -601,6 +622,40 @@ class Adopt(Base):
         r = self.adapter("adopt", **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("finding:", r.stdout)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_maintain_archives_the_oldest_session_log_entries_newest_first(self):
+        """The kit's own `maintain.keep_log` (6, session-handoff's "~6 max") and the `log` type's body-level,
+        newest-first order (#393): an oversized epic keeps its newest entries, oldest-first, and the rest move
+        to the archive doc `maintain` names by default (`archive/{slug}-log`), newest-first, no `## Log` section.
+        The archive doc is created first (session-handoff's own instruction): `maintain`'s fallback for a
+        missing one only fills in title/type/updated, short of what the `log` type's domain/status require."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        # 8 entries, oldest-first, padded well past the 30KB size guard so `maintain` actually trims this doc.
+        entries = [f"- 2026-01-{day:02d} — entry {day} " + "z" * 4000 for day in range(1, 9)]
+        body = ("---\ntitle: A\ntype: epic\ndomain: d\nstatus: active\nupdated: 2026-01-08\n---\n# A\n\n"
+                "## Goal\n\ng\n\n## Key decisions & gotchas\n\n## Remaining work\n\n## Session log\n\n"
+                + "\n".join(entries) + "\n")
+        (self.root / "d" / "a.md").write_text(body, encoding="utf-8")
+        (self.root / "archive").mkdir()
+        (self.root / "archive" / "a-log.md").write_text(
+            "---\ntitle: Log of d/a\ntype: log\ndomain: d\nstatus: active\nupdated: 2026-01-01\n---\n\n"
+            "# Log of d/a\n", encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        r = self.adapter("ctx", "maintain", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("archived: 2 log entries of d/a", r.stdout)
+        kept = [ln for ln in (self.root / "d" / "a.md").read_text(encoding="utf-8").splitlines()
+                if ln.startswith("- 2026-")]
+        self.assertEqual(kept, entries[2:])  # the newest 6 stay, oldest-first, as the Session log already reads
+        archive = self.root / "archive" / "a-log.md"
+        self.assertTrue(archive.is_file())
+        archived = [ln for ln in archive.read_text(encoding="utf-8").splitlines() if ln.startswith("- 2026-")]
+        self.assertEqual(archived, list(reversed(entries[:2])))  # the 2 oldest, moved newest-first
+        self.assertNotIn("## Log", archive.read_text(encoding="utf-8"))  # no section: the body-level dated list
+        self.assertEqual(self.adapter("ctx", "maintain", **env).returncode, 0)  # a second run changes nothing
+        self.assertEqual(self.adapter("ctx", "validate", **env).returncode, 0)
 
 
 class PreToolUseDeny(Base):
@@ -739,6 +794,31 @@ class McpServer(Base):
         replies = self.mcp(init, listing, KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         names = {t["name"] for t in replies[-1]["result"]["tools"]}
         self.assertTrue({"ctx_log", "ctx_str_replace", "ctx_insert", "ctx_fm", "ctx_create", "ctx_new", "ctx_move"} <= names)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_owner_rule_follows_the_named_actor_not_the_server(self):
+        """The kit's `mcp.actors` pattern (session.py's own NAME_RE, #393) plus the session type's `owner` rule:
+        a write naming the doc's own actor succeeds, another actor is NOT_OWNER, and one outside the pattern
+        (a leading '-', which CTX_ACTOR never allows) is USAGE before it ever reaches the owner check."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        (self.root / "sessions").mkdir(exist_ok=True)
+        (self.root / "sessions" / "foo-bar.md").write_text(
+            "---\nsession: foo-bar\nstatus: active\n---\n\n## Owns\n\n- x\n", encoding="utf-8")
+
+        def fm(ident, value, actor=None):
+            args = {"doc": "sessions/foo-bar", "field": "working_on", "value": value}
+            if actor is not None:
+                args["actor"] = actor
+            return {"jsonrpc": "2.0", "id": ident, "method": "tools/call", "params": {"name": "ctx_fm", "arguments": args}}
+
+        own, foreign, outside = self.mcp(fm(1, "w1", "foo-bar"), fm(2, "w2", "baz-qux"), fm(3, "w3", "-nope"), **env)
+        self.assertFalse(own["result"].get("isError"), own)
+        self.assertTrue(foreign["result"]["isError"])
+        self.assertEqual(foreign["result"]["content"][0]["text"], "NOT_OWNER sessions/foo-bar: doc is owned by another actor")
+        self.assertTrue(outside["result"]["isError"])
+        self.assertEqual(outside["result"]["content"][0]["text"], "USAGE actor: bad command line")
+        self.assertIn("working_on: w1\n", (self.root / "sessions" / "foo-bar.md").read_text(encoding="utf-8"))
 
 
 class BashRoute(Base):

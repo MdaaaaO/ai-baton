@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "23"
+  version: "24"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -61,9 +61,10 @@ worktree.
         REPOS=<repo[,repo]> WORKING="<current ticket/PR in one line>" \
         RESP="<what you own; what others should coordinate with you on>"
    ```
-   Then fill the body of `.context/sessions/<name>.md` (a direct `Edit` or the ctx tools — `sessions/` is
-   exempt from the write deny, and the session type has no owner rule) with anything another session
-   needs (what you own vs. don't, in-flight worktrees/PRs). **Override it whenever your
+   Then fill the body of `.context/sessions/<name>.md` (a direct `Edit`, or the ctx tools — `sessions/` is
+   exempt from the write deny) with anything another session needs (what you own vs. don't, in-flight
+   worktrees/PRs). The session type is owned (§ below): a ctx write to your own file must name your
+   actor, or the store refuses it `NOT_OWNER`. **Override it whenever your
    responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
    edit the body directly (`sessions/` stays writable; the hook regenerates `SESSION_INDEX.md`).
    **Rename** a session already registered under a generic or wrong name instead of leaving it and
@@ -100,6 +101,16 @@ worktree.
 Registering records the name for this session: `python3 $BATON/context-db/bin/kit_profile.py session-name` prints it,
 and `kit_profile.py footer` prints the session self-identifier with it — `session \`<name>\`` — the last line of
 every PR body and PR comment on your own PRs (`pr-open`, `pr-watch`); never an AI attribution line.
+
+**Name every ctx write as yourself (since v0.6.0, #393).** The ctx MCP server writes as one shared process
+identity unless a call says otherwise, so a ctx tool call that omits `actor` on a doc your session owns (your own
+`sessions/<name>.md`, once registered) is refused `NOT_OWNER`. Pass `actor: <name>` (the name you registered
+under) on **every** `ctx_*` write tool call (`ctx_create`, `ctx_str_replace`, `ctx_insert`, `ctx_delete`,
+`ctx_rename`, `ctx_log`, `ctx_fm`, `ctx_new`, `ctx_move`, `ctx_maintain`, `ctx_migrate`) — not only the ones that
+touch your session file: the store only ever sees the actor a call names, so a write that leaves it out is an
+unnamed write, never "this session" by default. The Bash fallback (`ctx_adapter.py ctx <verb> …`, used when the
+MCP tools are absent) needs no such flag: it reads your registered name itself (`kit_profile.py session-name`)
+and sets `CTX_ACTOR` from it when the environment does not already have one.
 
 ## 2. Keep the heartbeat fresh (≤12h)
 
