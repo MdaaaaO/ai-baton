@@ -2,8 +2,8 @@
 name: pr-event-brief
 description: "Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN line a pr-watch Monitor emits; the main session then performs the action."
 metadata:
-  version: "9"
-  updated: "2026-09-28"
+  version: "10"
+  updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "github.review_bot"
 argument-hint: <owner/repo> <pr_number> "<event line>"
@@ -54,7 +54,8 @@ re-request or merge anything — the main session does that.
    ```
    gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewDecision reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved comments(first:1){nodes{databaseId author{login} body}}}}}}}' -F o=<owner> -F r=<repo> -F n=$pr
    ```
-   Thread count, and for up to 5 unresolved ones `<databaseId> by <login>: <≤12 words>`. `first:100` is one
+   Thread count, and for up to 5 unresolved ones `<databaseId> by <login>: <≤12 words>`. Capture the
+   author of each unresolved thread to check if any are authored by the bot. `first:100` is one
    page (gh-cli's own pagination trap, here on a GraphQL cursor rather than a REST offset): if
    `pageInfo.hasNextPage` comes back true, the count is a floor, not a total — say `≥N threads (more
    exist, unread)` rather than reporting it as complete.
@@ -78,8 +79,9 @@ ACTION: <REPLY+RESOLVE | FIX+PUSH | RE-REQUEST-BOT | UPDATE-BRANCH | MERGE | WAI
 WHY: <one sentence, the single decisive fact>
 ```
 
-Pick one ACTION: `RE-REQUEST-BOT` when a bot is configured and the head has no Assessment; `REPLY+RESOLVE`
-when unresolved threads are the only gate; `UPDATE-BRANCH` when `mergeable_state` is `behind`; `MERGE`
+Pick one ACTION: `REPLY+RESOLVE` when unresolved threads exist that were authored by the bot; `RE-REQUEST-BOT`
+when a bot is configured, the head has no Assessment, **and** no unresolved threads are authored by the bot;
+`REPLY+RESOLVE` when unresolved threads are the only gate; `UPDATE-BRANCH` when `mergeable_state` is `behind`; `MERGE`
 when `reviewDecision` APPROVED + zero unresolved threads + `clean`, **and** (bot configured: 🟢 on the
 head) or (`BOT: n/a`: no bot condition at all); `WAIT(<login>)` when a
 named human must act; `INVESTIGATE-CHECK` for a real red check; `FIX+PUSH` when the bot or a human
@@ -90,4 +92,4 @@ on a `BOT REVIEW on <sha>` event whose `<sha>` (the watcher's short prefix) is a
 `startswith`, the way the watcher compares heads — means the bot *has* reviewed this head
 (the event line carries its color): decide on the other gates and that color, never `RE-REQUEST-BOT`. If the
 head moved after the event (`head.sha` does not start with `<sha>`), the event's color is *stale* — write `BOT: stale (on <sha7>)`
-and the normal rules apply (`RE-REQUEST-BOT`); a green from an older head never counts toward `MERGE`.
+and the normal rules apply; a green from an older head never counts toward `MERGE`.
