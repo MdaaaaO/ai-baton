@@ -713,7 +713,7 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
     return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
 
 
-FOOTER = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+FOOTER = "session `{}`"  # the bare self-identifier — no AI attribution anywhere (owner decision, 2026-09-28)
 
 
 def session_name() -> str:
@@ -726,10 +726,12 @@ def session_name() -> str:
 
 
 def footer() -> str:
-    """The attribution line with the session that wrote the text: `… · session `<name>``; without a registered
-    session, the bare line."""
+    """The self-identifier a session ends its own PRs and PR comments with: `` session `<name>` ``. Never a
+    "Generated with" / `Co-Authored-By` attribution line — dropped on purpose (owner decision, 2026-09-28): it reads
+    as noise, and the session name already points back to the registry row. "" when no session is registered (a
+    bare "Generated with" fallback is exactly what goes away — nothing to append)."""
     n = session_name()
-    return f"{FOOTER} · session `{n}`" if n else FOOTER
+    return FOOTER.format(n) if n else ""
 
 
 NEEDS_ARG = {"template": "<type>", "identity-source": "<WORKSPACE_* variable>", "get": "<dotted.config.key>"}

@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "20"
+  version: "21"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -94,8 +94,8 @@ worktree.
    prevents (owner decision, 2026-09-18).
 
 Registering records the name for this session: `python3 $BATON/context-db/bin/kit_profile.py session-name` prints it,
-and `kit_profile.py footer` prints the attribution line with it — `🤖 Generated with [Claude Code](…) · session
-\`<name>\`` — the last line of every PR body and PR comment on your own PRs (`pr-open`, `pr-watch`).
+and `kit_profile.py footer` prints the session self-identifier with it — `session \`<name>\`` — the last line of
+every PR body and PR comment on your own PRs (`pr-open`, `pr-watch`); never an AI attribution line.
 
 ## 2. Keep the heartbeat fresh (≤12h)
 

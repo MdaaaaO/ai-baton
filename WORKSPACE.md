@@ -80,7 +80,7 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
 ## Rules (always on)
 
 **Communication**
-- No AI footer on chat sent for the user; own PRs + PR comments end with `kit_profile.py footer`.
+- No AI attribution anywhere; own PRs + PR comments end with `kit_profile.py footer` only.
 - Asks/status pings default to 1–3 plain sentences — link + one clause + who must act, no bold
   field-label templates; point to where detail already lives, never restate it. Reserve
   headers/bullets/tables for messages that genuinely bundle several items.
