@@ -149,6 +149,110 @@ class TornWriteFree(unittest.TestCase):
             self.assertEqual(data[0]["d"], "2026-09-01")
 
 
+def _org_profile_get(path: str, default=None):
+    """A minimal org-mode `kit_profile.get` stand-in: just enough `cost.*` + `systems.datalake` for
+    `cmd_sql` to build both queries, without touching any real env store."""
+    values = {
+        "systems.datalake": True,
+        "cost": {
+            "spend_table": "spend.usage",
+            "columns": {
+                "date": "usage_date", "email": "user_email", "model": "model_id", "cost": "cost_usd",
+                "input": "input_tokens", "output": "output_tokens",
+                "cache_read": "cache_read_tokens", "cache_write": "cache_write_tokens",
+            },
+            "filters": "",
+            "email": "me@example.com",
+        },
+        "tracker.kind": "none",
+        "github.org": "",
+    }
+    return values.get(path, default)
+
+
+class PortableControlSql(unittest.TestCase):
+    """The control query used to bucket weeks with Snowflake-only `TO_CHAR(DATE_TRUNC(...), 'IYYY"W"IW')`,
+    which Snowflake accepts but does not implement (the format elements are taken literally), so every row
+    silently lands under the same week key instead of erroring. The query must now be a plain per-day
+    GROUP BY that works the same on any engine; ISO-week bucketing moves into `ingest` (Python)."""
+
+    def _sql(self) -> tuple[str, str]:
+        buf = io.StringIO()
+        with unittest.mock.patch.object(cost_report.profile, "get", side_effect=_org_profile_get):
+            with contextlib.redirect_stdout(buf):
+                rc = cost_report.cmd_sql(ns(since=None, until=None))
+        self.assertEqual(rc, 0)
+        own, control = buf.getvalue().split("\n\n", 1)
+        return own, control
+
+    def test_control_query_has_no_engine_specific_week_format(self):
+        # only the executable SQL, not the comment explaining the bug this query used to have
+        _own, control = self._sql()
+        sql = "\n".join(ln for ln in control.splitlines() if not ln.lstrip().startswith("--"))
+        self.assertNotIn("TO_CHAR", sql)
+        self.assertNotIn("IYYY", sql)
+        self.assertNotIn("DATE_TRUNC", sql)
+        self.assertNotIn(" AS wk", sql)
+
+    def test_control_query_groups_by_plain_date(self):
+        _own, control = self._sql()
+        self.assertIn("CAST(usage_date AS DATE) AS d,", control)
+        self.assertIn("GROUP BY 1 ORDER BY 1;", control)
+        self.assertIn("COUNT(DISTINCT user_email) AS users,", control)
+
+
+class ControlWeekBucketing(unittest.TestCase):
+    """`ingest` now does the ISO-week bucketing the SQL used to (see PortableControlSql): daily control
+    rows (`d`) are grouped into `YYYY-Wnn` buckets with Python's own `date.isocalendar()`, and any `wk`
+    value — whether it arrived pre-bucketed or was computed here — is checked against that shape before
+    it can become part of a control file `report` will treat as real weeks."""
+
+    def _ingest_control(self, control_rows: list) -> tuple[int, list | None, str]:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "rows.json").write_text(json.dumps([{"d": "2026-09-28", "usd": 1}]), encoding="utf-8")
+            (d / "control_rows.json").write_text(json.dumps(control_rows), encoding="utf-8")
+            out, control_out = d / "daily.json", d / "control.json"
+            args = ns(rows=str(d / "rows.json"), out=str(out), control_out=str(control_out),
+                      control_rows=str(d / "control_rows.json"))
+            buf = []
+            with unittest.mock.patch("builtins.print", lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+                rc = cost_report.cmd_ingest(args)
+            ctl = json.loads(control_out.read_text(encoding="utf-8")) if control_out.exists() else None
+            return rc, ctl, "\n".join(buf)
+
+    def test_daily_control_rows_bucket_into_the_right_iso_week(self):
+        # 2026-09-28 is a Monday (ISO week 40); 2026-10-04 is the Sunday closing that same ISO week.
+        rows = [
+            {"d": "2026-09-28", "users": 10, "usd": 100, "inp": 10, "cached": 1, "cwrite": 1, "outp": 50, "cheap_outp": 20},
+            {"d": "2026-10-04", "users": 6, "usd": 40, "inp": 4, "cached": 0, "cwrite": 0, "outp": 20, "cheap_outp": 5},
+            {"d": "2026-10-05", "users": 3, "usd": 10, "inp": 1, "cached": 0, "cwrite": 0, "outp": 5, "cheap_outp": 1},  # ISO week 41
+        ]
+        rc, ctl, _printed = self._ingest_control(rows)
+        self.assertEqual(rc, 0)
+        weeks = {c["wk"]: c for c in ctl}
+        self.assertEqual(set(weeks), {"2026-W40", "2026-W41"})
+        w40 = weeks["2026-W40"]
+        self.assertEqual(w40["usd"], 140)                 # 100 + 40, summed across the two week-40 days
+        self.assertEqual(w40["user_days"], 16)             # 10 + 6, exact (each row is a single day)
+        self.assertEqual(w40["users"], 10)                 # max of the daily counts, not their sum
+        self.assertEqual(weeks["2026-W41"]["usd"], 10)
+
+    def test_malformed_week_key_is_rejected_not_silently_ingested(self):
+        # the exact shape the Snowflake TO_CHAR('IYYY"W"IW') bug produced: every row collapsed to one
+        # literal, non-ISO key. A control file built from that query must never pass ingest.
+        rc, ctl, printed = self._ingest_control([{"wk": "I2626-WIW", "usd": 10, "outp": 100}])
+        self.assertEqual(rc, 2)
+        self.assertIsNone(ctl)
+        self.assertIn("YYYY-Wnn", printed)
+
+    def test_wk_column_still_accepted_when_already_valid(self):
+        # an engine-specific week query (e.g. Snowflake YEAROFWEEKISO/WEEKISO) may still emit `wk` directly.
+        rc, ctl, _printed = self._ingest_control([{"wk": "2026-W39", "usd": 10, "outp": 100}])
+        self.assertEqual(rc, 0)
+        self.assertEqual([c["wk"] for c in ctl], ["2026-W39"])
+
+
 class DocstringLooseCoupling(unittest.TestCase):
     def test_module_docstring_lists_every_subcommand(self):
         # `sub.add_parser(...)` in main() is the one place subcommands are registered; the docstring

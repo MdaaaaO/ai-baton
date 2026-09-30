@@ -251,11 +251,14 @@ SELECT CAST({col['date']} AS DATE) AS d, {col['model']} AS model,
 FROM {m['spend_table']}
 WHERE {where} AND LOWER({col['email']}) = LOWER('{email}')
 GROUP BY 1, 2 ORDER BY 1, 2;"""
-    control = f"""-- control: everyone else, weekly aggregate, weekdays, no identities leave the warehouse
--- (DATE_TRUNC / TO_CHAR ISO week / DAYOFWEEKISO: swap for your engine's equivalents if it rejects them)
-SELECT TO_CHAR(DATE_TRUNC('week', {col['date']}), 'IYYY-"W"IW') AS wk,
+    control = f"""-- control: everyone else, daily aggregate, weekdays, no identities leave the warehouse.
+-- Deliberately a plain date GROUP BY, not a week bucket: an engine's week-format function (ISO
+-- year/week format elements in TO_CHAR, on some engines) can silently produce the same literal key for every row instead of
+-- erroring, which collapses every week into one and passes a broken control through undetected. `ingest`
+-- does the ISO-week bucketing itself, in Python, from this daily grain.
+-- (DAYOFWEEKISO: swap for your engine's equivalent if it rejects it)
+SELECT CAST({col['date']} AS DATE) AS d,
        COUNT(DISTINCT {col['email']}) AS users,
-       COUNT(DISTINCT {col['email']} || CAST({col['date']} AS VARCHAR)) AS user_days,
        SUM({col['cost']}) AS usd, SUM({col['input']}) AS inp, SUM({col['cache_read']}) AS cached,
        SUM({col['cache_write']}) AS cwrite, SUM({col['output']}) AS outp,
        SUM(CASE WHEN LOWER({col['model']}) LIKE '%sonnet%' OR LOWER({col['model']}) LIKE '%haiku%' THEN {col['output']} ELSE 0 END) AS cheap_outp
@@ -288,6 +291,26 @@ def _day(v) -> str:
     return s[:10]
 
 
+WK_RE = re.compile(r"^\d{4}-W\d{2}$")
+
+
+def _control_week_key(r: dict) -> str | None:
+    """A control row's ISO-week key: use `wk` verbatim when the row already carries one (an engine-specific
+    week-bucketing query, e.g. ISO year-of-week and week functions), else compute it from `d` with Python's
+    own `date.isocalendar()` (the portable `sql` daily control) — never trust a warehouse-formatted week
+    string without checking its shape (see WK_RE below); `None` when the row has neither column."""
+    wk = str(r.get("wk") or "").strip()
+    if wk:
+        return wk
+    d = str(r.get("d") or "").strip()
+    if not d:
+        return None
+    try:
+        return _iso_week(_day(d))  # the one week-key definition `report` also uses
+    except ValueError:
+        return None
+
+
 def cmd_ingest(a) -> int:
     """Query results are the warehouse's, not the kit's: a role the caller renamed, dropped, or a row a
     different shape entirely (a header row, a null) is skipped and counted, never a KeyError that
@@ -308,17 +331,39 @@ def cmd_ingest(a) -> int:
     if a.control_rows:
         with open(a.control_rows, encoding="utf-8") as fh:
             crow = _lower_keys(json.load(fh))
-        ctl = []
+        # A row may arrive daily (`d`, the portable `sql` control — bucketed into ISO weeks here) or already
+        # weekly (`wk`, an engine-specific week query). Either way `users` is a per-row distinct-user count
+        # that cannot be summed across days without double-counting a user active on more than one day in
+        # the week, so the weekly `users` is the MAX of its daily values (a lower-bound estimate of the true
+        # weekly distinct count — exact would need identities to leave the warehouse); `user_days` is exact,
+        # since it is the sum of each row's own distinct-user count (one row's `users` IS that row's
+        # distinct-user-day count when the row already spans no more than a single day).
+        weekly: dict[str, dict] = {}
         cskipped = 0
+        bad_wk: list[str] = []
         for r in crow:
-            if not r.get("wk"):
+            wk = _control_week_key(r)
+            if not wk:
                 cskipped += 1
                 continue
-            ctl.append({"wk": str(r["wk"]), "users": int(_num(r.get("users"))), "user_days": int(_num(r.get("user_days"))),
-                        "usd": _num(r.get("usd")), "inp": _num(r.get("inp")), "cached": _num(r.get("cached")),
-                        "cwrite": _num(r.get("cwrite")), "outp": _num(r.get("outp")), "cheap_outp": _num(r.get("cheap_outp"))})
+            if not WK_RE.fullmatch(wk):
+                bad_wk.append(wk)
+                continue
+            u = int(_num(r.get("users")))
+            acc = weekly.setdefault(wk, {"wk": wk, "users": 0, "user_days": 0, "usd": 0.0, "inp": 0.0,
+                                          "cached": 0.0, "cwrite": 0.0, "outp": 0.0, "cheap_outp": 0.0})
+            acc["users"] = max(acc["users"], u)
+            acc["user_days"] += int(_num(r["user_days"])) if "user_days" in r else u
+            for k in ("usd", "inp", "cached", "cwrite", "outp", "cheap_outp"):
+                acc[k] += _num(r.get(k))
+        if bad_wk:
+            print("control row(s) with a week key that isn't YYYY-Wnn (a dialect's week-format function "
+                  "didn't do what was expected — see the comment in `sql`'s control query): " +
+                  ", ".join(sorted(set(bad_wk))[:5]), file=sys.stderr)
+            return 2
+        ctl = [weekly[k] for k in sorted(weekly)]
         fsutil.atomic_write(a.control_out, json.dumps(ctl, indent=0))
-        print(f"{len(ctl)} control weeks → {a.control_out}" + (f"; {cskipped} row(s) skipped (no week column)" if cskipped else ""))
+        print(f"{len(ctl)} control weeks → {a.control_out}" + (f"; {cskipped} row(s) skipped (no date/week column)" if cskipped else ""))
     return 0
 
 
@@ -801,7 +846,7 @@ def render_md(o: dict) -> str:
         L += [f"| {d['from']} → {d['to']} | {pct(d['usd_per_wday_change'])} | {pct(d['volume'])} | {pct(d['habit'])} | {pct(d['routing'])} | {num(d['avoided_usd_per_wday'])} |"
               for d in o["decomposition"]] + [""]
     if o["control"]:
-        L += ["## Control (everyone else, weekdays, anonymous aggregate)", "", "| Week | users | $/user-day | in/out | $/Mout | fixed $/Mout | cheap% |", "|---|---|---|---|---|---|---|"]
+        L += ["## Control (everyone else, weekdays, anonymous aggregate)", "", "| Week | peak daily users | $/user-day | in/out | $/Mout | fixed $/Mout | cheap% |", "|---|---|---|---|---|---|---|"]
         L += [f"| {c['wk']} | {c['users'] or '–'} | {num(c['usd_per_user_day'])} | {num(c['in_out'])} | {num(c['usd_per_mout'])} | {num(c['fixed_usd_per_mout'])} | {pct(c['cheap_share']).lstrip('+')} |"
               for c in o["control"]] + [""]
     L += ["## Reading the metrics", "",
