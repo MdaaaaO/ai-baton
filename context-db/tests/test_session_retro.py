@@ -108,6 +108,19 @@ class RuleChecks(RetroCase):
         unexpanded = Builder().user("go").bash('git commit -m "$t"')
         self.assertNotIn("title-style", self.rules(unexpanded))
 
+    def test_title_style_skips_fixture_commits(self):
+        bad_subject = "git commit -qm \"$(cat <<'EOF'\nUpdated stuff\n\nbody\nEOF\n)\""
+        pytest_tmp = Builder().user("go").bash(bad_subject, cwd="/tmp/pytest-of-me/pytest-3/test_x0")
+        self.assertNotIn("title-style", self.rules(pytest_tmp))
+        kit_scratch = Builder().user("go").bash(bad_subject, cwd="/run/user/1000/ai-baton-kit/sess")
+        self.assertNotIn("title-style", self.rules(kit_scratch))
+        cd_into_tmp = Builder().user("go").bash(f"cd /tmp/x && {bad_subject}")
+        self.assertNotIn("title-style", self.rules(cd_into_tmp))
+        alongside_pytest = Builder().user("go").bash(f"{bad_subject} && pytest tests/test_x.py")
+        self.assertNotIn("title-style", self.rules(alongside_pytest))
+        # the same bad subject, outside a temp dir and with no pytest alongside: still a hit
+        self.assertIn("title-style", self.rules(Builder().user("go").bash(bad_subject)))
+
     def test_agent_no_model(self):
         self.assertIn("agent-no-model", self.rules(Builder().user("go").call("Agent", description="fix it", prompt="x")))
         self.assertNotIn("agent-no-model", self.rules(Builder().user("go").call("Agent", description="fix it", prompt="x", model="sonnet")))

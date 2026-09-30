@@ -467,7 +467,8 @@ WORKSPACE.md § Rules and the skills the session invoked. It extracts
 and runs the rule checks a script can decide (`rule_hits`), each a CANDIDATE the fork confirms against the rule text:
   pr-no-labels        a `gh pr create` without `--label`, and no label added later in the session
   pr-no-footer        a PR body (inline or a body file the session wrote) without the attribution footer line
-  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style)
+  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style);
+                      a `git commit` under a temp dir or alongside a pytest invocation is fixture setup, not a hit
   agent-no-model      an `Agent` call without `model` (it inherits the main session's, the most expensive one)
   workspace-path      a `.context/`, `.worktrees/` or home-directory path in a title or body posted to GitHub
   store-write-no-root a writing `kb.py` / `session.py` call from a worktree without an explicit `CONTEXT_ROOT=`

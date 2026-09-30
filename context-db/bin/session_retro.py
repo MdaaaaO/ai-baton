@@ -11,7 +11,8 @@ WORKSPACE.md § Rules and the skills the session invoked. It extracts
 and runs the rule checks a script can decide (`rule_hits`), each a CANDIDATE the fork confirms against the rule text:
   pr-no-labels        a `gh pr create` without `--label`, and no label added later in the session
   pr-no-footer        a PR body (inline or a body file the session wrote) without the attribution footer line
-  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style)
+  title-style         a PR title or commit subject that `commit_style.py` refuses (the repo's resolved style);
+                      a `git commit` under a temp dir or alongside a pytest invocation is fixture setup, not a hit
   agent-no-model      an `Agent` call without `model` (it inherits the main session's, the most expensive one)
   workspace-path      a `.context/`, `.worktrees/` or home-directory path in a title or body posted to GitHub
   store-write-no-root a writing `kb.py` / `session.py` call from a worktree without an explicit `CONTEXT_ROOT=`
@@ -50,6 +51,8 @@ DENIAL_RE = re.compile(
     r"|hook (?:error|blocked)|pretooluse\S* .*?(?:denied|blocked)", re.I | re.S)
 FOOTER_RE = re.compile(r"Generated with \[Claude Code\]")
 LEAK_RE = re.compile(r"(?<![\w.])\.context/|(?<![\w.])\.worktrees/|(?<![\w])/(?:home|Users)/[^/\s`'\"]+/|(?<![\w/])~/")
+TEMP_DIR_RE = re.compile(r"(?:^|/)(?:pytest-of-[^/]+|ai-baton-kit(?:-\d+)?)(?:/|$)")
+PYTEST_RUN_RE = re.compile(r"(?:^|[;&|]\s*)(?:\S*/)?(?:python3?\s+-m\s+)?pytest\b")
 STORE_WRITES = {"kb.py": ("set", "rm", "config-set", "init", "migrate"), "session.py": ("register", "touch", "end")}
 MAKE_WRITES = ("session-register", "session-touch", "session-end")
 REGISTRY_SKILLS = ("session-register", "session-handoff")
@@ -134,6 +137,23 @@ def _opts(args: list[str]) -> dict[str, list[str]]:
                 o.setdefault(a, []).append("")
         i += 1
     return o
+
+
+def _in_temp_dir(path: str) -> bool:
+    """True when `path` sits under `$TMPDIR` (default `/tmp`), `$KIT_SCRATCH`, the kit scratch root
+    (`ai-baton-kit[-<uid>]`) or a pytest temp dir (`tmp_path` / `tmpdir` land under `pytest-of-<user>/pytest-<n>/…`,
+    itself under the system temp root) — a `git commit` there is test-fixture setup, not one the session means to
+    ship, so it is not a commit-style candidate."""
+    if not path:
+        return False
+    p = os.path.normpath(path)
+    for var, default in (("TMPDIR", "/tmp"), ("KIT_SCRATCH", None)):
+        base = os.environ.get(var) or default
+        if base:
+            base = os.path.normpath(base)
+            if p == base or p.startswith(base + os.sep):
+                return True
+    return bool(TEMP_DIR_RE.search(p))
 
 
 def _unheredoc(v: str) -> str:
@@ -349,8 +369,11 @@ class Retro:
                     m = o.get("--message") or next((v for k, v in o.items() if re.fullmatch(r"-[a-zA-Z]*m", k)), None)
                     msg = _unheredoc(m[0]) if m else (body_of(o, inline=(), files=("-F", "--file")) or "")
                     subject = msg.strip().splitlines()[0] if msg.strip() else ""
-                    wd = pre[pre.index("-C") + 1] if "-C" in pre[:-1] else c["cwd"]
-                    if subject and "$" not in subject:  # an unexpanded variable: the real subject is unknown
+                    wd = pre[pre.index("-C") + 1] if "-C" in pre[:-1] else cwd
+                    # a fixture/test-setup commit (temp dir, or the same Bash call also runs pytest) is not a
+                    # candidate: it never ships, so the repo's title style does not apply to it
+                    fixture = _in_temp_dir(wd) or _in_temp_dir(cwd) or bool(PYTEST_RUN_RE.search(cmd))
+                    if subject and "$" not in subject and not fixture:  # an unexpanded variable: the real subject is unknown
                         probs = commit_style.check_subject(subject, style(wd))
                         if probs:
                             hit("title-style", c, f"commit subject `{subject}`: {probs[0]}")
