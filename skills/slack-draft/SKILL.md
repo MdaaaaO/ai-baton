@@ -41,8 +41,10 @@ The gist is what §3 diffs against once it goes out.
 Run this **before** any of: re-creating the draft, updating it, reporting its status, drafting a
 follow-up to the same people, or acting on "no reply yet".
 
-1. `slack_read_thread` (thread draft) or `slack_read_channel` (top-level) on the target, from
-   the draft's creation time. Look for a message **from the user** whose substance matches the gist.
+1. `slack_read_thread` (thread draft) or `slack_read_channel` (top-level) on the target. Read the
+   full thread (omit `oldest=`; the parameter is unreliable) and filter by timestamp locally to
+   find messages after the draft's creation time. Look for a message **from the user** whose substance
+   matches the gist.
 2. Outcomes:
    - **Sent** → record *sent* + timestamp + **what they changed** (dropped/added points, wording
      shifts). Their edits are signal: they tell you which of your positions they did not want stated,

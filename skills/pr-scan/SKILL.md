@@ -21,7 +21,7 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
 
 ## Steps
 
-1. Run the sweep (it takes 1–4 minutes; set the Bash timeout to 300000):
+1. Run the sweep (wall time ~3–4 minutes; run under Monitor or in the background, never foreground; set the Bash timeout to 300000):
    ```sh
    bash $BATON/skills/pr-scan/pr-scan.sh --mark $ARGUMENTS
    ```
