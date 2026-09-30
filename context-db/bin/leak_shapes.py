@@ -299,7 +299,7 @@ def configured_values(cfg: dict, facts: dict, *, common: "set[str] | frozenset[s
         pats.append((re.compile((r"\b" if v[0].isalnum() else "") + esc + (r"\b" if v[-1].isalnum() else "")), what))
     org = str(((cfg or {}).get("github") or {}).get("org") or "")
     if org:
-        pats.append((re.compile(rf"\b{re.escape(org)}/{org_not_dep}[a-z][\w.-]*"), f"`{org}/<repo>` path"))
+        pats.append((re.compile(rf"\b{re.escape(org)}/{org_not_dep}[a-z][\w.-]*"), "github.org `<org>/<repo>` path"))
         pats.append((re.compile(rf"@{re.escape(org)}/"), "org team handle"))
     return pats + logins, errors
 
