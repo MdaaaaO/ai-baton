@@ -9,9 +9,15 @@ organisation's own values live here: those are read at run time from the env sto
 allow-list) — a per-file rule, so a doc line that merely mentions `leak_shapes.py` is still scanned.
 `allowed()` reads `skills/kit-health/allow.txt` — one regex per line, anchored at the start of `<path>:<match>`
 (`$` for an exact match) — the ONE allow-list both scanners honour, so a provenance line kit-health accepts is
-not a `kit-verify` failure. `shapes(tracker_kind, key_regex)` is the shape list a scanner uses: the generic list always (kit-verify's
+not a `kit-verify` failure. `shapes(tracker_kind, key_regex, ignore_case=…)` is the shape list a scanner uses: the generic list always (kit-verify's
 env-free scan, and kit-health on any tracker), plus this environment's `tracker.key_regex` as a second
 ticket shape on a Jira-style tracker.
+
+`configured_values(cfg, facts, …)` is the *value* half — this environment's own facts and config, gathered
+into scan-ready patterns (org, tracker repos/site/project, Slack channels/domain, `tz_default`, …); shared by
+kit-health's leak scan and `kit_profile.py public-text-check` so the two never disagree about what counts as
+this environment's own value. `cross_org_shapes(owner)` is public-text-check's one extra shape: an inline
+`<org>/<repo>#<n>` naming a different org than the repo the text is being posted to.
 Stdlib only.
 """
 from __future__ import annotations
@@ -75,15 +81,21 @@ def skip_path(rel: str) -> bool:
             or any(rel.lower().endswith(x) for x in SKIP_SUFFIXES))
 
 
-def shapes(tracker_kind: str | None = None, key_regex: str | None = None) -> list[tuple[re.Pattern, str]]:
+def shapes(tracker_kind: str | None = None, key_regex: str | None = None, *,
+           ignore_case: bool = False) -> list[tuple[re.Pattern, str]]:
     """The compiled shape list for one scanner: the generic list on every tracker (a key from ANOTHER environment is
     exactly the leak a shared kit risks, so the generic ticket shape is never dropped), plus, on a tracker with a
     compiling `key_regex`, that regex as a second ticket shape so this environment's own keys are caught even when
-    they do not fit the generic form. An invalid regex is kit-verify's finding; nothing is added for it."""
+    they do not fit the generic form. An invalid regex is kit-verify's finding; nothing is added for it.
+    `ignore_case` (default False, kit-health's own case-sensitive scan of kit files) compiles `key_regex` with
+    `re.IGNORECASE` too — `kit_profile.py public-text-check` wants this: a lane name lower-cases its tracker key
+    (`<key>-<n>-<topic>`), and the generic LEAK_SHAPES ticket shape is already case-shaped (upper-case prefix),
+    so only `key_regex` needs the flag."""
     out = [(re.compile(rx), what) for rx, what in LEAK_SHAPES]
+    flags = re.IGNORECASE if ignore_case else 0
     if key_regex and tracker_kind != "github":  # a GitHub key is `#12`: no id to leak, the generic shape already covers foreign keys
         try:
-            out.append((re.compile(key_regex), "ticket key (tracker.key_regex)"))
+            out.append((re.compile(key_regex, flags), "ticket key (tracker.key_regex)"))
         except re.error:
             pass
     return out
@@ -150,3 +162,152 @@ def scan(text: str, shapes: list[tuple[re.Pattern, str]] | None = None, rel: str
             continue
         out += [(n, what, hit) for what, hit in line_hits(line, pats, rel, allow)]
     return out
+
+
+# ── configured values — this environment's own facts and config, not a generic shape ──────────────────────────
+# Shared by kit-health's leak scan (every kit file) and `kit_profile.py public-text-check` (one outgoing PR/issue
+# body): both need the SAME set of "this environment's own values" so the two scanners never drift on what
+# counts as a leak. `GENERIC`/`COMMON_REPO_NAMES`/`keep_value`/`redact`/`common_word_kinds` are the shared
+# predicates; `configured_values` is the shared value-gathering (kit-health composes it with its own
+# kit-tree-specific additions — the dependency-address exclusion, `identity_values` — public-text-check uses it
+# as is).
+GENERIC = {"true", "false", "none", "jira", "github", "slack", "notion", "datalake", "airflow", "dbt",
+           "issues", "main", "master"}
+# bare repo names that half of GitHub has and the kit uses as ordinary words: `setup.sh --personal` fills
+# `tracker.repos` from `gh repo list` on a fresh workspace, and a `config` repo flagged every kit file (#118).
+# The full `owner/<repo>` slug and the `<org>/<repo>` path shape still catch these repos.
+COMMON_REPO_NAMES = {"config", "configs", "dotfiles", "docs", "notes", "scripts", "tools", "utils", "setup",
+                     "infra", "test", "tests", "templates", "examples", "sandbox", "playground", "website",
+                     "blog", "archive", "backup", "workspace", "projects"}
+
+
+def keep_value(v: str, kind: str = "", common: "set[str] | frozenset[str]" = frozenset()) -> bool:
+    """Is this configured value worth scanning for? Not when it is short, generic or a placeholder — those match
+    everywhere and mean nothing. For an env-store ROW (`kind` given): a common-word kind (`common_word: true` in its
+    manifest — first names, teams, labels) skips a plain single word but still scans a value with a space or hyphen
+    (`First Last`, `<team>-platform` are the leaks the scan exists for), and any kind skips a plain word under six
+    letters. A config or identity value (no `kind`) keeps the old four-character floor: a short org or
+    login is the leak most worth catching."""
+    s = v.strip()
+    if len(s) < 4 or s.lower() in GENERIC or (s.isdigit() and len(s) < 6) or s.startswith("<"):
+        return False
+    if not kind:
+        return True
+    plain_word = re.fullmatch(r"[A-Za-z]+", s) is not None
+    if plain_word and kind in common:
+        return False
+    if plain_word and len(s) < 6:
+        return False
+    return True
+
+
+def redact(what: str, value: str) -> str:
+    """`<kind>:<first2>…` — the report and the audit log name the kind and two characters, never the value.
+    Shapes give their name as `what`; configured values their key."""
+    kind = what.split(" (")[0].replace("env fact ", "").strip("`")
+    return f"{kind}:{value[:2]}…" if len(value) > 2 else f"{kind}:…"
+
+
+def common_word_kinds(manifests: dict) -> set[str]:
+    """`<system>.<kind>` of every manifest fact flagged `common_word: true` — kinds whose values are ordinary words
+    (a person's first name, a team, a label) and would flood the value scan. `manifests` is `kb.load_manifests()`'s
+    result — this module stays stdlib-only and does no I/O of its own; the caller loads it (and an environment's
+    own `_discovery/` overlay is picked up the same way `kb` already merges it)."""
+    out: set[str] = set()
+    for m in (manifests or {}).values():
+        for f in m.get("facts") or []:
+            if isinstance(f, dict) and f.get("common_word") and f.get("target", "row") == "row":
+                out.add(str(f.get("key", "")).split(" ")[0])
+    return out
+
+
+def configured_values(cfg: dict, facts: dict, *, common: "set[str] | frozenset[str]" = frozenset(),
+                       core_domains: "set[str] | frozenset[str]" = frozenset(),
+                       login_tail: str = r"(?![\w-])", org_not_dep: str = "",
+                       repo_dependencies: "set[str] | frozenset[str]" = frozenset()) -> tuple[list[tuple[re.Pattern, str]], list[str]]:
+    """(patterns, loader errors) — every literal value THIS environment has configured, as scan-ready patterns:
+    every env-store fact row's value (`facts`, `kb.all_facts()`'s shape) + config keys that carry identity (org,
+    review bot, owner teams, Slack channels/domain, tracker site/project/board_sprint_prefix, `tracker.repos` —
+    full slug and bare name, skipping `COMMON_REPO_NAMES` — `tz_default`, `leaks.markers` (#95: product/org
+    markers no shape knows), `.context/` domains). `cfg` is a loaded `kit_profile.load()` (or `{}`), `facts` a
+    loaded `kb.all_facts()` (or `{}`) — this function does no I/O of its own, so a caller decides how (and
+    whether) to degrade when the store is unreadable. Short / numeric / generic values never make the cut
+    (`keep_value`) — they would match everywhere and mean nothing.
+
+    `common` is `common_word_kinds()`'s result (kit-health passes it; public-text-check may pass nothing —
+    a bare four-character floor is still applied via `keep_value`'s no-kind path only when `kind` is dropped,
+    so this function keeps a `kind` on every fact-row value regardless, trading a few short common words for
+    never missing a real one). `core_domains` excludes the engine's own domain folder names
+    (`kit_profile.CORE_DOMAINS`) — ordinary English words a real environment also uses as a domain. `login_tail`
+    / `org_not_dep` let kit-health exclude its own dependency address (the kit's own repo mentioning itself is
+    not a leak) from the login and `<org>/<repo>` patterns; `repo_dependencies` does the same for `tracker.repos`
+    itself (a tracked repo that IS one of the kit's own dependencies, e.g. the kit's own checkout, is skipped
+    entirely, not just its `<org>/<repo>` form). All three default to "exclude nothing", which is what
+    public-text-check wants (it is not scanning the kit's own tree)."""
+    vals: dict[str, str] = {}
+    errors: list[str] = []
+
+    def keep(v: object, what: str, kind: str = "") -> None:
+        if v in (None, ""):
+            return
+        s = str(v)
+        if keep_value(s, kind, common):
+            vals.setdefault(s.strip(), what)
+
+    try:
+        for system, kinds in (facts or {}).items():
+            for kind, rows in kinds.items():
+                for row in rows.values():
+                    keep(row["value"], f"env fact `{system}.{kind}`", f"{system}.{kind}")
+    except (AttributeError, TypeError, KeyError) as e:
+        errors.append(f"env-store tables malformed ({e}) — the value scan is shapes-only until that is fixed")
+
+    logins: list[tuple[re.Pattern, str]] = []
+    if cfg:
+        gh = cfg.get("github") or {}
+        keep(gh.get("review_bot"), "github.review_bot")
+        for login in (gh.get("display_names") or {}):
+            if keep_value(str(login)):
+                logins.append((re.compile(rf"(?<![\w-]){re.escape(str(login).strip())}{login_tail}"),
+                               "colleague login (github.display_names)"))
+        for team in gh.get("owner_teams") or []:
+            keep(team, "github.owner_teams")
+        keep((cfg.get("slack") or {}).get("domain"), "slack.domain")
+        for v in ((cfg.get("slack") or {}).get("channels") or {}).values():
+            keep(v, "Slack channel id (slack.channels)")
+        for k in ("site", "project", "board_sprint_prefix"):
+            keep((cfg.get("tracker") or {}).get(k), f"tracker.{k}")
+        keep(cfg.get("tz_default"), "tz_default")
+        for m in (cfg.get("leaks") or {}).get("markers") or []:  # #95: product/org markers no shape knows
+            keep(m, "leaks.markers")
+        for repo in (cfg.get("tracker") or {}).get("repos") or []:
+            name = str(repo).rsplit("/", 1)[-1]
+            if name in repo_dependencies:
+                continue
+            keep(repo, "tracker.repos")
+            if name.lower() not in COMMON_REPO_NAMES:
+                keep(name, "tracker.repos (repo name)")
+
+    pats: list[tuple[re.Pattern, str]] = []
+    for d in sorted({str(d).strip() for d in ((cfg or {}).get("domains") or [])} - {""} - set(core_domains)):
+        pats.append((re.compile(rf"(?:\.context/|DOMAIN=){re.escape(d)}\b"), "domains (a local .context/ domain)"))
+    for v, what in vals.items():
+        esc = re.escape(v)
+        pats.append((re.compile((r"\b" if v[0].isalnum() else "") + esc + (r"\b" if v[-1].isalnum() else "")), what))
+    org = str(((cfg or {}).get("github") or {}).get("org") or "")
+    if org:
+        pats.append((re.compile(rf"\b{re.escape(org)}/{org_not_dep}[a-z][\w.-]*"), f"`{org}/<repo>` path"))
+        pats.append((re.compile(rf"@{re.escape(org)}/"), "org team handle"))
+    return pats + logins, errors
+
+
+def cross_org_shapes(owner: str) -> list[tuple[re.Pattern, str]]:
+    """`<org>/<repo>#<n>` naming a DIFFERENT org than `owner` (the repo text is about to be posted to) — a bare
+    inline issue/PR reference is plausibly a private repo leaking through a shorthand nobody meant to publish
+    (the honest form for a genuine cross-repo reference is the full URL anyway). A same-org reference
+    (`<owner>/<repo>#<n>`, an ordinary link within one's own org) is not flagged. `owner` empty → no shape (a
+    caller that could not parse `--repo` has already failed earlier)."""
+    if not owner:
+        return []
+    return [(re.compile(rf"\b(?!{re.escape(owner)}/)[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*#\d+\b", re.IGNORECASE),
+             "other-org `<org>/<repo>#<n>` reference — use the full URL, or describe it generically")]

@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "21"
+  version: "22"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -49,7 +49,10 @@ worktree.
    what you own (`hardening`, a ticket number, a feature); a successor on the same lane adds `-2`, `-3`
    (`kit-hardening`, `kit-216-changelog`, `<repo>-weekly-2`). `session-register` refuses a new name outside it; a
    successor takes the name its predecessor's prompt proposes. The name ends every PR body and PR comment you post on
-   your own PRs (`kit_profile.py footer`, below), so it is public: no person, org or private project in it. A generic
+   your own PRs (`kit_profile.py footer`, below), so it is public: no person, org or private project in it — enforced,
+   not just asked: a NEW name is refused when it embeds one of this environment's own `tracker.repos` (full slug
+   or bare name)/domain names, or its `tracker.key_regex` shape (lower-case included, e.g. a lane like
+   `key-123-topic`); an existing name already on file is grandfathered. A generic
    placeholder still matches the regex and is not exempt — `<lane>-lane-<n>` (e.g. `kit-lane-6`) is not a topic;
    the *topic* part must name what you actually own. Get your `ref` from `ListAgents` (your own row):
 

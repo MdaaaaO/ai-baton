@@ -164,6 +164,13 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                    #   alias (DEPRECATED_ALIASES) answers with the
                                                                    #   systems.* value it now means, and warns once on stderr
                         python3 kit_profile.py get --nonempty tracker.close_reasons.done  # exit 1 on unset OR "" / [] / {}, not just unset
+                        python3 kit_profile.py public-text-check <file> --repo <owner/repo> [--public|--private]
+                                                               # scan a body file about to be posted for THIS environment's
+                                                               #   own private values (leak_shapes.py's shapes + configured
+                                                               #   values) — applies only when <owner/repo> is public (a
+                                                               #   `gh api` lookup, skippable with --public/--private) and
+                                                               #   is not one of this environment's own tracker.repos;
+                                                               #   exit 1 prints one `<line>: <what> <matched text>` per hit
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC
@@ -706,9 +713,15 @@ organisation's own values live here: those are read at run time from the env sto
 allow-list) — a per-file rule, so a doc line that merely mentions `leak_shapes.py` is still scanned.
 `allowed()` reads `skills/kit-health/allow.txt` — one regex per line, anchored at the start of `<path>:<match>`
 (`$` for an exact match) — the ONE allow-list both scanners honour, so a provenance line kit-health accepts is
-not a `kit-verify` failure. `shapes(tracker_kind, key_regex)` is the shape list a scanner uses: the generic list always (kit-verify's
+not a `kit-verify` failure. `shapes(tracker_kind, key_regex, ignore_case=…)` is the shape list a scanner uses: the generic list always (kit-verify's
 env-free scan, and kit-health on any tracker), plus this environment's `tracker.key_regex` as a second
 ticket shape on a Jira-style tracker.
+
+`configured_values(cfg, facts, …)` is the *value* half — this environment's own facts and config, gathered
+into scan-ready patterns (org, tracker repos/site/project, Slack channels/domain, `tz_default`, …); shared by
+kit-health's leak scan and `kit_profile.py public-text-check` so the two never disagree about what counts as
+this environment's own value. `cross_org_shapes(owner)` is public-text-check's one extra shape: an inline
+`<org>/<repo>#<n>` naming a different org than the repo the text is being posted to.
 Stdlib only.
 ```
 

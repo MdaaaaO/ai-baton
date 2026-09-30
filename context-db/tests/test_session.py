@@ -3,6 +3,7 @@ Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import argparse
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -434,6 +435,67 @@ class NameConventionAndFooter(unittest.TestCase):
         self.assertEqual(run("kit_profile.py", "footer", root=self.root, env=self.env).stdout.strip(),
                           "session `kit-footer-test`")
 
+
+class NoPrivateValueInName(unittest.TestCase):
+    """`check_no_private_value` (#357, second-sweep note): a NEW session name is refused when it embeds this
+    environment's own repo/project name or tracker key shape — the name reaches the public PR footer. Values
+    here are assembled at run time, per the leak gate this file's own scan runs."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        (self.root / "sessions").mkdir(parents=True)
+        self.scratch = Path(self.tmp.name) / "scratch"
+        self.env = {"KIT_SCRATCH": str(self.scratch)}
+        env_dir = self.root / "reference" / "env"
+        env_dir.mkdir(parents=True)
+        (env_dir / "config.json").write_text(json.dumps({
+            "environment": "t",
+            "tracker": {"kind": "github", "repos": ["acme" + "corp/widgets" + "-app"], "key_regex": r"\bKEY-\d+\b"},
+            "domains": ["ig" + "bot"],
+        }), encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_name_embedding_the_private_repos_bare_name_is_refused(self):
+        r = run("session.py", "register", "--name", "widgets-app-hardening", "--no-stats", root=self.root, env=self.env)
+        self.assertNotEqual(r.returncode, 0, r.stderr)
+        self.assertIn("own repo/project name", r.stderr)
+        self.assertFalse((self.root / "sessions" / "widgets-app-hardening.md").exists())
+
+    def test_a_name_embedding_a_private_domain_is_refused(self):
+        r = run("session.py", "register", "--name", "igbot-followers", "--no-stats", root=self.root, env=self.env)
+        self.assertNotEqual(r.returncode, 0, r.stderr)
+        self.assertIn("own repo/project name", r.stderr)
+
+    def test_a_name_embedding_the_tracker_key_shape_lower_cased_is_refused(self):
+        r = run("session.py", "register", "--name", "key-123-topic", "--no-stats", root=self.root, env=self.env)
+        self.assertNotEqual(r.returncode, 0, r.stderr)
+        self.assertIn("tracker key shape", r.stderr)
+
+    def test_an_unrelated_name_is_accepted(self):
+        r = run("session.py", "register", "--name", "kit-hardening", "--no-stats", root=self.root, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_an_existing_name_already_on_file_is_grandfathered(self):
+        # re-registering an existing entry never re-checks the name it was already given
+        (self.root / "sessions" / "widgets-app-legacy.md").write_text(
+            "---\nsession: widgets-app-legacy\nstatus: active\n---\n\nbody\n", encoding="utf-8")
+        r = run("session.py", "register", "--name", "widgets-app-legacy", "--no-stats", root=self.root, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_rename_target_is_checked_too(self):
+        run("session.py", "register", "--name", "kit-clean-lane", "--no-stats", root=self.root, env=self.env)
+        r = run("session.py", "rename", "--from", "kit-clean-lane", "--to", "igbot-rename", root=self.root, env=self.env)
+        self.assertNotEqual(r.returncode, 0, r.stderr)
+        self.assertIn("own repo/project name", r.stderr)
+
+    def test_no_store_does_not_block_registration(self):
+        empty_root = Path(self.tmp.name) / "no-store" / ".context"
+        (empty_root / "sessions").mkdir(parents=True)
+        r = run("session.py", "register", "--name", "igbot-nostore", "--no-stats", root=empty_root, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 def _load_session_module(root: Path):

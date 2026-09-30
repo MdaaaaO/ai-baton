@@ -2,7 +2,7 @@
 name: ticket-open
 description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues) — placement (sprint, or labels + milestone), labels, epic/parent link, a lean opening block (Goal + Plan + Links + Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating the ticket."
 metadata:
-  version: "8"
+  version: "9"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
@@ -83,14 +83,19 @@ Tools: `gh` with the token per skill `gh-cli` (`github.sandbox_token_prefix`), i
 `tracker.url_template` with `{repo}` + `{key}` → `[#162](https://github.com/<owner>/<repo>/issues/162)`
 in terminal replies, bare `#162` (auto-linked) inside GitHub.
 
-1. **Create with labels + milestone — they replace the sprint field.**
+1. **Create with labels + milestone — they replace the sprint field.** Before posting the body file
+   (this one and the parent's, step 2), `python3 $BATON/context-db/bin/kit_profile.py public-text-check
+   <file> --repo <repo>`: exit 0 → post; exit 1 → rewrite the hits generically (never post the file as
+   is) and re-check. Only applies when `<repo>` is public and not one of `tracker.repos` — a session in a
+   private work environment opening an issue on an unrelated public repo is exactly the case it exists for.
    `gh issue create -R <repo> --title … --body-file <file> --label <type>,<area> [--milestone <open milestone>]`.
    Labels come from the repo's **own** set (`gh label list -R <repo>`) — one type label + any area
    labels, spelled like the PR labels; don't invent new ones. Milestone = the open one covering today
    if the repo uses milestones (`gh api repos/<repo>/milestones`), else none.
 2. **Parent instead of epic link.** Put `Parent: #<n>` in the body **and** add a task-list line
    `- [ ] #<new>` to the parent/tracking issue (`gh issue edit <n> -R <repo> --body-file …`, after
-   reading its current body). Related issues: a `Related: #a, #b` line.
+   reading its current body — same `public-text-check` step before posting). Related issues: a
+   `Related: #a, #b` line.
 3. **Opening block goes in the body** — the Goal/Plan/Links/Sizing block is the issue body itself (the
    body is the opening comment on GitHub); `gh issue comment` only when the body was written by someone
    else. Mention whoever must act with `@login` on one line.

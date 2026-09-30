@@ -2,7 +2,7 @@
 name: ticket-update
 description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
@@ -114,8 +114,11 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
 
 ## Adapter — GitHub issues (tracker.kind = github)
 
-- Comment: `gh issue comment <n> -R <repo> --body-file <file>` (token per skill `gh-cli` —
-  `github.sandbox_token_prefix`; `<repo>` from `tracker.repos`). Mentions are plain `@login`. Edit-the-last-comment =
+- Comment: before posting `<file>`, `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
+  --repo <repo>` — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
+  re-check; a no-op when `<repo>` is one of `tracker.repos` or not public. Then `gh issue comment <n> -R
+  <repo> --body-file <file>` (token per skill `gh-cli` — `github.sandbox_token_prefix`; `<repo>` from
+  `tracker.repos`). Mentions are plain `@login`. Edit-the-last-comment =
   `gh issue comment <n> --edit-last` under the same gate as above.
 - **Status = labels + milestone** (no workflow states): `gh issue edit <n> -R <repo>
   --add-label/--remove-label/--milestone` from the repo's own label set; an open PR with

@@ -23,6 +23,13 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                    #   alias (DEPRECATED_ALIASES) answers with the
                                                                    #   systems.* value it now means, and warns once on stderr
                         python3 kit_profile.py get --nonempty tracker.close_reasons.done  # exit 1 on unset OR "" / [] / {}, not just unset
+                        python3 kit_profile.py public-text-check <file> --repo <owner/repo> [--public|--private]
+                                                               # scan a body file about to be posted for THIS environment's
+                                                               #   own private values (leak_shapes.py's shapes + configured
+                                                               #   values) — applies only when <owner/repo> is public (a
+                                                               #   `gh api` lookup, skippable with --public/--private) and
+                                                               #   is not one of this environment's own tracker.repos;
+                                                               #   exit 1 prints one `<line>: <what> <matched text>` per hit
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC
@@ -734,6 +741,91 @@ def footer() -> str:
     return FOOTER.format(n) if n else ""
 
 
+REPO_SLUG_RE = re.compile(r"^([A-Za-z0-9][\w.-]*)/([A-Za-z0-9][\w.-]*)$")
+
+
+def repo_is_public(owner: str, repo: str) -> bool | None:
+    """`gh api repos/<owner>/<repo> --jq .private`, inverted — None when `gh` cannot answer (not installed,
+    offline, the repo is unknown to this token, a timeout): the caller then assumes public rather than silently
+    skipping the scan (a scan that runs when it didn't strictly need to costs a moment; one that never runs
+    because a lookup glitched is exactly the leak this tool exists to catch)."""
+    import subprocess
+    try:
+        r = subprocess.run(["gh", "api", f"repos/{owner}/{repo}", "--jq", ".private"],
+                           env=gh_env(), capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = r.stdout.strip().lower()
+    return {"true": False, "false": True}.get(out) if r.returncode == 0 else None
+
+
+def public_text_hits(text: str, cfg: dict, owner: str) -> tuple[list[tuple[int, str, str]], list[str]]:
+    """(hits, loader errors) for `text`, about to be posted to a repo owned by `owner`: the generic leak shapes
+    plus this environment's own `tracker.key_regex` (`leak_shapes.shapes`, case-insensitive — a session-name
+    lane can lower-case a tracker key, e.g. `key-123-topic`), this environment's own configured values
+    (`leak_shapes.configured_values` — org, `tracker.repos` full slug AND bare name, Slack channels/domain,
+    `tz_default`, `leaks.markers`, `.context/` domains — the SAME set `kit-health`'s leak scan uses, so the two
+    never disagree on what counts as this environment's own value), and a cross-org `<org>/<repo>#<n>`
+    reference (`leak_shapes.cross_org_shapes`). Deliberately narrower than kit-health's own scan in two ways:
+    no kit-dependency exclusion (this is not the kit's own tree, nothing here is "the kit naming itself") and
+    no identity values (mentioning yourself in your own issue/PR is normal, not a leak)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import leak_shapes  # noqa: E402  — same dir
+    errors: list[str] = []
+    tracker = cfg.get("tracker") or {}
+    pats = leak_shapes.shapes(tracker.get("kind"), tracker.get("key_regex"), ignore_case=True)
+    try:
+        import kb  # noqa: E402  — same dir
+        facts = kb.all_facts()
+    except (OSError, ValueError, KeyError, SystemExit) as e:
+        facts = {}
+        errors.append(f"env-store tables could not be read ({e}) — the value scan is shapes-only until that is fixed")
+    vpats, verrors = leak_shapes.configured_values(cfg, facts)
+    pats += vpats + leak_shapes.cross_org_shapes(owner)
+    return leak_shapes.scan(text, pats), errors + verrors
+
+
+def public_text_check(path: str, repo: str, *, public: bool | None = None) -> int:
+    """`kit_profile.py public-text-check <file> --repo <owner/repo>`'s engine — exit 0 (not applicable, or
+    scanned clean), 1 (hits — one line per hit on stdout, `<line>: <what> <matched text>`), 2 (usage: a bad
+    `--repo` slug or an unreadable `<file>`). Applies only when `repo` is public (skips the `gh api` lookup
+    when `public` is already known — True/False, the CLI's `--public`/`--private`, so a test never touches the
+    network) and is not one of this environment's OWN `tracker.repos` — this environment's own facts in its own
+    repos are not a leak, they are the repo doing its job."""
+    m = REPO_SLUG_RE.match(repo)
+    if not m:
+        print(f"kit_profile: public-text-check: {repo!r} is not an <owner>/<repo> slug", file=sys.stderr)
+        return 2
+    owner, name = m.group(1), m.group(2)
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"kit_profile: public-text-check: cannot read {path}: {e}", file=sys.stderr)
+        return 2
+    cfg = load(strict=False)
+    own_repos = {str(r).strip().lower() for r in (cfg.get("tracker") or {}).get("repos") or []}
+    if f"{owner}/{name}".lower() in own_repos:
+        print(f"public-text-check: {owner}/{name} is one of this environment's own tracker.repos — not scanned")
+        return 0
+    is_public = public if public is not None else repo_is_public(owner, name)
+    if is_public is None:
+        print(f"public-text-check: could not tell whether {owner}/{name} is public (gh unavailable or unreachable) "
+              f"— scanning anyway", file=sys.stderr)
+        is_public = True
+    if not is_public:
+        print(f"public-text-check: {owner}/{name} is not public — not scanned")
+        return 0
+    hits, errors = public_text_hits(text, cfg, owner)
+    for e in errors:
+        print(f"public-text-check: {e}", file=sys.stderr)
+    if not hits:
+        print(f"public-text-check: {path}: clean")
+        return 0
+    for n, what, matched in hits:
+        print(f"{n}: {what} {matched}")
+    return 1
+
+
 NEEDS_ARG = {"template": "<type>", "identity-source": "<WORKSPACE_* variable>", "get": "<dotted.config.key>"}
 
 
@@ -848,6 +940,28 @@ def main(argv: list[str]) -> int:
         if v is None or (nonempty and is_empty(v)):
             return 1
         print(v if isinstance(v, (str, int, float)) and not isinstance(v, bool) else json.dumps(v))
+    elif cmd == "public-text-check":
+        rest = argv[2:]
+        usage = ("kit_profile: `public-text-check` needs <file> --repo <owner/repo> [--public|--private] — "
+                 "kit_profile.py public-text-check <file> --repo <owner/repo> [--public|--private]")
+        file_path, repo, force_public, force_private, i, bad = None, None, False, False, 0, False
+        while i < len(rest):
+            tok = rest[i]
+            if tok == "--repo" and i + 1 < len(rest):
+                repo, i = rest[i + 1], i + 2
+            elif tok == "--public":
+                force_public, i = True, i + 1
+            elif tok == "--private":
+                force_private, i = True, i + 1
+            elif file_path is None and not tok.startswith("--"):
+                file_path, i = tok, i + 1
+            else:
+                bad, i = True, len(rest)
+        if bad or file_path is None or not repo or (force_public and force_private):
+            print(usage, file=sys.stderr)
+            return 2
+        public = True if force_public else (False if force_private else None)
+        return public_text_check(file_path, repo, public=public)
     else:
         print(__doc__, file=sys.stderr)
         return 2

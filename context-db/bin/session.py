@@ -111,6 +111,49 @@ def check_convention(name: str) -> None:
                  f"`kit-216-changelog`, `kit-weekly-2`); a successor on the same lane adds -2, -3")
 
 
+def check_no_private_value(name: str) -> None:
+    """Refuse a NEW session name (a fresh registration, or a rename's target — never a re-register under a name
+    already on file) that embeds this environment's own repo/project name or its tracker key shape: the name is
+    public — it ends every PR body and PR comment the session posts (`kit_profile.py footer`) — and a lane like
+    `key-123-topic` or `<private-repo>-hardening` is exactly the leak a later audit of `public-text-check`'s
+    scope found the convention's own "no private project in it" line only asked for, never enforced. Silent (no store,
+    or one that fails to load) rather than fatal: a session must still be able to register before `env-init` has
+    run. Existing names are grandfathered — this only runs where the caller has already decided the name is
+    NEW."""
+    try:
+        cfg = profile.load(strict=False)
+    except SystemExit:
+        return
+    if not cfg:
+        return
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import leak_shapes  # noqa: E402  — same dir
+    tracker = cfg.get("tracker") or {}
+    kr = str(tracker.get("key_regex") or "").strip()
+    if kr:
+        try:
+            if re.search(kr, name, re.IGNORECASE):
+                sys.exit(f"session.py: {name!r} contains this environment's tracker key shape — a session name is "
+                         f"public (the PR footer, `kit_profile.py footer`); pick a name that doesn't embed a tracker key")
+        except re.error:
+            pass  # kit-verify's finding, not this check's problem
+    values = set()
+    for repo in tracker.get("repos") or []:
+        repo = str(repo).strip()
+        if repo:
+            values.add(repo)
+            values.add(repo.rsplit("/", 1)[-1])
+    for dom in cfg.get("domains") or []:
+        if dom:
+            values.add(str(dom).strip())
+    for v in values:
+        if len(v) < 4 or v.lower() in leak_shapes.GENERIC or v.lower() in leak_shapes.COMMON_REPO_NAMES:
+            continue
+        if re.search(r"(?<![a-z0-9])" + re.escape(v.lower()) + r"(?![a-z0-9])", name.lower()):
+            sys.exit(f"session.py: {name!r} embeds this environment's own repo/project name ({v!r}) — a session "
+                     f"name is public (the PR footer, `kit_profile.py footer`); pick a name that doesn't name it")
+
+
 def record_name(name: str) -> None:
     """Remember this session's registry name in its own scratch dir, so `kit_profile.py session-name` / `footer`
     can say which session wrote a PR or a comment. Per session (`CLAUDE_CODE_SESSION_ID` keys the scratch dir);
@@ -322,6 +365,7 @@ def cmd_register(a) -> None:
     meta, body = read_doc(path)
     if meta is None:  # a new registration: the name must follow the convention (existing ones are grandfathered)
         check_convention(a.name)
+        check_no_private_value(a.name)
         meta, body = {}, DEFAULT_BODY.format(name=a.name)
     meta["session"] = a.name
     # The harness session id, so a Claude Code hook — handed `session_id` on stdin, never the registry name — can
@@ -510,6 +554,7 @@ def cmd_rename(a) -> None:
     if meta is None:
         sys.exit(f"session.py: no session entry {a.old}.md to rename")
     check_convention(a.new)  # a rename is a first-class registration under the new name
+    check_no_private_value(a.new)
     new_path = path_for(a.new)
     if os.path.exists(new_path):
         sys.exit(f"session.py: rename target {a.new!r} already has an entry — pick another name, "

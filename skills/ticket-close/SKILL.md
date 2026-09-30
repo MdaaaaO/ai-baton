@@ -2,8 +2,8 @@
 name: ticket-close
 description: "Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues): a final outcome comment (Delivered / Verified / Out-of-scope), the right transition or close reason (Done / Won't Do / Cancelled), the delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "9"
-  updated: "2026-09-28"
+  version: "10"
+  updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
 user-invocable: true
@@ -51,7 +51,10 @@ kind X in this environment" and stop.
 
 `gh` with the token per skill `gh-cli` (`github.sandbox_token_prefix`), in one of `tracker.repos`.
 
-- Final comment: `gh issue comment <n> -R <repo> --body-file <file>`.
+- Final comment: before posting, `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
+  --repo <repo>` — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
+  re-check; a no-op when `<repo>` is one of `tracker.repos` or not public. Then `gh issue comment <n> -R
+  <repo> --body-file <file>`.
 - **Close reason replaces the transition.** Resolve the value for the outcome key with `get --nonempty`
   and **stop if the lookup fails** — a plain `get` would let a configured-but-blank reason (`""`) through,
   and an empty `--reason` would close the issue as `completed` with no error:

@@ -447,14 +447,8 @@ LEAK_SHAPES = leak_shapes.LEAK_SHAPES
 # skipped per file (SKIP_FILE) — a line that merely mentions `kit-health` is scanned like any other
 SKIP_LINE = leak_shapes.SKIP_LINE
 SKIP_FILE = set(leak_shapes.SKIP_FILES)  # the scanners' own files, per file (leak_shapes.py owns the set)
-GENERIC = {"true", "false", "none", "jira", "github", "slack", "notion", "datalake", "airflow", "dbt",
-           "issues", "main", "master"}
-# bare repo names that half of GitHub has and the kit uses as ordinary words: `setup.sh --personal` fills
-# `tracker.repos` from `gh repo list` on a fresh workspace, and a `config` repo flagged every kit file (#118).
-# The full `owner/<repo>` slug and the `<org>/<repo>` path shape still catch these repos.
-COMMON_REPO_NAMES = {"config", "configs", "dotfiles", "docs", "notes", "scripts", "tools", "utils", "setup",
-                     "infra", "test", "tests", "templates", "examples", "sandbox", "playground", "website",
-                     "blog", "archive", "backup", "workspace", "projects"}
+GENERIC = leak_shapes.GENERIC
+COMMON_REPO_NAMES = leak_shapes.COMMON_REPO_NAMES  # kept as names here too: several call sites read them locally
 IDENTITY = "identity"  # `what` prefix of patterns whose match is never printed (settings.local.json values)
 
 
@@ -550,43 +544,19 @@ def address_tail() -> str:
 def common_word_kinds() -> set[str]:
     """`<system>.<kind>` of every manifest fact flagged `common_word: true` — kinds whose values are ordinary words
     (a person's first name, a team, a label) and would flood the value scan. Read from the manifests, so an
-    environment's own `_discovery/` overlay can add one."""
-    out: set[str] = set()
+    environment's own `_discovery/` overlay can add one. The predicate itself lives in `leak_shapes.py` (shared
+    with `kit_profile.py public-text-check`, should it ever need it); this wrapper just supplies the live
+    `kb.load_manifests()` read, and degrades to "none flagged" rather than raising on a broken manifest."""
     try:
-        for m in kb.load_manifests().values():
-            for f in m.get("facts") or []:
-                if isinstance(f, dict) and f.get("common_word") and f.get("target", "row") == "row":
-                    out.add(str(f.get("key", "")).split(" ")[0])
+        return leak_shapes.common_word_kinds(kb.load_manifests())
     except (OSError, ValueError, TypeError):
-        pass
-    return out
+        return set()
 
 
-def keep_value(v: str, kind: str = "", common: set[str] | frozenset[str] = frozenset()) -> bool:
-    """Is this configured value worth scanning for? Not when it is short, generic or a placeholder — those match
-    everywhere and mean nothing. For an env-store ROW (`kind` given): a common-word kind (`common_word: true` in its
-    manifest — first names, teams, labels) skips a plain single word but still scans a value with a space or hyphen
-    (`First Last`, `<team>-platform` are the leaks the scan exists for), and any kind skips a plain word under six
-    letters. A config or identity value (no `kind`) keeps the old four-character floor: a short org or
-    login is the leak most worth catching."""
-    s = v.strip()
-    if len(s) < 4 or s.lower() in GENERIC or (s.isdigit() and len(s) < 6) or s.startswith("<"):
-        return False
-    if not kind:
-        return True
-    plain_word = re.fullmatch(r"[A-Za-z]+", s) is not None
-    if plain_word and kind in common:
-        return False
-    if plain_word and len(s) < 6:
-        return False
-    return True
-
-
-def redact(what: str, value: str) -> str:
-    """`<kind>:<first2>…` — the report and the audit log name the kind and two characters, never the value.
-    Shapes give their name as `what`; configured values their key."""
-    kind = what.split(" (")[0].replace("env fact ", "").strip("`")
-    return f"{kind}:{value[:2]}…" if len(value) > 2 else f"{kind}:…"
+# `keep_value` / `redact` are the shared predicates — `leak_shapes.py`, so `kit_profile.py public-text-check`
+# reads the same rule for what counts as a real value worth scanning for, never a second copy of it.
+keep_value = leak_shapes.keep_value
+redact = leak_shapes.redact
 
 
 def changed_units(commit: str) -> list[str] | None:
@@ -634,54 +604,22 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
     """(patterns, loader errors). Every literal value this environment has configured: env-store table values +
     config keys that carry identity (org, review bot, hosts, channel ids, colleague logins, tracked repos, domains)
     + the user's own identity. Short / numeric / generic values are skipped — they would match everywhere. A store
-    that cannot be read is an ERROR the caller reports, never a silent shapes-only scan."""
-    vals: dict[str, str] = {}
-    logins: list[tuple[re.Pattern, str]] = []
+    that cannot be read is an ERROR the caller reports, never a silent shapes-only scan. The value-gathering itself
+    is `leak_shapes.configured_values` (shared with `kit_profile.py public-text-check`); this wrapper supplies the
+    live reads (`kb.all_facts()`, `kit_profile.load()`, `verify.CORE_DOMAINS`) and kit-health's own exclusions
+    (the kit's own dependency address is not a leak) plus its own identity values, which public-text-check has no
+    use for (mentioning yourself in your own issue/PR is normal, not a leak)."""
     errors: list[str] = []
-
-    common = common_word_kinds()
-
-    def keep(v: object, what: str, kind: str = "") -> None:
-        if keep_value(str(v), kind, common):
-            vals.setdefault(str(v).strip(), what)
-
     try:
-        for system, kinds in kb.all_facts().items():
-            for kind, rows in kinds.items():
-                for row in rows.values():
-                    keep(row["value"], f"env fact `{system}.{kind}`", f"{system}.{kind}")
+        facts = kb.all_facts()
     except (OSError, ValueError, KeyError, SystemExit) as e:
+        facts = {}
         errors.append(f"env-store tables could not be read ({e}) — the value scan is shapes-only until that is fixed")
     try:
         cfg = kit_profile.load()
     except SystemExit as e:
         errors.append(f"env-store config could not be loaded ({e}) — configured values not scanned")
         cfg = {}
-    if cfg:
-        gh = (cfg.get("github") or {})
-        keep(gh.get("review_bot"), "github.review_bot")
-        for login in (gh.get("display_names") or {}):
-            if keep_value(str(login)):  # the kit's own `<owner>/<repo>` address is not a leak (#118)
-                logins.append((re.compile(rf"(?<![\w-]){re.escape(str(login).strip())}{address_tail()}"),
-                               "colleague login (github.display_names)"))
-        for team in gh.get("owner_teams") or []:
-            keep(team, "github.owner_teams")
-        keep((cfg.get("slack") or {}).get("domain"), "slack.domain")
-        for v in ((cfg.get("slack") or {}).get("channels") or {}).values():
-            keep(v, "Slack channel id (slack.channels)")
-        for k in ("site", "project", "board_sprint_prefix"):
-            keep((cfg.get("tracker") or {}).get(k), f"tracker.{k}")
-        keep(cfg.get("tz_default"), "tz_default")
-        for m in (cfg.get("leaks") or {}).get("markers") or []:  # #95: product/org markers no shape knows
-            keep(m, "leaks.markers")
-        deps = kit_dependencies()
-        for repo in (cfg.get("tracker") or {}).get("repos") or []:
-            if str(repo).rsplit("/", 1)[-1] in deps:
-                continue
-            keep(repo, "tracker.repos")
-            if str(repo).rsplit("/", 1)[-1].lower() not in COMMON_REPO_NAMES:
-                keep(str(repo).rsplit("/", 1)[-1], "tracker.repos (repo name)")
-    pats: list[tuple[re.Pattern, str]] = []
     # a domain name is often an ordinary word — flag only its path-like uses; a domain the engine itself
     # owns (verify.py CORE_DOMAINS — e.g. `on-call`, where `new.sh TYPE=oncall` writes) is a kit constant,
     # not an environment value, even when the env config lists it under `domains`
@@ -690,18 +628,12 @@ def configured_values() -> tuple[list[tuple[re.Pattern, str]], list[str]]:
     except (ImportError, SystemExit) as e:
         _core = set()
         errors.append(f"verify.py could not be imported for CORE_DOMAINS ({e}) — engine domains scanned as environment values")
-    for d in sorted({str(d).strip() for d in (cfg.get("domains") or [])} - {""} - set(_core)):
-        pats.append((re.compile(rf"(?:\.context/|DOMAIN=){re.escape(d)}\b"), "domains (a local .context/ domain)"))
-    for v, what in vals.items():
-        esc = re.escape(v)
-        pats.append((re.compile((r"\b" if v[0].isalnum() else "") + esc + (r"\b" if v[-1].isalnum() else "")), what))
-    orgs = {str((cfg.get("github") or {}).get("org") or "")} - {""}
-    for org in sorted(orgs):
-        deps = "|".join(re.escape(d) for d in sorted(kit_dependencies()))
-        not_dep = rf"(?!(?:{deps})\b)" if deps else ""
-        pats.append((re.compile(rf"\b{re.escape(org)}/{not_dep}[a-z][\w.-]*"), f"`{org}/<repo>` path"))
-        pats.append((re.compile(rf"@{re.escape(org)}/"), "org team handle"))
-    return pats + logins + identity_values(), errors
+    deps = kit_dependencies()
+    not_dep = rf"(?!(?:{'|'.join(re.escape(d) for d in sorted(deps))})\b)" if deps else ""
+    pats, verrors = leak_shapes.configured_values(cfg, facts, common=common_word_kinds(), core_domains=_core,
+                                                   login_tail=address_tail(), org_not_dep=not_dep,
+                                                   repo_dependencies=deps)
+    return pats + identity_values(), errors + verrors
 
 
 def sec_leaks(r: Report) -> None:
