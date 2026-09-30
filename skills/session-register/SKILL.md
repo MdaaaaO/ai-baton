@@ -100,8 +100,9 @@ worktree.
 
 Registering records the name for this session: `python3 $BATON/context-db/bin/kit_profile.py session-name` prints it,
 and the session self-identifier — `session \`<name>\`` — is the `footer:` line of the resolved-profile block the
-SessionStart hook prints (from the next session start; once a compaction drops that block, or it never printed,
-`kit_profile.py footer` prints it). It is the last line of every PR body and PR comment on your own PRs
+SessionStart hook prints (from the next session start; once a compaction drops that block, it never printed, or
+you registered or renamed after the start — the block shows the name of that moment — `kit_profile.py footer`
+prints the current one). It is the last line of every PR body and PR comment on your own PRs
 (`pr-open`, `pr-watch`); never an AI attribution line.
 
 **Name every ctx write as yourself (since v0.6.0, #393).** The ctx MCP server writes as one shared process
