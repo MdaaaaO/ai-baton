@@ -252,8 +252,8 @@ FROM {m['spend_table']}
 WHERE {where} AND LOWER({col['email']}) = LOWER('{email}')
 GROUP BY 1, 2 ORDER BY 1, 2;"""
     control = f"""-- control: everyone else, daily aggregate, weekdays, no identities leave the warehouse.
--- Deliberately a plain date GROUP BY, not a week bucket: an engine's week-format function (Snowflake's
--- TO_CHAR IYYY/IW elements, for one) can silently produce the same literal key for every row instead of
+-- Deliberately a plain date GROUP BY, not a week bucket: an engine's week-format function (ISO
+-- year/week format elements in TO_CHAR, on some engines) can silently produce the same literal key for every row instead of
 -- erroring, which collapses every week into one and passes a broken control through undetected. `ingest`
 -- does the ISO-week bucketing itself, in Python, from this daily grain.
 -- (DAYOFWEEKISO: swap for your engine's equivalent if it rejects it)
@@ -296,7 +296,7 @@ WK_RE = re.compile(r"^\d{4}-W\d{2}$")
 
 def _control_week_key(r: dict) -> str | None:
     """A control row's ISO-week key: use `wk` verbatim when the row already carries one (an engine-specific
-    week-bucketing query, e.g. Snowflake's YEAROFWEEKISO/WEEKISO), else compute it from `d` with Python's
+    week-bucketing query, e.g. ISO year-of-week and week functions), else compute it from `d` with Python's
     own `date.isocalendar()` (the portable `sql` daily control) — never trust a warehouse-formatted week
     string without checking its shape (see WK_RE below); `None` when the row has neither column."""
     wk = str(r.get("wk") or "").strip()
@@ -306,10 +306,9 @@ def _control_week_key(r: dict) -> str | None:
     if not d:
         return None
     try:
-        y, w, _ = date.fromisoformat(_day(d)).isocalendar()
+        return _iso_week(_day(d))  # the one week-key definition `report` also uses
     except ValueError:
         return None
-    return f"{y}-W{w:02d}"
 
 
 def cmd_ingest(a) -> int:
@@ -847,7 +846,7 @@ def render_md(o: dict) -> str:
         L += [f"| {d['from']} → {d['to']} | {pct(d['usd_per_wday_change'])} | {pct(d['volume'])} | {pct(d['habit'])} | {pct(d['routing'])} | {num(d['avoided_usd_per_wday'])} |"
               for d in o["decomposition"]] + [""]
     if o["control"]:
-        L += ["## Control (everyone else, weekdays, anonymous aggregate)", "", "| Week | users | $/user-day | in/out | $/Mout | fixed $/Mout | cheap% |", "|---|---|---|---|---|---|---|"]
+        L += ["## Control (everyone else, weekdays, anonymous aggregate)", "", "| Week | peak daily users | $/user-day | in/out | $/Mout | fixed $/Mout | cheap% |", "|---|---|---|---|---|---|---|"]
         L += [f"| {c['wk']} | {c['users'] or '–'} | {num(c['usd_per_user_day'])} | {num(c['in_out'])} | {num(c['usd_per_mout'])} | {num(c['fixed_usd_per_mout'])} | {pct(c['cheap_share']).lstrip('+')} |"
               for c in o["control"]] + [""]
     L += ["## Reading the metrics", "",
