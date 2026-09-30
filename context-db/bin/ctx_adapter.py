@@ -76,6 +76,7 @@ CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that nam
 BIN = Path(__file__).resolve().parent
 STORE_DATA = BIN.parent / "ctx-store"  # the kit's store settings + type schemas, handed to `ctx init` by `adopt`
 ADOPT_TIMEOUT = 300     # seconds `adopt` gives one ctx call (a whole-store validate; not a hook)
+INSTALL_TIMEOUT = 120   # seconds `install` gives the pinned-tag clone (setup.sh runs it unattended)
 MCP_ACTOR = "claude"    # CTX_ACTOR of the MCP server unless the user set one: the audit rows of the model's writes
 # A write through the ctx MCP server's tools (plugin: mcp__plugin_<plugin>_ctx__…, a clone's .mcp.json: mcp__ctx__…).
 CTX_WRITE_TOOL = re.compile(r"^mcp__(?:\w[\w-]*_)?ctx__ctx_(?:create|str_replace|insert|delete|rename|log|fm|new|move|maintain|migrate)$")
@@ -117,8 +118,15 @@ def install(url: str = CTX_REPO, version: str = CTX_VERSION, dest: Path | None =
     tmp = Path(tempfile.mkdtemp(prefix=".fetch-", dir=dest.parent))
     try:
         src = tmp / "ctx-store"
-        r = subprocess.run(["git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--branch", version,
-                            url, str(src)], capture_output=True, text=True)
+        # setup.sh runs this unattended: a stalled network or a credential prompt must fail, never hang
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+        try:
+            r = subprocess.run(["git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--branch",
+                                version, url, str(src)], capture_output=True, text=True, env=env,
+                               stdin=subprocess.DEVNULL, timeout=INSTALL_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise OSError(f"git clone of {version} did not finish within {INSTALL_TIMEOUT}s (network stalled?)")
         if r.returncode != 0:
             raise OSError(f"git clone of {version} failed: {(r.stderr.strip().splitlines() or ['no output'])[-1]}")
         if not _usable(src / "ctx"):

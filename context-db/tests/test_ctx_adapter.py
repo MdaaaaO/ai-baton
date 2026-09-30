@@ -184,6 +184,23 @@ class Install(Base):
         self.assertFalse(dest.exists())
 
 
+    def test_a_stalled_clone_times_out_without_prompting(self):
+        # setup.sh fetches unattended: a black-holed network or a credential prompt must fail, never hang
+        mod = load_adapter()
+        mod.INSTALL_TIMEOUT = 1
+        bindir, seen = self.t / "fakebin", self.t / "seen"
+        bindir.mkdir()
+        (bindir / "git").write_text(f"#!/bin/sh\necho \"prompt=$GIT_TERMINAL_PROMPT\" > '{seen}'\n"
+                                   f"[ -t 0 ] && echo tty >> '{seen}'\nsleep 30\n", encoding="utf-8")
+        (bindir / "git").chmod(0o755)
+        dest = self.t / "cache" / "pinned"
+        env = dict(hermetic_env(self.t), PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaisesRegex(OSError, "did not finish within 1s"):
+                mod.install(url="https://example.invalid/r", dest=dest)
+        self.assertEqual(seen.read_text(encoding="utf-8").split(), ["prompt=0"])  # no prompt, stdin not a tty
+        self.assertFalse(dest.exists())
+
 class HooksAreSilentWithoutCtxOrStore(Base):
     """A machine that has not adopted ctx-store sees nothing: exit 0, no output, no call."""
 
