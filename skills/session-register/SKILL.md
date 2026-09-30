@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "20"
+  version: "21"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -49,8 +49,9 @@ worktree.
    what you own (`hardening`, a ticket number, a feature); a successor on the same lane adds `-2`, `-3`
    (`kit-hardening`, `kit-216-changelog`, `<repo>-weekly-2`). `session-register` refuses a new name outside it; a
    successor takes the name its predecessor's prompt proposes. The name ends every PR body and PR comment you post on
-   your own PRs (`kit_profile.py footer`, below), so it is public: no person, org or private project in it. Get your
-   `ref` from `ListAgents` (your own row):
+   your own PRs (`kit_profile.py footer`, below), so it is public: no person, org or private project in it. A generic
+   placeholder still matches the regex and is not exempt — `<lane>-lane-<n>` (e.g. `kit-lane-6`) is not a topic;
+   the *topic* part must name what you actually own. Get your `ref` from `ListAgents` (your own row):
 
    ```sh
    make -C $BATON/context-db session-register NAME=<name> REF=<ref> EPIC=<tracker-key> \
@@ -62,10 +63,23 @@ worktree.
    needs (what you own vs. don't, in-flight worktrees/PRs). **Override it whenever your
    responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
    edit the body directly (`sessions/` stays writable; the hook regenerates `SESSION_INDEX.md`).
+   **Rename** a session already registered under a generic or wrong name instead of leaving it and
+   re-registering fresh — this moves the file, rewrites its frontmatter and title, and, only when your
+   own backstop heartbeat (below) was actually running for the old name, restarts it under the new name
+   with the same focus in one step. Only rename **your own live session** — renaming an ended or someone
+   else's entry moves the file but starts no heartbeat (there is none of yours to restart), so do that by
+   hand if it still needs one:
+   ```sh
+   make -C $BATON/context-db session-rename FROM=<old-name> TO=<new-name>
+   ```
+   `<new-name>` follows the same convention and is refused if another entry already has it.
 4. **Re-arm the PR watches.** `Monitor`s die with the session that armed them, so a restarted or
-   successor session owns PRs that nobody is watching. For **every open PR you now own** (the
-   `## Open PRs` list in the predecessor's session file, the context doc's *What was built* /
-   *Remaining work*, or `gh pr list --author @me`), verify the current head with
+   successor session owns PRs that nobody is watching. `session.py end`/`touch` always leave a
+   `## Open PRs` heading behind (`none` when there is nothing to list) — a predecessor file missing
+   the heading entirely predates that fix and is not the same as "no PRs": treat it as unknown and
+   check `gh pr list --author @me` before assuming there is nothing to re-arm. For **every open PR
+   you now own** (the `## Open PRs` list in the predecessor's session file, the context doc's *What
+   was built* / *Remaining work*, or `gh pr list --author @me`), verify the current head with
    `gh api repos/<o>/<r>/pulls/<n> --jq .head.sha` and arm **one** multi-PR `pr-watch` Monitor covering
    all of them (the `pr-watch` skill; `bash …/pr-watch.sh <o>/<r> <n> <head> [<n> <head> …]` under
    `Monitor`, persistent, `timeout_ms: 3600000` — one Monitor per repo, not per PR; owner decision, 2026-09-22).

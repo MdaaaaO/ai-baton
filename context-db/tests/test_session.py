@@ -1,6 +1,7 @@
 """session.py / kit_profile without an env store, with a broken one, and the registry doc round trip. Stdlib unittest.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import argparse
 import importlib.util
 import os
 import subprocess
@@ -337,6 +338,35 @@ class NoSilentLoss(unittest.TestCase):
         self.assertNotIn("Register as t-next-none-2.", doc)
         self.assertIn("status: ended", doc)
 
+    def test_end_adds_a_missing_open_prs_heading(self):
+        # session-register step 4 (a successor's re-arm step) reads `## Open PRs` to know which watches
+        # to re-arm; a session that ends without ever writing the section must still leave it behind, so
+        # a missing heading is never mistaken for "nothing to re-arm".
+        run("session.py", "register", "--name", "t-end-noprs", "--no-stats", root=self.root)
+        doc_path = self.root / "sessions" / "t-end-noprs.md"
+        self.assertNotIn("## Open PRs", doc_path.read_text(encoding="utf-8"))
+        r = run("session.py", "end", "--name", "t-end-noprs", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("## Open PRs\n\nnone", doc_path.read_text(encoding="utf-8"))
+
+    def test_end_keeps_an_existing_open_prs_list(self):
+        run("session.py", "register", "--name", "t-end-hasprs", "--no-stats", root=self.root)
+        doc_path = self.root / "sessions" / "t-end-hasprs.md"
+        doc_path.write_text(doc_path.read_text(encoding="utf-8") + "\n## Open PRs\n- o/r#1 abc — waits\n", encoding="utf-8")
+        r = run("session.py", "end", "--name", "t-end-hasprs", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = doc_path.read_text(encoding="utf-8")
+        self.assertIn("## Open PRs\n- o/r#1 abc — waits", doc)
+        self.assertEqual(doc.count("## Open PRs"), 1)
+
+    def test_touch_adds_a_missing_open_prs_heading(self):
+        run("session.py", "register", "--name", "t-touch-noprs", "--no-stats", root=self.root)
+        doc_path = self.root / "sessions" / "t-touch-noprs.md"
+        self.assertNotIn("## Open PRs", doc_path.read_text(encoding="utf-8"))
+        r = run("session.py", "touch", "--name", "t-touch-noprs", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("## Open PRs\n\nnone", doc_path.read_text(encoding="utf-8"))
+
     def test_a_non_string_tracker_regex_does_not_break_the_registry(self):
         import json as _json
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},
@@ -403,3 +433,127 @@ class NameConventionAndFooter(unittest.TestCase):
         self.assertEqual(run("kit_profile.py", "session-name", root=self.root, env=self.env).stdout.strip(), "kit-footer-test")
         self.assertEqual(run("kit_profile.py", "footer", root=self.root, env=self.env).stdout.strip(),
                           "session `kit-footer-test`")
+
+
+
+def _load_session_module(root: Path):
+    """A fresh `session` module bound to `root` as CONTEXT_ROOT — same pattern the fence tests above use.
+    Rename tests import the module directly (never `run()`/subprocess) so `_restart_heartbeat` can be
+    monkeypatched: a real `session.py rename` subprocess would invoke the real heartbeat.sh, which — run
+    from inside an actual Claude session, as these tests are — finds the real owning `claude` process and
+    spawns a genuine background heartbeat that outlives the test. Never do that from a test."""
+    spec = importlib.util.spec_from_file_location(f"session_mod_{id(root)}", BIN / "session.py")
+    with unittest.mock.patch.dict(os.environ, {"CONTEXT_ROOT": str(root)}):
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+class RenameSubcommand(unittest.TestCase):
+    """session.py rename --from <old> --to <new>: moves sessions/<old>.md, rewrites the `session:`
+    frontmatter and the `# Session: <name>` title, and (best-effort) restarts the heartbeat under the
+    new name. `_restart_heartbeat` is always monkeypatched here — see `_load_session_module`."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        (self.root / "sessions").mkdir(parents=True)
+        self.mod = _load_session_module(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _register(self, name: str, working: str = "") -> None:
+        a = argparse.Namespace(name=name, session_id="", no_stats=True, ref="", status="", epic="",
+                                repos="", working=working, resp="", note="", next="")
+        self.mod.cmd_register(a)
+
+    def test_rename_moves_the_file_and_rewrites_frontmatter_and_title(self):
+        self._register("t-old-lane", working="on something")
+        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
+            self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-real-topic"))
+        rh.assert_called_once_with("t-old-lane", "kit-real-topic", "on something")
+        self.assertFalse((self.root / "sessions" / "t-old-lane.md").exists())
+        doc = (self.root / "sessions" / "kit-real-topic.md").read_text(encoding="utf-8")
+        self.assertIn("session: kit-real-topic", doc)
+        self.assertIn("# Session: kit-real-topic", doc)
+        self.assertNotIn("t-old-lane", doc)
+
+    def test_rename_refuses_when_the_target_already_has_an_entry(self):
+        self._register("t-old-lane")
+        self._register("kit-taken-name")
+        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True):
+            with self.assertRaises(SystemExit):
+                self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-taken-name"))
+        self.assertTrue((self.root / "sessions" / "t-old-lane.md").exists())  # untouched
+        self.assertIn("session: kit-taken-name", (self.root / "sessions" / "kit-taken-name.md").read_text())
+
+    def test_rename_rejects_a_new_name_outside_the_convention(self):
+        self._register("t-old-lane")
+        with self.assertRaises(SystemExit):
+            self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="NotKebabCase"))
+        self.assertTrue((self.root / "sessions" / "t-old-lane.md").exists())  # untouched, nothing renamed
+
+    def test_rename_reports_but_does_not_fail_when_the_heartbeat_restart_fails(self):
+        self._register("t-old-lane")
+        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=False):
+            self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-real-topic"))  # no raise
+        self.assertTrue((self.root / "sessions" / "kit-real-topic.md").exists())  # the move still happened
+
+
+class HeartbeatRestartHelpers(unittest.TestCase):
+    """`_kill_heartbeat` / `_restart_heartbeat` in isolation. `_restart_heartbeat`'s subprocess call is
+    always mocked — see `_load_session_module` above for why a real invocation must never happen in a test."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.mod = _load_session_module(Path(self.tmp.name) / ".context")  # content root unused by these helpers
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_kill_heartbeat_stops_a_live_process_and_removes_the_pidfile(self):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            pidfile = Path(self.tmp.name) / f"heartbeat-t-live.pid"
+            pidfile.write_text(str(proc.pid), encoding="utf-8")
+            with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+                self.assertTrue(self.mod._kill_heartbeat("t-live"))
+            proc.wait(timeout=5)
+            self.assertFalse(pidfile.exists())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+    def test_kill_heartbeat_cleans_up_a_stale_pidfile(self):
+        pidfile = Path(self.tmp.name) / "heartbeat-t-stale.pid"
+        pidfile.write_text("999999999", encoding="utf-8")  # practically guaranteed not to exist
+        with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+            self.assertFalse(self.mod._kill_heartbeat("t-stale"))
+        self.assertFalse(pidfile.exists())
+
+    def test_kill_heartbeat_with_no_pidfile_is_a_noop(self):
+        with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+            self.assertFalse(self.mod._kill_heartbeat("t-never-started"))
+
+    def test_restart_heartbeat_reports_success(self):
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=True), \
+             unittest.mock.patch.object(self.mod.subprocess, "run",
+                                         return_value=subprocess.CompletedProcess([], 0, "heartbeat for kit-x started", "")):
+            self.assertTrue(self.mod._restart_heartbeat("old", "kit-x", "focus"))
+
+    def test_restart_heartbeat_reports_failure_without_raising(self):
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=True), \
+             unittest.mock.patch.object(self.mod.subprocess, "run",
+                                         return_value=subprocess.CompletedProcess([], 1, "", "could not find the owning claude process")):
+            self.assertFalse(self.mod._restart_heartbeat("old", "kit-x", "focus"))
+
+    def test_restart_heartbeat_starts_nothing_when_none_was_running(self):
+        """No heartbeat for the OLD name means the rename isn't of a live session of the caller's own — for
+        an ended session, or someone else's, starting one anyway would attach heartbeat.sh to the caller's
+        own `claude` process and stats (REVIEW.md § 2.3): it must not even try."""
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=False), \
+             unittest.mock.patch.object(self.mod.subprocess, "run") as run:
+            self.assertFalse(self.mod._restart_heartbeat("old", "kit-x", "focus"))
+        run.assert_not_called()

@@ -17,6 +17,12 @@ Subcommands (each regenerates SESSION_INDEX.md):
             nothing to hand over, and pass --next none to withdraw a prompt already on file — and
             appends one row to sessions/_ledger.md (the cross-session cost/activity ledger)
   stats     print this session's stats (block) without touching the registry
+  rename    --from <old> --to <new>: move sessions/<old>.md to <new>.md, rewrite the `session:`
+            frontmatter and the `# Session: <name>` title, re-record the scratch session name, and
+            when a heartbeat was running for <old>, restart heartbeat.sh under the new name with the same
+            focus (best-effort — a heartbeat outside a live session has nothing to attach to and is reported,
+            not fatal); refuses when
+            <new> already has an entry or does not follow the session naming convention.
 
 Every subcommand also refreshes the `stats:` field (one line: turns, context, tokens, rough
 spend, PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's transcript is
@@ -31,6 +37,8 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import signal
+import subprocess
 import sys
 from datetime import datetime, timezone
 
@@ -52,6 +60,7 @@ FIELDS = ["session", "session_id", "ref", "status", "epic", "repos",
 STATS_HEADING = "## Session stats"
 NEXT_HEADING = "## Next session"
 NOTES_HEADING = "## Notes"
+OPEN_PRS_HEADING = "## Open PRs"
 LEDGER = os.path.join(SESS_DIR, "_ledger.md")   # `_` prefix: gen_sessions.py skips it
 LEDGER_HEADER = """# Session ledger — one row per ended session (stats for geeks)
 
@@ -255,6 +264,30 @@ def _replace_section(body: str, heading: str, content: str) -> str:
     return "\n".join(out).rstrip("\n") + "\n"
 
 
+def _has_section(body: str, heading: str) -> bool:
+    """Whether a `## heading` section exists in the free-text body — fence-blind, same rule as
+    `_replace_section` (a heading quoted inside a pasted prompt's fenced block is text, not a section)."""
+    lines = body.rstrip("\n").split("\n")
+    track = sum(1 for ln in lines if ln.lstrip().startswith("```")) % 2 == 0
+    fence = False
+    for ln in lines:
+        if track and ln.lstrip().startswith("```"):
+            fence = not fence
+        if not fence and ln.strip() == heading:
+            return True
+    return False
+
+
+def _ensure_open_prs_heading(body: str) -> str:
+    """Guarantee `## Open PRs` exists in the body — `none` when nothing is filled in — so
+    session-register step 4 (a successor's re-arm step) can always find the heading and tell "no open
+    PRs" apart from "this session never got to filling it in". Never touches an existing section: only
+    a body with no `## Open PRs` heading at all gets one appended."""
+    if _has_section(body, OPEN_PRS_HEADING):
+        return body
+    return _replace_section(body, OPEN_PRS_HEADING, "none")
+
+
 def _ledger_append(meta: dict, st) -> None:
     import session_stats
     k = session_stats._k
@@ -326,6 +359,7 @@ def cmd_touch(a) -> None:
     nxt = _next_prompt(a)
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
+    body = _ensure_open_prs_heading(body)
     _apply_stats(meta, _stats(a))
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
@@ -363,6 +397,7 @@ def cmd_end(a) -> None:
         meta["working_on"] = a.working
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
+    body = _ensure_open_prs_heading(body)
     if meta.get("status") == "ended":
         # Already ended: allow the hand-off fields to be refined, but never a second ledger row.
         print(f"{a.name} already ended — no second ledger row", file=sys.stderr)
@@ -396,6 +431,104 @@ def cmd_stats(a) -> None:
     print(session_stats.fmt_block(st))
 
 
+def _rename_title(body: str, old_name: str, new_name: str) -> str:
+    """Rewrite the body's own `# Session: <old>` title line (DEFAULT_BODY's heading) to the new name.
+    Free text elsewhere in the body is left untouched — a rename moves the registry entry, it is not a
+    find-and-replace over whatever the session wrote about itself."""
+    pattern = re.compile(rf"^# Session: {re.escape(old_name)}[ \t]*$", re.MULTILINE)
+    return pattern.sub(f"# Session: {new_name}", body, count=1)
+
+
+def _baton_tmp() -> str:
+    """The per-user tmp dir heartbeat.sh keeps its pidfile/log under — `${TMPDIR:-/tmp}/ai-baton-<uid>`.
+    Kept in sync by hand with heartbeat.sh's own `BATON_TMP` (bash and Python don't share one literal);
+    this is deliberately NOT `kit_profile.scratch()`'s `ai-baton-kit-<uid>`, a different directory."""
+    return os.path.join(os.environ.get("TMPDIR") or "/tmp", f"ai-baton-{os.getuid()}")
+
+
+def _kill_heartbeat(name: str) -> bool:
+    """Stop a live heartbeat.sh for `name` (SIGTERM on the pid its pidfile names) and remove the
+    pidfile. Returns whether one was found running — a stale pidfile (process already gone, e.g. the
+    session crashed) is just cleaned up, silently."""
+    pidfile = os.path.join(_baton_tmp(), f"heartbeat-{name}.pid")
+    alive = False
+    try:
+        with open(pidfile, encoding="utf-8") as f:
+            pid = int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        return False
+    try:
+        os.kill(pid, 0)  # existence check only — no signal sent yet
+        alive = True
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        alive = True  # another user's process with our pid — leave it; still report "was running"
+    try:
+        os.remove(pidfile)
+    except FileNotFoundError:
+        pass
+    return alive
+
+
+def _restart_heartbeat(old_name: str, new_name: str, working: str) -> bool:
+    """Stop the old name's heartbeat (if any) and, only when one was actually running, start a fresh one
+    for the new name with the same focus. An ended (or archived, `restore_from_archive`-brought-back)
+    session, or someone else's, has no heartbeat of its own to restart — starting one anyway would attach
+    heartbeat.sh to the CALLER's `claude` process and `CLAUDE_CODE_SESSION_ID`, so every touch would write
+    the caller's transcript stats into the renamed row, and the caller's own session-end would later end
+    an entry that was never theirs. Best-effort otherwise: heartbeat.sh needs a `claude`/`node` ancestor
+    process to attach to — a bare CLI invocation (no owning session, e.g. this being run outside a Claude
+    session) fails that lookup; the failure is reported to stderr and never fails the rename itself."""
+    was_running = _kill_heartbeat(old_name)
+    if not was_running:
+        print(f"session.py: no heartbeat was running for {old_name} — none started for {new_name} either "
+              f"(start one by hand if this session should have one)", file=sys.stderr)
+        return False
+    script = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                            "..", "..", "skills", "session-register", "heartbeat.sh"))
+    if not os.path.isfile(script):
+        print(f"session.py: heartbeat.sh not found at {script} — start the new heartbeat by hand", file=sys.stderr)
+        return False
+    try:
+        r = subprocess.run(["bash", script, new_name, working], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"session.py: could not restart the heartbeat for {new_name}: {e} — start it by hand", file=sys.stderr)
+        return False
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout).strip()
+        print(f"session.py: heartbeat restart for {new_name} did not start ({detail or 'no output'})"
+              " — the old one was stopped — start it by hand", file=sys.stderr)
+        return False
+    return True
+
+
+def cmd_rename(a) -> None:
+    old_path = restore_from_archive(a.old)
+    meta, body = read_doc(old_path)
+    if meta is None:
+        sys.exit(f"session.py: no session entry {a.old}.md to rename")
+    check_convention(a.new)  # a rename is a first-class registration under the new name
+    new_path = path_for(a.new)
+    if os.path.exists(new_path):
+        sys.exit(f"session.py: rename target {a.new!r} already has an entry — pick another name, "
+                 f"or end/archive it first")
+    working = meta.get("working_on", "")
+    meta["session"] = a.new
+    body = _rename_title(body, a.old, a.new)
+    meta["updated"] = today()
+    write_doc(new_path, meta, body)
+    try:
+        os.remove(old_path)
+    except FileNotFoundError:
+        pass
+    record_name(a.new)
+    restarted = _restart_heartbeat(a.old, a.new, working)
+    print(f"renamed {os.path.relpath(old_path, CTX)} → {os.path.relpath(new_path, CTX)}"
+          + (" (heartbeat restarted)" if restarted else " (heartbeat NOT restarted — see above)"))
+
+
 def regen() -> None:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import gen_sessions
@@ -419,13 +552,25 @@ def main() -> int:
         sp.add_argument("--note", default="", help="text for the body's `## Notes` section (replaces that section only)")
         sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session "
                         "(written to '## Next session'); 'none' withdraws a stored prompt instead")
+    rn = sub.add_parser("rename")
+    rn.add_argument("--from", dest="old", required=True, help="the session's current registry name")
+    rn.add_argument("--to", dest="new", required=True, help="the new name (must follow the naming convention)")
     a = p.parse_args()
     # Empty --working means "leave unchanged" (so a bare keep-alive touch never
-    # wipes the current focus). The other optional fields already use truthiness.
-    if a.working == "":
+    # wipes the current focus). The other optional fields already use truthiness. `rename` has no
+    # --working of its own (getattr default keeps it out of the way).
+    if getattr(a, "working", None) == "":
         a.working = None
     if a.cmd == "stats":
         cmd_stats(a)
+        return 0
+    if a.cmd == "rename":
+        check_name(a.old)
+        # same registry lock as register/touch/end: a rename is a read-modify-write too (moves a file
+        # another session's heartbeat.sh or session-touch could be mid-write on)
+        with locked(os.path.join(SESS_DIR, ".registry")):
+            cmd_rename(a)
+        regen()
         return 0
     check_name(a.name)
     # one registry lock around read-modify-write: the session and its heartbeat.sh touch the same file

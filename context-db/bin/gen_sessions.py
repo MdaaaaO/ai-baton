@@ -85,6 +85,15 @@ def rel_from_root(path: str) -> str:
     return os.path.relpath(path, os.path.dirname(os.path.abspath(CTX))).replace(os.sep, "/")
 
 
+def rel_from_index(path: str, index_path: str) -> str:
+    """`path` relative to the directory of the index file that will link to it — the correct Markdown href.
+    A renderer (VS Code preview, GitHub, Obsidian) resolves a relative link against the *linking file's own
+    directory*, not the workspace root: reusing `rel_from_root`'s path as the href makes it 404 (a renderer
+    looks for <content-root>/<content-root>/sessions/<name>.md). The label stays `rel_from_root` — this is
+    for the href half of a `[label](href)` link only."""
+    return os.path.relpath(path, os.path.dirname(os.path.abspath(index_path))).replace(os.sep, "/")
+
+
 # Ended sessions leave the live registry for sessions/archive/ when nothing waits on them: no next-session
 # prompt (nothing for a successor to pick up), or ended more than ARCHIVE_DAYS ago. Makefile:
 # `make … ARCHIVE_DAYS=<n>` (exported as SESSION_ARCHIVE_DAYS); 0 sweeps every ended session; --no-archive skips.
@@ -241,7 +250,8 @@ def write_archive_index(now: datetime) -> int:
         out.append("|---|---|---|---|---|")
         for m in rows:
             path = rel_from_root(m["_path"])
-            prompt = f"[{path}]({path})" if has_next_prompt(m) else "-"
+            href = rel_from_index(m["_path"], ARCHIVE_OUT)
+            prompt = f"[{path}]({href})" if has_next_prompt(m) else "-"
             out.append(f"| `{cell(m, 'session')}` | {cell(m, 'epic')} | {profile.local_str(m.get('heartbeat', ''), LOCAL_TZ)} "
                        f"| `{os.path.basename(m['_path'])}` | {prompt} |")
     else:
@@ -338,7 +348,8 @@ def main(argv: list[str] | None = None) -> int:
         for m in recent:
             name = cell(m, "session")
             path = rel_from_root(m["_path"])
-            out.append(f"`{name}` — [{path}]({path})")
+            href = rel_from_index(m["_path"], OUT)
+            out.append(f"`{name}` — [{path}]({href})")
             out.append("")
             out.append("```text")
             out.append(f"Register as the successor of {name}; your prompt is in {path} § Next session.")
@@ -346,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
             out.append("")
         if older:
             entries = ", ".join(
-                f"`{cell(m, 'session')}` ([{rel_from_root(m['_path'])}]({rel_from_root(m['_path'])}))"
+                f"`{cell(m, 'session')}` ([{rel_from_root(m['_path'])}]({rel_from_index(m['_path'], OUT)}))"
                 for m in older
             )
             out.append(f"<details><summary>{len(older)} older ended session(s)</summary>")
