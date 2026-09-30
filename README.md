@@ -159,7 +159,7 @@ explains the clone's hooks and guards.
 |---|---|
 | Sessions and knowledge | `session-register` · `session-handoff` · `session-retro` · `env-init` · `kit-setup` · `kit-health` · `cost-report` · `self-assessment` |
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
-| Tracker | `ticket-open` · `ticket-update` · `ticket-close` |
+| Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
 | Needs a system (`systems.*`) | `sign-queue` · `signed-git-commits` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
