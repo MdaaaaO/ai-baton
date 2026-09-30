@@ -177,6 +177,60 @@ class Helpers(unittest.TestCase):
         self.assertIsInstance(pats, list)
 
 
+class DiskCheck(unittest.TestCase):
+    """`disk_wiring()` — free-disk on `/`, `$HOME` and the scratch root, plus the top-cache sizes above
+    `DISK_WARN_PCT` (a sandbox root overlay filled silently from an untended build cache; the first symptom was
+    an ENOSPC inside an unrelated skill step, so kit-health looks at the machine, not only at the kit)."""
+
+    def test_human_size(self):
+        kh = load_kit_health()
+        self.assertEqual(kh.human_size(0), "0B")
+        self.assertEqual(kh.human_size(512), "512B")
+        self.assertEqual(kh.human_size(2048), "2.0K")
+        self.assertEqual(kh.human_size(5 * 1024 * 1024), "5.0M")
+
+    def test_du_sums_file_sizes_recursively(self):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a.o").write_bytes(b"x" * 100)
+            (root / "sub").mkdir()
+            (root / "sub" / "b.o").write_bytes(b"y" * 50)
+            self.assertEqual(kh.du(root), 150)
+
+    def test_below_threshold_is_ok_and_lists_no_caches(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        Usage = type(kh.shutil.disk_usage(Path.cwd()))  # the real namedtuple type, any real path will do
+        with mock.patch.object(kh.shutil, "disk_usage", return_value=Usage(total=100, used=50, free=50)):
+            kh.disk_wiring(r, targets=[("/", Path("/"))])
+        text = "\n".join(r.lines)
+        self.assertIn("✅", text)
+        self.assertIn("50% full on `/`", text)
+        self.assertEqual(r.counts[kh.WARN], 0)
+
+    def test_above_threshold_warns_and_lists_cache_sizes_once(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        Usage = type(kh.shutil.disk_usage(Path.cwd()))
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".cache" / "go-build").mkdir(parents=True)
+            (home / ".cache" / "go-build" / "b.o").write_bytes(b"x" * 4096)
+            (home / ".npm").mkdir()  # present but empty — no size, no line
+            with mock.patch.object(kh.shutil, "disk_usage", return_value=Usage(total=100, used=96, free=4)), \
+                 mock.patch.object(kh.Path, "home", return_value=home):
+                kh.disk_wiring(r, targets=[("/", Path("/a")), ("$HOME", Path("/b"))])
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 2)  # both targets over DISK_WARN_PCT
+        self.assertIn("96% full on `/`", text)
+        self.assertIn("96% full on `$HOME`", text)
+        self.assertIn("go-build", text)
+        self.assertIn("rm -rf ~/.cache/go-build", text)
+        self.assertEqual(text.count("safe to remove"), 1)  # listed once, not once per over-threshold target
+        self.assertNotIn("~/.npm`", text)  # empty cache dir: no size to report, no line at all
+
+
 class ReadOnlyRun(unittest.TestCase):
     def engine_section(self, root: Path, stamping: bool = False) -> str:
         """kit-health's section 5 alone, on a temp CONTEXT_ROOT — no gh/aws probes, no network (the workspace is

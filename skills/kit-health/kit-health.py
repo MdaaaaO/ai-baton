@@ -18,8 +18,10 @@ Sections:
   3. config     — the env fact store (`.context/reference/env/`): config completeness, renamed flags,
                   a retired capability key (`slack.enabled`, `github.signed_commits`) still in config.json
   4. machine    — this machine's wiring: environment name, CLAUDE.md imports, Makefile include, memory
-                  symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell;
-                  one legacy line: a leftover `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
+                  symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell,
+                  free disk on `/`/`$HOME`/the scratch root with the usual build/package caches named above
+                  DISK_WARN_PCT; one legacy line: a leftover `.claude/profiles/` clone (the layer retired
+                  2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
                   scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
                   and the pinned `ctx --version` answers the API the adapter expects
@@ -912,6 +914,73 @@ def seed_wiring(r: Report) -> None:
         r.add(OK, "machine", "seeded files (.context/README.md, environment.md, CLAUDE.md, the self-assessment charter) are not older than their templates")
 
 
+DISK_WARN_PCT = 85
+CACHE_DIRS = (  # (label, safe-to-remove command) — the usual build/package caches that fill silently
+    ("~/.cache/go-build", "rm -rf ~/.cache/go-build"),
+    ("~/.npm", "npm cache clean --force"),
+    ("~/.cache/pip", "pip cache purge"),
+)
+
+
+def human_size(n: float) -> str:
+    for unit in ("B", "K", "M", "G"):
+        if abs(n) < 1024 or unit == "G":
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}T"
+
+
+def du(path: Path) -> int:
+    """Total bytes of the files under `path` (symlinks not followed) — `du -sb` without the shell-out."""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path, followlinks=False):
+        for name in filenames:
+            try:
+                total += (Path(dirpath) / name).lstat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def disk_targets() -> list[tuple[str, Path]]:
+    """(label, path) pairs `disk_wiring` checks: root, `$HOME`, and the scratch root when one can be resolved
+    (a machine where it cannot is section 5's problem, not this one's)."""
+    targets = [("/", Path("/")), ("$HOME", Path.home())]
+    try:
+        targets.append(("scratch", kit_profile.scratch()))
+    except Exception:
+        pass
+    return targets
+
+
+def disk_wiring(r: Report, targets: list[tuple[str, Path]] | None = None) -> None:
+    """`df -P` on `/`, `$HOME` and the scratch root — the free-disk check kit-health lacked: a sandbox root
+    overlay filled silently from `~/.cache/go-build` (~4 GB) plus the npm cache, and the first symptom was an
+    ENOSPC inside an unrelated skill step, because nothing here looked at the machine, only at the kit. Above
+    `DISK_WARN_PCT` full, names the usual caches with their size and the safe command to clear each one; a `du`
+    walk of those caches only runs once a filesystem IS tight, never on a healthy machine."""
+    shown_caches = False
+    for label, path in (disk_targets() if targets is None else targets):
+        try:
+            usage = shutil.disk_usage(path)
+        except OSError:
+            continue
+        pct = (usage.used / usage.total * 100) if usage.total else 0.0
+        if pct < DISK_WARN_PCT:
+            r.add(OK, "machine", f"disk {pct:.0f}% full on `{label}`")
+            continue
+        r.add(WARN, "machine", f"disk {pct:.0f}% full on `{label}` ({human_size(usage.used)} / {human_size(usage.total)})")
+        if shown_caches:
+            continue
+        shown_caches = True
+        for clabel, cmd in CACHE_DIRS:
+            p = Path(clabel.replace("~", str(Path.home()), 1))
+            if p.is_dir():
+                size = du(p)
+                if size:
+                    r.raw(f"  - `{clabel}`: {human_size(size)} — safe to remove: `{cmd}`")
+
+
 def pr_review_example_edited(example: Path | None = None) -> list[str]:
     """Keys in `pr-review/config.example.json` that no longer hold their placeholder shape (a leading `<`) —
     a sign the file itself was hand-edited instead of the seeded `.context/state/pr-review/config.json`
@@ -1082,6 +1151,7 @@ def sec_machine(r: Report) -> str:
     mcp = [k for k in kb.MCP_BACKED if systems.get(k)]  # kb.py owns the list, beside kb.SYSTEMS
     if mcp:
         r.raw(f"- MCP-backed systems ({', '.join(mcp)}): not probeable from a shell — the skill's step 3 checks the servers are connected in this session")
+    disk_wiring(r)
     return envname
 
 
