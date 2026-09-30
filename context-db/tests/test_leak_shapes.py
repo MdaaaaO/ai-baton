@@ -47,7 +47,9 @@ class OneSkipRule(unittest.TestCase):
     def test_skip_path(self):
         for rel, skip in (("context-db/tests/fixtures/leaky.md", True), ("skills/cost-report/fixtures/x.json", True),
                           ("docs/a.md", False), ("docs/pic.PNG", True), ("skills/kit-health/allow.txt", True),
-                          ("context-db/bin/leak_shapes.py", True), ("docs/fixtures.md", False)):
+                          ("context-db/bin/leak_shapes.py", True), ("docs/fixtures.md", False),
+                          ("skills/pr-open/node_modules/mermaid/index.js", True),  # vendored: `npm ci` in skills/pr-open/
+                          ("skills/pr-open/mermaid-check.mjs", False)):  # the kit's own file beside it: still scanned
             self.assertEqual(leak_shapes.skip_path(rel), skip, rel)
 
     def test_both_scanners_use_it_and_keep_no_list_of_their_own(self):
