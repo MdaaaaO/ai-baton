@@ -16,3 +16,4 @@ sends it. Loaded on demand; SKILL.md § 1 points here.
   ask first. Detail goes in a thread reply, not the top-level message.
 - **Threads.** A reply carries `thread_ts`; the draft then lives in the thread's reply box, not the channel
   composer (SKILL.md § 1).
+- **Draft tool parameter.** The draft tool's message parameter is `message`, not `text`.
