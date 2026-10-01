@@ -535,7 +535,7 @@ def sketch_line(ticket_text: str, repo: str, by_facet: dict[str, list[str]]) -> 
 # ── --check: the diagram lint (warn, never fail) ──────────────────────────────────────────────
 MERMAID_BLOCK_RE = re.compile(r"```mermaid[^\n]*\n(.*?)\n```", re.DOTALL)
 NODE_LABEL_RE = re.compile(r'(\w+)\[\s*"?([^"\]]*)"?\s*\]')
-LABELLED_EDGE_RE = re.compile(r"--\s*\S[^-]*?\s*-->|-\.\s*\S[^.]*?\s*\.->|-->\s*\|[^|]+\|")
+LABELLED_EDGE_RE = re.compile(r"--\s*[^\s>][^-\n]*?\s*-->|-\.\s*[^\s>][^.\n]*?\s*\.->|-->\s*\|[^|]+\|")
 BARE_EDGE_RE = re.compile(r"-->|-\.->")
 
 
@@ -697,26 +697,31 @@ def main(argv: list[str]) -> int:
         if not a.pr:
             print("FAIL --check needs --pr", file=sys.stderr)
             return 2
-        warnings = lint(body, [f for f, _ in files])
-        if warnings:
-            for w in warnings:
-                print(f"LINT: warn {w}")
-        else:
-            print("LINT: ok")
+        # The verdict line prints first — pr-event-brief and pr-watch read the first stdout line
+        # as the verdict — and the LINT: lines (which never change the exit code) print after it.
         old = marker_from_body(body)
         new = mk[len("<!-- diagram-plan: "):-len(" -->")]
         if old is None:
             bad = malformed_marker_line(body)
             if bad is not None:
                 print(f"MALFORMED MARKER — {bad}; fresh plan: {new}")
-                return 3
-            print(f"NO MARKER — body carries no diagram-plan marker; fresh plan: {new}")
-            return 3
-        if old == new:
+                rc = 3
+            else:
+                print(f"NO MARKER — body carries no diagram-plan marker; fresh plan: {new}")
+                rc = 3
+        elif old == new:
             print(f"OK {new}")
-            return 0
-        print(f"DRIFT {old} → {new}")
-        return 3
+            rc = 0
+        else:
+            print(f"DRIFT {old} → {new}")
+            rc = 3
+        warnings = lint(body, [f for f, _ in files])
+        if warnings:
+            for w in warnings:
+                print(f"LINT: warn {w}")
+        else:
+            print("LINT: ok")
+        return rc
 
     if a.json:
         p["marker"] = mk

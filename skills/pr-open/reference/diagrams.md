@@ -56,7 +56,9 @@ file stem (the basename without its extension), never by directory prefix.
 
 `--check` (with `--pr`) also scans the body's `flowchart`/`graph` Mermaid blocks and prints `LINT: ok` (no
 findings) or one `LINT: warn <reason>` line per finding — never changes the exit code, which stays the
-marker/drift result above:
+marker/drift result above. **Order matters**: the verdict line (`OK …` / `DRIFT … → …` / `NO MARKER — …` /
+`MALFORMED MARKER — …`) always prints first, the `LINT:` line(s) after — `pr-event-brief` and `pr-watch`
+read only the first stdout line as the verdict and never see the rest:
 
 - a node whose label carries `(this PR)` but names no changed path, basename or stem;
 - an edge with no label (`A --> B`, `A -.-> B`) — the kit's own convention always labels an edge with its

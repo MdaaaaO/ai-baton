@@ -227,6 +227,19 @@ class LintUnit(unittest.TestCase):
     def test_no_mermaid_blocks_means_no_warnings(self):
         self.assertEqual(dp.lint("Docs-only, no diagram.", ["README.md"]), [])
 
+    def test_two_consecutive_bare_edges_count_as_two_not_one_labelled(self):
+        self.assertEqual(dp.unlabelled_edge_count("a --> b\n  b --> c"), 2)
+
+    def test_two_consecutive_bare_dotted_edges_count_as_two_not_one_labelled(self):
+        self.assertEqual(dp.unlabelled_edge_count("a -.-> b\n  b -.-> c"), 2)
+
+    def test_one_labelled_and_one_bare_edge_counts_only_the_bare_one(self):
+        self.assertEqual(dp.unlabelled_edge_count("a -- calls --> b\n  c --> d"), 1)
+
+    def test_a_labelled_edge_whose_label_spans_no_newline_still_counts_as_labelled(self):
+        self.assertEqual(dp.unlabelled_edge_count("a -- calls --> b"), 0)
+        self.assertEqual(dp.unlabelled_edge_count("a -. reads .-> b"), 0)
+
 
 class LintViaCheck(unittest.TestCase):
     """`--check` (needs `--pr`) prints the lint lines without changing the drift exit code — a stubbed
@@ -279,6 +292,16 @@ class LintViaCheck(unittest.TestCase):
         self.assertEqual(rc, 3)
         self.assertIn("LINT: warn", out)
         self.assertIn("NO MARKER", out)
+
+    def test_the_verdict_line_is_first_even_when_the_lint_warns(self):
+        # pr-event-brief and pr-watch read only the first stdout line as the verdict — the LINT:
+        # line(s) must never precede it, marker-ok or not.
+        self._stub(FLOW_WITH_FINDINGS, marker_ok=True)
+        rc, out, _ = self._run_with_stub(["--pr", REPO, "9", "--check"])
+        self.assertEqual(rc, 0)
+        first_line = out.splitlines()[0]
+        self.assertTrue(first_line.startswith("OK "), first_line)
+        self.assertFalse(first_line.startswith("LINT:"), first_line)
 
 
 if __name__ == "__main__":
