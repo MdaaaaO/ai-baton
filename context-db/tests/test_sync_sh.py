@@ -676,6 +676,21 @@ class SyncSh(unittest.TestCase):
         # literal substring is there
         self.assertEqual(self._origin_owner_repo("https://notgithub.com/example/kit-sync-test"), "")
 
+    def test_origin_owner_repo_reads_the_host_not_the_path(self):
+        # another host that carries "github.com" as a path segment is not a github.com remote
+        for url in ("https://host.example/github.com/example/kit-sync-test",
+                    "ssh://git@host.example/github.com/example/kit-sync-test.git"):
+            with self.subTest(url=url):
+                self.assertEqual(self._origin_owner_repo(url), "")
+
+    def test_origin_owner_repo_reads_the_common_forms(self):
+        for url in ("git@github.com:example/kit-sync-test.git",
+                    "https://github.com/example/kit-sync-test",
+                    "https://user@github.com/example/kit-sync-test.git",
+                    "ssh://git@github.com/example/kit-sync-test"):
+            with self.subTest(url=url):
+                self.assertEqual(self._origin_owner_repo(url), "example/kit-sync-test")
+
     def test_origin_owner_repo_leaves_an_ssh_host_alias_unparsed(self):
         # an ssh config alias like "github.com-work" (a common way to juggle multiple accounts) is
         # not github.com even though it starts with that string — deliberately left unparsed, same

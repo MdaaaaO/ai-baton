@@ -169,9 +169,10 @@ write_preview() {
 # (ssh, https, or ssh:// form, including an explicit port on the ssh:// form, e.g.
 # `ssh://git@github.com:22/o/r` or `ssh://git@ssh.github.com:443/o/r`; a trailing ".git" is
 # stripped); empty when there is no origin, or it is not a github.com (or ssh.github.com) remote.
-# The host must be exactly `github.com` or `ssh.github.com`, immediately preceded by start of
-# string, `@`, or `/` (the last `/` of `//`) — `notgithub.com/o/r` no longer matches just because
-# the substring is there. An ssh host alias such as `git@github.com-work:o/r` (an SSH config
+# The host must be exactly `github.com` or `ssh.github.com`, in the host position: after an optional
+# `<scheme>://` and an optional `<user>@`, nothing else — `notgithub.com/o/r` does not match just
+# because the substring is there, and neither does another host with `github.com` in its path
+# (`https://host.example/github.com/o/r`). An ssh host alias such as `git@github.com-work:o/r` (an SSH config
 # `Host` entry some people point at github.com, with `-work` not part of any real github.com
 # hostname) stays unparsed on purpose — it is never guessed at, so it reads as "not github.com" and
 # verify_release leaves it unverified rather than trusting a hostname that is not actually
@@ -183,7 +184,7 @@ origin_owner_repo() {
   local url
   url="$(git config --get remote.origin.url 2>/dev/null)" || return 0
   printf '%s\n' "$url" \
-    | sed -E -n 's#^(.*[@/])?(github\.com|ssh\.github\.com)(:[0-9]+)?[:/]+([^/]+/[^/]+)/?$#\4#p' \
+    | sed -E -n 's#^([A-Za-z][A-Za-z0-9+.-]*://)?([^@/]+@)?(github\.com|ssh\.github\.com)(:[0-9]+)?[:/]+([^/]+/[^/]+)/?$#\5#p' \
     | sed -E 's#\.git$##'
 }
 
