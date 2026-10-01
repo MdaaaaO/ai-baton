@@ -2,7 +2,7 @@
 name: ticket-close
 description: "Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues): a final outcome comment (Delivered / Verified / Out-of-scope), the right transition or close reason (Done / Won't Do / Cancelled), the delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "13"
+  version: "14"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
@@ -30,6 +30,13 @@ kind X in this environment" and stop.
    ```
    Evidence-dense, not narrative. Links rendered from `tracker.url_template`. Each Verified claim
    carries an evidence item, the grammar `ticket-update` § Comment grammar defines.
+
+   **As-built — only when the ticket carries a sketch marker** (`docs/diagrams.md` § The sketch
+   marker). Name the delivering PR's `## Diagrams` section as the as-built picture and copy its own
+   `Sketch:` line; run `python3 $BATON/skills/ticket-open/sketch.py check <ticket text> --repo-dir
+   <repo> --base <merge sha>` and fold a `MOVED`/`STALE` result in as a further difference. Add
+   `As-built: #<pr> — Sketch: matches` (or `differs (+a, −b) — <reason>`) to the final comment. No
+   marker → nothing.
 2. **Post via a file — both adapters run this, not just GitHub's.** Write the comment to a file, then run,
    in order: `python3 $BATON/context-db/bin/evidence_check.py <file>` — exit 0 → continue; exit 3 → fix the
    comment (add the missing evidence item(s), named on stderr) and re-check, never post as is; exit 2 → the

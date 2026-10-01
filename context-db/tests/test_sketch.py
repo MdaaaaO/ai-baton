@@ -4,7 +4,9 @@ branch. Covers the round trip (stamp -> parse -> same fields), that a re-stamp r
 than duplicating it and that its hash moves when the drawn content does, and every `check` outcome
 (`SKETCH OK`, `MOVED <path>`, a `+path` whose parent still exists, `STALE SKETCH`, `MALFORMED SKETCH`,
 `NO SKETCH`) against a throw-away git repo. Also locks the one-line `Sketch: SKIP` shape `ticket-open`'s
-own prose promises for every non-`opus` ticket. Stdlib unittest, no network. Run: make -C .claude/context-db test."""
+own prose promises for every non-`opus` ticket, and the exact status lines `docs/diagrams.md` § The exact
+lines promises `ticket-update`, `ticket-close` and `ticket-pickup` carry once a ticket's sketch moves
+through a Pivot, a Close or a Pickup. Stdlib unittest, no network. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 
 import io
@@ -246,6 +248,60 @@ class TicketOpenSketchSkipLine(unittest.TestCase):
         # the whiteboard-defence contract's own section headers live in docs/diagrams.md, not duplicated here
         self.assertNotIn("## The sketch marker", self.body)
         self.assertNotIn("## The four questions", self.body)
+
+
+class TicketUpdateRedrawRule(unittest.TestCase):
+    """docs/diagrams.md's zoom table gates `ticket-update`'s Pivot redraw on a sketch marker existing;
+    the skill's own prose must name the gate, the before -> after rendering and the re-stamp call."""
+
+    def setUp(self):
+        self.body = (KIT / "skills" / "ticket-update" / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_skill_names_the_marker_gate_and_the_restamp(self):
+        self.assertIn("sketch marker", self.body)
+        self.assertIn("before", self.body)
+        self.assertIn("after", self.body)
+        self.assertIn("sketch.py stamp", self.body)
+        self.assertIn("docs/diagrams.md", self.body)
+
+    def test_skill_says_no_marker_means_no_redraw(self):
+        self.assertIn("No marker on the ticket", " ".join(self.body.split()))
+
+
+class TicketCloseAsBuiltLine(unittest.TestCase):
+    """docs/diagrams.md § The exact lines names `As-built: #<pr> — Sketch: matches` (or `differs (…)`) as
+    the close comment's line, gated on the ticket carrying a sketch marker; `ticket-close`'s own prose
+    must carry that exact shape rather than paraphrase it."""
+
+    def setUp(self):
+        self.body = (KIT / "skills" / "ticket-close" / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_skill_names_the_as_built_line_and_its_two_outcomes(self):
+        self.assertIn("As-built: #<pr> — Sketch: matches", self.body)
+        self.assertIn("differs (+a, −b)", self.body)
+        self.assertIn("## Diagrams", self.body)
+        self.assertIn("sketch.py check", self.body)
+
+    def test_skill_gates_the_line_on_a_marker(self):
+        squeezed = " ".join(self.body.split())
+        self.assertIn("only when the ticket carries a sketch marker", squeezed)
+        self.assertIn("No marker", squeezed)
+
+
+class TicketPickupSketchCheckLines(unittest.TestCase):
+    """docs/diagrams.md § The exact lines names the four `sketch.py check` outcomes a pickup report
+    carries; `ticket-pickup`'s own prose must quote each one and say a `MOVED` sketch blocks the build."""
+
+    def setUp(self):
+        self.body = (KIT / "skills" / "ticket-pickup" / "SKILL.md").read_text(encoding="utf-8")
+
+    def test_skill_names_every_check_outcome(self):
+        for line in ("SKETCH OK", "MOVED <path>", "STALE SKETCH <old>", "MALFORMED SKETCH <line>", "NO SKETCH"):
+            self.assertIn(line, self.body)
+        self.assertIn("sketch.py check", self.body)
+
+    def test_skill_says_moved_blocks_the_build(self):
+        self.assertIn("redrawn before the build", self.body)
 
 
 if __name__ == "__main__":
