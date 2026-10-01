@@ -2,9 +2,9 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "23"
-  updated: "2026-09-30"
-  reviewed: "2026-09-27"
+  version: "24"
+  updated: "2026-10-01"
+  reviewed: "2026-10-01"
 ---
 
 # pr-watch — stay on top of your PRs without the noise
@@ -56,19 +56,27 @@ as the bot-mode phase 3 loop.
 
 ## What it emits (and what it deliberately does not)
 
-One line per actionable event — bot verdict, human comment/approval, checks settling red, head moves
-(pushed, synced, or stale), conflicts, merge/close, or a query error — each with what to do about it;
-filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated non-green
-states. The full per-line table: `reference/events.md`.
+One stdout line per actionable event — bot verdict on the current head, human comment/approval, checks
+settling red, a real head move, conflicts, merge/close, or a query error — each with what to do about
+it. Bookkeeping the session has nothing to do about goes to stderr instead (the Monitor output file,
+never a wake-up): its own `update-branch` sync, a head move this session's own push produced (named by
+committer login + a local git object in `PR_WATCH_WORKTREE`, when set — unset it and every push reads
+as a real `HEAD MOVED`), and a stale review (`commit_id` not the current head) from the configured
+review bot or a `github.bots` login — a bot re-reviews the new head on its own. A human's stale review
+is still emitted, in every state, marked `(on older head <sha>)`: humans do not automatically re-review
+after a push. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
+non-green states. The full per-line table: `reference/events.md`.
 
 ## Auto-sync with the base branch (since 2026-09-21)
 
 While a PR waits for review it cannot merge anyway, so the watcher keeps the branch merged with its base:
 every poll it reads `compare/<base>...<head>.behind_by`, and when behind and **no human `APPROVED`
-review exists** (a bot/automerge-bot approval does not count), it runs `update-branch` itself and prints
-`SYNCED` — one attempt per head, cooled down by `PR_WATCH_SYNC_COOLDOWN`, off via `PR_WATCH_SYNC=0`. The
-approval-detection nuance, the failure cases and the consequences (rebase needs `sign-queue --rebase`,
-the bot must re-review): `reference/auto-sync.md`.
+review exists** (a bot/automerge-bot approval does not count), it runs `update-branch` itself — one
+attempt per head, cooled down by `PR_WATCH_SYNC_COOLDOWN`, off via `PR_WATCH_SYNC=0` — and logs `SYNCED`
+to stderr only (bookkeeping, not an event). **Standing rule: before any further push from the worktree**,
+`git fetch origin <branch>` and, when the remote is ahead, rebase onto it first (`sign-queue --rebase`
+where commits are signed) — the watcher may have auto-synced the branch behind your back. The
+approval-detection nuance and the failure cases: `reference/auto-sync.md`.
 
 ## Cost controls (2026-09-22)
 

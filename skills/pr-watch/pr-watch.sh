@@ -11,14 +11,24 @@
 #   bot Assessment on <head>; new top-level review comments from anyone but this login and
 #   the bot's in-thread replies; new reviews (approve/changes/comment) from anyone but this login;
 #   new issue comments from anyone but this login; non-green checks; head moved (not by its own sync);
-#   merged/closed (exit). Own replies and bot "thanks" replies are filtered out.
+#   merged/closed (exit). Own replies and bot "thanks" replies are filtered out. A review whose `commit_id`
+#   is not the current head is stale, but a human does not automatically re-review after a push, so a
+#   human's stale verdict (any state) is still live information this cycle — emitted, marked
+#   `(on older head <sha>)`; only a bot's stale verdict is dropped, with a stderr note.
 #   Auto-sync (owner decision 2026-09-21): while the PR waits for review, keep its branch merged with the base branch —
 #   when it is behind, no human APPROVED review exists and the cooldown has passed, PUT pulls/N/update-branch
-#   (GitHub-signed merge commit). Emits SYNCED / BEHIND (approved, 403, 422) / CONFLICTS lines. PR_WATCH_SYNC=0 disables,
-#   PR_WATCH_SYNC_COOLDOWN=<s> (default 3600) limits how often a fast-moving base re-triggers CI on the PR.
+#   (GitHub-signed merge commit). Emits BEHIND (approved, 403, 422) / CONFLICTS lines; SYNCED is bookkeeping,
+#   not a decision, so it goes to stderr (the Monitor output file) instead of waking the session. PR_WATCH_SYNC=0
+#   disables, PR_WATCH_SYNC_COOLDOWN=<s> (default 3600) limits how often a fast-moving base re-triggers CI on the PR.
+#   A 422 (merge conflict, or "head ref does not exist" right after the PR merged and its branch was deleted)
+#   re-reads the PR state before emitting: merged/closed by then → no BEHIND line, the end-of-cycle check
+#   below reports MERGED/CLOSED on its own.
 #   The merge commit such a sync lands is tracked silently (SYNCED already said it; no HEAD MOVED follows), and in bot
 #   mode the watcher then removes and re-adds the review bot as a requested reviewer itself (RE-REQUEST line only if
-#   that fails) — each was a wake-up that asked the session for nothing it could not do here.
+#   that fails) — each was a wake-up that asked the session for nothing it could not do here. A head move whose
+#   commit this session pushed itself (committer = the configured login, and the sha is already a local git
+#   object in PR_WATCH_WORKTREE, when set) is tracked silently the same way — unset PR_WATCH_WORKTREE and every
+#   push reads as a real HEAD MOVED (the conservative default; deciding this without a worktree hint is a later step).
 #   CHECK NOT GREEN (owner decision 2026-09-22): at most ONE line per head (reset on HEAD MOVED), and only once the suite
 #   has settled (no check run queued/in_progress), listing every failing check at that moment — previously one line
 #   per newly-finished failing check (~10 wake-ups for one known cause).
@@ -125,22 +135,36 @@ while true; do
       short=$(printf %s "$cur" | cut -c1-9)
       # This watcher's own update-branch (sync_from = the head it synced FROM) is not news to the session — it
       # already got the SYNCED line. Recognised strictly: the new head is a two-parent GitHub (web-flow) merge commit
-      # whose first parent is exactly that head. Anything else — a push, someone else's rebase, a lookup failure —
-      # is a real HEAD MOVED, as before.
-      self=0; from=$(getv sync_from)
-      if [ -n "$from" ]; then
-        pinfo=$(gh api "repos/$repo/commits/$cur" --jq '"\(.parents|length) \(.parents[0].sha // "") \(.committer.login // "")"' 2>/dev/null)
-        [ "$pinfo" = "2 $from web-flow" ] && self=1
+      # whose first parent is exactly that head. A second, independent self case: this session's own direct push —
+      # recognised only when PR_WATCH_WORKTREE names a local checkout AND the new head's committer is the configured
+      # login AND that sha is already a git object there (so a same-login push by someone else's machine, or a login
+      # that merely matches by coincidence, still reads as a real move — a surer way to decide this is a later step).
+      # Anything else — a push with no worktree hint, someone else's rebase, a lookup failure — is a real HEAD
+      # MOVED, as before.
+      self=0; resync=0; from=$(getv sync_from)
+      if [ -n "$from" ] || [ -n "${PR_WATCH_WORKTREE:-}" ]; then
+        cinfo=$(gh api "repos/$repo/commits/$cur" --jq '"\(.parents|length) \(.parents[0].sha // "") \(.committer.login // "")"' 2>/dev/null)
+        nparents=${cinfo%% *}; crest=${cinfo#* }; parent1=${crest%% *}; committer=${crest##* }
+        if [ -n "$from" ] && [ "$nparents" = 2 ] && [ "$parent1" = "$from" ] && [ "$committer" = web-flow ]; then
+          self=1; resync=1
+        elif [ -n "${PR_WATCH_WORKTREE:-}" ] && [ -n "$committer" ] && [ "$committer" = "$me" ] &&
+             git -C "$PR_WATCH_WORKTREE" cat-file -e "${cur}^{commit}" 2>/dev/null; then
+          self=1
+        fi
       fi
       rm -f "$D/sync_from"
-      if [ "$self" = 1 ]; then echo "pr-watch: PR $pr head $head -> $short is this watcher's own update-branch merge — tracked silently" >&2
+      if [ "$self" = 1 ]; then
+        if [ "$resync" = 1 ]; then echo "pr-watch: PR $pr head $head -> $short is this watcher's own update-branch merge — tracked silently" >&2
+        else echo "pr-watch: PR $pr head $head -> $short is this session's own push (committer $me, sha in PR_WATCH_WORKTREE) — tracked silently" >&2
+        fi
       else echo "PR $pr HEAD MOVED to $short (was $head)"; fi
       head=$short; putv head "$head"; putv seen_bot 0; rm -f "$D/notgreen"
       # The review bot does not re-review a merge-commit head on its own, and a plain POST re-request is a no-op there
       # (GitHub thinks it already asked) — remove, then re-add, as pr-merge.sh's force_review does. Only now, once the
       # sync commit is the head: a request sent before it landed would review a head that is about to be replaced.
-      # A failure is a line (the session must re-request by hand), never silence.
-      if [ "$self" = 1 ] && [ -n "$bot" ]; then
+      # A failure is a line (the session must re-request by hand), never silence. Only the resync case needs this —
+      # a real push fires the bot's normal `synchronize` webhook on its own.
+      if [ "$resync" = 1 ] && [ -n "$bot" ]; then
         if gh api -X DELETE "repos/$repo/pulls/$pr/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$D/.rrerr" &&
            gh api -X POST "repos/$repo/pulls/$pr/requested_reviewers" -f "reviewers[]=$bot" >/dev/null 2>"$D/.rrerr"; then
           echo "pr-watch: PR $pr re-requested $bot on $short (remove + re-add)" >&2
@@ -180,12 +204,22 @@ while true; do
                 out=$(gh api -X PUT "repos/$repo/pulls/$pr/update-branch" -f expected_head_sha="$cur" 2>&1); rc=$?
                 if [ "$rc" = 0 ]; then
                   if [ -n "$bot" ]; then rr="the watcher re-requests $bot itself once it lands"; else rr="nothing to re-request"; fi
-                  echo "PR $pr SYNCED with $base (was $behind behind): update-branch requested on $(printf %s "$cur" | cut -c1-9) — the merge head is tracked silently (no HEAD MOVED follows) and $rr; further worktree pushes need --rebase"
+                  # Bookkeeping, not a decision (the session has nothing to do about its own sync) — stderr only.
+                  echo "pr-watch: PR $pr SYNCED with $base (was $behind behind): update-branch requested on $(printf %s "$cur" | cut -c1-9) — the merge head is tracked silently (no HEAD MOVED follows) and $rr; further worktree pushes need --rebase" >&2
                   putv last_sync "$now"; putv sync_from "$cur"
                 else
                   case "$out" in
                     *"HTTP 403"*) echo "PR $pr BEHIND $base by $behind — update-branch refused (403: the token lacks the workflow scope, PR touches .github/workflows?) — rebase the worktree + sign-queue --rebase, or on the user's machine: gh pr update-branch $pr";;
-                    *"HTTP 422"*) echo "PR $pr BEHIND $base by $behind — update-branch 422 (merge conflict or head moved): $(printf %s "$out" | tr '\n' ' ' | cut -c1-200)";;
+                    *"HTTP 422"*)
+                      # A 422 here often just means the PR merged (and its branch was deleted) in the gap between
+                      # this cycle's fetch and the update-branch call — re-read before emitting: merged/closed by
+                      # now means nothing to say here, the end-of-cycle state check below reports MERGED/CLOSED.
+                      rst=$(gh pr view "$pr" --repo "$repo" --json state --jq .state 2>/dev/null)
+                      case "$rst" in
+                        MERGED|CLOSED) : ;;
+                        *) echo "PR $pr BEHIND $base by $behind — update-branch 422 (merge conflict or head moved): $(printf %s "$out" | tr '\n' ' ' | cut -c1-200)";;
+                      esac
+                      ;;
                     *) echo "PR $pr BEHIND $base by $behind — update-branch failed: $(printf %s "$out" | tr '\n' ' ' | cut -c1-200)";;
                   esac
                   putv sync_stuck "$cur"
@@ -261,15 +295,30 @@ while true; do
     fi
     rm -f "$cerr"
     rerr=$(mktemp)
-    rraw=$(gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state)"' 2>"$rerr"); rrc=$?
+    rraw=$(gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state):\(.commit_id)"' 2>"$rerr"); rrc=$?
     if [ $rrc -ne 0 ]; then echo "ERROR $repo#$pr $(head -1 "$rerr" | tr -d '\r')"
     else
       for rec in $rraw; do
-        id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; state=${rest##*:}
+        id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; rest2=${rest#*:}; state=${rest2%%:*}; cid=${rest2#*:}
         grep -qxF "$id" "$D/seen_r" && continue; echo "$id" >>"$D/seen_r"
         [ -z "$init" ] && continue
         [ "$login" = "$me" ] && continue
         [ "$login" = "$bot" ] && continue      # bot verdicts are reported via the Assessment line
+        # A verdict on any head but the current one is stale (superseded by what a re-review on the new
+        # head would say) — but a human does not automatically re-review after a push, and a CHANGES_REQUESTED
+        # keeps blocking the merge regardless of which head it names, so a human's stale verdict is still live
+        # information this cycle: emitted in every state, marked with the head it is on. Only a bot's stale
+        # verdict is dropped (stderr note only) — a bot re-reviews the new head on its own once asked. "Bot"
+        # here is the configured review bot (already skipped just above) or a login in github.bots.
+        if [ "$cid" != "$cur" ]; then
+          inbots=$(printf '%s' "$bots" | jq -e --arg l "$login" 'type == "array" and (index($l) != null)' 2>/dev/null)
+          if [ "$inbots" = "true" ]; then
+            echo "pr-watch: PR $pr dropping stale review $id ($state by $login) on $(printf %s "$cid" | cut -c1-9), current head is $(printf %s "$cur" | cut -c1-9)" >&2
+          else
+            new="$new; review $state by $login (on older head $(printf %s "$cid" | cut -c1-9))"
+          fi
+          continue
+        fi
         new="$new; review $state by $login"
       done
     fi
