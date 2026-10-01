@@ -416,7 +416,12 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        `heartbeat`, `session_id`, `ref`, `updated` and the `sections` summary dropped outright,
                        the fields a 2026-10-01 gap report found eating the budget before the body) and its `##`
                        sections led by `SECTION_PRIORITY` when present — within `BRIEF_BUDGET`; then, when a
-                       context doc resolved, its key and the head of its *Remaining work*, within `EPIC_BUDGET`
+                       context doc resolved, its key and the head of its *Remaining work*, within `EPIC_BUDGET`.
+                       The owner line and the session brief are written and flushed to stdout the moment they
+                       are ready; the whole hook has `COMPACT_DEADLINE` seconds (under the hooks' own 10s
+                       `timeout`), so the context-doc lookups (`resolve`/`find`/`get`) run only while more than
+                       1.5s of it remain, each capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` — skipped or
+                       timed out, one line `context doc: skipped (hook deadline)` stands in for that tail
 
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.

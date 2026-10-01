@@ -934,6 +934,72 @@ class CompactBrief(Base):
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
 
 
+BRIEF_FOR_DEADLINE = ("sessions/lane-topic (session, 10 bytes)\nsession: lane-topic\nepic: acme/widgets#42\n\n"
+                      "# Session: lane-topic\n\n## Notes\n\nhi\n")
+
+
+class CompactBriefDeadline(Base):
+    """A compact brief used to make up to four ctx calls in a row (`brief --session`, `resolve`, `find --type
+    epic`, `get --section`, each also able to wait `CTX_LOCK_TIMEOUT` on a lock) against the hooks' own 10s
+    `timeout` (hooks/hooks.json, settings.json), building its whole answer before printing a byte of it — a
+    harness kill lost even the owner line and session brief it had already computed. `COMPACT_DEADLINE` now
+    bounds the whole call, and the owner line plus session brief are flushed to stdout as soon as they are
+    ready; a slow or timed-out context-doc lookup is replaced with one line rather than risking the rest.
+    A stubbed `_ctx` (not a real sleep, no real `ctx` needed) stands in for a slow `resolve`."""
+
+    def setUp(self):
+        super().setUp()
+        self.mod = load_adapter()
+        self.mod.resolve = lambda: (self.fake, "override")
+        self.mod._context_root = lambda: self.root
+
+    def run_hook(self, stdin: str) -> str:
+        import contextlib
+        import io
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"CTX_STORE": ""}), \
+             mock.patch.object(sys, "stdin", io.StringIO(stdin)), contextlib.redirect_stdout(out):
+            self.mod.hook("brief-session")
+        return out.getvalue()
+
+    def test_a_slow_resolve_is_skipped_but_the_owner_line_and_brief_still_print(self):
+        def slow_ctx(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
+            if args[0] == "brief":
+                return subprocess.CompletedProcess(args, 0, stdout=BRIEF_FOR_DEADLINE, stderr="")
+            raise self.mod.subprocess.TimeoutExpired("ctx", timeout)  # resolve/find/get: always too slow
+        self.mod._ctx = slow_ctx
+        out = self.run_hook(self.payload(source="compact"))
+        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and no context doc\n"), out)
+        self.assertIn("session: lane-topic", out)
+        self.assertIn("context doc: skipped (hook deadline)", out)
+
+    def test_a_fast_resolve_prints_the_full_output_as_before(self):
+        def fast_ctx(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
+            if args[0] == "brief":
+                return subprocess.CompletedProcess(args, 0, stdout=BRIEF_FOR_DEADLINE, stderr="")
+            if args[0] == "resolve":
+                return subprocess.CompletedProcess(args, 0, stdout="widgets/rollout · epic\n", stderr="")
+            if args[0] == "get":
+                return subprocess.CompletedProcess(args, 0, stdout="- step 1\n- step 2\n", stderr="")
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+        self.mod._ctx = fast_ctx
+        out = self.run_hook(self.payload(source="compact"))
+        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and widgets/rollout\n"), out)
+        self.assertNotIn("skipped (hook deadline)", out)
+        self.assertIn("widgets/rollout:", out)
+        self.assertIn("- step 1", out)
+        self.assertIn("- step 2", out)
+
+    def test_deadline_leaves_margin_under_the_hooks_own_timeout(self):
+        for path in (KIT / "hooks" / "hooks.json", KIT / "settings.json"):
+            hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
+            timeouts = [h["timeout"] for groups in hooks.values() for g in groups for h in g["hooks"]
+                        if "brief-session" in h["command"]]
+            self.assertTrue(timeouts, path)
+            for t in timeouts:
+                self.assertLessEqual(self.mod.COMPACT_DEADLINE + 1, t, path)
+
+
 class PreToolUseDeny(Base):
     """A direct Write/Edit of a store doc is denied on an adopted store; everything else gets no decision."""
 
