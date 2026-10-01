@@ -192,6 +192,9 @@ def scan(text: str, shapes: list[tuple[re.Pattern, str]] | None = None, rel: str
 # as is).
 GENERIC = {"true", "false", "none", "jira", "github", "slack", "notion", "datalake", "airflow", "dbt",
            "issues", "main", "master"}
+# the `what` of the `<org>/<repo>` path pattern `configured_values` appends below — named so a caller (public-text-check's
+# same-owner exception) can single that one hit out without duplicating the literal
+ORG_PATH_WHAT = "github.org `<org>/<repo>` path"
 # bare repo names that half of GitHub has and the kit uses as ordinary words: `setup.sh --personal` fills
 # `tracker.repos` from `gh repo list` on a fresh workspace, and a `config` repo flagged every kit file (#118).
 # The full `owner/<repo>` slug and the `<org>/<repo>` path shape still catch these repos.
@@ -315,7 +318,7 @@ def configured_values(cfg: dict, facts: dict, *, common: "set[str] | frozenset[s
         pats.append((re.compile((r"\b" if v[0].isalnum() else "") + esc + (r"\b" if v[-1].isalnum() else "")), what))
     org = str(((cfg or {}).get("github") or {}).get("org") or "")
     if org:
-        pats.append((re.compile(rf"\b{re.escape(org)}/{org_not_dep}[a-z][\w.-]*"), "github.org `<org>/<repo>` path"))
+        pats.append((re.compile(rf"\b{re.escape(org)}/{org_not_dep}[a-z][\w.-]*"), ORG_PATH_WHAT))
         pats.append((re.compile(rf"@{re.escape(org)}/"), "org team handle"))
     return pats + logins, errors
 

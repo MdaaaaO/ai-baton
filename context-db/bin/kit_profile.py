@@ -29,9 +29,13 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                #   values) — applies only when <owner/repo> is public (a
                                                                #   `gh api` lookup, skippable with --public/--private) and
                                                                #   is not one of this environment's own tracker.repos;
-                                                               #   exit 1 prints one `<line>: <what> <redacted>` per hit,
-                                                               #   never the value itself; exit 3 = the env store could
-                                                               #   not be loaded — treat like a hit, never like exit 0
+                                                               #   an `<org>/<repo>` path naming THIS environment's own
+                                                               #   org is a hit only when `<repo>` is not itself a public
+                                                               #   repo of that org (another `gh api` lookup; unreachable
+                                                               #   keeps the hit); exit 1 prints one `<line>: <what>
+                                                               #   <redacted>` per hit, never the value itself; exit 3 =
+                                                               #   the env store could not be loaded — treat like a hit,
+                                                               #   never like exit 0
                         python3 kit_profile.py domains        # extra .context domains, one per line
                         python3 kit_profile.py template epic  # the store's template override, or ""
                         python3 kit_profile.py tz              # owner's display zone name: WORKSPACE_TZ, else tz_default, else UTC
@@ -852,7 +856,13 @@ def public_text_hits(text: str, cfg: dict, owner: str) -> tuple[list[tuple[int, 
     never disagree on what counts as this environment's own value), and a cross-org `<org>/<repo>#<n>`
     reference (`leak_shapes.cross_org_shapes`). Deliberately narrower than kit-health's own scan in two ways:
     no kit-dependency exclusion (this is not the kit's own tree, nothing here is "the kit naming itself") and
-    no identity values (mentioning yourself in your own issue/PR is normal, not a leak)."""
+    no identity values (mentioning yourself in your own issue/PR is normal, not a leak).
+
+    When `owner` is this environment's own `github.org`, an `<org>/<repo>` path hit is dropped when `<repo>` is
+    itself a public repo of `org` — an ordinary cross-repo reference within one's own public work, same as the
+    full-URL form already is (`cross_org_shapes` already carries the different-org case). Every other finding,
+    including a private/internal repo of `org` and any hit when `owner` is a different org, is untouched
+    (`_resolve_same_owner_org_hits`)."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import leak_shapes  # noqa: E402  — same dir
     errors: list[str] = []
@@ -866,7 +876,36 @@ def public_text_hits(text: str, cfg: dict, owner: str) -> tuple[list[tuple[int, 
         errors.append(f"env-store tables could not be read ({e}) — the value scan is shapes-only until that is fixed")
     vpats, verrors = leak_shapes.configured_values(cfg, facts)
     pats += vpats + leak_shapes.cross_org_shapes(owner)
-    return leak_shapes.scan(text, pats), errors + verrors
+    hits = leak_shapes.scan(text, pats)
+    org = str((cfg.get("github") or {}).get("org") or "")
+    if org and owner.lower() == org.lower():
+        hits = _resolve_same_owner_org_hits(hits, org)
+    return hits, errors + verrors
+
+
+def _resolve_same_owner_org_hits(hits: list[tuple[int, str, str]], org: str) -> list[tuple[int, str, str]]:
+    """`hits` with every `leak_shapes.ORG_PATH_WHAT` entry resolved against `org`'s own public repos: a
+    `<org>/<repo>` hit is dropped when `repo_is_public(org, repo)` is True, kept unchanged when False (a
+    private or internal repo of `org` is still a leak), and kept with a note appended to `what` when the lookup
+    cannot answer (`None` — no `gh`, no network, a timeout, a non-zero exit or output `repo_is_public` cannot
+    parse) — a failed lookup must read as "still a hit", never silently as "clean". One lookup per distinct
+    `repo`, cached here for the single call this is used from."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import leak_shapes  # noqa: E402  — same dir
+    cache: dict[str, bool | None] = {}
+    out: list[tuple[int, str, str]] = []
+    for n, what, matched in hits:
+        if what == leak_shapes.ORG_PATH_WHAT and "/" in matched:
+            repo = matched.split("/", 1)[1]
+            if repo not in cache:
+                cache[repo] = repo_is_public(org, repo)
+            public = cache[repo]
+            if public is True:
+                continue
+            if public is None:
+                what = f"{what} (repo visibility lookup failed — kept)"
+        out.append((n, what, matched))
+    return out
 
 
 def public_text_check(path: str, repo: str, *, public: bool | None = None) -> int:
