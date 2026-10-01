@@ -61,7 +61,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        own `resolve` rule, then — when one resolved — fetch its key and the head of its
                        *Remaining work*, within a separate `EPIC_BUDGET`. The whole hook has `COMPACT_DEADLINE`
                        seconds (under the hooks' own 10s `timeout`); the context-doc lookups (`resolve`/
-                       `find`/`get`) run only while more than 1.5s of it remain before each one starts, every
+                       `get`) run only while more than 1.5s of it remain before each one starts, every
                        one of them capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` recomputed right before
                        that call, never a single value reused across more than one — skipped or timed out, one
                        line `context doc: skipped (hook deadline)` stands in for that tail
@@ -660,18 +660,15 @@ def _reorder_sections(body: str) -> str:
 def _resolve_epic_doc(ctx: Path, store: list[str], epic_key: str, remaining: Callable[[], float]) -> str | None:
     """The context doc `epic_key` (a session's `epic:` frontmatter field) names, through the store's own
     `resolve` rule (`ctx resolve`) — None when there is no key, the store sets no `resolve.key_regex`, the key
-    matches no doc, or a call fails (a compact brief degrades, it does not go silent over one of its two extra
-    reads). `resolve.fields` names `epic` — the same field this session's own doc carries, since that is what
-    tags which context doc it is on — and a field match outranks the context doc's own `resolve.section` match
-    (`Tracker & links`), so resolving a session's own `epic:` value finds that session, never the context doc
-    it names. When `ctx resolve` hands back a `sessions/…` doc for that reason, this falls back to a search
-    scoped to the context doc's own type (`ctx find --type epic`), the one `resolve.section` exists for.
-    `remaining` is re-called before each of the two ctx calls — a fast `resolve` does not buy `find` a second
-    helping of the same timeout — each capped at `min(EPIC_LOOKUP_TIMEOUT, remaining())`; less than 1.5s left
-    before either one raises `subprocess.TimeoutExpired` rather than making the call. That exception, whether
-    raised here or by a call that actually timed out, is let through, not swallowed — the caller
-    (`_compact_brief`) tells a timeout, which it must report as skipped, from an ordinary no-match, which it
-    must not."""
+    matches no doc, or the call fails (a compact brief degrades, it does not go silent over one extra read).
+    The kit's `resolve.fields` names no field: a field match would outrank the context doc's own
+    `resolve.section` match (`Tracker & links`) — which is the only match that can ever apply, since no doc's
+    frontmatter is ever searched by field — so `ctx resolve` always answers with the context doc the key's
+    *Tracker & links* section names, never the session row that merely carries the key in its own `epic:`
+    field. Less than 1.5s of `remaining()` left raises `subprocess.TimeoutExpired` rather than making the
+    call, the same signal a call that actually timed out would raise — let through, not swallowed, so the
+    caller (`_compact_brief`) tells a timeout, which it must report as skipped, from an ordinary no-match,
+    which it must not."""
     if not epic_key:
         return None
     if remaining() < 1.5:
@@ -680,21 +677,13 @@ def _resolve_epic_doc(ctx: Path, store: list[str], epic_key: str, remaining: Cal
         r = _ctx(ctx, store, "resolve", epic_key, timeout=min(EPIC_LOOKUP_TIMEOUT, remaining()))
     except OSError:
         return None
-    if r.returncode == 0:
-        row = _lines(r.stdout)
-        candidate = row[0].split(" · ", 1)[0].strip() if row else ""
-        if candidate and not candidate.startswith("sessions/"):
-            return candidate
-    if remaining() < 1.5:
-        raise subprocess.TimeoutExpired("ctx find", EPIC_LOOKUP_TIMEOUT)
-    try:
-        f = _ctx(ctx, store, "find", "--type", "epic", epic_key, timeout=min(EPIC_LOOKUP_TIMEOUT, remaining()))
-    except OSError:
+    if r.returncode != 0:
         return None
-    if f.returncode != 0:
-        return None
-    rows = _lines(f.stdout)  # rows[0] is "<n> hits"; the best hit, if any, follows it
-    return rows[1].split(" · ", 1)[0].strip() or None if len(rows) > 1 else None
+    row = _lines(r.stdout)
+    doc = row[0].split(" · ", 1)[0].strip() if row else ""
+    # a session row here means the store still carries the old `resolve.fields` (adopted before the kit
+    # dropped it, not re-adopted since): no context doc is a truer answer than the session naming itself
+    return doc if doc and not doc.startswith("sessions/") else None
 
 
 def _epic_remaining_head(ctx: Path, store: list[str], doc_key: str, remaining: Callable[[], float]) -> list[str]:
@@ -723,7 +712,7 @@ def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
     stdout before any context-doc lookup is even attempted, not merely before the slowest of them: neither
     needs anything beyond this session's own frontmatter, so a harness kill that lands during the slower
     lookups below still leaves both of these on stdout. Only once they are flushed does this try to resolve
-    the context doc the `epic:` field names — up to three more ctx calls (`resolve`, `find`, `get`), each
+    the context doc the `epic:` field names — up to two more ctx calls (`resolve`, `get`), each
     against a per-call deadline recomputed right before it, not one `min(EPIC_LOOKUP_TIMEOUT, remaining)`
     computed once and handed to two calls in a row (see `_resolve_epic_doc`/`_epic_remaining_head`). When a
     context doc resolved, its key and the head of its *Remaining work* follow in a separate `EPIC_BUDGET` —
