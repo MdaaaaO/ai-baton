@@ -77,7 +77,14 @@ if [ "$1" = api ]; then
       [ "$method" = PUT ] || { echo "stub gh: unexpected method $method for $path" >&2; exit 9; }
       [ -n "${STUB_UPDATE_BRANCH_FAIL:-}" ] && { echo "${STUB_UPDATE_BRANCH_FAIL}" >&2; exit 1; }
       exit 0 ;;
-    */compare/*) body=$STUB_COMPARE_JSON ;;
+    */compare/*)
+      [ -n "${STUB_COMPARE_FAIL:-}" ] && { echo "stub gh: simulated compare failure" >&2; exit 1; }
+      if [ -n "${STUB_COMPARE_FAIL_COUNT:-}" ]; then
+        cf="${STUB_LOG}.compare_calls"
+        n=$(( $(cat "$cf" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" >"$cf"
+        if [ "$n" -le "$STUB_COMPARE_FAIL_COUNT" ]; then echo "stub gh: simulated transient compare failure" >&2; exit 1; fi
+      fi
+      body=$STUB_COMPARE_JSON ;;
     */commits/*) body=$STUB_COMMIT_JSON ;;
     */pulls/*) body=$STUB_PR_JSON ;;
     *) echo "stub gh: unhandled api path: $path" >&2; exit 9 ;;
@@ -101,7 +108,9 @@ if [ "$1" = pr ] && [ "$2" = view ]; then
     esac
   done
   case "$json" in
-    statusCheckRollup) body="{\"statusCheckRollup\": $STUB_ROLLUP_JSON}" ;;
+    statusCheckRollup)
+      [ -n "${STUB_ROLLUP_FAIL:-}" ] && { echo "stub gh: simulated rollup failure" >&2; exit 1; }
+      body="{\"statusCheckRollup\": $STUB_ROLLUP_JSON}" ;;
     state) body="{\"state\": \"$STUB_STATE\"}" ;;
     *) echo "stub gh: unhandled pr view --json $json" >&2; exit 9 ;;
   esac
@@ -160,6 +169,7 @@ class PrWatchStub(unittest.TestCase):
             TMPDIR=str(self.tmp),  # per-test state dir, never the shared ${TMPDIR:-/tmp}/pr-watch-* of a live watcher
             STUB_ME_JSON=json.dumps({"login": me_login}),
             PR_WATCH_SYNC_COOLDOWN="0",
+            PR_WATCH_RETRY_DELAY="0",  # the retry backoff would otherwise really sleep between attempts
         )
         if identity_env is not None:
             env.update(identity_env)
@@ -221,6 +231,86 @@ class PrWatchStub(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("ERROR", r.stdout)
         self.assertNotIn("unknown", r.stdout)
+
+    # --- a failed lookup is UNKNOWN, never read as red or green; repeated red backs off additively ---
+
+    def test_a_failed_behind_by_lookup_is_unknown_not_a_silent_skip(self):
+        r = self.run_watch(extra_env={"STUB_COMPARE_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.count("LOOKUP FAILED"), 1, r.stdout)
+        self.assertIn(f"PR {PR} LOOKUP FAILED: behind-by check", r.stdout)
+        self.assertIn("simulated compare failure", r.stdout)
+        self.assertNotIn("BEHIND", r.stdout)
+        self.assertNotIn("CHECK NOT GREEN", r.stdout)
+
+    def test_a_transient_behind_by_failure_that_recovers_on_retry_emits_nothing(self):
+        r = self.run_watch(extra_env={"STUB_COMPARE_FAIL_COUNT": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout, f"PR {PR} MERGED\n")
+
+    def test_a_failed_check_status_lookup_is_unknown_never_a_silent_green(self):
+        r = self.run_watch(extra_env={"STUB_ROLLUP_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.count("LOOKUP FAILED"), 1, r.stdout)
+        self.assertIn(f"PR {PR} LOOKUP FAILED: check status", r.stdout)
+        self.assertIn("simulated rollup failure", r.stdout)
+        self.assertNotIn("CHECK NOT GREEN", r.stdout)
+        self.assertNotIn("BEHIND", r.stdout)
+
+    def test_a_persisting_lookup_failure_is_announced_once_across_cycles(self):
+        # dedup: the SAME failure persisting across cycles (two separate invocations against the same,
+        # surviving state dir — like a real re-arm) announces once, not on every cycle.
+        kwargs = dict(extra_env={"STUB_COMPARE_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
+        r1 = self.run_watch(**kwargs)
+        self.assertIn("LOOKUP FAILED", r1.stdout)
+        r2 = self.run_watch(**kwargs)
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertNotIn("LOOKUP FAILED", r2.stdout)
+
+    def test_a_recovered_lookup_then_a_new_failure_is_announced_again(self):
+        fail = dict(extra_env={"STUB_COMPARE_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
+        ok = dict(identity_env={"PR_WATCH_SELF": "tester"})
+        r1 = self.run_watch(**fail)
+        self.assertIn("LOOKUP FAILED", r1.stdout)
+        r2 = self.run_watch(**ok)
+        self.assertNotIn("LOOKUP FAILED", r2.stdout)
+        r3 = self.run_watch(**fail)
+        self.assertIn("LOOKUP FAILED", r3.stdout)
+
+    def test_check_not_green_backoff_is_silent_within_the_window_then_reannounced(self):
+        rollup = json.dumps([self.check_run("unit-tests", "FAILURE")])
+        self.seed_state(head=HEAD9)  # init=1 already: every call below is a re-arm, state is kept, not reset
+        now0 = 1_700_000_000
+        r1 = self.run_watch(rollup=rollup, identity_env={"PR_WATCH_SELF": "tester"},
+                             extra_env={"PR_WATCH_NOW": str(now0)})
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE", r1.stdout)
+        sd = self.state_dir()
+        self.assertEqual((sd / "notgreen_step").read_text().strip(), "3600")
+        self.assertEqual((sd / "notgreen_last").read_text().strip(), str(now0))
+
+        # within the first 1h window: silent
+        r2 = self.run_watch(rollup=rollup, identity_env={"PR_WATCH_SELF": "tester"},
+                             extra_env={"PR_WATCH_NOW": str(now0 + 1800)})
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r2.stdout)
+
+        # past the window: re-announced, the next window grows by +2h (1h -> 3h)
+        r3 = self.run_watch(rollup=rollup, identity_env={"PR_WATCH_SELF": "tester"},
+                             extra_env={"PR_WATCH_NOW": str(now0 + 3700)})
+        self.assertEqual(r3.returncode, 0, r3.stdout + r3.stderr)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE", r3.stdout)
+        self.assertEqual((sd / "notgreen_step").read_text().strip(), "10800")
+
+    def test_check_not_green_backoff_caps_at_pr_watch_backoff_max(self):
+        last = 1_700_000_000
+        self.seed_state(head=HEAD9, notgreen=FULL, notgreen_bad="unit-tests: FAILURE;",
+                         notgreen_last=str(last), notgreen_step="82800")
+        r = self.run_watch(identity_env={"PR_WATCH_SELF": "tester"},
+                            extra_env={"PR_WATCH_NOW": str(last + 82800 + 1)})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;", r.stdout)
+        self.assertEqual((self.state_dir() / "notgreen_step").read_text().strip(), "86400")
 
     # --- #225: a bot-only approval must not block the auto-sync ---
 

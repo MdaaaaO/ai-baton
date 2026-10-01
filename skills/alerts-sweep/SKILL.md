@@ -3,9 +3,9 @@ name: alerts-sweep
 description: "Sonnet-forked sweep of the airflow-alerts Slack channel: reads all new messages (paginated), classifies each against the pattern KB, returns a state-advance trailer the main session applies, NO-OP when nothing was read, or `NEEDS <system>.<kind> <name>` for a missing fact. Arm with `/loop 20m /alerts-sweep`; never writes."
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
-  version: "13"
-  updated: "2026-09-28"
-  reviewed: "2026-09-28"
+  version: "14"
+  updated: "2026-10-01"
+  reviewed: "2026-10-01"
   requires: "airflow,slack"
   facts: "slack.channel airflow-alerts,airflow.path alerts-state,airflow.path alerts-kb"
 context: fork
@@ -40,7 +40,9 @@ through the trailer in Return value, which the main session applies.
    none — a busy channel, or a weekend gap, returns more than one page, and the rest must never be
    silently dropped the way one un-paginated call would. Track `NEWEST_TS`, the highest ts seen across
    every page. If any page's read fails, stop and return `alerts-sweep: read failed — state not advanced`
-   (Return value) instead of continuing on a partial read. Drop the message equal to `LAST_TS` itself. If
+   plus the connector's own error text (Return value) instead of continuing on a partial read, and never as
+   `NO-OP` — a failed read is UNKNOWN, not "nothing to report": a swallowed error must never read as a
+   negative result. Drop the message equal to `LAST_TS` itself. If
    nothing is newer across every page: go to step 5 with no changes (`NEWEST_TS` stays unset).
 3. For each new message, read its thread (`slack_read_thread`) — never judge from the top level alone.
    Classify:
@@ -63,8 +65,11 @@ through the trailer in Return value, which the main session applies.
   `/env-init <system>.<kind> <name>`, which follows the fact's discovery manifest (`slack_search_channels`
   for the channel; the two paths are `user` facts — asked once) and writes it back with structured
   provenance (`--from tool:slack_search_channels` / `--from user`), then re-arms the sweep.
-- If a page's read failed (step 2), return exactly `alerts-sweep: read failed — state not advanced` — never
-  `NO-OP`: a failed read has seen nothing, so nothing in `STATE` or `KB` should move either.
+- If a page's read failed (step 2), return `alerts-sweep: read failed — state not advanced: <error text>`
+  — the connector's own error, one line, trimmed — never bare `alerts-sweep: read failed — state not
+  advanced` with the error dropped, and never `NO-OP`: a failed read is UNKNOWN (seen nothing), not a
+  quiet channel, so nothing in `STATE` or `KB` should move either, but the main session needs the error
+  text to tell a transient read failure from an auth/permission problem worth fixing.
 - If nothing was newer than `LAST_TS` (step 2 found no page with a message), return exactly the single word
   `NO-OP` and nothing else — a re-arm 20 minutes later reads the same `LAST_TS`, so there is truly nothing
   for the main session to apply.

@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "24"
+  version: "25"
   updated: "2026-10-01"
   reviewed: "2026-10-01"
 ---
@@ -66,6 +66,17 @@ review bot or a `github.bots` login — a bot re-reviews the new head on its own
 is still emitted, in every state, marked `(on older head <sha>)`: humans do not automatically re-review
 after a push. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
 non-green states. The full per-line table: `reference/events.md`.
+
+**A failed lookup is UNKNOWN, never red or green.** Every `gh` read a verdict depends on (PR info,
+behind-by, approvals, the check-status rollup) goes through a retry (3 attempts, `PR_WATCH_RETRY_DELAY`
+apart) before it is treated as a failure, and a failure that survives the retries never falls back to
+"nothing pending" (a silent GREEN) or "not behind" (a silent no-op) — it prints exactly one
+`PR N LOOKUP FAILED: <what> — <error>` line instead, deduped so the same failure persisting across
+cycles announces once (a changed error, or a recovery in between, announces again). **The same
+`CHECK NOT GREEN` on a settled head backs off additively** instead of firing once-ever: re-announced
+after 1h, then 3h, then 5h … +2h each time, capped by `PR_WATCH_BACKOFF_MAX` (default 86400s); the first
+announcement is still immediate, and `PR_WATCH_KNOWN_RED`'s mute is unaffected — a muted head stays
+silent. Details: `reference/events.md`, `reference/cost-controls.md`.
 
 ## Auto-sync with the base branch (since 2026-09-21)
 
