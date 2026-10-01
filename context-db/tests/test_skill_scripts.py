@@ -209,10 +209,9 @@ class TrivialCheck(unittest.TestCase):
                                 side_effect=self.tc.subprocess.TimeoutExpired(cmd=["gh"], timeout=60)):
             self.assertIsNone(self.tc.gh("repos/acme/widgets/pulls/1", allow_fail=True))
 
-    def test_missing_config_prints_ok_false_and_exits_3(self):
-        # a missing config.json used to traceback (FileNotFoundError at import time); it must now fail
-        # closed with the documented setup-problem shape — distinct from both the eligible=false and
-        # the error=true shapes a PR-level or API-level failure prints.
+    def test_missing_config_prints_the_error_shape_and_exits_3(self):
+        # a missing config.json used to traceback (FileNotFoundError at import time); it must fail
+        # closed with the error shape callers already treat as NOT eligible, and its own exit code.
         script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
         with tempfile.TemporaryDirectory() as tmp:
             home = str(Path(tmp, "home"))
@@ -222,12 +221,12 @@ class TrivialCheck(unittest.TestCase):
                                 capture_output=True, text=True, env=env)
             self.assertEqual(r.returncode, 3, (r.stdout, r.stderr))
             out = json.loads(r.stdout)
-            self.assertEqual(out["ok"], False)
+            self.assertEqual((out["eligible"], out["error"]), (False, True))
             self.assertIn("no config.json", out["reasons"][0])
             self.assertIn(home, out["reasons"][0])
             self.assertIn(home, r.stderr)
 
-    def test_unparsable_config_prints_ok_false_and_exits_3(self):
+    def test_unparsable_config_prints_the_error_shape_and_exits_3(self):
         script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
         with tempfile.TemporaryDirectory() as tmp:
             home = str(Path(tmp, "home"))
@@ -239,8 +238,24 @@ class TrivialCheck(unittest.TestCase):
                                 capture_output=True, text=True, env=env)
             self.assertEqual(r.returncode, 3, (r.stdout, r.stderr))
             out = json.loads(r.stdout)
-            self.assertEqual(out["ok"], False)
+            self.assertEqual((out["eligible"], out["error"]), (False, True))
             self.assertIn("unreadable", out["reasons"][0])
+
+    def test_config_without_a_login_prints_the_error_shape_and_exits_3(self):
+        script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
+        for body in ('{"auto_approve": {}}', '{"login": ""}', '[]'):
+            with self.subTest(body=body), tempfile.TemporaryDirectory() as tmp:
+                home = str(Path(tmp, "home"))
+                os.makedirs(home)
+                Path(home, "config.json").write_text(body, encoding="utf-8")
+                env = hermetic_env(tmp)
+                env["PR_REVIEW_HOME"] = home
+                r = subprocess.run([sys.executable, str(script), "acme/widgets", "1"],
+                                    capture_output=True, text=True, env=env)
+                self.assertEqual(r.returncode, 3, (r.stdout, r.stderr))
+                out = json.loads(r.stdout)
+                self.assertEqual((out["eligible"], out["error"]), (False, True))
+                self.assertIn("no login", out["reasons"][0])
 
     @staticmethod
     def _fake_run(responses):
@@ -279,7 +294,7 @@ class TrivialCheck(unittest.TestCase):
         self.assertTrue(readable)
 
     def test_required_checks_unreadable_when_neither_source_reachable(self):
-        # neither endpoint could be read (both calls fail) — a reason on its own, never a vacuous pass.
+        # neither endpoint could be read (both calls fail): reported as such, never as "none configured"
         responses = {
             "rules/branches/main": (1, ""),
             "protection/required_status_checks": (1, ""),
@@ -337,6 +352,57 @@ class TrivialCheck(unittest.TestCase):
         self.assertTrue(out["error"])
         self.assertIn("commits/", out["reasons"][0])
         self.assertIn("/status", out["reasons"][0])
+
+    def _main_with_required(self, rules, protection):
+        """Run main() on an open PR with one green check-run named `build`; `rules` / `protection` are
+        what the rulesets and the branch-protection calls return (None = the call failed)."""
+        pr_json = {
+            "head": {"sha": "a" * 40}, "user": {"login": "someone-else"}, "title": "t",
+            "html_url": "https://example.test/pr/1", "state": "open", "draft": False,
+            "base": {"ref": "main", "repo": {"default_branch": "main"}},
+            "requested_reviewers": [{"login": "someone"}], "requested_teams": [], "changed_files": 0,
+        }
+        threads_empty = {"data": {"repository": {"pullRequest": {"reviewThreads": {
+            "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []}}}}}
+        runs = {"check_runs": [{"name": "build", "status": "completed", "conclusion": "success"}]}
+
+        def fake_gh(*args, paginate=False, allow_fail=False):
+            path = args[0]
+            if path.endswith("/pulls/1"): return pr_json
+            if "/pulls/1/files" in path: return []
+            if "/pulls/1/reviews" in path: return []
+            if path == "graphql": return threads_empty
+            if "/check-runs" in path: return [runs]
+            if path.endswith("/status"): return {"state": "pending", "total_count": 0, "statuses": []}
+            if "/rules/branches/main" in path: return rules
+            if path.endswith("/protection/required_status_checks"): return protection
+            raise AssertionError(f"unexpected gh call in this test: {args}")
+
+        buf = io.StringIO()
+        with mock.patch.object(self.tc, "gh", side_effect=fake_gh), \
+             mock.patch.object(self.tc, "AA", {"mode": "live", "classes": []}), \
+             mock.patch.object(sys, "argv", ["trivial-check.py", "acme/widgets", "1"]):
+            with contextlib.redirect_stdout(buf):
+                self.tc.main()
+        return json.loads(buf.getvalue())
+
+    def test_a_check_only_a_ruleset_requires_must_be_present(self):
+        # the repo is governed by a ruleset, classic protection is not readable: the required context
+        # that never reported is a reason, where reading protection alone saw no required check at all
+        rules = [{"type": "required_status_checks",
+                  "parameters": {"required_status_checks": [{"context": "build"}, {"context": "ci"}]}}]
+        out = self._main_with_required(rules, None)
+        self.assertEqual(out["protection"], {"required": ["build", "ci"], "missing": ["ci"], "source": "rulesets"})
+        self.assertIn("required checks not green/present: ci", out["reasons"])
+
+    def test_unreadable_required_checks_fall_back_to_every_check_run_green(self):
+        out = self._main_with_required(None, None)
+        self.assertEqual(out["protection"], "unreadable")
+        self.assertFalse([r for r in out["reasons"] if "required" in r or "check-run" in r], out["reasons"])
+
+    def test_no_required_check_configured_reads_as_none(self):
+        out = self._main_with_required([], None)
+        self.assertEqual(out["protection"], "none")
 
 
 class DiagramPlan(unittest.TestCase):

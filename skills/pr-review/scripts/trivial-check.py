@@ -9,8 +9,8 @@ Reads .context/state/pr-review/config.json `auto_approve` (PR_REVIEW_HOME overri
 `--head SHA` refuses (reason "head moved") when the live head differs — submit-review.sh --auto passes the reviewed head.
 `--head SHA` / `--head=SHA` with an empty or non-40-hex value (an unset shell variable in the caller), a
 repeated --head, or any other `--` flag exits 2: nothing disarms the check or is dropped silently.
-A missing or unparsable config.json is a setup problem, not a PR verdict: prints {"ok": false,
-"reasons": [...]} (the message also goes to stderr) and exits 3 — never a traceback.
+A missing or unparsable config.json, or one without a `login`, is a setup problem: the same error shape
+({"eligible": false, "error": true, "reasons": [...]}, the message also on stderr) and exit 3 — never a traceback.
 Never posts anything. A PR is eligible only if EVERY gate passes:
   - the user is a requested reviewer (login in requested_reviewers, or a requested team in auto_approve.owner_teams) — repo-sweep PRs never qualify
   - open, not draft, base == default branch (no stacked PRs), author != login, no human CHANGES_REQUESTED, 0 unresolved review threads
@@ -24,10 +24,10 @@ Never posts anything. A PR is eligible only if EVERY gate passes:
     bump is patch (x.y.Z), or minor when the package is in dev_tooling; major never; lockfiles must
     accompany at least one manifest; a patch that does not parse as unified-diff hunks is refused
   - CI: required contexts come from the rulesets endpoint first, classic branch protection as the fallback
-    (a ruleset-governed repo must not pass vacuously); when readable, every required context must be present
-    and green. When neither source is readable that is a reason on its own (never a silent pass); with no
-    required contexts at all, every check-run on head must have concluded success/skipped/neutral (>=1 run,
-    paginated) and the combined status must not be failure
+    (a ruleset-governed repo must not pass vacuously); every required context must be present and green.
+    With no required context — none configured, or neither source readable (`"protection": "unreadable"`
+    in the output) — every check-run on head must have concluded success/skipped/neutral (>=1 run,
+    paginated); the combined status must not be failure either way
   - docs class excludes `docs_exclude_globs` (dbt model docs, packages/constraints txt are not "docs")
   - repos in require_bot_review: a review by the environment's review bot (`github.review_bot`, override
     `PR_WATCH_BOT_LOGIN`) on head with a green Assessment
@@ -47,19 +47,22 @@ except Exception:  # env store missing — no bot gate
     REVIEW_BOT = os.environ.get("PR_WATCH_BOT_LOGIN", "")
 
 def load_config():
-    """Read config.json under ROOT, or print the documented {"ok": false, "reasons": [...]} shape and
-    exit 3 — never a traceback. Distinct from a single PR's ineligibility ({"eligible": false, ...}) or
-    a failed gh call ({"eligible": false, "error": true, ...}): this is a setup problem, not a verdict."""
+    """Read config.json under ROOT, or print the error shape a failed gh call prints
+    ({"eligible": false, "error": true, "reasons": [...]}) and exit 3 — never a traceback. Exit 3, not
+    1: the setup is wrong, a retry will not help."""
     path = os.path.join(ROOT, "config.json")
     try:
         with open(path) as f:
-            return json.load(f)
+            cfg = json.load(f)
+        if isinstance(cfg, dict) and cfg.get("login"):
+            return cfg
+        msg = f"config.json at {path} has no login"
     except FileNotFoundError:
         msg = f"no config.json at {path}"
     except (OSError, json.JSONDecodeError) as e:
         msg = f"config.json at {path} is unreadable: {e}"
     print(f"error: {msg}", file=sys.stderr)
-    print(json.dumps({"ok": False, "reasons": [msg]}))
+    print(json.dumps({"eligible": False, "error": True, "reasons": [msg]}))
     sys.exit(3)
 
 CFG = load_config()
@@ -363,18 +366,17 @@ def main():
     st_map = {x["context"]: x["state"] for x in st.get("statuses", [])}
     res["ci"] = f"check-runs {len(cr)} ({len(bad_runs)} not green) · status {st['state']}/{st['total_count']}"
     required, prot_source, readable = required_checks(repo, base_ref)
-    if not readable:
-        # neither the rulesets endpoint nor classic branch protection could be read: a reason to fall
-        # back, never a vacuous "all required checks green" pass (a ruleset-governed repo with no
-        # readable source must not look the same as a repo that genuinely has no required checks).
-        res["protection"] = "unreadable"
-        res["reasons"].append("required checks unreadable: neither rulesets nor branch protection could be read")
-    else:
+    if required:
         green = {c["name"] for c in cr if c["status"] == "completed" and c["conclusion"] in ("success", "skipped", "neutral")} | {k for k, v in st_map.items() if v == "success"}
         missing = [x for x in required if x not in green]
         res["protection"] = {"required": required, "missing": missing, "source": prot_source}
         if missing: res["reasons"].append("required checks not green/present: " + ", ".join(missing[:4]))
-        elif not required and not cr: res["reasons"].append("no check-runs on head")
+    else:
+        # no required context known: none configured, or neither source could be read (an older host
+        # without the rulesets endpoint, a token that may not read protection). Either way every
+        # check-run on head has to be green (bad_runs below) and there must be at least one.
+        res["protection"] = "none" if readable else "unreadable"
+        if not cr: res["reasons"].append("no check-runs on head")
     if bad_runs: res["reasons"].append("check-runs not green: " + ", ".join(bad_runs[:4]))
     if st["total_count"] and st["state"] != "success": res["reasons"].append(f"combined status {st['state']}")
     res["eligible"] = not res["reasons"] and res["class"] is not None

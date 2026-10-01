@@ -2,6 +2,8 @@
 # fetch-context.sh <owner/repo> <pr> [--out DIR] [--no-bundle]
 # Snapshots everything a review needs into one directory and decides the review mode. Read-only.
 # Fail-closed: a fetch that fails after a retry aborts (exit 1) — a swallowed error must never read as "no reviews".
+# A review-thread list that stops at a failed page still writes the snapshot (threads_complete=false) and then exits 1.
+# Exit 2: usage, no workspace, or a config.json without a login.
 # Besides the snapshot it writes the BUNDLE the runner works from, so no model turn is spent on `gh api contents`
 # or `git show`: head/<path> and base/<path> for every touched file, diffs/<path>.patch, checks+statuses,
 # kb-traps.md (repo KB § Known traps + sections matching touched paths), bundle.json (per-file stats, unresolved
@@ -46,7 +48,7 @@ q='query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){p
 cursor=""; : > "$out/threads.raw"; complete=true
 while :; do
   if [ -n "$cursor" ]; then resp=$(get graphql -f query="$q" -F o="$o" -F r="$r" -F n="$pr" -F c="$cursor"); else resp=$(get graphql -f query="$q" -F o="$o" -F r="$r" -F n="$pr"); fi
-  [ -z "$resp" ] && { complete=false; had_fetch_failure=1; break; }
+  [ -z "$resp" ] && { complete=false; had_fetch_failure=1; echo "review threads incomplete: a page of the thread list could not be fetched" >> "$ERR"; break; }
   jq -c '.data.repository.pullRequest.reviewThreads.nodes[]?' <<<"$resp" >> "$out/threads.raw"
   if [ "$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage' <<<"$resp")" = "true" ]; then cursor=$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor' <<<"$resp"); else break; fi
 done
@@ -117,7 +119,7 @@ if [ "$bundle" = 1 ]; then
   }
   # bounded concurrency: PR_REVIEW_FETCH_CONCURRENCY background fetches at a time (default 6), never one per file —
   # a 300-file PR must not fire 300 parallel requests and trip GitHub's secondary rate limit.
-  BLOBERR=$(mktemp -d "${TMPDIR:-/tmp}/fetch-blob-errors.XXXXXX"); i=0; n=0; CONC=${PR_REVIEW_FETCH_CONCURRENCY:-6}
+  BLOBERR=$(mktemp -d "${TMPDIR:-/tmp}/fetch-blob-errors.XXXXXX") || fail "cannot create a temp dir for the blob fetch errors"; i=0; n=0; CONC=${PR_REVIEW_FETCH_CONCURRENCY:-6}
   spawn(){ "$@" & n=$((n+1)); [ $((n % CONC)) -eq 0 ] && wait; }
   while IFS=$'\t' read -r status path prev size; do
     i=$((i+1))
@@ -186,5 +188,5 @@ if [ "$bundle" = 1 ]; then
   echo "bundle: $bundled_head files at head · $bundled_base at base · $skip_summary · diffs/ kb-traps.md bundle.json skipped.tsv"
 fi
 [ -s "$ERR" ] && echo "errors: $(wc -l < "$ERR") lines in $ERR"
-[ "$had_fetch_failure" -eq 0 ] || exit 1
+[ "$had_fetch_failure" -eq 0 ] || { echo "error: the snapshot is incomplete — see $ERR" >&2; exit 1; }
 exit 0
