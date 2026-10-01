@@ -568,6 +568,88 @@ class CtxPinCheck(unittest.TestCase):
         self.assertNotIn("install &&", line)  # no fetch can verify against a pin that is not there
 
 
+class TemplateOverrideCheck(unittest.TestCase):
+    """§5 (engine): an environment's `_templates/<type>.md` override must not drop a `## ` heading its type
+    declares in `sections` — a throwaway `ctx-store/types` + env-store fixture (never the live kit's types
+    or template overrides), the `ConfigSection`/`StoreCase` pattern test_kb_store.py uses."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.types_dir = Path(self.tmp.name) / "types"
+        self.types_dir.mkdir()
+        self.templates_dir = Path(self.tmp.name) / "env_templates"
+        self.templates_dir.mkdir()
+        self.kh = load_kit_health()
+        self._saved = (self.kh.type_template.TYPES_DIR, self.kh.kit_profile.TEMPLATES_DIR)
+        self.kh.type_template.TYPES_DIR = self.types_dir
+        self.kh.kit_profile.TEMPLATES_DIR = self.templates_dir
+
+    def tearDown(self):
+        self.kh.type_template.TYPES_DIR, self.kh.kit_profile.TEMPLATES_DIR = self._saved
+        self.tmp.cleanup()
+
+    def write_type(self, sections: list[str], log_section: str | None = None) -> None:
+        data: dict = {"sections": sections}
+        if log_section is not None:
+            data["log"] = {"section": log_section}
+        (self.types_dir / "widget.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def run_check(self) -> tuple[str | None, str]:
+        r = self.kh.Report()
+        self.kh.template_override_check(r)
+        levels = [k for k, n in r.counts.items() if n]
+        return (levels[0] if levels else None), (r.lines[-1] if r.lines else "")
+
+    def test_no_override_is_silent(self):
+        self.write_type(["Goal"])
+        level, line = self.run_check()
+        self.assertIsNone(level)
+        self.assertEqual(line, "")
+
+    def test_a_type_with_no_declared_sections_is_never_checked(self):
+        self.write_type([])
+        (self.templates_dir / "widget.md").write_text("## Nothing\n", encoding="utf-8")
+        level, _line = self.run_check()
+        self.assertIsNone(level)
+
+    def test_override_keeping_every_section_is_ok(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n\n## Notes\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "OK")
+        self.assertIn("widget", line)
+
+    def test_override_dropping_a_section_warns_naming_it_and_the_fix(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("Notes", line)
+        self.assertIn("widget", line)
+        self.assertIn("fall back to the engine template", line)
+
+    def test_override_with_a_section_only_inside_fenced_code_warns(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n\n```\n## Notes\n```\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("drops Notes", line)
+
+    def test_override_naming_a_section_twice_warns(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n\n## Notes\n\n## Goal\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("Goal more than once", line)
+
+    def test_an_override_that_cannot_be_read_warns_instead_of_crashing(self):
+        self.write_type(["Goal"])
+        (self.templates_dir / "widget.md").write_bytes(b"## Goal\n\xff\xfe\n")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("cannot be read", line)
+
+
 class ConfigSection(unittest.TestCase):
     """kit-health § 3 (config) on a throw-away store — never the live one (kb.ENV / kit_profile.ENV_DIR
     patched directly, the StoreCase pattern test_kb_store.py uses)."""
