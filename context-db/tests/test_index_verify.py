@@ -133,6 +133,37 @@ class IndexAndVerify(ContextRoot):
         self.assertNotIn("sessions/live.md", r.stderr)
 
 
+class LedgerWarnings(ContextRoot):
+    """verify.py's decision-ledger check (docs/carousel.md § After the answer): a line under Key
+    decisions & gotchas that already looks ledger-shaped (a date, then `→`) but is missing its
+    `; not <rejected>` clause warns; a free-form gotcha line in the same section never does."""
+
+    def ledger_doc(self, rel: str, good: str, no_reject: str, free_form: str) -> Path:
+        p = self.root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            "---\ntitle: Ledger\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-09-30\n---\n\n"
+            "# Ledger\n\n## Key decisions & gotchas\n\n"
+            f"- {good}\n- {no_reject}\n- {free_form}\n\n## Remaining work\n",
+            encoding="utf-8",
+        )
+        return p
+
+    def test_ledger_shaped_line_without_rejected_option_warns_once(self):
+        good = "2026-09-29 · pick a queue → SQS; not Kafka — ops already run SQS elsewhere"
+        no_reject = "2026-09-28 · pick a cache → Redis — it was already in the stack"
+        arrows_in_prose = "(2026-09-27) the cliff is invalidation (tools → system → messages); batch always-on edits"
+        free_form = "watch out, the fixture loader is order-dependent"
+        self.ledger_doc("repos/ledger.md", good, no_reject, free_form + "\n- " + arrows_in_prose)
+        run(self.root, "gen_index.py")
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)  # non-fatal — a warning, not a FAIL
+        self.assertEqual(v.stderr.count("repos/ledger.md:"), 1, v.stderr)  # exactly one warning
+        self.assertIn(f"repos/ledger.md: - {no_reject}", v.stderr)
+        self.assertNotIn(good, v.stderr)
+        self.assertNotIn(free_form, v.stderr)
+
+
 class NewSh(ContextRoot):
     def new(self, **env: str) -> subprocess.CompletedProcess:
         return subprocess.run(["sh", str(BIN / "new.sh")], env=env_for(self.root, **env), capture_output=True, text=True)
