@@ -159,10 +159,11 @@ def check_subject(subject: str, style: str) -> list[str]:
             if m.group("type") not in TYPES:
                 problems.append(f"type `{m.group('type')}` is not one of {', '.join(TYPES)}")
             desc = m.group("desc")
-            # mirrors the pinned conventional-release tool's `check-title` exactly (no exemption for a ticket
-            # key or an acronym leading the description — it rejects those too; a digit or a backtick is not
-            # an upper-case letter, so those still pass): any upper-case first character is refused.
-            if desc[:1].isupper():
+            # an upper-case first letter is refused, an acronym included (`API keys`) — the `pr-title` workflow's
+            # check refuses it too, so passing here must not mean failing there. The one exemption is a tracker
+            # key leading the description (`KEY-123 add …`), the form the styles table prescribes; a digit or a
+            # backtick is not an upper-case letter, so those pass.
+            if desc[:1].isupper() and not re.match(r"^[A-Z][A-Z0-9]*-\d+\b", desc):
                 problems.append("description starts with an upper-case letter (should start lower-case, "
                                  "imperative: `add …`, not `Add …`)")
             rx = key_regex()

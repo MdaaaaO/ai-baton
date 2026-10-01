@@ -37,10 +37,12 @@ file to someone else's repo — propose it to the owner if the style there reall
 | `ticket-key` | `<KEY>: <description>` | key per the env config's `tracker.key_regex`; ≤ 72 chars, no trailing period |
 | `free` | anything non-empty | for repos that explicitly want no rule |
 
-A `conventional` description's first character must be lower-case — no exemption for a ticket key or an
-acronym leading it (`feat(kb): API keys` and `feat(kb): KEY-1 add x` are both refused); a digit or a
-backtick leading is fine. This mirrors the pinned release tool's `check-title`, which the `pr-title`
-workflow also runs (§ Gates), so a title that passes `commit_style.py title` never fails there.
+A `conventional` description starts lower-case. An acronym leading it is refused like any other
+upper-case start (`feat(kb): API keys` → `feat(kb): rotate the API keys`); a digit or a backtick
+leading is fine. The one exemption is a tracker key leading the description (`KEY-123 add …`, the
+form in the table above). The kit repo's `pr-title` workflow runs the release tool's own title check,
+which refuses every upper-case start, a leading key too: a repo that runs that check puts the key
+later in the description (the kit's own titles end with `(#123)`).
 
 Always accepted: `Merge …`, `Revert "…"`, `fixup! …`, `squash! …` (git writes them). A message's
 second line must be blank; every line that starts with the comment char (`#`, or the repo's `core.commentChar`) is
