@@ -233,6 +233,12 @@ class LintUnit(unittest.TestCase):
     def test_two_consecutive_bare_dotted_edges_count_as_two_not_one_labelled(self):
         self.assertEqual(dp.unlabelled_edge_count("a -.-> b\n  b -.-> c"), 2)
 
+    def test_a_one_line_bare_chain_counts_every_edge(self):
+        """`a --> b --> c` and the dotted form on one line are two bare edges each — the label's first
+        character may not be an arrow character, so one bare edge never swallows the next."""
+        self.assertEqual(dp.unlabelled_edge_count("a --> b --> c"), 2)
+        self.assertEqual(dp.unlabelled_edge_count("a -.-> b -.-> c"), 2)
+
     def test_one_labelled_and_one_bare_edge_counts_only_the_bare_one(self):
         self.assertEqual(dp.unlabelled_edge_count("a -- calls --> b\n  c --> d"), 1)
 

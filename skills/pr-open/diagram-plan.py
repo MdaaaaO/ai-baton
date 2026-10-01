@@ -535,7 +535,7 @@ def sketch_line(ticket_text: str, repo: str, by_facet: dict[str, list[str]]) -> 
 # ── --check: the diagram lint (warn, never fail) ──────────────────────────────────────────────
 MERMAID_BLOCK_RE = re.compile(r"```mermaid[^\n]*\n(.*?)\n```", re.DOTALL)
 NODE_LABEL_RE = re.compile(r'(\w+)\[\s*"?([^"\]]*)"?\s*\]')
-LABELLED_EDGE_RE = re.compile(r"--\s*[^\s>][^-\n]*?\s*-->|-\.\s*[^\s>][^.\n]*?\s*\.->|-->\s*\|[^|]+\|")
+LABELLED_EDGE_RE = re.compile(r"--\s*[^\s>.-][^-\n]*?\s*-->|-\.\s*[^\s>.-][^.\n]*?\s*\.->|-->\s*\|[^|]+\|")
 BARE_EDGE_RE = re.compile(r"-->|-\.->")
 
 
