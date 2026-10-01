@@ -1,8 +1,11 @@
 """sync.sh + sync-check.sh against a temp clone and a bare origin: the .sync-status states (pending, ok, held,
 offline, error, lock-busy skipped), the fetch timeout with and without a `timeout` binary, sync.log rotation and
 the sha line only when HEAD moved, the release-tag channel (tag selection, the held preview, --accept, the
-`kit.channel main` opt-out), and which states sync-check warns about (#42). Stdlib unittest, no network: a hung or
-unreachable origin is faked with `remote.origin.uploadpack`. Run: make -C .claude/context-db test."""
+`kit.channel main` opt-out), the manifest verification `--accept` runs before applying a release tag (verified,
+failed attestation, a manifest naming the wrong commit, no `gh` on PATH, a release with no manifest.txt asset —
+against a stub `gh` on PATH, never the network or the real `gh`), and which states sync-check warns about (#42).
+Stdlib unittest, no network: a hung or unreachable origin is faked with `remote.origin.uploadpack`.
+Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import fcntl
 import os
@@ -28,6 +31,48 @@ def _env(home: Path, path: str | None = None) -> dict:
     if path is not None:
         env["PATH"] = path
     return env
+
+
+# A stub `gh` for verify_release (sync.sh): every call is logged (one line per invocation) to
+# $GH_STUB_LOG, and GH_AUTH_RC / GH_DOWNLOAD_RC / GH_DOWNLOAD_ERR / GH_ATTEST_RC / GH_ATTEST_ERR /
+# GH_MANIFEST_CONTENT (all optional; unset reads as success) choose what each subcommand does. A
+# successful "release download" writes $GH_MANIFEST_CONTENT to <the --dir value>/manifest.txt, same
+# as the real `gh` would land the asset. Never the real `gh`, never the network.
+GH_STUB = r"""#!/bin/bash
+echo "$*" >> "$GH_STUB_LOG"
+case "$*" in
+  "auth status"*)
+    if [ "${GH_AUTH_RC:-0}" != 0 ]; then
+      echo "${GH_AUTH_ERR:-gh: not logged in (stub)}" >&2
+      exit "${GH_AUTH_RC:-1}"
+    fi
+    exit 0 ;;
+  "release download "*)
+    rc="${GH_DOWNLOAD_RC:-0}"
+    if [ "$rc" != 0 ]; then
+      echo "${GH_DOWNLOAD_ERR:-gh: release not found (stub)}" >&2
+      exit "$rc"
+    fi
+    dir=""
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "--dir" ]; then dir="$a"; fi
+      prev="$a"
+    done
+    if [ -z "$dir" ]; then echo "stub gh: no --dir given" >&2; exit 9; fi
+    mkdir -p "$dir"
+    printf '%s' "$GH_MANIFEST_CONTENT" > "$dir/manifest.txt"
+    exit 0 ;;
+  "attestation verify "*)
+    rc="${GH_ATTEST_RC:-0}"
+    if [ "$rc" != 0 ]; then
+      echo "${GH_ATTEST_ERR:-gh: attestation verification failed (stub)}" >&2
+      exit "$rc"
+    fi
+    exit 0 ;;
+  *) echo "stub gh: unexpected call: $*" >&2; exit 9 ;;
+esac
+"""
 
 
 class SyncSh(unittest.TestCase):
@@ -108,6 +153,35 @@ class SyncSh(unittest.TestCase):
                 if os.path.isfile(f) and os.access(f, os.X_OK):
                     (d / e).symlink_to(f)
         return str(d)
+
+    def fake_github_remote(self, suffix: str = ""):
+        """Give the kit checkout's origin a github.com-shaped URL — a made-up placeholder repo, never
+        a real one — for verify_release's owner/repo parsing, while a `url.<base>.insteadOf` rewrite
+        keeps every actual git operation hitting the real local `origin.git`. `git config --get
+        remote.origin.url` (what origin_owner_repo() reads) returns the literal value unexpanded;
+        `git remote get-url` would instead hand back the rewrite target, so a test must not use that
+        to check what got configured."""
+        url = "https://github.com/example/kit-sync-test" + suffix
+        self.git("config", f"url.{self.origin}.insteadOf", url, cwd=self.kit)
+        self.git("remote", "set-url", "origin", url, cwd=self.kit)
+
+    def gh_bin(self) -> Path:
+        """The stub `gh`'s directory, written once per test."""
+        d = self.tmp / "ghbin"
+        if not d.exists():
+            d.mkdir()
+            gh = d / "gh"
+            gh.write_text(GH_STUB)
+            gh.chmod(0o755)
+        return d
+
+    def gh_env(self, **gh_vars) -> dict:
+        """self.env with PATH resolving `gh` to the stub only (any real `gh` on the host is excluded,
+        per the brief: never the real `gh`), GH_STUB_LOG set, and the given GH_* overrides applied."""
+        env = _env(self.tmp, path=str(self.gh_bin()) + os.pathsep + self.path_without("gh"))
+        env["GH_STUB_LOG"] = str(self.tmp / "gh.log")
+        env.update({k: str(v) for k, v in gh_vars.items()})
+        return env
 
     def backdate(self, secs: int):
         """Move the epoch (field 3) of a pending/offline status `secs` into the past."""
@@ -489,7 +563,10 @@ class SyncSh(unittest.TestCase):
         self.sync()
         self.assertEqual(self.status()[1], "held")
         tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
-        r = self.sync(args=["--accept"])
+        # no gh on this PATH: manifest verification (the dedicated tests further down cover it on its
+        # own) cannot run, so this also exercises the "cannot run" contract — applied, `unverified`
+        # in the detail — without that being what this test is about
+        r = self.sync(env=_env(self.tmp, path=self.path_without("gh")), args=["--accept"])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.status()[1], "ok")
         self.assertIn("v0.1.0", self.status_file.read_text())
@@ -520,7 +597,7 @@ class SyncSh(unittest.TestCase):
     def test_sync_check_is_silent_at_the_tag_with_unreleased_commits_on_origin(self):
         self.origin_commit("a")
         self.seed_tag("v0.1.0")
-        self.sync(args=["--accept"])
+        self.sync(env=_env(self.tmp, path=self.path_without("gh")), args=["--accept"])
         self.origin_commit("b")  # unreleased: the release channel is not behind because of it
         self.sync()
         self.assertEqual(self.status()[1], "ok")
@@ -534,6 +611,139 @@ class SyncSh(unittest.TestCase):
         self.seed_tag("v0.1.0")
         self.git("fetch", "-q", "--tags", "origin", cwd=self.kit)
         self.assertIn("origin/main is 1 commit(s) ahead", self.check())
+
+    # ── --accept: manifest verification before applying a release tag ──
+    def test_accept_verified_manifest_applies_cleanly(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        self.assertEqual(self.status()[1], "held")
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertNotIn("unverified", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
+        log = (self.tmp / "gh.log").read_text()
+        self.assertIn("attestation verify", log)
+        self.assertIn("release download v0.1.0", log)
+
+    def test_accept_names_the_repo_without_a_dot_git_suffix(self):
+        for suffix in (".git", ".git/", "/"):
+            with self.subTest(suffix=suffix):
+                self.fake_github_remote(suffix)
+                out = subprocess.run(
+                    ["bash", "-c", 'eval "$(sed -n \'/^origin_owner_repo() {/,/^}/p\' "$0")"; origin_owner_repo',
+                     str(self.kit / "sync.sh")], cwd=self.kit, capture_output=True, text=True)
+                self.assertEqual(out.stdout.strip(), "example/kit-sync-test", out.stderr)
+
+    def test_accept_passes_the_origin_repo_to_gh(self):
+        self.fake_github_remote(".git")
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        r = self.sync(env=self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n"), args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        log = (self.tmp / "gh.log").read_text()
+        self.assertIn("--repo example/kit-sync-test ", log)
+        self.assertIn("--signer-workflow example/kit-sync-test/.github/workflows/release.yml", log)
+        self.assertNotIn(".git/", log.replace("/.github/", "/"))
+
+    def test_accept_non_github_origin_never_calls_gh(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        r = self.sync(env=self.gh_env(), args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("unverified", self.status_file.read_text())
+        self.assertFalse((self.tmp / "gh.log").exists(), "no gh call for an origin that is not on github.com")
+
+    def test_accept_failed_attestation_applies_nothing(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        before = self.rev_parse("HEAD", cwd=self.kit)
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_RC="1",
+                           GH_ATTEST_ERR="gh: attestation verification failed (stub)")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("nothing", r.stderr.lower())
+        self.assertIn("applied", r.stderr.lower())
+        self.assertEqual(self.status()[1], "error")
+        self.assertIn("v0.1.0", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), before, "a failed check applies nothing")
+
+    def test_accept_manifest_commit_mismatch_applies_nothing(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        before = self.rev_parse("HEAD", cwd=self.kit)
+        wrong_sha = "0" * 40
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {wrong_sha}\n")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("nothing", r.stderr.lower())
+        self.assertEqual(self.status()[1], "error")
+        self.assertIn("v0.1.0", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), before, "a commit mismatch applies nothing")
+
+    def test_accept_no_gh_on_path_applies_unverified(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = _env(self.tmp, path=self.path_without("gh"))
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("unverified", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha, "cannot-run still applies the update")
+
+    def test_accept_release_without_manifest_asset_applies_unverified(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = self.gh_env(GH_DOWNLOAD_RC="1",
+                           GH_DOWNLOAD_ERR='gh: no assets found matching pattern "manifest.txt" (stub)')
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("unverified", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha, "no asset still applies the update")
+
+    def test_accept_kit_channel_main_skips_verification(self):
+        self.git("config", "kit.channel", "main", cwd=self.kit)
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        tip_sha = self.rev_parse("HEAD", cwd=self.seed)
+        # no gh at all: if verify_release ran anyway it would show "unverified" (no gh on PATH)
+        env = _env(self.tmp, path=self.path_without("gh"))
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertNotIn("unverified", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tip_sha)
+
+    def test_sync_check_silent_on_unverified_ok(self):
+        # the `unverified` word is kit-health's to warn on — sync-check has no `ok)` case at
+        # all, so this locks that in rather than relying on an absence to stay accidental. A real
+        # sync first, so hooks/origin/main are all in order; other checks (e.g. the env-store check)
+        # may still warn about unrelated fixture state, so assert on the sync status line only,
+        # matching the count-based style used elsewhere in this file rather than requiring total
+        # silence.
+        self.sync()
+        self.status_file.write_text("2026-01-01T00:00:00Z ok kit@abc1234 (v0.1.0) unverified (no gh on PATH)\n")
+        out = self.check()
+        self.assertEqual(out.count("unverified"), 0)
+        self.assertEqual(out.count("last sync"), 0)
 
 
 if __name__ == "__main__":

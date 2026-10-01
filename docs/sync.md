@@ -60,9 +60,10 @@ refused pull is seen by the next session instead of staying silent:
 |---|---|---|
 | `pending <epoch>` | written just before the fetch (bounded by `timeout 60`, or a shell watchdog where `timeout` is missing); still there = the run was killed | when older than 5 minutes |
 | `ok <kit@sha>` | fetched; fast-forwarded, already in step, or already past the held tag | never |
+| `ok <kit@sha> unverified (<reason>)` | `--accept` applied a release tag whose manifest attestation could not be checked (no `gh`, not authenticated, offline, or the release has no `manifest.txt` asset) | not from `sync-check.sh` — the standalone word `unverified` is kit-health's check to warn on |
 | `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | not from the status line — its kit check names the waiting tag for as long as `HEAD` lacks it |
 | `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
-| `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed | always |
+| `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed, or an accepted release tag failed manifest verification | always |
 
 ## Channel: release tags or `main`
 
@@ -76,6 +77,20 @@ and the other files a clone runs unattended — git hooks, `settings.json`, `set
 `context-db/bin/`) and leaves `.sync-status` at `held <tag>`. Only `sh .claude/sync.sh --accept` (what
 `make claude_sync` passes) fast-forwards to the held tag; the `SessionEnd` hook never passes `--accept`,
 so an unattended run can only hold, never apply.
+
+Before that fast-forward, `--accept` verifies the held tag against its attested manifest the way
+[`CONTRIBUTING.md`](../CONTRIBUTING.md) § Releases documents: download the tag's `manifest.txt` release
+asset, `gh attestation verify` it against `.github/workflows/release.yml` (owner/repo read from the
+checkout's own `origin` remote, never hardcoded), then check the manifest's `commit <sha>` line against
+the tag's own commit. Verified → applies as above. The check ran and **failed** (bad attestation or a
+manifest naming a different commit) → applies nothing, `.sync-status` is `error <reason>` and the run
+exits 1 with the reason on stderr — the one error that does, since `--accept` only ever runs in the
+foreground. The check **cannot run at
+all** — no `gh` on `PATH`, `gh` not authenticated, offline, or the release predates the manifest and
+carries no `manifest.txt` asset — → applies anyway: a clone must still be able to catch up with no
+network or an unauthenticated `gh`, so `.sync-status` is `ok …` with the standalone word `unverified`
+and a short reason appended (`kit-health`'s check, not `sync-check.sh`'s, warns on that word). `kit.channel
+main` never verifies — there is no release tag to verify against.
 
 A contributor who wants the old behaviour — always track `origin/main`, no hold — opts out with:
 
