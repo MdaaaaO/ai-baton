@@ -2,7 +2,7 @@
 name: ticket-open
 description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating it."
 metadata:
-  version: "11"
+  version: "13"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
@@ -29,6 +29,7 @@ kind X in this environment" and stop — never improvise.
    ```
    **Goal** — one line: what this delivers and why
    **Plan** — 2–4 terse steps
+   **Sketch** — step 4 below decides this line; either a drawing + marker or `Sketch: SKIP (<reason>)`
    **Links** — epic/parent · related tickets · any existing PR (all clickable)
    **Sizing:** `<model>`, <delegate|main session>. <one-line reason>
    ```
@@ -37,11 +38,20 @@ kind X in this environment" and stop — never improvise.
    with `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main session>" "<reason>"` so it
    parses back the same way; it goes in the body, not a label (label sets differ per repo, the kit stays
    repo-agnostic).
-4. **Context doc.** If this ticket is its own initiative, create the context doc
+4. **Sketch — gated on the Sizing line** (`docs/diagrams.md`, the whiteboard-defence contract; this step
+   adds only this skill's own piece, it does not restate the contract). `Sizing: opus` → draw the target
+   state: WHERE the change sits (placement), the target shape of WHAT changes, and one WHY row when an
+   alternative existed; Mermaid for WHERE where `tracker.kind` renders it (GitHub), else a table for WHAT
+   and a nested list for WHERE. Then stamp the marker onto the drawn section:
+   `python3 $BATON/skills/ticket-open/sketch.py stamp --repo-slug <owner/repo> --paths <entry>[,<entry>…] --components <name>[,<name>…]`
+   (the section on stdin) and use its stdout as the Sketch section. Every other Sizing writes one line,
+   `Sketch: SKIP (<reason>)` — the Sizing model plus a few words, e.g. `sonnet-sized, specified fix` —
+   and nothing else; no drawing, no marker.
+5. **Context doc.** If this ticket is its own initiative, create the context doc
    (`make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=<key-slug>`); if it belongs to an existing
    epic, add it under that epic's context doc instead. Never cite the local `.context/` path on the
    ticket (`WORKSPACE.md` § Rules).
-5. **Register / coordinate.** If another live session owns the epic (`.context/SESSION_INDEX.md`),
+6. **Register / coordinate.** If another live session owns the epic (`.context/SESSION_INDEX.md`),
    agree ownership before starting work on it. Flush the new ticket to the context doc.
 
 ## Adapter — Jira (tracker.kind = jira)
