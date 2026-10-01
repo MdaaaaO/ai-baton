@@ -191,6 +191,12 @@ ENQUEUE_RE = re.compile(r"enqueue\.sh\s+[a-z0-9][A-Za-z0-9._-]*\s+[/$\"']")
 # always carries one (merge/comment/close take the item as an argument; create does not — a freshly created
 # PR/ticket's number is not yet known from the command that made it, so it is reported without one).
 ACTIVITY_LIMIT = 40  # at most this many output lines, headers included (Done #53)
+# Segment-anchored (not `(?<![\w-])` like GH_WRITE_RE): `git` is common enough as plain text — "echo git
+# commit" or a sentence mentioning it — that only a real command start should count. Matches right after
+# `^`, `&&`, `;`, `||` or `|`, with an optional `-C <path>` between `git` and the verb, so `cd <dir> &&
+# git commit …` and `git -C <dir> commit …` both count alongside the plain `git commit …` / `git push …`.
+GIT_COMMIT_RE = re.compile(r"(?:^|&&|\|\||;|\|)\s*git(?:\s+-C\s+\S+)?\s+commit\b", re.MULTILINE)
+GIT_PUSH_RE = re.compile(r"(?:^|&&|\|\||;|\|)\s*git(?:\s+-C\s+\S+)?\s+push\b", re.MULTILINE)
 PR_CREATE_RE = re.compile(r"(?<![\w-])gh\s+pr\s+create\b")
 PR_CREATE_API_RE = re.compile(r"(?<![\w-])gh\s+api\b(?:[^;|&\n]|\\\n)*?/pulls(?:[/?\s]|$)(?:[^;|&\n]|\\\n)*?-X\s+POST\b")
 PR_MERGE_RE = re.compile(r"pr-merge\.sh\s+\S+\s+(\d+)")
@@ -254,9 +260,9 @@ def collect_activity(path: str) -> list[dict]:
                         seen_files.add(key); files.append(key)
             elif name == "Bash":
                 cmd = (inp.get("command") or "").strip()
-                if cmd.startswith("git commit"):
+                if GIT_COMMIT_RE.search(cmd):
                     commits.append("commit")
-                elif cmd.startswith("git push"):
+                elif GIT_PUSH_RE.search(cmd):
                     commits.append("push")
                 if PR_CREATE_RE.search(cmd) or PR_CREATE_API_RE.search(cmd):
                     prs.append("created")
@@ -295,19 +301,28 @@ def collect_activity(path: str) -> list[dict]:
 
 def fmt_activity(groups: list[dict], limit: int = ACTIVITY_LIMIT) -> list[str]:
     """Render `collect_activity`'s groups as `header (count)` + `- line` bullets, at most `limit` lines
-    total. Over the limit: the header counts stay exact (the true total), and the single group
-    contributing the most bullet lines is cut short with one `… (+N)` line standing in for the rest —
-    never the other groups, and never a silent drop with no `(+N)` marker."""
+    total. Over the limit: the header counts stay exact (the true total), and bullet lines come off the
+    largest group first, then the next-largest, and so on — each one cut short with one `… (+N)` line
+    standing in for the rest it hides — until the total fits. A group already down to a single line (or
+    with none) can't be trimmed further and is skipped, so `limit` only binds when enough bullets exist
+    to cut; never a silent drop with no `(+N)` marker."""
     total = sum(1 + len(g["lines"]) for g in groups)
     over = total - limit
     if over > 0 and groups:
-        gi = max(range(len(groups)), key=lambda i: len(groups[i]["lines"]))
-        lines = groups[gi]["lines"]
-        n = len(lines)
-        keep = max(0, n - over - 1)
-        hidden = n - keep
-        if hidden > 0:
+        order = sorted(range(len(groups)), key=lambda i: len(groups[i]["lines"]), reverse=True)
+        for gi in order:
+            if over <= 0:
+                break
+            lines = groups[gi]["lines"]
+            n = len(lines)
+            if n <= 1:
+                continue
+            keep = max(0, n - over - 1)
+            hidden = n - keep
+            if hidden <= 0:
+                continue
             groups[gi] = {**groups[gi], "lines": lines[:keep] + [f"… (+{hidden})"]}
+            over -= n - (keep + 1)
     out = []
     for g in groups:
         out.append(f"{g['header']} ({g['count']})")

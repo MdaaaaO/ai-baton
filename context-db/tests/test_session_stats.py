@@ -237,6 +237,25 @@ class Transcript(unittest.TestCase):
                 if m:
                     self.assertEqual(m.group("pr_verb") == "create", want_open)
 
+    def test_git_commit_push_regex_table(self):
+        """GIT_COMMIT_RE / GIT_PUSH_RE are segment-anchored (after `^`, `&&`, `;`, `||`, `|`), not
+        `cmd.startswith(...)` — so a chained `cd <dir> && git commit` or a `git -C <dir> commit` still
+        counts, same as the plain form (#53 nit); `echo git commit …` or `git status` must not."""
+        cases = [
+            ("git commit -m 'msg'", True, False),
+            ("cd /tmp/work && git commit -m 'msg'", True, False),
+            ("git -C /tmp/work commit -m 'msg'", True, False),
+            ("git push -u origin feat/x", False, True),
+            ("cd /tmp/work && git push -u origin feat/x", False, True),
+            ("git -C /tmp/work push -u origin feat/x", False, True),
+            ("echo git commit is great", False, False),      # "git commit" as plain text, not invoked
+            ("git status", False, False),
+        ]
+        for cmd, want_commit, want_push in cases:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(ss.GIT_COMMIT_RE.search(cmd) is not None, want_commit)
+                self.assertEqual(ss.GIT_PUSH_RE.search(cmd) is not None, want_push)
+
     def test_k_and_stats_for(self):
         self.assertEqual([ss._k(n) for n in (5, 1500, 2_500_000)], ["5", "2k", "2.5M"])
         saved = os.environ.pop("CLAUDE_CODE_SESSION_ID", None)  # the test may itself run inside a Claude session
@@ -321,6 +340,33 @@ class Activity(unittest.TestCase):
         self.assertLessEqual(len(out), ss.ACTIVITY_LIMIT)
         self.assertEqual(out[0], "Files edited (50)")  # the header keeps the true count
         self.assertTrue(any(ln.startswith("- … (+") for ln in out))
+
+    def test_over_the_limit_trims_the_next_largest_group_until_it_fits(self):
+        """Five equal groups of 10 lines (55 lines total, headers included) used to cap only the single
+        largest group, printing 46 lines even though `limit` is 40 — the trim must keep moving to the
+        next-largest group until the total actually fits (#53 nit)."""
+        groups = [{"header": f"Group {g}", "count": 10, "lines": [f"g{g}-item{i}" for i in range(10)]}
+                  for g in range(5)]
+        out = ss.fmt_activity(groups)
+        self.assertLessEqual(len(out), ss.ACTIVITY_LIMIT)
+        blocks: dict[str, list[str]] = {}
+        header = None
+        for ln in out:
+            if ln.startswith("Group "):
+                header = ln
+                blocks[header] = []
+            else:
+                blocks[header].append(ln)
+        trimmed_any = False
+        for g in range(5):
+            header = f"Group {g} (10)"
+            self.assertIn(header, blocks)  # the header count stays the true 10, trimmed or not
+            lines = blocks[header]
+            full = [f"- g{g}-item{i}" for i in range(10)]
+            if lines != full:
+                trimmed_any = True
+                self.assertTrue(lines[-1].startswith("- … (+"))
+        self.assertTrue(trimmed_any)
 
     def test_drafts_are_counted_only_never_detailed(self):
         lines = [assistant("a1", "2026-09-28T09:00:01Z", [
