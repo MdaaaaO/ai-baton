@@ -25,18 +25,29 @@ Usage (from the workspace root; stdlib only):
            type label with --pr (bug/hotfix → bugfix; tech-debt/refactor → refactor), else feature.
   --check  with --pr: compare the body's `<!-- diagram-plan: … -->` marker to the fresh plan;
            prints `OK`, `DRIFT <old> → <new>`, `NO MARKER` or `MALFORMED MARKER <line>`; exit 3 on
-           drift (or a marker that fails to parse) so a watcher can act.
+           drift (or a marker that fails to parse) so a watcher can act. Also prints the diagram
+           lint: `LINT: ok`, or one `LINT: warn <reason>` line per finding (a `(this PR)` node whose
+           label names no changed path/basename/stem, or an edge with no label) — warnings only,
+           the exit code still follows the marker result above.
+  --sketch <ticket-text-file|->  reads the ticket's last sketch marker for this run's repo (needs
+           --repo or --pr to name it) and prints exactly one line, always exit 0: `Sketch: none` (no
+           marker for this repo), `Sketch: matches`, or `Sketch: differs (+a, −b)` — `+` the changed
+           paths in a substantive facet no marker entry covers and no component names by stem, `−`
+           the marker entries/components that cover no changed path, `+` items first, sorted, capped
+           at 6 combined with a trailing `+N more`.
   --trivial-lines / --secondary-share  override the two facet-weighting thresholds below (rarely
            needed; a repo whose diffs run unusually large or small).
 
-Exit codes: 0 success (a plan was printed, or --check found the marker current); 1 a `gh`/`git`
-call failed (message on stderr, `FAIL …`); 2 bad usage (no changed files found, or --check without
---pr); 3 --check found drift, no marker, or a marker present but malformed.
+Exit codes: 0 success (a plan was printed, --check found the marker current, or --sketch printed its
+line); 1 a `gh`/`git` call failed (message on stderr, `FAIL …`); 2 bad usage (no changed files found,
+--check without --pr, or --sketch with no repo named); 3 --check found drift, no marker, or a marker
+present but malformed (never from --sketch or the lint, which only warn).
 
 Facet globs: core defaults below (generic conventions) + the env config's overlay
 `diagrams.repos.<owner/repo>.facets.<facet>: [globs]` (first match wins, overlay before defaults)
 and `diagrams.repos.<owner/repo>.ignore: [globs]`. Environment-specific paths live in the env config,
-never here (kit-health greps for leaks).
+never here (kit-health greps for leaks). The `ddl` facet (object/before/after/grant WHAT table) raises
+nothing on its own — it exists only once a repo's overlay names `facets.ddl`.
 """
 from __future__ import annotations
 
@@ -53,6 +64,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
+sys.path.insert(0, str(KIT / "skills" / "ticket-open"))
+import fsutil  # noqa: E402 — the one `<file | ->` reader
+import sketch as ticket_sketch  # noqa: E402 — owns the sketch marker's grammar; never re-parsed here
 try:
     import kit_profile  # type: ignore
 except Exception:  # env store absent (bare checkout) — core defaults still work
@@ -154,6 +168,11 @@ MATRIX: dict[str, dict[str, str | None]] = {
     "skill": {
         "where": "invocation `flowchart` — who triggers it, which scripts/agents it runs, what it writes; only if the skill has a runtime (scripts/hooks)",
         "what": None,
+        "runs": None,
+    },
+    "ddl": {
+        "where": None,
+        "what": "object delta **table** — `object | before | after | grant`; one row per touched object, the grant/permission change on its own row when it changed",
         "runs": None,
     },
 }
@@ -453,6 +472,117 @@ def malformed_marker_line(body: str) -> str | None:
     return None
 
 
+# ── --sketch: the ticket's sketch marker vs this PR's changed paths ──────────────────────────
+def substantive_paths(by_facet: dict[str, list[str]]) -> list[str]:
+    """Changed paths in a substantive facet (not SUPPORTING, not `other`) — the same set `plan()` calls
+    substantive, flattened, before the trivial-lines weighting that only decides which facet gets a block."""
+    return [p for f, ps in by_facet.items() if f not in SUPPORTING and f != "other" for p in ps]
+
+
+def path_stem(path: str) -> str:
+    """The basename without its extension — how a sketch marker's `components=` names an in-repo unit."""
+    base = path.rsplit("/", 1)[-1]
+    return base.rsplit(".", 1)[0] if "." in base else base
+
+
+def covers(entry: str, path: str) -> bool:
+    """The sketch marker's general "covers" relation: `entry == path`, or `entry` ends in `/` and `path`
+    starts with it; a leading `+` is dropped first. The same relation the pickup check (`sketch.py`) uses,
+    read against the PR's changed paths here instead of the default branch's tree."""
+    e = entry[1:] if entry.startswith("+") else entry
+    return e == path or (e.endswith("/") and path.startswith(e))
+
+
+def sketch_diff(entries: list[str], components: list[str], paths: list[str]) -> tuple[list[str], list[str]]:
+    """(`+`, `−`) — `+` the changed `paths` no `entries` member covers and no `components` member names by
+    stem, sorted; `−` the `entries`/`components` that cover (or name) no `path`, sorted."""
+    stems = {path_stem(p) for p in paths}
+    plus = sorted({p for p in paths if not any(covers(e, p) for e in entries) and path_stem(p) not in components})
+    minus_entries = (e for e in entries if not any(covers(e, p) for p in paths))
+    minus_components = (c for c in components if c not in stems)
+    minus = sorted(set(minus_entries) | set(minus_components))
+    return plus, minus
+
+
+def render_sketch(plus: list[str], minus: list[str]) -> str:
+    """`Sketch: matches` (both empty) or `Sketch: differs (+a, −b)` — `+` items first, sorted, then `−`
+    items, sorted; the combined list capped at 6 entries with a trailing `+N more` for the rest."""
+    if not plus and not minus:
+        return "Sketch: matches"
+    ordered = [("+", p) for p in plus] + [("−", m) for m in minus]
+    total = len(ordered)
+    shown = ordered[:6]
+    groups = {"+": [v for s, v in shown if s == "+"], "−": [v for s, v in shown if s == "−"]}
+    parts = [f"{sign}{','.join(vs)}" for sign, vs in groups.items() if vs]
+    text = ", ".join(parts)
+    if total > 6:
+        text += f", +{total - 6} more"
+    return f"Sketch: differs ({text})"
+
+
+def sketch_line(ticket_text: str, repo: str, by_facet: dict[str, list[str]]) -> str:
+    """The one line `pr-open` pastes under `## Diagrams`: `Sketch: none` when the ticket carries no marker
+    for `repo` (no Sketch section, a `Sketch: SKIP` line, or a marker that does not parse), else `matches` or
+    `differs (...)` against the PR's changed paths in a substantive facet."""
+    markers = ticket_sketch.parse_markers(ticket_text)
+    entry = markers.get(repo)
+    if entry is None:
+        return "Sketch: none"
+    plus, minus = sketch_diff(entry["paths"], entry["components"], substantive_paths(by_facet))
+    return render_sketch(plus, minus)
+
+
+# ── --check: the diagram lint (warn, never fail) ──────────────────────────────────────────────
+MERMAID_BLOCK_RE = re.compile(r"```mermaid[^\n]*\n(.*?)\n```", re.DOTALL)
+NODE_LABEL_RE = re.compile(r'(\w+)\[\s*"?([^"\]]*)"?\s*\]')
+LABELLED_EDGE_RE = re.compile(r"--\s*\S[^-]*?\s*-->|-\.\s*\S[^.]*?\s*\.->|-->\s*\|[^|]+\|")
+BARE_EDGE_RE = re.compile(r"-->|-\.->")
+
+
+def is_flow_block(block: str) -> bool:
+    """Only a `flowchart`/`graph` block carries the bracket nodes and labelled-intent edges the lint
+    checks — a `sequenceDiagram`/`stateDiagram-v2` block uses different syntax and is skipped."""
+    first = next((ln.strip() for ln in block.splitlines() if ln.strip()), "")
+    return first.lower().startswith(("flowchart", "graph"))
+
+
+def node_labels(block: str) -> dict[str, str]:
+    return {node_id: label.strip() for node_id, label in NODE_LABEL_RE.findall(block) if label.strip()}
+
+
+def unlabelled_edge_count(block: str) -> int:
+    remaining = LABELLED_EDGE_RE.sub(" ", block)  # drop labelled edges first so their own `-->` is never recounted
+    return len(BARE_EDGE_RE.findall(remaining))
+
+
+def lint_block(n: int, block: str, changed_paths: list[str]) -> list[str]:
+    if not is_flow_block(block):
+        return []
+    warnings = []
+    stems = {path_stem(p) for p in changed_paths}
+    basenames = {p.rsplit("/", 1)[-1] for p in changed_paths}
+    for node_id, label in node_labels(block).items():
+        if "(this pr)" not in label.lower():
+            continue
+        if (any(p in label for p in changed_paths) or any(b in label for b in basenames)
+                or any(s in label for s in stems)):
+            continue
+        warnings.append(f"block {n} node {node_id!r} labelled (this PR) names no changed path, basename or stem")
+    n_unlabelled = unlabelled_edge_count(block)
+    if n_unlabelled:
+        warnings.append(f"block {n} has {n_unlabelled} unlabelled edge(s)")
+    return warnings
+
+
+def lint(body: str, changed_paths: list[str]) -> list[str]:
+    """One warning per finding, across every `flowchart`/`graph` Mermaid block in `body`, numbered in
+    reading order. Never raises — an empty list means `LINT: ok`."""
+    out = []
+    for n, block in enumerate(MERMAID_BLOCK_RE.findall(body), 1):
+        out.extend(lint_block(n, block, changed_paths))
+    return out
+
+
 def render(p: dict, ignored: list[str], mk: str) -> str:
     out = []
     fac = "  ".join(f"{f}({n}{', ' + str(p['lines'][f]) + ' lines' if p['lines'].get(f) else ''})"
@@ -517,7 +647,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--files", nargs="+", metavar="PATH", help="the changed paths, given directly")
     ap.add_argument("--files-from", metavar="LISTFILE", help="a file of paths, one per line (plain, name-status or numstat lines)")
     ap.add_argument("--type", choices=sorted(INTENT), help="PR intent; overrides the label-derived one")
-    ap.add_argument("--check", action="store_true", help="with --pr: compare the body marker to the fresh plan")
+    ap.add_argument("--check", action="store_true", help="with --pr: compare the body marker to the fresh plan, plus the diagram lint")
+    ap.add_argument("--sketch", metavar="TICKET_TEXT_FILE_OR_-",
+                     help="compare the ticket's last sketch marker for this run's repo (needs --repo or --pr) against the changed paths; "
+                          "prints one Sketch: line, exit 0")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--trivial-lines", type=int, default=TRIVIAL_LINES, metavar="N",
                      help=f"a substantive facet under N changed lines never earns a block (default {TRIVIAL_LINES})")
@@ -546,6 +679,14 @@ def main(argv: list[str]) -> int:
 
     intent = a.type or next((TYPE_LABELS[l.lower()] for l in labels if l.lower() in TYPE_LABELS), "feature")
     by_facet, lines, ignored = classify(files, repo)
+
+    if a.sketch is not None:
+        if not repo:
+            print("FAIL --sketch needs a repo (--repo <dir>|<owner/repo> or --pr <owner/repo> <n>)", file=sys.stderr)
+            return 2
+        print(sketch_line(fsutil.read_arg(a.sketch), repo, by_facet))
+        return 0
+
     p = plan(by_facet, lines, intent, trivial_lines=a.trivial_lines, secondary_share=a.secondary_share)
     if repo_dir is not None and repo is None:  # the fallback is visible, never silent
         p["notes"].append(f"no `origin` remote in the --repo directory ({a.repo}; or an unparsable URL) — the env-config "
@@ -556,6 +697,12 @@ def main(argv: list[str]) -> int:
         if not a.pr:
             print("FAIL --check needs --pr", file=sys.stderr)
             return 2
+        warnings = lint(body, [f for f, _ in files])
+        if warnings:
+            for w in warnings:
+                print(f"LINT: warn {w}")
+        else:
+            print("LINT: ok")
         old = marker_from_body(body)
         new = mk[len("<!-- diagram-plan: "):-len(" -->")]
         if old is None:

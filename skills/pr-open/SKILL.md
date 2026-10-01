@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "22"
+  version: "23"
   updated: "2026-09-30"
   reviewed: "2026-09-25"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
@@ -97,54 +97,51 @@ only where the environment has Slack (`systems.slack`); everything else holds in
 "When you create a PR description please also add event flow diagrams, and component / architecture diagrams"
 (2026-09-17) — refined 2026-09-25: "not just all diagrams randomly added but rather the right set of diagrams
 based on PR content — if pipeline then pipeline flow, if model changes the table before and after, if
-architecture then components". A reviewer should see *where the change sits*, *what changes* and *what runs*
-without reading the diff — and nothing that the PR does not raise.
+architecture then components". A reviewer should see *where the change sits*, *what changes*, *what runs* and,
+on a feature PR, *why this shape* — without reading the diff, and nothing the PR does not raise.
 
 **Three principles**
-1. **One artifact per reviewer question, only for the questions the content raises.** WHERE does the change
-   sit (placement), WHAT changes (before → after), what RUNS when (flow). At most three blocks; most PRs need
-   one or two. A refactor raises WHERE + WHAT, never RUNS; a bugfix raises RUNS only; a docs/config/deps/test
-   PR raises none.
+1. **One artifact per reviewer question, only for the questions the content raises.** WHERE (placement), WHAT
+   (before → after), RUNS (flow) — at most three blocks, most PRs need one or two — plus WHY (the option that
+   lost) on a feature PR with a real alternative. A refactor raises WHERE + WHAT, never RUNS; a bugfix raises
+   RUNS only; a docs/config/deps/test PR raises none; none of those three ever carries WHY.
 2. **The form follows the content — Mermaid is not always the answer.** Graphs and flows are Mermaid
    (`flowchart`, `sequenceDiagram`, `stateDiagram-v2`); a *delta* (columns, fields, resources, jobs, seed
-   windows) is a markdown **table** `x | before | after | note`. A column list as an `erDiagram` is worse than
-   the table.
+   windows, DDL grants) is a markdown **table** `x | before | after | note`; WHY is always a table too (≤ 4
+   rows). A column list as an `erDiagram` is worse than the table.
 3. **The plan is deterministic and comes from the diff, not from habit.** Changed paths → facets → plan,
    computed by `diagram-plan.py`; the same facets that pick the labels. The model draws exactly what the plan
-   asks for and stamps the plan marker into the body so a later push can be checked for drift.
+   asks for, writes the WHY table and the Sketch reason by hand, and stamps the plan marker so a later push
+   can be checked for drift.
 
 **Procedure**
-1. From the workspace root, with the branch pushed or the diff local:
-   ```
-   python3 $BATON/skills/pr-open/diagram-plan.py --repo <repo-dir> [--base origin/main] [--type bugfix|refactor|feature]
-   python3 $BATON/skills/pr-open/diagram-plan.py --pr <owner/repo> <n>      # after create: files + type label from GitHub
-   ```
-   `--repo` takes the clone's **directory** (the worktree you are about to push): `git diff` runs there and
-   the env-config overlay key is read from its `origin` — sessions run from the workspace root, so a bare
-   `git diff` in the cwd would answer "not a git repo". Before the first commit (writing the body, nothing
-   pushed yet), the same `--repo <repo-dir>` call still plans correctly — the diff is `--base…HEAD` plus the
-   working tree and untracked files by default (`--committed-only` drops back to history only). An
-   `owner/repo` slug is still accepted with `--files-from`; `--files <path> <path>…` takes changed paths
-   directly, not a list file (`--files-from <list.txt>` is the list-file form). It prints the facets with
-   their weight, the dominant one, the plan (`WHERE` / `WHAT` / `RUNS`, a `?`
-   suffix = conditional on its "only when" clause), notes, and the `<!-- diagram-plan: … -->` marker. `--type`
-   is the PR *intent* (paths cannot show it); with `--pr` it is read from the type label (`bug`/`hotfix` →
-   bugfix, `tech-debt`/`refactor` → refactor, else feature).
+1. From the workspace root, with the branch pushed or the diff local, run `diagram-plan.py --repo <repo-dir>
+   [--base origin/main] [--type bugfix|refactor|feature]` (or `--pr <owner/repo> <n>` after create, which also
+   reads the type label). It prints the facets, the dominant one, the plan (`WHERE`/`WHAT`/`RUNS`, a `?`
+   suffix = conditional), notes, and the `<!-- diagram-plan: … -->` marker — every flag and mode, and the facet
+   → question matrix: `reference/diagrams.md`.
 2. Draw **exactly** the planned blocks under `## Diagrams`, in WHERE → WHAT → RUNS order, each with a one-line
-   caption naming the question it answers. A conditional block (`RUNS?`) is drawn only when its clause holds;
-   otherwise one line says why not ("no routing change — no flow diagram"). `SKIP` → one line under
-   `## Diagrams` ("Docs-only, no diagram." / "Config-only, no diagram.") and no block.
-3. Paste the marker as the last line of the `## Diagrams` section (HTML comment, invisible on GitHub).
+   caption naming the question it answers; a conditional block (`RUNS?`) only when its clause holds, else one
+   line why not. Add the WHY table (`reference/diagrams.md` § WHY) on a feature PR with a real alternative.
+   `SKIP` → one line under `## Diagrams` and no block. Drawing is delegated to a Sonnet worker with the brief
+   in `docs/diagrams.md` § The drawing brief; the main session validates and pastes.
+3. Directly under `## Diagrams`, paste the `Sketch:` line when the ticket carries a sketch marker for this
+   repo — `diagram-plan.py --sketch <ticket-text>` computes `none` / `matches` / `differs (+a, −b)`
+   (`reference/diagrams.md` § `--sketch`); add only the ` — <reason>` for `differs`, never edit the computed
+   part. Then paste the plan marker as the section's last line (HTML comment, invisible on GitHub).
 4. Validate every Mermaid block (`reference/diagrams.md` § Rules that hold for every block), then create/update the PR.
 5. **On every later push** run `diagram-plan.py --pr <o/r> <n> --check` — `OK` / `DRIFT <old> → <new>` / `NO
-   MARKER` / `MALFORMED MARKER <line>` (a hand-edited marker that no longer parses — fix the line, don't
-   just redraw), each of the last three exit 3. On drift, redraw in the same turn as the code (a new route
-   file, a dropped RPC, a model added to the PR). The `pr-watch` head-move event is the reminder — the same
-   event is `verified.py check`'s STALE reminder too (§ Verified step 4).
+   MARKER` / `MALFORMED MARKER <line>` (fix a hand-edited marker, don't just redraw), each of the last three
+   exit 3; it also prints `LINT: ok` or one `LINT: warn <reason>` per finding (`reference/diagrams.md` §
+   Lint) — warn only, the exit code stays the marker result. On drift, redraw in the same turn as the code,
+   and re-run `--sketch` too when the ticket has a marker. Before creating or updating the PR, and again
+   after any redraw this step triggers, run the cold-reader gate on the `## Diagrams` section
+   (`docs/cold-reader.md`) when the plan is not `SKIP`. The `pr-watch` head-move event is the reminder — the
+   same event is `verified.py check`'s STALE reminder too (§ Verified step 4).
 
-Exit codes, the facet → question matrix (and its intent overlays / composition rules), and the rules
-that hold for every block (native Mermaid rendering, validate-before-publishing, honest labels,
-right-sizing, keeping them current): `reference/diagrams.md`.
+Exit codes, the facet → question matrix (intent overlays / composition), the WHY table, `--sketch`, the lint,
+the `ddl` facet, and the rules every block follows (native Mermaid rendering, validate-before-publishing,
+honest labels, right-sizing, keeping them current): `reference/diagrams.md`.
 
 ## Verified — real command output, never a claim (owner decision, 2026-09-30)
 
