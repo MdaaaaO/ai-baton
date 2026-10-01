@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "27"
+  version: "28"
   updated: "2026-10-01"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -178,6 +178,11 @@ jobs · Slack drafts`
 - On `session-end` the block is written under `## Session stats` in your session file and one row is
   appended to `.context/sessions/_ledger.md` (cross-session ledger; `_`-prefixed files are skipped by
   the index). The ledger feeds `.context/reference/claude-cost-tracking.md`.
+- The line ends with `split hint: …` once the average prefix over the last `SESSION_STATS_SPLIT_WINDOW`
+  turns (default 20) reaches `SESSION_STATS_SPLIT_THRESHOLD` tokens (default 150k) — a sustained fat
+  prefix, not one busy turn, and never on the strength of turns from before the last auto-compact. When
+  it shows: finish the current step, run `session-handoff`, and continue in a successor session — one
+  scope per session (`WORKSPACE.md` § Cost & context hygiene).
 
 ## 3. On end (part of `session-handoff`)
 

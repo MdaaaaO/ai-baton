@@ -14,9 +14,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const req = createRequire(path.join(process.cwd(), '/'));
 const load = async (name) => (await import(pathToFileURL(req.resolve(name)).href)).default;
 
-let JSDOM, DOMPurifyFactory, mermaid;
+let JSDOM, dom, DOMPurifyFactory, mermaid;
 try {
   ({ JSDOM } = await load('jsdom'));
+  dom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
   DOMPurifyFactory = await load('dompurify');
   mermaid = await load('mermaid');
 } catch (e) {
@@ -26,9 +29,6 @@ try {
     `\`npm ci --no-audit --no-fund\` there, then run this script with that dir as your CWD.`);
   process.exit(2);
 }
-const dom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
-globalThis.window = dom.window;
-globalThis.document = dom.window.document;
 globalThis.DOMPurify = DOMPurifyFactory(dom.window);
 mermaid.initialize({ startOnLoad: false });
 
