@@ -136,6 +136,15 @@ class CheckBareClaim(unittest.TestCase):
         self.assertTrue(bad)
         self.assertIn("no pasted output", bad[0][1])
 
+    def test_rendered_empty_tail_is_bare(self):
+        """A block as render_block writes it with an empty tail (a blank line inside the fence) is bare —
+        the fence itself must never count as output."""
+        body = "## Verified\nCommand: `make test`\nExit: `0`\n\n```\n\n```\n"
+        start, section = v.verified_section(body)
+        bad = v.bare_claims(start, section)
+        self.assertTrue(bad)
+        self.assertIn("no pasted output", bad[0][1])
+
     def test_mixed_list_names_only_the_bare_line(self):
         body = "## Verified\n- `pytest -q` → `12 passed`\n- it works trust me\n"
         start, section = v.verified_section(body)

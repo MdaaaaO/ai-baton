@@ -174,7 +174,7 @@ def bare_claims(section_start: int, section: str) -> list[tuple[int, str]]:
         return []
     if "Command:" in section and "Exit:" in section:
         m = FENCE_RE.search(section)
-        if m and m.group(1).strip():
+        if m and m.group(2).strip():
             return []
         return [(section_start, "declared-command block has no pasted output")]
     out: list[tuple[int, str]] = []
