@@ -67,11 +67,21 @@ jobs:
         if: steps.detect.outputs.tag != ''
         run: python3 context-db/bin/release_manifest.py build --out manifest.txt
 
+      # The manifest's own build-provenance attestation (no secrets: Sigstore signs with the job's OIDC
+      # token) — docs/contributing.md § Releases has the verify command. Before the Release step, so a
+      # published Release never exists without it; a re-run attests the same bytes again, which is harmless.
+      - name: Attest the manifest
+        if: steps.detect.outputs.tag != ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: manifest.txt
+
       # Whenever the commit carries its tag, new or from an earlier attempt: a missing Release is
       # created as a draft (immutable releases, the repo setting, only lock a published one), the
       # manifest uploaded, then the draft published; an already-published Release is a no-op. A draft
       # left over from an interrupted run (upload or publish failed) is finished, not re-created:
-      # `--clobber` makes a second upload of the same deterministic manifest harmless.
+      # `--clobber` makes a second upload of the same deterministic manifest harmless. Only gh's
+      # "release not found" counts as missing; any other gh error fails the step.
       - name: GitHub Release
         if: steps.detect.outputs.tag != ''
         env:
@@ -79,7 +89,14 @@ jobs:
           VERSION: ${{ steps.detect.outputs.version }}
           TAG: ${{ steps.detect.outputs.tag }}
         run: |
-          state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          if state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>&1)"; then
+            :
+          elif [[ "$state" == *"release not found"* ]]; then
+            state=missing
+          else
+            echo "$state" >&2
+            exit 1
+          fi
           if [[ "$state" == "missing" ]]; then
             uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release notes "$VERSION" > notes.md
             gh release create "$TAG" manifest.txt --title "$TAG" --notes-file notes.md --draft --verify-tag
@@ -89,11 +106,3 @@ jobs:
             gh release upload "$TAG" manifest.txt --clobber
             gh release edit "$TAG" --draft=false
           fi
-
-      # The manifest's own build-provenance attestation (no secrets: Sigstore signs with the job's OIDC
-      # token) — docs/contributing.md § Releases has the verify command.
-      - name: Attest the manifest
-        if: steps.detect.outputs.tag != ''
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: manifest.txt
