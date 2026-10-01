@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.7.0 (2026-10-01)
+
+
+### Features
+
+* **engine:** inject resolved profile values at session start (#370) ([#394](https://github.com/MdaaaaO/ai-baton/issues/394)) ([9cb4387](https://github.com/MdaaaaO/ai-baton/commit/9cb438739186883a3c26f76ba1635ccfae498961))
+* **engine:** re-pin ctx-store v0.6.0 for actors + maintain (#393) ([#395](https://github.com/MdaaaaO/ai-baton/issues/395)) ([ddbe8ce](https://github.com/MdaaaaO/ai-baton/commit/ddbe8ce8d60f7fe93889af4a3ab90ce0c77d2a64))
+* **skills:** ask open user decisions as one carousel (#354) ([#399](https://github.com/MdaaaaO/ai-baton/issues/399)) ([d6a12a6](https://github.com/MdaaaaO/ai-baton/commit/d6a12a6d010f771e5c6ef8e70e11eddc4330c38c))
+* **skills:** add ticket-carousel (#105) ([#401](https://github.com/MdaaaaO/ai-baton/issues/401)) ([d2f2aa5](https://github.com/MdaaaaO/ai-baton/commit/d2f2aa5c28d881c8540c96ee9251f1285439b724))
+* **skills:** decision ledger for carousel answers (#379) ([#402](https://github.com/MdaaaaO/ai-baton/issues/402)) ([a211984](https://github.com/MdaaaaO/ai-baton/commit/a2119842faa26b8f28877b9c9666601f78204db3))
+* **skills:** successor narrates the handoff back first (#382) ([#406](https://github.com/MdaaaaO/ai-baton/issues/406)) ([7100fd4](https://github.com/MdaaaaO/ai-baton/commit/7100fd44cf0e0ddf3918720d92f2be86d04dab8d))
+* **engine:** evidence items on every Verified claim (#60) ([#403](https://github.com/MdaaaaO/ai-baton/issues/403)) ([30b5e4c](https://github.com/MdaaaaO/ai-baton/commit/30b5e4c60e8c22b59e66531b7dcf60a8c75cbc26))
+* **engine:** derive what a session did from its transcript (#53) ([#405](https://github.com/MdaaaaO/ai-baton/issues/405)) ([7699c80](https://github.com/MdaaaaO/ai-baton/commit/7699c8024d14983c23d344bb56398b93d0680818))
+* **session-handoff:** review the activity list before the flush (#53) ([#408](https://github.com/MdaaaaO/ai-baton/issues/408)) ([531e911](https://github.com/MdaaaaO/ai-baton/commit/531e9114544f2fa9b85cbaaec81da595312fa1c1))
+* **ticket-open:** stamp and check the ticket sketch marker (#384) ([#407](https://github.com/MdaaaaO/ai-baton/issues/407)) ([e78b207](https://github.com/MdaaaaO/ai-baton/commit/e78b207c6f37e66a2a9e4263e67be1f8bea96df9))
+* **pr-review:** explainability finding class and WBD line (#387) ([#410](https://github.com/MdaaaaO/ai-baton/issues/410)) ([026e0af](https://github.com/MdaaaaO/ai-baton/commit/026e0af05adb1f108319d546a0d9b93a1e90ddac))
+* **session-handoff:** optional Architecture section in epic docs (#389) ([#411](https://github.com/MdaaaaO/ai-baton/issues/411)) ([91809be](https://github.com/MdaaaaO/ai-baton/commit/91809be8ea1d5c5de6491ba5d4f6fa700986ee31))
+* **pr-watch:** diagrams drift line in the head-moved brief (#388) ([#409](https://github.com/MdaaaaO/ai-baton/issues/409)) ([afb3869](https://github.com/MdaaaaO/ai-baton/commit/afb38696a621ece1a47f4562c761f2d502d5f4ae))
+* **ticket:** sketch on pivot, close and pickup (#385) ([#413](https://github.com/MdaaaaO/ai-baton/issues/413)) ([3187d6d](https://github.com/MdaaaaO/ai-baton/commit/3187d6da9c3e86bc8982d985b251244bd62d3209))
+* **pr-open:** run the verify command into the PR body (#100) ([#412](https://github.com/MdaaaaO/ai-baton/issues/412)) ([6738218](https://github.com/MdaaaaO/ai-baton/commit/6738218153e50bcb0f941c4d016f6bdaab5cf702))
+* **docs:** cold-reader gate brief for tickets and handoffs (#378) ([#414](https://github.com/MdaaaaO/ai-baton/issues/414)) ([e9be5df](https://github.com/MdaaaaO/ai-baton/commit/e9be5df5d50bbd601b2ac43868fa16ce1736ae14))
+* **skills:** diff-shaped pivots and handoffs (#381) ([#415](https://github.com/MdaaaaO/ai-baton/issues/415)) ([e5ae1f9](https://github.com/MdaaaaO/ai-baton/commit/e5ae1f93c0694ad2b5f35e67ebecc3dd90b3f324))
+* **pr-open:** why row, sketch line, diagram lint, ddl facet (#386) ([#416](https://github.com/MdaaaaO/ai-baton/issues/416)) ([72ba31a](https://github.com/MdaaaaO/ai-baton/commit/72ba31ac595f38443a9abe36cfe99f582ecf6697))
+* **engine:** word-count length check for tickets, PRs, handoffs (#383) ([#419](https://github.com/MdaaaaO/ai-baton/issues/419)) ([2f85042](https://github.com/MdaaaaO/ai-baton/commit/2f85042714ea19cd6f3ddcc861a3501d6c511c9e))
+* **skills:** assumption register for standing-go calls (#380) ([#422](https://github.com/MdaaaaO/ai-baton/issues/422)) ([ccb4c31](https://github.com/MdaaaaO/ai-baton/commit/ccb4c31be75fc5974dfe097341bfb984bd022030))
+* **engine:** re-ground the session after a compaction (#56) ([#420](https://github.com/MdaaaaO/ai-baton/issues/420)) ([02a39b9](https://github.com/MdaaaaO/ai-baton/commit/02a39b9b6f8109f67333b281d4fa3df443cddd2a))
+* **kit:** drawing-brief pointer in ticket-open, whiteboard line (#390) ([#423](https://github.com/MdaaaaO/ai-baton/issues/423)) ([7c48c18](https://github.com/MdaaaaO/ai-baton/commit/7c48c181ca9df3b0327d59cd457cc35baddd4ed9))
+
+
+### Documentation
+
+* **skills:** session-register reads the footer from the block (#370) ([#400](https://github.com/MdaaaaO/ai-baton/issues/400)) ([b3260fc](https://github.com/MdaaaaO/ai-baton/commit/b3260fcfcdaaabdcf0293e75fe69bbf2ca55cbfe))
+* **diagrams:** add the whiteboard defence contract [skip-bump] (#374) ([#404](https://github.com/MdaaaaO/ai-baton/issues/404)) ([1076882](https://github.com/MdaaaaO/ai-baton/commit/10768829ffc31921f40ab432337a4b6e23c9820a))
+
 ## 0.6.0 (2026-09-30)
 
 
