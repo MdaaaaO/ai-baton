@@ -12,7 +12,8 @@ labels: []
 ## Whiteboard
 
 <!-- Only when the change moves a session flow (a step order, a hook, a hand-off): one line — where it
-     plugs in → what changes — or `Sketch: SKIP (<reason>)`; `docs/diagrams.md` says when a drawing is due. -->
+     plugs in → what changes — or `Sketch: SKIP (<reason>)`. This is the issue's own gate; the drawing itself
+     follows `docs/diagrams.md` (where a ticket draws only at `Sizing: opus`). -->
 
 ## Why
 
