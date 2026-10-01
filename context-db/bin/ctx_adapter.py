@@ -227,8 +227,8 @@ def install(url: str = CTX_REPO, version: str = CTX_VERSION, sha: str = CTX_SHA,
     somewhere else and installs nothing, naming both shas; a commit that could not be read at all is not a
     mismatch, it is applied and recorded unverified (`_write_pin_status`; see `_clone_commit_sha`). The clone lands
     in a temporary sibling first and is renamed into place, so an interrupted fetch never leaves a half copy the
-    resolver would take. Already present: returns it untouched (no re-check; a stale cache is kit-health's `pin`
-    line to catch, see `ctx_pin_check` in kit-health.py)."""
+    resolver would take. Already present: returns it untouched (no re-check, no new record; a stale cache is
+    kit-health's `pin` line to catch, see `ctx_pin_check` in kit-health.py — its fix removes the copy first)."""
     dest = dest or pinned_dir(version)
     if _usable(dest / "ctx"):
         return dest
@@ -943,7 +943,8 @@ def main(argv: list[str] | None = None) -> int:
         status = pin_status()
         if status is None:
             print(f"no sha record at the pinned location ({pinned_dir()}) — not installed, or installed before "
-                  "this check existed; `ctx_adapter.py install` (re-)writes it", file=sys.stderr)
+                  "this check existed; `ctx_adapter.py install` writes one with a fresh fetch only, so remove "
+                  "that directory first when a copy is already there", file=sys.stderr)
             return 1
         print(f"pinned_sha {status.get('pinned_sha') or ''}")
         print(f"cloned_sha {status.get('cloned_sha') or ''}")

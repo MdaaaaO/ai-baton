@@ -312,6 +312,7 @@ class InstallShaPin(Base):
         r = self.adapter("pin", XDG_CACHE_HOME=str(self.t / "cache"))
         self.assertEqual(r.returncode, 1)
         self.assertIn("ctx_adapter.py install", r.stderr)
+        self.assertIn("remove that directory first", r.stderr)  # `install` keeps a copy that is already there
 
 
 class HooksAreSilentWithoutCtxOrStore(Base):

@@ -1205,19 +1205,24 @@ def ctx_pin_check(r: Report) -> None:
     if os.environ.get("KIT_CTX", "").strip():
         r.add(OK, "engine", base)
         return
+    # `install` returns a usable pinned copy untouched (no new fetch, no new record): removing it comes first
+    refetch = f"remove `{Path(ctx_path).parent}` (the copy at the pin), then {fix}"
     rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "pin"])
     if rc != 0:
-        r.add(WARN, "engine", f"{base}; sha not recorded for this install (older than this check) — {fix}")
+        r.add(WARN, "engine", f"{base}; sha not recorded for this install (older than this check) — {refetch}")
         return
     info = dict(ln.split(" ", 1) for ln in out.splitlines() if " " in ln)
     verified = info.get("verified") == "true"
     pinned_sha = info.get("pinned_sha", "")
-    if not verified:
-        r.add(WARN, "engine", f"{base}; sha unverified at install (offline, or the clone's commit could not be "
-                              f"read) — {fix}")
-    elif want_sha and pinned_sha != want_sha:
+    if not want_sha:
+        r.add(WARN, "engine", f"{base}; the adapter pins no sha (`CTX_SHA` is empty), so no install can be "
+                              "verified — set it beside `CTX_VERSION` in ctx_adapter.py")
+    elif not verified:
+        r.add(WARN, "engine", f"{base}; sha unverified at install (the clone's commit could not be read, or the "
+                              f"adapter pinned no sha then) — {refetch}")
+    elif pinned_sha != want_sha:
         r.add(WARN, "engine", f"{base}; this install verified sha {pinned_sha}, the adapter now expects "
-                              f"{want_sha} — {fix}")
+                              f"{want_sha} — {refetch}")
     else:
         r.add(OK, "engine", f"{base}, sha {pinned_sha} verified")
 

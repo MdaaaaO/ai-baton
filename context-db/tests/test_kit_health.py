@@ -421,18 +421,29 @@ class CtxPinCheck(unittest.TestCase):
         self.assertEqual(level, "WARN")
         self.assertIn("api 1", line)
         self.assertIn("sha not recorded", line)
+        self.assertIn("remove `/opt`", line)  # `install` alone returns the copy at the pin untouched
         self.assertIn("ctx_adapter.py adopt`", line)
 
     def test_an_unverified_sha_is_a_warning(self):
         level, line = self.check(pin=(0, f"pinned_sha {GOOD_SHA}\ncloned_sha \nverified false", ""))
         self.assertEqual(level, "WARN")
         self.assertIn("sha unverified at install", line)
+        self.assertNotIn("offline", line)  # an offline install fails at the clone and records nothing
+        self.assertIn("remove `/opt`", line)
 
     def test_a_pin_stale_against_the_current_adapter_sha_is_a_warning(self):
         level, line = self.check(pin=(0, f"pinned_sha {OTHER_SHA}\ncloned_sha {OTHER_SHA}\nverified true", ""))
         self.assertEqual(level, "WARN")
         self.assertIn(f"verified sha {OTHER_SHA}", line)
         self.assertIn(f"now expects {GOOD_SHA}", line)
+        self.assertIn("remove `/opt`", line)
+
+    def test_an_adapter_without_a_sha_pin_names_the_constant_not_a_reinstall(self):
+        level, line = self.check(adapter_version=(0, "v0.4.0\napi 1\nsha ", ""),
+                                 pin=(0, "pinned_sha \ncloned_sha \nverified false", ""))
+        self.assertEqual(level, "WARN")
+        self.assertIn("`CTX_SHA` is empty", line)
+        self.assertNotIn("install &&", line)  # no fetch can verify against a pin that is not there
 
 
 class ConfigSection(unittest.TestCase):
