@@ -428,6 +428,55 @@ class EnvFileCheck(unittest.TestCase):
         self.assertEqual(r.counts[kh.WARN], 1, text)
         self.assertIn("outside the session-env block", text)
 
+    def test_a_stray_baton_line_whose_path_is_gone_warns_once_with_the_delete_advice(self):
+        with tempfile.TemporaryDirectory() as td:
+            gone = Path(td) / "gone"
+            envfile = Path(td) / "env"
+            envfile.write_text(f"export BATON={gone}\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("delete the stray line", text)
+        self.assertIn("does not exist", text)
+        self.assertNotIn("start a new session", text)
+
+    def test_a_stray_project_dir_line_warns_only_when_its_path_is_gone(self):
+        with tempfile.TemporaryDirectory() as td:
+            kept = Path(td) / "kept"
+            kept.mkdir()
+            gone = Path(td) / "gone"
+            envfile = Path(td) / "env"
+            envfile.write_text(f"export CLAUDE_PROJECT_DIR={kept}\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+            self.assertEqual(r.counts[kh.WARN], 0, "\n".join(r.lines))
+            envfile.write_text(f"export CLAUDE_PROJECT_DIR={gone}\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("delete the stray line", text)
+        self.assertNotIn("start a new session", text)
+
+    def test_a_quoted_path_with_a_space_is_read_as_one_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            kept = Path(td) / "with space"
+            kept.mkdir()
+            envfile = Path(td) / "env"
+            envfile.write_text(
+                f"{kit_profile.SESSION_ENV_BEGIN}\nexport BATON='{kept}'\n{kit_profile.SESSION_ENV_END}\n",
+                encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        self.assertEqual(r.counts[kh.WARN], 0, "\n".join(r.lines))
+
+    def test_bytes_that_are_not_utf8_do_not_crash_the_check(self):
+        with tempfile.TemporaryDirectory() as td:
+            gone = Path(td) / "gone"
+            envfile = Path(td) / "env"
+            envfile.write_bytes(
+                b"export OTHER=\xff\xfe\n" + f"{kit_profile.SESSION_ENV_BEGIN}\nexport BATON={gone}\n"
+                f"{kit_profile.SESSION_ENV_END}\n".encode("utf-8"))
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
+
     def test_other_file_content_never_prints(self):
         with tempfile.TemporaryDirectory() as td:
             gone = Path(td) / "gone"

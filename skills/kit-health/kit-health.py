@@ -1020,16 +1020,18 @@ _ENV_FILE_EXPORT_RE = re.compile(r"^export (BATON|CLAUDE_PROJECT_DIR)=(.*)$")
 
 
 def env_file_wiring(r: Report) -> None:
-    """`$CLAUDE_ENV_FILE` gone stale: a `BATON`/`CLAUDE_PROJECT_DIR` line whose path no longer exists (a
-    workspace or install that moved or was removed since the SessionStart hook last wrote it), or an `export
-    BATON=` line sitting outside the `kit_profile.SESSION_ENV_BEGIN`/`SESSION_ENV_END` block the hook replaces
-    (residue from before the hook switched to replacing that block in place, which the block-replace never
-    touches). Unset, missing or unreadable: no finding — never the file's other content, which may hold secrets."""
+    """`$CLAUDE_ENV_FILE` gone stale. Inside the `kit_profile.SESSION_ENV_BEGIN`/`SESSION_ENV_END` block the
+    SessionStart hook replaces: a `BATON`/`CLAUDE_PROJECT_DIR` line whose path no longer exists (a workspace or
+    install that moved or was removed since the hook last wrote it) — the next session start repairs it. Outside
+    the block, which the hook never touches: any `export BATON=` line, and a `CLAUDE_PROJECT_DIR` line whose path
+    is gone — only deleting the line repairs those, so each gets that advice and no other. Unset, missing or
+    unreadable: no finding, and a harness that does not hand the variable to this process leaves nothing to
+    read. Never the file's other content, which may hold secrets."""
     path = os.environ.get("CLAUDE_ENV_FILE", "").strip()
     if not path:
         return
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return
     inside = False
@@ -1046,15 +1048,18 @@ def env_file_wiring(r: Report) -> None:
             continue
         var, raw = m.group(1), m.group(2)
         try:
-            value = shlex.split(raw)[0] if raw.strip() else ""
+            value = (shlex.split(raw) or [""])[0]
         except ValueError:
             value = raw
-        if value and not Path(value).exists():
+        gone = bool(value) and not Path(value).exists()
+        if not inside:
+            if var == "BATON" or gone:
+                r.add(WARN, "machine", f"`$CLAUDE_ENV_FILE` carries `export {var}={value}` outside the "
+                      "session-env block" + (", and the path does not exist" if gone else "")
+                      + " — delete the stray line, the hook only replaces the block")
+        elif gone:
             r.add(WARN, "machine", f"`$CLAUDE_ENV_FILE` exports `{var}={value}`, which does not exist — stale "
                   "session env file, start a new session to let the SessionStart hook refresh it")
-        if var == "BATON" and not inside:
-            r.add(WARN, "machine", f"`$CLAUDE_ENV_FILE` carries `export BATON={value}` outside the session-env "
-                  "block — delete the stray line, the hook only replaces the block")
 
 
 def sec_machine(r: Report) -> str:
