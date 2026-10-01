@@ -225,7 +225,7 @@ class GitIgnoredScan(unittest.TestCase):
 
 
 class AutoCompactCheck(unittest.TestCase):
-    """`autocompact_wiring()` (#398): the real backstop is the user's `autoCompactWindow` setting in
+    """`autocompact_wiring()`: the real backstop is the user's `autoCompactWindow` setting in
     `~/.claude/settings.json`, or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for a cloud session — never the
     plugin's own settings.json (a no-op there). Unset is a WARN, set (either way) is OK."""
 
@@ -237,6 +237,7 @@ class AutoCompactCheck(unittest.TestCase):
             with mock.patch.object(kh.Path, "home", return_value=home), \
                  mock.patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
+                os.environ.pop("CLAUDE_CODE_DISABLE_1M_CONTEXT", None)
                 kh.autocompact_wiring(r)
         text = "\n".join(r.lines)
         self.assertEqual(r.counts[kh.WARN], 1)
@@ -252,6 +253,7 @@ class AutoCompactCheck(unittest.TestCase):
             with mock.patch.object(kh.Path, "home", return_value=home), \
                  mock.patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
+                os.environ.pop("CLAUDE_CODE_DISABLE_1M_CONTEXT", None)
                 kh.autocompact_wiring(r)
         text = "\n".join(r.lines)
         self.assertEqual(r.counts[kh.WARN], 0)
@@ -268,6 +270,17 @@ class AutoCompactCheck(unittest.TestCase):
         text = "\n".join(r.lines)
         self.assertEqual(r.counts[kh.WARN], 0)
         self.assertIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", text)
+
+    def test_a_session_capped_at_200k_is_ok_without_either(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(kh.Path, "home", return_value=Path(td)), \
+                 mock.patch.dict(os.environ, {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}):
+                os.environ.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
+                kh.autocompact_wiring(r)
+        self.assertEqual(r.counts[kh.WARN], 0)
+        self.assertIn("CLAUDE_CODE_DISABLE_1M_CONTEXT", "\n".join(r.lines))
 
 
 class DiskCheck(unittest.TestCase):

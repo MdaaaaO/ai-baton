@@ -192,7 +192,7 @@ class Transcript(unittest.TestCase):
             self.assertEqual(s["context"], {"peak": 200, "avg": 200})  # not 400: the first chunk's ctx was backed out
 
     def test_split_hint_fires_over_threshold_with_a_full_window(self):
-        """#398: the hint fires once the avg context over the configured window reaches the
+        """The hint fires once the avg context over the configured window reaches the
         configured threshold, with a full window of turns behind it."""
         with tempfile.TemporaryDirectory() as d:
             path = write_transcript(Path(d), "split-over", [
@@ -242,8 +242,10 @@ class Transcript(unittest.TestCase):
         with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_THRESHOLD": "9000", "SESSION_STATS_SPLIT_WINDOW": "7"}):
             self.assertEqual(ss.split_threshold(), 9000)
             self.assertEqual(ss.split_window(), 7)
-        with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_THRESHOLD": "not-a-number"}):
-            self.assertEqual(ss.split_threshold(), ss.SPLIT_THRESHOLD_DEFAULT)
+        for bad in ("not-a-number", "0", "-5"):
+            with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_THRESHOLD": bad, "SESSION_STATS_SPLIT_WINDOW": bad}):
+                self.assertEqual(ss.split_threshold(), ss.SPLIT_THRESHOLD_DEFAULT, bad)
+                self.assertEqual(ss.split_window(), ss.SPLIT_WINDOW_DEFAULT, bad)
         self.assertEqual(ss.split_window(), ss.SPLIT_WINDOW_DEFAULT)
 
     def test_collect_reads_transcript_in_one_pass(self):

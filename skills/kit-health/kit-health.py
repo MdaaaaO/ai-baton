@@ -835,12 +835,16 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
 
 
 def autocompact_wiring(r: Report) -> None:
-    """The auto-compact backstop (#398): the user setting `autoCompactWindow` in `~/.claude/settings.json`,
+    """The auto-compact backstop: the user setting `autoCompactWindow` in `~/.claude/settings.json`,
     or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for a cloud session — never the plugin's own `settings.json` (a
-    no-op there). Read-only: a missing/unparseable settings.json reads as unset, never an error. Unset is a
-    WARN, not an ERR — the harness's own default still applies."""
+    no-op there). `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` caps the session at the 200K boundary, so nothing is
+    missing then. Read-only: a missing/unparseable settings.json reads as unset, never an error. Unset is a
+    WARN, not an ERR — the harness's own default still applies (about 967K on a 1M-window model)."""
     if os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "").strip():
         r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set in the environment")
+        return
+    if os.environ.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "").strip() == "1":
+        r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` — the session compacts at 200K")
         return
     p = Path.home() / ".claude" / "settings.json"
     try:
@@ -851,8 +855,9 @@ def autocompact_wiring(r: Report) -> None:
         r.add(OK, "machine", "auto-compact backstop: `autoCompactWindow` set in `~/.claude/settings.json`")
     else:
         r.add(WARN, "machine", "auto-compact backstop unset — no `autoCompactWindow` in `~/.claude/settings.json` "
-              "and no `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the environment; `/autocompact 200k` sets the user "
-              "setting (cloud: export `CLAUDE_CODE_AUTO_COMPACT_WINDOW`)")
+              "and no `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the environment, so a 1M-window model compacts only "
+              "at about 967K; `/autocompact 200k` sets the user setting (cloud: export "
+              "`CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`)")
 
 
 def seed_pairs() -> list[tuple[Path, Path]]:

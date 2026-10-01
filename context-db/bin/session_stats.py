@@ -29,7 +29,7 @@ own transcript under <project>/<session-id>/subagents/*.jsonl, and those are sum
 main-session only; this session's review-runners alone cost ~3.4x the main prefix, so the total
 is the number to quote. Discounts/batch are ignored.
 
-Split hint (#398): when the avg context over the last SESSION_STATS_SPLIT_WINDOW turns (default 20)
+Split hint: when the avg context over the last SESSION_STATS_SPLIT_WINDOW turns (default 20)
 is >= SESSION_STATS_SPLIT_THRESHOLD tokens (default 150_000), `fmt_block`/`fmt_line` append one line
 nudging a fresh session — a sustained fat prefix, not one busy turn. Silent below a full window or
 below threshold. Stdlib only.
@@ -79,30 +79,28 @@ def prices() -> tuple[float, float, float, float, float]:
     return DEFAULT_PRICES
 
 
-SPLIT_THRESHOLD_DEFAULT = 150_000  # tokens: an avg prefix at/above this over the window is "fat" (#398)
+SPLIT_THRESHOLD_DEFAULT = 150_000  # tokens: an avg prefix at/above this over the window is "fat"
 SPLIT_WINDOW_DEFAULT = 20  # turns: require a full window before judging a trend, not one busy turn
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    """A positive integer from the environment, else `default` — unset, not a number, zero and negative all
+    fall back, so a typo never turns the hint always-on or the window empty."""
+    try:
+        value = int(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def split_threshold() -> int:
     """`SESSION_STATS_SPLIT_THRESHOLD` (tokens), else `SPLIT_THRESHOLD_DEFAULT` — same override shape as `prices()`."""
-    raw = os.environ.get("SESSION_STATS_SPLIT_THRESHOLD", "")
-    if raw:
-        try:
-            return int(raw)
-        except ValueError:
-            pass
-    return SPLIT_THRESHOLD_DEFAULT
+    return _positive_int_env("SESSION_STATS_SPLIT_THRESHOLD", SPLIT_THRESHOLD_DEFAULT)
 
 
 def split_window() -> int:
     """`SESSION_STATS_SPLIT_WINDOW` (turns), else `SPLIT_WINDOW_DEFAULT`."""
-    raw = os.environ.get("SESSION_STATS_SPLIT_WINDOW", "")
-    if raw:
-        try:
-            return int(raw)
-        except ValueError:
-            pass
-    return SPLIT_WINDOW_DEFAULT
+    return _positive_int_env("SESSION_STATS_SPLIT_WINDOW", SPLIT_WINDOW_DEFAULT)
 
 
 def price_for(model: str | None) -> tuple[float, float, float, float, float]:
