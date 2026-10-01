@@ -189,6 +189,32 @@ class VerifyNoGit(unittest.TestCase):
             self.assertEqual(problems, [])
             self.assertEqual([n for n in notes if "pyc" in n or "__pycache__" in n], [])
 
+    def test_claude_code_in_use_markers_are_skipped_outright(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(Path(tmp))
+            text = tree.manifest()
+            (tree.path / ".in_use").mkdir()
+            (tree.path / ".in_use" / "12345").write_text("", encoding="utf-8")
+            (tree.path / "sub" / ".in_use").write_text("not a marker\n", encoding="utf-8")
+            problems, notes = rm.verify_no_git(text, tree.path)
+            self.assertEqual(problems, [])
+            self.assertEqual([n for n in notes if ".in_use" in n], ["untracked by the manifest: sub/.in_use"])
+
+    def test_a_path_that_leaves_the_tree_is_a_malformed_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "tree").mkdir()
+            tree = Tree(Path(tmp) / "tree")
+            outside = Path(tmp) / "outside.txt"
+            outside.write_text("secret\n", encoding="utf-8")
+            digest = rm.file_sha256(outside)
+            for rel in ("../outside.txt", "sub/../../outside.txt", str(outside), "..\\outside.txt"):
+                with self.subTest(rel=rel):
+                    with self.assertRaises(ValueError):
+                        rm.verify_no_git(tree.manifest() + f"{digest}  {rel}\n", tree.path)
+            manifest = Path(tmp) / "manifest.txt"
+            manifest.write_text(tree.manifest() + f"{digest}  ../outside.txt\n", encoding="utf-8")
+            self.assertEqual(rm.main(["verify", str(manifest), "--root", str(tree.path), "--no-git"]), 1)
+
     def test_cli_no_git_flag_reports_problems_as_notes_go_to_stderr(self):
         with tempfile.TemporaryDirectory() as tmp:
             tree = Tree(Path(tmp))

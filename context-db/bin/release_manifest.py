@@ -67,7 +67,8 @@ def build(root: Path, commit: str | None = None) -> str:
 
 
 def parse(manifest_text: str) -> tuple[str, dict[str, str]]:
-    """(commit, {path: sha256}) from manifest text. Raises ValueError on a malformed manifest."""
+    """(commit, {path: sha256}) from manifest text. Raises ValueError on a malformed manifest — also on a path
+    that is absolute or climbs out with `..`: a manifest only ever names files inside the tree it was built from."""
     lines = manifest_text.splitlines()
     if not lines or not lines[0].startswith(COMMIT_PREFIX):
         raise ValueError(f'first line is not "{COMMIT_PREFIX}<sha>"')
@@ -81,6 +82,8 @@ def parse(manifest_text: str) -> tuple[str, dict[str, str]]:
         digest, sep, rel = line.partition("  ")
         if not sep:
             raise ValueError(f"malformed file line: {line!r}")
+        if rel.startswith(("/", "\\")) or ".." in rel.replace("\\", "/").split("/") or (len(rel) > 1 and rel[1] == ":"):
+            raise ValueError(f"path leaves the tree: {rel!r}")
         files[rel] = digest
     return commit, files
 
@@ -116,8 +119,9 @@ def verify_no_git(manifest_text: str, root: Path) -> tuple[list[str], list[str]]
     - `problems` (a real failure, same as `verify()`): a manifest-listed file missing from `root`, or
       present with the wrong hash.
     - `notes` (never a failure): a file under `root` the manifest doesn't list — this mode cannot tell a
-      hand edit from a file that was simply never tracked, so it is named, not failed on. Python's own
-      runtime noise (`__pycache__/`, `*.pyc`) is skipped outright rather than listed. The commit is never
+      hand edit from a file that was simply never tracked, so it is named, not failed on. Runtime noise
+      (Python's `__pycache__/` and `*.pyc`, Claude Code's top-level `.in_use/` markers in a plugin cache) is
+      skipped outright rather than listed. The commit is never
       checked (there is no `git rev-parse` to check it against) — the manifest's own `commit <sha>` line
       is named in a note instead, so a caller never mistakes silence for a check that ran."""
     commit, files = parse(manifest_text)
@@ -135,7 +139,7 @@ def verify_no_git(manifest_text: str, root: Path) -> tuple[list[str], list[str]]
         if not p.is_file():
             continue
         parts = p.relative_to(root).parts
-        if "__pycache__" in parts or parts[-1].endswith(".pyc"):
+        if "__pycache__" in parts or parts[-1].endswith(".pyc") or parts[0] == ".in_use":
             continue
         rel = "/".join(parts)
         if rel not in listed:

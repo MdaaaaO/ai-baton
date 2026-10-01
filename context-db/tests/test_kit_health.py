@@ -1006,8 +1006,10 @@ case "$cmd" in
         *) shift ;;
       esac
     done
-    [ "${GH_STUB_NO_ASSET:-}" = "1" ] && exit 0
-    if [ "${GH_STUB_DOWNLOAD_FAIL:-}" = "1" ]; then echo "stub: download failed" >&2; exit 1; fi
+    if [ -n "${GH_STUB_NO_ASSET:-}" ]; then echo "$GH_STUB_NO_ASSET" >&2; exit 1; fi
+    [ "${GH_STUB_EMPTY_DOWNLOAD:-}" = "1" ] && exit 0
+    [ -n "${GH_STUB_CALLS:-}" ] && echo "download $tag" >>"$GH_STUB_CALLS"
+    if [ "${GH_STUB_DOWNLOAD_FAIL:-}" = "1" ]; then echo "${GH_STUB_DOWNLOAD_ERR:-stub: download failed}" >&2; exit 1; fi
     case "$tag" in
       v0.3.0) content="${GH_STUB_MANIFEST_OLD:-$GH_STUB_MANIFEST}" ;;
       v0.4.0) content="${GH_STUB_MANIFEST_NEW:-$GH_STUB_MANIFEST}" ;;
@@ -1098,10 +1100,68 @@ class ManifestCheck(unittest.TestCase):
         self.assertEqual(r.counts[kh.WARN], 1, r.lines)
         self.assertIn("`gh` not installed", r.findings[0][2])
 
+    def test_attestation_rate_limit_or_server_error_is_warn(self):
+        for err in ("HTTP 403: API rate limit exceeded for user ID 1 (https://api.github.com/x)",
+                    "HTTP 429: Too Many Requests", "HTTP 502: Bad Gateway", "HTTP 401: Bad credentials"):
+            with self.subTest(err=err):
+                kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_RC": "1", "GH_STUB_ATTEST_ERR": err})
+                self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+                self.assertIn("got no answer", r.findings[0][2])
+
+    def test_attestation_not_found_is_err(self):
+        kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_RC": "1", "GH_STUB_ATTEST_ERR": "HTTP 404: Not Found"})
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (0, 1), r.lines)
+
     def test_no_manifest_asset_is_warn(self):
-        kh, r = self.run_check(extra_env={"GH_STUB_NO_ASSET": "1"})
-        self.assertEqual(r.counts[kh.WARN], 1, r.lines)
+        """`gh release download` exits 1 with one of two wordings when the release has no such asset."""
+        for said in ("no assets match the file pattern", "no assets to download"):
+            with self.subTest(said=said):
+                kh, r = self.run_check(extra_env={"GH_STUB_NO_ASSET": said})
+                self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+                self.assertIn("no `manifest.txt` release asset", r.findings[0][2])
+
+    def test_a_download_that_leaves_no_file_is_warn(self):
+        kh, r = self.run_check(extra_env={"GH_STUB_EMPTY_DOWNLOAD": "1"})
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
         self.assertIn("no `manifest.txt` release asset", r.findings[0][2])
+
+    def test_a_failed_release_lookup_is_warn_without_a_second_ask(self):
+        calls = self.tmp_path / "calls"
+        kh = load_kit_health()
+        kh.KIT = self.cache
+        r = kh.Report()
+        env = {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}", "GH_STUB_MANIFEST": self.manifest_text,
+               "GH_STUB_CALLS": str(calls)}
+        with mock.patch.dict(os.environ, env):
+            kh.manifest_check(r, dict(self.PLUGIN), "v0.3.0", lookup_ok=False)
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+        self.assertIn("release lookup above failed", r.findings[0][2])
+        self.assertFalse(calls.exists(), "gh was asked again")
+
+    def test_the_installed_manifest_is_downloaded_once_per_run(self):
+        calls = self.tmp_path / "calls"
+        kh = load_kit_health()
+        kh.KIT = self.cache
+        r = kh.Report()
+        env = {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}", "GH_STUB_MANIFEST": self.manifest_text,
+               "GH_STUB_CALLS": str(calls)}
+        with mock.patch.dict(os.environ, env):
+            kh.manifest_check(r, dict(self.PLUGIN), "v0.3.0")
+            kh.pending_update_check(r, dict(self.PLUGIN), "v0.3.0", {"tag": "v0.4.0", "published": "", "url": ""})
+        self.assertEqual(calls.read_text(encoding="utf-8").split("\n")[:-1], ["download v0.3.0", "download v0.4.0"])
+
+    def test_no_answer_on_a_download_stops_further_downloads(self):
+        calls = self.tmp_path / "calls"
+        kh = load_kit_health()
+        kh.KIT = self.cache
+        r = kh.Report()
+        env = {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}", "GH_STUB_CALLS": str(calls),
+               "GH_STUB_DOWNLOAD_FAIL": "1", "GH_STUB_DOWNLOAD_ERR": "dial tcp: lookup api.github.com: no such host"}
+        with mock.patch.dict(os.environ, env):
+            kh.manifest_check(r, dict(self.PLUGIN), "v0.3.0")
+            kh.pending_update_check(r, dict(self.PLUGIN), "v0.3.0", {"tag": "v0.4.0", "published": "", "url": ""})
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+        self.assertEqual(calls.read_text(encoding="utf-8").split("\n")[:-1], ["download v0.3.0"])
 
 
 class PendingUpdateCheck(unittest.TestCase):

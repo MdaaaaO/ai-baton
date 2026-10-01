@@ -239,7 +239,7 @@ def sec_kit(r: Report, stale: int) -> None:
     installed, latest, newer = release_check(r, plugin, mode)
     if plugin is not None:
         cache_wiring(r, plugin)
-        manifest_check(r, plugin, installed)
+        manifest_check(r, plugin, installed, lookup_ok=latest is not None)
         if newer:
             pending_update_check(r, plugin, installed, latest)
     review_ratio(r)
@@ -287,7 +287,7 @@ def sync_status() -> tuple[str, str, str]:
     return parts[0], parts[1], parts[2]
 
 
-UNVERIFIED = re.compile(r"\bunverified\b(?:\s*\(([^)]*)\))?")
+UNVERIFIED = re.compile(r"\bunverified\b(?:\s*\((.*)\))?")
 
 
 def clone_channel_report(r: Report) -> None:
@@ -453,38 +453,59 @@ def cache_wiring(r: Report, plugin: dict) -> None:
         r.raw("- plugin cache: edit check skipped — `installed_plugins.json` records no install time for this path")
 
 
-def download_manifest(repo: str, tag: str, dest_dir: Path, timeout: int = 30) -> tuple[bool, str]:
-    """`gh release download` the `manifest.txt` asset of `repo`'s `tag` into `dest_dir`. (False, why) covers every
-    cannot-run cause `manifest_check`/`pending_update_check` must turn into a WARN, never a slow/flaky ERR: no repo
-    slug, no `gh`, offline/unauthenticated (gh's own exit), or a release cut before the manifest asset existed (gh
-    exits 0, no file — the caller checks for that). Bounded by `timeout` like every other `gh` call here, so a
-    plain kit-health run is never slow or flaky on a bad network."""
-    if not repo:
-        return False, "no repo slug known for this install (plugin.json names no `repository`)"
-    if not tag:
-        return False, "no release tag known"
-    if not shutil.which("gh"):
-        return False, "`gh` not installed"
-    rc, out, err = sh(["gh", "release", "download", tag, "-R", repo, "--pattern", "manifest.txt", "--dir", str(dest_dir)],
-                       env=kit_profile.gh_env(), timeout=timeout)
-    if rc != 0:
-        return False, f"`gh release download {tag}` failed: {(err or out).splitlines()[-1] if (err or out) else f'exit {rc}'}"
-    return True, ""
-
-
 GH_NO_ANSWER = re.compile(r"could not resolve (?:host|hostname)|temporary failure in name resolution|name or service not known"
                           r"|failed to connect|network is unreachable|no route to host|connection (?:refused|timed out)"
                           r"|operation timed out|no such host|dial tcp|i/o timeout|tls handshake timeout|error connecting to"
-                          r"|gh auth login", re.I)
+                          r"|gh auth login|bad credentials|rate limit|HTTP (?:401|403|429|5\d\d)", re.I)
+GH_NO_ASSET = re.compile(r"no assets (?:to download|match)", re.I)
+MANIFESTS: dict[tuple[str, str], tuple[bytes | None, str]] = {}  # one download per (repo, tag) and run
+GH_SILENT: list[str] = []  # why `gh` got no answer, once it did not: later downloads in this run do not ask again
+
+
+def download_manifest(repo: str, tag: str, timeout: int = 30) -> tuple[bytes | None, str]:
+    """The bytes of the `manifest.txt` asset of `repo`'s `tag` (`gh release download`), or (None, why). The why
+    covers every cannot-run cause `manifest_check`/`pending_update_check` must turn into a WARN, never a slow or
+    flaky ERR: no repo slug, no `gh`, offline/unauthenticated (gh's own exit), or a release without the asset (gh
+    exits 1 with `no assets …`). Bounded by `timeout` like every other `gh` call here; a (repo, tag) is asked for
+    once per run, and after one call that got no answer (`GH_NO_ANSWER`, a timeout) no further one is made."""
+    if not repo:
+        return None, "no repo slug known for this install (plugin.json names no `repository`)"
+    if not tag:
+        return None, "no release tag known"
+    if not shutil.which("gh"):
+        return None, "`gh` not installed"
+    if (repo, tag) in MANIFESTS:
+        return MANIFESTS[(repo, tag)]
+    if GH_SILENT:
+        return None, GH_SILENT[0]
+    with tempfile.TemporaryDirectory(prefix="kit-health-manifest-") as tmp:
+        rc, out, err = sh(["gh", "release", "download", tag, "-R", repo, "--pattern", "manifest.txt", "--dir", tmp],
+                           env=kit_profile.gh_env(), timeout=timeout)
+        asset = Path(tmp) / "manifest.txt"
+        no_asset = f"`{tag}` has no `manifest.txt` release asset (a release cut before the manifest existed)"
+        if rc != 0:
+            why = (f"`gh release download {tag}` failed: "
+                   f"{(err or out).splitlines()[-1] if (err or out) else f'exit {rc}'}")
+            if GH_NO_ASSET.search(both(out, err)):
+                why = no_asset
+            elif rc == 127 or GH_NO_ANSWER.search(both(out, err)):
+                GH_SILENT.append(why)
+            got: tuple[bytes | None, str] = (None, why)
+        elif not asset.is_file():
+            got = (None, no_asset)
+        else:
+            got = (asset.read_bytes(), "")
+    MANIFESTS[(repo, tag)] = got
+    return got
 
 
 def attest_verify(repo: str, manifest_path: Path, timeout: int = 30) -> tuple[str, str]:
     """`gh attestation verify` a downloaded manifest against `repo`'s release workflow (docs/contributing.md §
     Releases) — proves the manifest's own provenance before `manifest_check` trusts its hashes. Three answers, the
     same split sync.sh makes: ("ok", "") verified; ("failed", why) the check ran and said no; ("cannot", why) it
-    never got an answer — a `gh` from before `gh attestation` existed, a timeout, a network error or an
-    unauthenticated `gh` (`GH_NO_ANSWER`, gh's own wording). An error text this does not recognise counts as
-    failed: the strict reading is the safe one."""
+    never got an answer — a `gh` from before `gh attestation` existed, a timeout, a network error, a rate limit
+    or server error, or an unauthenticated `gh` (`GH_NO_ANSWER`, gh's own wording). An error text this does not
+    recognise counts as failed: the strict reading is the safe one."""
     gh_env = kit_profile.gh_env()
     rc, _, err = sh(["gh", "attestation", "verify", "--help"], env=gh_env, timeout=timeout)
     if rc == 127:
@@ -502,7 +523,7 @@ def attest_verify(repo: str, manifest_path: Path, timeout: int = 30) -> tuple[st
     return "failed", why
 
 
-def manifest_check(r: Report, plugin: dict, installed: str) -> None:
+def manifest_check(r: Report, plugin: dict, installed: str, lookup_ok: bool = True) -> None:
     """§ 1, plugin install: the plugin cache checked against the installed release's own attested manifest —
     `gh release download` the `manifest.txt` asset, `gh attestation verify` it (proves provenance), then
     `release_manifest.verify_no_git` it against the live cache (proves the cache's own files match). The repo slug
@@ -514,22 +535,23 @@ def manifest_check(r: Report, plugin: dict, installed: str) -> None:
     (no `gh` or one too old, unauthenticated, offline, no manifest asset on this release) → WARN naming why, never an ERR — a
     cannot-run is not a cache that is wrong. Files present but unlisted by the manifest are a note on the OK line,
     not a failure: `verify_no_git` cannot tell a hand edit from a file simply never tracked without a git checkout
-    to ask (docs/packaging.md)."""
+    to ask (docs/packaging.md). `lookup_ok` False — `release_check`'s own lookup just failed with `gh` installed —
+    is the same WARN without asking GitHub a second time."""
     repo = plugin.get("repo", "")
     if not installed:
         r.raw("- plugin cache vs manifest: skipped — installed release unknown")
         return
+    if not lookup_ok and shutil.which("gh"):
+        r.add(WARN, "kit", "plugin cache vs manifest: cannot check — the release lookup above failed, so GitHub "
+              "was not asked again")
+        return
+    data, why = download_manifest(repo, installed)
+    if data is None:
+        r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — {why}")
+        return
     with tempfile.TemporaryDirectory(prefix="kit-health-manifest-") as tmp:
-        tmp_path = Path(tmp)
-        ok, why = download_manifest(repo, installed, tmp_path)
-        if not ok:
-            r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — {why}")
-            return
-        manifest_file = tmp_path / "manifest.txt"
-        if not manifest_file.is_file():
-            r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — `{installed}` has no `manifest.txt` "
-                  "release asset (a release cut before the manifest existed)")
-            return
+        manifest_file = Path(tmp) / "manifest.txt"
+        manifest_file.write_bytes(data)
         state, why = attest_verify(repo, manifest_file)
         if state == "cannot":
             r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — {why}")
@@ -562,54 +584,46 @@ def pending_update_check(r: Report, plugin: dict, installed: str, latest: dict) 
     """§ 1, plugin install, only when `release_check` found a newer release out: the files a pending update
     would change — a path-level diff (added/removed/changed) between the installed and the newer release's
     manifests, so the warning above says what `claude plugin update` would actually touch. Reuses `release_check`'s
-    already-fetched `latest` (never asks GitHub twice for the tag) and `download_manifest` (same timeout bound):
+    already-fetched `latest` (never asks GitHub twice for the tag) and `download_manifest` (same timeout bound, and
+    the installed release's manifest `manifest_check` already fetched):
     cannot fetch either manifest → one line saying so, never a failure — this is extra detail on an
     already-reported warning, not a check of its own."""
     repo, tag = plugin.get("repo", ""), latest.get("tag", "")
     if not (installed and tag and repo):
         r.raw("- pending update: files changed not listed — installed version or repo unknown")
         return
-    with tempfile.TemporaryDirectory(prefix="kit-health-pending-") as tmp:
-        old_dir, new_dir = Path(tmp) / "old", Path(tmp) / "new"
-        old_dir.mkdir()
-        new_dir.mkdir()
-        ok, why = download_manifest(repo, installed, old_dir)
-        if not ok:
+    texts = []
+    for t in (installed, tag):
+        data, why = download_manifest(repo, t)
+        if data is None:
             r.raw(f"- pending update {tag}: files changed not listed — {why}")
             return
-        ok, why = download_manifest(repo, tag, new_dir)
-        if not ok:
-            r.raw(f"- pending update {tag}: files changed not listed — {why}")
-            return
-        old_manifest, new_manifest = old_dir / "manifest.txt", new_dir / "manifest.txt"
-        if not (old_manifest.is_file() and new_manifest.is_file()):
-            r.raw(f"- pending update {tag}: files changed not listed — one of the releases has no `manifest.txt` asset")
-            return
-        try:
-            _, old_files = relman.parse(old_manifest.read_text(encoding="utf-8"))
-            _, new_files = relman.parse(new_manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            r.raw(f"- pending update {tag}: files changed not listed — malformed manifest ({e})")
-            return
-        added = sorted(set(new_files) - set(old_files))
-        removed = sorted(set(old_files) - set(new_files))
-        changed = sorted(p for p in (set(old_files) & set(new_files)) if old_files[p] != new_files[p])
-        total = len(added) + len(removed) + len(changed)
-        if not total:
-            r.raw(f"- pending update {tag}: no tracked file changed (metadata-only release)")
-            return
-        cap = 10
-        parts: list[str] = []
-        for label, items in (("added", added), ("removed", removed), ("changed", changed)):
-            for p in items:
-                if len(parts) >= cap:
-                    break
-                parts.append(f"{label} `{p}`")
+        texts.append(data)
+    try:
+        _, old_files = relman.parse(texts[0].decode("utf-8"))
+        _, new_files = relman.parse(texts[1].decode("utf-8"))
+    except ValueError as e:  # UnicodeDecodeError is one
+        r.raw(f"- pending update {tag}: files changed not listed — malformed manifest ({e})")
+        return
+    added = sorted(set(new_files) - set(old_files))
+    removed = sorted(set(old_files) - set(new_files))
+    changed = sorted(p for p in (set(old_files) & set(new_files)) if old_files[p] != new_files[p])
+    total = len(added) + len(removed) + len(changed)
+    if not total:
+        r.raw(f"- pending update {tag}: no tracked file changed (metadata-only release)")
+        return
+    cap = 10
+    parts: list[str] = []
+    for label, items in (("added", added), ("removed", removed), ("changed", changed)):
+        for p in items:
             if len(parts) >= cap:
                 break
-        more = total - len(parts)
-        text = "; ".join(parts) + (f", +{more} more" if more > 0 else "")
-        r.raw(f"- pending update {tag}: {total} file(s) changed — {text}")
+            parts.append(f"{label} `{p}`")
+        if len(parts) >= cap:
+            break
+    more = total - len(parts)
+    text = "; ".join(parts) + (f", +{more} more" if more > 0 else "")
+    r.raw(f"- pending update {tag}: {total} file(s) changed — {text}")
 
 
 # ── review findings ────────────────────────────────
