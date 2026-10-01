@@ -45,7 +45,7 @@
 #   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
 #   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
 #   make -C $BATON/context-db migrate [CONTEXT=<store>] # bring a store forward: kb.py migrate, then ctx_adapter.py adopt —
-#                                                        #   the one command sync-check.sh/kit-health name when either is behind
+#                                                        #   both steps in one call (sync-check.sh and kit-health name each on its own)
 #   make -C $BATON/context-db kit-health [STALE=90] [KIT_HEALTH_ARGS=…]  # full kit audit of the store CONTEXT names (the kit-health skill's script)
 #   make -C $BATON/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
 #
@@ -109,8 +109,8 @@ sync-check:
 	@sh $(ENGINE)../sync-check.sh || true
 
 # make migrate [CONTEXT=<store>]  — bring a store forward: kb.py migrate (env-config flags), then ctx_adapter.py
-# adopt (kit settings/types + any pending ctx migrations) — the one command sync-check.sh/kit-health name when
-# either is behind.
+# adopt (kit settings/types + any pending ctx migrations) — both steps in one call; sync-check.sh and kit-health
+# name each step on its own when it is the one behind.
 migrate:
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/kb.py migrate
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/ctx_adapter.py adopt
