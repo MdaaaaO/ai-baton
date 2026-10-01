@@ -2,8 +2,8 @@
 name: review-runner
 description: "Opus worker for pr-review steps 1–4 (snapshot, repo trap KB, review pass incl. --deep lenses, independent verification) on one PR: writes the triage sheet to $CTX/triage.json, returns only the overview block (≤3K tokens) — the diff never enters a long-lived prefix. Never posts, never asks. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "14"
-  updated: "2026-09-28"
+  version: "15"
+  updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.mcp_tools.search"
 model: opus
@@ -39,6 +39,9 @@ so you spend them on judgment, not on fetching.
    Respect `mode`: `full` / `follow_up` (build the Addressed/Outstanding/Superseded/Reversed ledger of our
    previous review from `threads.json` first, then review only the delta) / `replies_only` (no new
    findings unless the user asked; the walk is about replies).
+   Also `python3 $BATON/skills/pr-open/diagram-plan.py --pr <owner/repo> <pr> --json` (its own `gh` reads,
+   same budget as this script's — not a new live-read exception) for the questions this PR's facets raise;
+   keep the plan for step 6's Explainability check and `WBD:` line.
 2. First `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"` — the same line `fetch-context.sh`
    already runs, exporting `github.sandbox_token_prefix` where a sandbox needs it and nothing where `gh` is
    logged in natively — in the same Bash command as each of the four live `gh` reads below
@@ -103,6 +106,13 @@ so you spend them on judgment, not on fetching.
    showed), `comment` = the exact inline text proposed for posting (`$BATON/skills/pr-review/reference/
    review-writing.md` if you need the voice). `path`/`line` must be a line present in `diffs/<path>.patch`.
    Also `$CTX/traps.json` (`[{trap, result: hit|n/a|unverified}]`) and, if any, `$CTX/ff.json`.
+   **Explainability** (`scope.md`): compare step 1's plan against `manifest.json.pr_meta.body` — every
+   question the plan raises answered by a picture or table, the plan itself SKIP, or no body diagram
+   contradicts the diff → `covered`; else `gap <question>[, <question>]`, one short question per missing
+   or contradicting block, phrased for the author. That is the `WBD:` line below. Add a WARN finding to
+   `triage.json` only when a gap exists **and** this run is `--deep` or already carries an
+   Interface/contract finding — `comment` is the gap question itself; below that gate the gap stays in
+   `WBD:` only, no numbered finding (`scope.md` § Explainability's own gate).
 
 **Write only under `$CTX`.** Never post a review, comment, reply, reaction or Jira comment; never edit
 the KB, the ledger or any repo file. Never put a local path (`.context/`, scratchpad, `/tmp`) or a bare
@@ -120,5 +130,6 @@ CTX: <absolute path>
 NEEDS nothing | datalake reauth (findings #…) | gh reauth (a live `gh` read hit an auth failure) | <one line>   ← a missing env fact instead: `NEEDS <system>.<kind> <name>`
 (kit-wide form, no colon — one spelling, docs/env-facts.md § Environment facts)
 IMPACT: <n> consumers (<kind:name owner …>) · <what changes, how many rows/values> | none found | not assessed (<why>)
+WBD: covered | gap <question>[, <question>] | not assessed (diagram-plan failed — <reason>)
 NOTE: ≤ 5 lines the walk needs (stacked base, human approval already present, prior-review ledger summary in follow_up mode, FF count)
 ```

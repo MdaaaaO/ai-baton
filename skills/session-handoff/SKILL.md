@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "19"
+  version: "20"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -28,6 +28,13 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
      *Infra/secrets locations*; *Remaining work*) with anything durable you learned or shipped
      (`ctx_str_replace` of the exact old text, or `ctx_insert` after a line). Keep
      the doc lean — long history goes to `.context/archive/<slug>-log.md`.
+   - **Architecture** — only when a PR on this initiative landed since the last flush and its diagram plan
+     carries a WHERE block (`where=` in `diagram-plan.py --pr <owner/repo> <n> --check`'s marker, or in the
+     merged PR body's own `<!-- diagram-plan: … -->` line; `docs/diagrams.md` § Zoom and gate per surface,
+     Handoff row): update the doc's optional `## Architecture` section with that WHERE, rendered as the plain
+     nested list (`docs/diagrams.md` § Rendering), through `ctx_str_replace`/`ctx_insert`. When the map does
+     not move, add one Session log line instead: `Architecture unchanged: <reason>`. A landed PR with no
+     `where=` needs nothing here.
    - **Cap the Session log.** If `.context/archive/<slug>-log.md` does not exist yet, create it first
      (`ctx_new` TYPE=log, same DOMAIN as the context doc, SLUG=`<slug>-log`) — `maintain`'s own fallback for a
      missing archive doc fills in only `title`/`type`/`updated`, which the `log` type's `domain`/`status`

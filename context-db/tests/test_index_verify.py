@@ -183,6 +183,19 @@ class NewSh(ContextRoot):
         self.assertEqual(v.returncode, 0, v.stderr)
         self.assertEqual(run(self.root, "verify.py").returncode, 0)
 
+    def test_epic_scaffold_carries_the_optional_architecture_section(self):
+        # the section is in the template but not in the epic type's required list (#389): a fresh scaffold
+        # carries it, and the doc still validates with the kit's own light checker.
+        run(self.root, "kb.py", "config-set", "domains", '["airflow"]')
+        r = self.new(TYPE="epic", DOMAIN="airflow", SLUG="arch-smoke", TITLE="Arch smoke")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text(encoding="utf-8")
+        self.assertIn("## Architecture", text)
+        self.assertLess(text.index("## Key decisions & gotchas"), text.index("## Architecture"))
+        self.assertLess(text.index("## Architecture"), text.index("## Infra / secrets locations"))
+        self.assertEqual(run(self.root, "gen_index.py").returncode, 0)
+        self.assertEqual(run(self.root, "verify.py").returncode, 0)
+
     def test_special_characters_in_values_survive(self):
         # the sed substitution was unescaped — `/`, `&`, `\\` and the `|` delimiter corrupted the scaffold
         title = "A/B & C\\D | E $x"

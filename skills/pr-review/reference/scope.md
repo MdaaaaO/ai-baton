@@ -12,11 +12,21 @@
 | Verification gap | Claim in the PR body that nothing in the diff or CI proves | absence of a test, no run link, "tested locally" |
 | Slop | AI residue that will confuse the next reader (see `slop.md`) | the diff itself |
 | Stakeholder impact | Who reads this model/column downstream, and what changes for them that the PR body does not say? | `$CTX/impact.json`: the models' dependency and exposure graph (`ref()`s in a dbt repo), BI workbooks (the BI tool's MCP search), chat-alert/export workspaces, plus a SQL count of the rows/values that flip |
+| Explainability | Can a cold reader draw this change from the PR body? | the plan from `diagram-plan.py --pr` against the body's blocks, or a body diagram the diff contradicts |
 
 Rate each finding **STOP / WARN / NIT**:
 - **STOP** — wrong output, data loss, security exposure, a contract break for a known consumer. Blocks merge; needs evidence a reader can re-run.
 - **WARN** — likely defect or missing verification that the author should answer before merge; phrased as a question when the evidence is circumstantial. An **undisclosed value change** for a known consumer (a column a BI workbook / alert / export reads changes value or goes NULL and the body does not say so) is at least WARN; STOP when the consumer is customer- or exec-facing and the change is material.
 - **NIT** — style, naming, wording, a nicer idiom. Prefix the posted comment `nit:` or `suggestion:`; never blocks.
+
+**Explainability's own gate** (`docs/diagrams.md` § Zoom and gate per surface): raised only on a `--deep` review
+(above `deep_lines`) or when this same review already carries an Interface/contract finding — never on an
+ordinary small fix. What counts: a substantive facet (`diagram-plan.py`'s classifier) that the plan raises a
+question for and the body answers with no picture or table, or a body diagram the diff contradicts. Always
+**WARN**, phrased as a question ("can you add a quick diagram/table for X?"), never STOP — a gap below the gate
+still prints in the review overview's `WBD:` line, just without a numbered finding. A flow **STOP** on any axis
+may carry a ≤ 10-step `sequenceDiagram` sketch in place of prose that would otherwise need more than three
+sentences.
 
 ## Proportionality
 
