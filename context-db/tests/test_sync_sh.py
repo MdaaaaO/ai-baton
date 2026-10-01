@@ -983,5 +983,62 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(out.count("last sync"), 0)
 
 
+class SyncCheckStoreBehind(unittest.TestCase):
+    """sync-check.sh turns `ctx_adapter.py adopt --check`'s exit 6 (store behind the kit's settings/types,
+    ctx_adapter.py's `behind`) into one WARN line naming `adopt` — same shape and placement as the existing
+    env-store-behind line just above it. `kb.py` and `ctx_adapter.py` are stub scripts here (a fixture store
+    under test, not the real content root or the real ctx-store binary) so this covers sync-check.sh's own
+    exit-code wiring in isolation, same as SyncSh above covers the git-state checks in isolation."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="kit-sync-check-behind-test."))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.kit = self.tmp / "kit"
+        (self.kit / "context-db" / "bin").mkdir(parents=True)
+        shutil.copy(KIT / "sync-check.sh", self.kit / "sync-check.sh")
+        (self.kit / "context-db" / "bin" / "kb.py").write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
+        self.rc_file = self.tmp / "adopt-check-rc"
+        self.argv_file = self.tmp / "adopt-check-argv"
+        (self.kit / "context-db" / "bin" / "ctx_adapter.py").write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys\n"
+            f"p = {str(self.rc_file)!r}\n"
+            f"open({str(self.argv_file)!r}, 'w').write(' '.join(sys.argv[1:]))\n"
+            "sys.exit(int(open(p).read().strip()) if os.path.exists(p) else 0)\n"
+        )
+        self.env = _env(self.tmp)
+
+    def set_adopt_check_rc(self, rc: int):
+        self.rc_file.write_text(str(rc))
+
+    def check(self) -> str:
+        r = subprocess.run([SH, str(self.kit / "sync-check.sh")], env=self.env, capture_output=True, text=True,
+                           timeout=30)
+        self.assertEqual(r.returncode, 0)
+        return r.stderr
+
+    def test_rc_6_is_one_warn_line_naming_adopt(self):
+        self.assertNotIn("content store", self.check(), "a clean --check (exit 0 from the stub) stays silent")
+        self.set_adopt_check_rc(6)
+        warned = self.check()
+        self.assertEqual(warned.count("content store"), 1)
+        self.assertIn("content store predates the kit's settings/types", warned)
+        self.assertIn("ctx_adapter.py adopt`", warned)
+
+    def test_other_exit_codes_are_not_this_warn(self):
+        # 1 (not installed), 3 (findings), 4 (not adopted), 5 (differs) are kit-health's (§ 5) to report —
+        # sync-check only turns 6 into a line, the rest stay silent here, same as it leaves kb.py's own
+        # non-{0,3} codes to its own first warn above
+        for rc in (1, 3, 4, 5):
+            self.set_adopt_check_rc(rc)
+            self.assertNotIn("content store", self.check(), f"rc={rc}")
+
+    def test_passes_no_validate(self):
+        # the cheap record-only mode: sync-check runs on every session-register, so it must never ask for a
+        # whole-store `ctx validate` — the stub logs the argv it actually received
+        self.check()
+        self.assertEqual(self.argv_file.read_text(), "adopt --check --no-validate")
+
+
 if __name__ == "__main__":
     unittest.main()
