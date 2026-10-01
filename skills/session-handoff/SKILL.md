@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "18"
+  version: "19"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -62,7 +62,12 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    should *arrive* here after two idle Monitor windows rather than re-arming a third — an idle watcher
    costs a full-prefix wake-up per expiry, a parked session costs nothing (owner decision, 2026-09-22; `pr-watch`
    § Park when the gates are not yours).
-8. **Session stats — record them (owner decision, 2026-09-19: "stats for geeks").** Run
+8. **What the session did, then its stats.** First run `make -C $BATON/context-db session-activity` (zero
+   model turns; the transcript's files edited, commits, PRs, tickets, drafts and compactions, identifiers only)
+   and treat the list as a checklist: every item is reflected in the context doc above or named here as
+   deliberately left out; no transcript → one line saying so, then flush from memory as before. The same
+   block lands under `## What this session did` at `session-end`. Then the stats (owner decision,
+   2026-09-19: "stats for geeks"): run
    `make -C $BATON/context-db session-stats` (zero model turns; derived from the transcript via
    `$CLAUDE_CODE_SESSION_ID`) and put:
    - the **one-liner** (the `stats:` value the registry row carries: turns · hours · ctx peak/avg ·
