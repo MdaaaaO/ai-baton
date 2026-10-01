@@ -90,8 +90,8 @@ several machines or several people.
    discovers a missing value once and writes it back.
 4. What sessions learn goes into `.context/` as rows of a markdown DB with a generated index.
 5. Sessions register in a live registry and hand off through one context doc per initiative.
-6. Kit changes are PR-only. Each machine picks them up itself: a clone runs `make claude_sync` (its SessionEnd hook
-   does too) to fast-forward to the merged `main`, a plugin install updates to each release with `claude plugin update`.
+6. Kit changes are PR-only. Each machine picks up a release itself: a clone's SessionEnd hook holds the new tag
+   with a preview and `make claude_sync` applies it, a plugin install runs `claude plugin update`.
 
 ## Stays healthy on every machine
 
@@ -148,7 +148,7 @@ the same `setup.sh`.
 | Path | Update, then restart Claude Code and run `/kit-health` to re-stamp the machine |
 |---|---|
 | Plugin | `claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@ai-baton-kit` |
-| Clone | `make claude_sync` (or `sh .claude/sync.sh`). It only ever fast-forwards `main` |
+| Clone | `make claude_sync` (or `sh .claude/sync.sh --accept`). It only fast-forwards, to a release tag |
 
 `/kit-health` warns when a newer release is out and prints the update command. [`docs/sync.md`](docs/sync.md)
 explains the clone's hooks and guards.

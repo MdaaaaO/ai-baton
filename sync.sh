@@ -1,20 +1,30 @@
 #!/bin/sh
 # shellcheck shell=dash  # run as `sh` everywhere (README, workspace.mk); dash has `local`
-# sync.sh — keep the .claude kit in step with origin, PR-only: the kit is PULLED (fast-forward of
-# `main`), never committed or pushed from here. Kit changes travel branch → PR → merge on GitHub;
+# sync.sh — keep the .claude kit in step with origin, PR-only: the kit is PULLED (fast-forward),
+# never committed or pushed from here. Kit changes travel branch → PR → merge on GitHub;
 # a versioned pre-push hook (hooks/pre-push, installed via core.hooksPath by this script and
 # setup.sh) refuses any push to the kit's `main`. Nothing else is synced: an environment's facts
 # live in the local env store (.context/reference/env/, never in git), its prose in
 # .context/reference/environment.md. Idempotent, lock-guarded; exits 0 except 3 when another run holds
-# the lock (it is also run from a SessionEnd hook, which ignores the exit). Takes no arguments.
+# the lock (it is also run from a SessionEnd hook, which ignores the exit).
 #
-#   sh .claude/sync.sh                  (from the workspace root, or via `make claude_sync`)
+# Channel: by default the kit follows the highest `v[0-9]*` release tag that `origin/main` contains
+# (it tracks `main` directly before the first release tag exists). `git config kit.channel main`
+# opts a checkout back into the old behaviour — always fast-forward straight to `origin/main`. On the
+# release channel a tag newer than HEAD is never applied by a bare run: it only writes the ignored
+# .sync-preview (the commits, the changed skills/agents/hooks, and the other files a clone runs
+# unattended) and the status `held <tag>`, so a SessionEnd run never applies an update unattended.
+# The one optional argument, --accept, applies the held tag — passed by `make claude_sync`, never by
+# the SessionEnd hook.
+#
+#   sh .claude/sync.sh [--accept]       (from the workspace root, or via `make claude_sync`)
 #
 # Outcome is recorded in .sync-status (ignored; one line: `<utc-ts> <state> <detail>`) so a later
 # session can see what a background sync did — the SessionEnd hook swallows all output.
 # `sync-check.sh` (run by `make -C .claude/context-db session-register`) reads it. States:
 #   pending <epoch> …           written just before the fetch; still there later = the run was killed
-#   ok <what>                   fetched; fast-forwarded or already in step
+#   ok <what>                   fetched; fast-forwarded, already in step, or already past the held tag
+#   held <tag>                  a newer release tag is waiting in .sync-preview; `make claude_sync` applies it
 #   offline <epoch> since <ts>  the fetch could not resolve/reach origin; <epoch> = first run of the streak
 #   error <reason>              needs the user: off main, dirty, ahead, fetch failed or timed out, ff failed
 # A run that finds the lock busy logs `skipped`, exits 3 and leaves .sync-status alone (the holder writes it).
@@ -25,10 +35,14 @@ FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-60}"  # seconds; Claude Code does not enfor
 LOCK_WAIT="${SYNC_LOCK_WAIT:-30}"          # seconds to wait for another sync.sh's flock
 LOG_KEEP=200                               # sync.log is trimmed to its last LOG_KEEP lines
 
+ACCEPT=""
+for _arg in "$@"; do [ "$_arg" = "--accept" ] && ACCEPT=1; done
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LOG="$HERE/sync.log"
 STATUS="$HERE/.sync-status"
-FAIL=""; PULLED=""; OFFLINE=""; ERRF=""
+PREVIEW="$HERE/.sync-preview"
+FAIL=""; PULLED=""; OFFLINE=""; HELD=""; ERRF=""
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }
 status() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >"$STATUS"; }
@@ -60,10 +74,69 @@ fetch_offline() {
   grep -Eqi 'could not resolve (host|hostname)|temporary failure in name resolution|name or service not known|nodename nor servname|failed to connect|couldn.t connect to server|network is unreachable|no route to host|connection (refused|timed out)|operation timed out' "$1"
 }
 
-# sync_kit — PR-only: install the pre-push guard, then fast-forward main to origin/main when the
-# checkout is clean. Never stages, commits or pushes. Sets FAIL (and pulls nothing) when the
-# checkout is off main, dirty, or ahead of origin — that work belongs on a branch + PR; sets
-# OFFLINE when origin could not be reached.
+# release_tag — the highest `v[0-9]*` tag reachable from origin/main (the pattern kit_version()
+# already matches), or empty before the first release tag.
+release_tag() {
+  git for-each-ref --merged origin/main --sort=-version:refname --format='%(refname:short)' \
+    'refs/tags/v[0-9]*' 2>/dev/null | head -n 1
+}
+
+# ff_to <ref> <label> — fast-forward HEAD to <ref>; <label> (e.g. " (v1.2.3)") is appended to the
+# log's sha line and to PULLED, or kit_version() is used when <label> is empty (the main channel).
+ff_to() {
+  local ref=$1 label=$2 before; before="$(git rev-parse --short HEAD 2>/dev/null)"
+  if git merge -q --ff-only "$ref" >>"$LOG" 2>&1; then
+    PULLED="kit@$(git rev-parse --short HEAD)$label"
+    [ "kit@$before$label" = "$PULLED" ] || log "kit: main at $(git rev-parse --short HEAD)${label:-$(kit_version)} (was $before)"
+    return 0
+  fi
+  log "kit: ERROR fast-forward to $ref failed"; FAIL="kit fast-forward to $ref failed (see sync.log)"; return 1
+}
+
+# write_preview <tag> <from> <to> — the ignored .sync-preview a held run writes instead of applying:
+# the commits between HEAD and the tag, the changed skills/agents/hooks, and the other files a clone
+# runs unattended (git hooks, settings.json, setup.sh, this script, the engine's own bin/).
+write_preview() {
+  local tag=$1 from=$2 to=$3
+  {
+    printf 'release %s held — `make claude_sync` applies it (or `sh sync.sh --accept`)\n\n' "$tag"
+    printf 'commits:\n'
+    git log --oneline "$from..$to" 2>/dev/null
+    printf '\nchanged skills/agents/hooks:\n'
+    git diff --name-only "$from" "$to" -- skills/ agents/ hooks/ 2>/dev/null
+    printf '\nother files that run unattended:\n'
+    git diff --name-only "$from" "$to" -- settings.json setup.sh sync.sh context-db/bin/ 2>/dev/null
+  } >"$PREVIEW"
+  log "kit: held $tag — wrote $(basename "$PREVIEW")"
+}
+
+# sync_release <tag> — the default (release) channel: nothing to do when HEAD is already at <tag> or
+# already past it (e.g. a channel switch back from `main`); without --accept, holds (preview + status
+# `held <tag>`, applies nothing); with --accept, fast-forwards to it.
+sync_release() {
+  local tag=$1 target before
+  target="$(git rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)"
+  before="$(git rev-parse HEAD 2>/dev/null)"
+  # an unreadable tag must not look like "already there": the ancestor test below fails on an empty target too
+  [ -n "$target" ] || { FAIL="kit: release tag $tag does not resolve to a commit"; return 1; }
+  rm -f "$PREVIEW"
+  if [ "$target" = "$before" ] || ! git merge-base --is-ancestor "$before" "$target" 2>/dev/null; then
+    PULLED="kit@$(git rev-parse --short HEAD)"
+    return 0
+  fi
+  if [ -z "$ACCEPT" ]; then
+    write_preview "$tag" "$before" "$target"
+    HELD="$tag"
+    return 0
+  fi
+  ff_to "refs/tags/$tag" " ($tag)"
+}
+
+# sync_kit — PR-only: install the pre-push guard, then move main to the right target when the
+# checkout is clean — the highest release tag `origin/main` contains by default (held until
+# --accept), or `origin/main` itself with `kit.channel main` or before the first release tag. Never
+# stages, commits or pushes. Sets FAIL (and pulls nothing) when the checkout is off main, dirty, or
+# ahead of origin — that work belongs on a branch + PR; sets OFFLINE when origin could not be reached.
 sync_kit() {
   cd "$HERE" || return 1
   if [ "$(git config --get core.hooksPath 2>/dev/null)" != "$HERE/hooks" ]; then
@@ -85,7 +158,7 @@ sync_kit() {
   status "pending $(date -u +%s) fetch started (pid $$) — still here minutes later = the run was killed"
   local rc=0
   ERRF="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/kit-sync.$$")"
-  with_timeout "$FETCH_TIMEOUT" git fetch -q origin 2>"$ERRF" 9>&- || rc=$?
+  with_timeout "$FETCH_TIMEOUT" git fetch -q --tags origin 2>"$ERRF" 9>&- || rc=$?
   [ -s "$ERRF" ] && cat "$ERRF" >>"$LOG"
   if [ "$rc" -eq 124 ]; then
     log "kit: ERROR fetch timed out after ${FETCH_TIMEOUT}s"
@@ -101,14 +174,14 @@ sync_kit() {
     FAIL="kit has $ahead local commit(s) on main that will never be pushed — main is PR-only: git branch <topic> && git reset --hard origin/main, then open a PR from <topic>"
     return 1
   fi
-  local before; before="$(git rev-parse --short HEAD 2>/dev/null)"
-  if git merge -q --ff-only origin/main >>"$LOG" 2>&1; then
-    PULLED="kit@$(git rev-parse --short HEAD)"
-    # the sha line only when HEAD moved: an in-step sync at every session end logs nothing
-    [ "kit@$before" = "$PULLED" ] || log "kit: main at $(git rev-parse --short HEAD)$(kit_version) (was $before)"
-  else
-    log "kit: ERROR fast-forward failed"; FAIL="kit fast-forward to origin/main failed (see sync.log)"; return 1
+  local channel; channel="$(git config --get kit.channel 2>/dev/null || true)"
+  if [ "$channel" != main ]; then
+    local tag; tag="$(release_tag)"
+    [ -n "$tag" ] && { sync_release "$tag"; return $?; }
   fi
+  # the main channel, or the release channel before the first release tag exists: no tag to hold on
+  rm -f "$PREVIEW"
+  ff_to origin/main ""
 }
 
 # the cheap check first: no repo means no lock, no status
@@ -243,5 +316,6 @@ elif [ -n "$OFFLINE" ]; then
   # BSD date takes -r <epoch>, GNU date -d @<epoch>
   since_ts="$(date -u -r "$since" +%FT%TZ 2>/dev/null || date -u -d "@$since" +%FT%TZ 2>/dev/null || echo "$since")"
   status "offline $since since $since_ts — origin unreachable, nothing pulled"
+elif [ -n "$HELD" ]; then status "held $HELD"
 else status "ok ${PULLED:-kit no-origin}"; fi
 exit 0

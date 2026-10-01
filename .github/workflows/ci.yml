@@ -28,7 +28,9 @@ jobs:
   kit-verify:
     name: kit-verify
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The suite runs twice in this job (Engine tests, then Test isolation), about five minutes each:
+    # the limit leaves room for both plus the steps after them, so a green run is not cut off at the end.
+    timeout-minutes: 20
     steps:
       # The kit lives at <workspace>/.claude and finds the env store at <workspace>/.context, so
       # check it out one level down and give it a blank store — the same shape setup.sh builds.
