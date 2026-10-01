@@ -26,6 +26,7 @@ Stdlib only; runs on the host's system python3 (3.9+).
 from __future__ import annotations
 
 import datetime as _dt
+import fcntl
 import json
 import os
 import re
@@ -37,7 +38,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 KIT = Path(__file__).resolve().parents[2]  # skills/sign-queue → the kit (a .claude/ clone or the plugin root)
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
@@ -54,7 +55,7 @@ else:
 Q = Path(os.environ.get("SIGN_QUEUE_DIR", str(CONTEXT / "state" / "sign-queue")))
 LEGACY_Q = KIT / "sign-queue"  # where jobs were queued before #7
 LOGS = Q / "logs"
-KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b")
+LOCK = Q / ".lock"  # held exclusively (fcntl.flock) for the whole drain — a second `run` finds it held and exits
 
 # ── terminal styling ────────────────────────────────────────────────────────────────────────
 TTY = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
@@ -86,13 +87,21 @@ def now_z() -> str:
 
 
 # ── shell helpers ───────────────────────────────────────────────────────────────────────────
-def sh(args: List[str], cwd: Optional[str] = None, timeout: int = 15, env: Optional[dict] = None) -> str:
-    """Run a command, return stdout ('' on any failure). Never raises."""
+def sh(args: List[str], cwd: Optional[str] = None, timeout: int = 15, env: Optional[dict] = None) -> Tuple[bool, str, str]:
+    """Run a command, return (ok, stdout, reason). ok is False on a non-zero exit, a timeout or a launch
+    error (missing binary, …); reason is then a short one-line explanation (never the full stderr dump) —
+    a caller that only looked at stdout used to see '' and could not tell "ran clean, said nothing" apart
+    from "failed outright". Never raises."""
     try:
         r = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    return r.stdout.strip() if r.returncode == 0 else ""
+    except subprocess.TimeoutExpired:
+        return False, "", f"timed out after {timeout}s"
+    except OSError as e:
+        return False, "", f"{type(e).__name__}: {e}"
+    if r.returncode != 0:
+        line = next((ln.strip() for ln in r.stderr.splitlines() if ln.strip()), f"exit {r.returncode}")
+        return False, "", line[:160]
+    return True, r.stdout.strip(), ""
 
 
 def gh_env() -> dict:
@@ -109,19 +118,39 @@ def gh_env() -> dict:
 
 
 # ── metadata derivation (shared by enqueue.sh via `meta` and by the drain for legacy jobs) ──
-def repo_of(wt: str) -> str:
-    url = sh(["git", "-C", wt, "remote", "get-url", "origin"])
-    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", url)
-    return m.group(1) if m else ""
+def repo_of(wt: str) -> Dict[str, object]:
+    """{"repo": "<owner>/<repo>", "repo_lookup_error": ""} — or repo="" with a reason when `git remote
+    get-url` itself failed (no origin configured reads as repo="" with no error: that is not a failure)."""
+    ok, out, reason = sh(["git", "-C", wt, "remote", "get-url", "origin"])
+    if not ok:
+        return {"repo": "", "repo_lookup_error": reason}
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", out)
+    return {"repo": m.group(1) if m else "", "repo_lookup_error": ""}
+
+
+def key_regex() -> Optional["re.Pattern[str]"]:
+    """This environment's ticket-key shape, from the env config's `tracker.key_regex` (the same source
+    `context-db/bin/commit_style.py`'s `key_regex()` reads) — never a hardcoded tracker's shape. No
+    configured regex (or one that fails to compile) means no key matching at all, not a fallback shape."""
+    rx = str(kit_profile.get("tracker.key_regex") or "")
+    if not rx:
+        return None
+    try:
+        return re.compile(rx)
+    except re.error:
+        return None
 
 
 def ticket_of(*candidates: str) -> str:
+    rx = key_regex()
+    if rx is None:
+        return ""
     for c in candidates:
         if not c:
             continue
-        m = KEY_RE.search(c) or KEY_RE.search(c.upper())
+        m = rx.search(c) or rx.search(c.upper())
         if m:
-            return m.group(1).upper()
+            return m.group(0).upper()
     return ""
 
 
@@ -205,13 +234,15 @@ def subject_of(msg: str) -> str:
 
 def build_meta(wt: str, branch: str, msg: str, topic: str = "", by: str = "", ticket: str = "", epic: str = "",
                pr: str = "", summary: str = "", flags: Optional[List[str]] = None, files: int = -1) -> Dict[str, object]:
-    repo = repo_of(wt)
+    repo_info = repo_of(wt)
+    repo = str(repo_info.get("repo") or "")
     subject = summary or subject_of(msg)
     ticket = ticket.upper() if ticket else ticket_of(branch, topic, subject)
     meta: Dict[str, object] = {
         "v": 1, "topic": topic, "by": by, "enqueued": now_z(),
         "wt": wt, "branch": branch, "msg": msg,
         "repo": repo, "ticket": ticket, "subject": subject,
+        "repo_lookup_error": repo_info.get("repo_lookup_error") or "",
         "flags": flags or [], "files": files,
     }
     if epic:
@@ -242,7 +273,9 @@ class Job:
 
     @property
     def topic(self) -> str:
-        return str(self.meta.get("topic") or re.sub(r"^\d{8}T\d{6}Z-", "", self.name)[:-3])
+        # the timestamp prefix, optionally followed by the same-second collision suffix enqueue.sh adds
+        # since the fix (`-NNN-`) — a legacy job from before it has no suffix to strip either way.
+        return str(self.meta.get("topic") or re.sub(r"^\d{8}T\d{6}Z-(?:\d+-)?", "", self.name)[:-3])
 
     @property
     def log(self) -> Path:
@@ -412,7 +445,10 @@ MILESTONES = [
 FAIL_HINTS = [
     (re.compile(r"^UNSIGNED "), "a commit below HEAD would have pushed unsigned — the job refused the push "
      "before it landed; a sandbox-made commit surviving a no-op re-stack is the usual cause"),
-    (re.compile(r"non-fast-forward|fetch first|rejected"), "remote moved: re-enqueue with --rebase (or --force-with-lease after a rewrite)"),
+    # anchored to git's own push-rejection line (`! [rejected]        branch -> branch (…)`) — a bare
+    # "rejected" also matches a commit subject that happens to contain the word (e.g. a fix for rejected
+    # payments), which used to trigger this hint on an unrelated failure.
+    (re.compile(r"non-fast-forward|fetch first|! \[rejected\]"), "remote moved: re-enqueue with --rebase (or --force-with-lease after a rewrite)"),
     (re.compile(r"CONFLICT|could not apply"), "rebase conflict: the owning session resolves in the worktree, then re-enqueues"),
     (re.compile(r"gpg failed to sign|signing failed|No secret key|Couldn't load public key|failed to write commit object"),
      "signing failed: the signing key is not available (a drain only works on the host)"),
@@ -600,6 +636,25 @@ def resolve_pr_after_push(j: Job) -> None:
 def cmd_run(argv: List[str]) -> int:
     verbose = "-v" in argv or "--verbose" in argv
     dry = "--dry-run" in argv
+    # the exclusive lock guards the whole drain, acquired before anything else runs (including the
+    # job listing that follows) — a second concurrent `run` must see nothing but this one line, never
+    # a header or table it has no business printing. LOCK_NB: never block, just say so and leave.
+    Q.mkdir(parents=True, exist_ok=True)
+    lock_f = open(LOCK, "a+")
+    try:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(dim("sign queue: another drain already holds the lock — exiting"))
+        lock_f.close()
+        return 0
+    try:
+        return _drain(verbose, dry)
+    finally:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+        lock_f.close()
+
+
+def _drain(verbose: bool, dry: bool) -> int:
     jobs = load_jobs()
     pending = [j for j in jobs if not j.parked]
     parked = [j for j in jobs if j.parked]
@@ -613,13 +668,24 @@ def cmd_run(argv: List[str]) -> int:
     print(table(pending))
     results = []
     for i, j in enumerate(pending, 1):
+        if not j.path.exists():
+            # gone since `list`/`load_jobs` read it (a hand `rm`, or a `sign_drop` run alongside this
+            # drain) — never let a missing file abort the loop and lose the summary for every other job.
+            print(dim(f"  skipped {j.name} — job file disappeared mid-drain"))
+            continue
         print(job_card(i, len(pending), j))
         r = run_job(j, verbose, dry)
         if r["status"] == "pushed":
-            j.path.unlink()
+            try:
+                j.path.unlink()
+            except FileNotFoundError:
+                print(dim(f"  {j.name} pushed, but its job file was already gone"))
             resolve_pr_after_push(j)
         elif r["status"] == "failed":
-            j.path.rename(j.path.with_name(j.path.name + ".failed"))
+            try:
+                j.path.rename(j.path.with_name(j.path.name + ".failed"))
+            except FileNotFoundError:
+                print(dim(f"  {j.name} failed, but its job file was already gone — not parked"))
         results.append((j, r))
     if dry:
         return 0
@@ -652,7 +718,8 @@ def cmd_list(_: List[str]) -> int:
 def cmd_show(argv: List[str]) -> int:
     j = pick(load_jobs(), argv[0])
     print(bold(j.path.name) + ("  " + red("(parked)") if j.parked else ""))
-    for k in ("ticket", "epic", "epic_title", "repo", "pr", "pr_url", "pr_lookup_error", "pr_lookup_skipped", "branch", "wt", "msg", "subject", "flags", "files", "by", "enqueued"):
+    for k in ("ticket", "epic", "epic_title", "repo", "repo_lookup_error", "pr", "pr_url", "pr_lookup_error",
+              "pr_lookup_skipped", "branch", "wt", "msg", "subject", "flags", "files", "by", "enqueued"):
         if j.meta.get(k) not in (None, "", [], -1):
             print(f"  {k:<15} {j.meta[k]}")
     print(dim("\n--- script ---"))
