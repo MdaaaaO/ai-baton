@@ -556,11 +556,19 @@ class RenameSubcommand(unittest.TestCase):
                                 repos="", working=working, resp="", note="", next="")
         self.mod.cmd_register(a)
 
+    def test_rename_hands_the_rows_session_id_to_the_heartbeat_restart(self):
+        # The heartbeat's pidfile is keyed by the harness session id on the row, so the restart needs it.
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "sess-rename"}):
+            self._register("t-old-id", working="on something")
+        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
+            self.mod.cmd_rename(argparse.Namespace(old="t-old-id", new="kit-real-id"))
+        rh.assert_called_once_with("t-old-id", "kit-real-id", "on something", "sess-rename")
+
     def test_rename_moves_the_file_and_rewrites_frontmatter_and_title(self):
         self._register("t-old-lane", working="on something")
         with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
             self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-real-topic"))
-        rh.assert_called_once_with("t-old-lane", "kit-real-topic", "on something")
+        rh.assert_called_once_with("t-old-lane", "kit-real-topic", "on something", "")
         self.assertFalse((self.root / "sessions" / "t-old-lane.md").exists())
         doc = (self.root / "sessions" / "kit-real-topic.md").read_text(encoding="utf-8")
         self.assertIn("session: kit-real-topic", doc)
@@ -620,6 +628,23 @@ class HeartbeatRestartHelpers(unittest.TestCase):
         with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
             self.assertFalse(self.mod._kill_heartbeat("t-stale"))
         self.assertFalse(pidfile.exists())
+
+    def test_kill_heartbeat_finds_a_pidfile_keyed_by_the_session_id(self):
+        # heartbeat.sh keys its pidfile by the harness session id when it has one; a rename knows the
+        # session by name and by the id on its row, and must stop that loop too.
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            pidfile = Path(self.tmp.name) / "heartbeat-sess-1234.pid"
+            pidfile.write_text(str(proc.pid), encoding="utf-8")
+            with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+                self.assertFalse(self.mod._kill_heartbeat("t-by-id"), "the name alone has no pidfile")
+                self.assertTrue(self.mod._kill_heartbeat("t-by-id", "sess-1234"))
+            proc.wait(timeout=5)
+            self.assertFalse(pidfile.exists())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
 
     def test_kill_heartbeat_with_no_pidfile_is_a_noop(self):
         with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):

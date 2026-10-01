@@ -502,11 +502,19 @@ def _baton_tmp() -> str:
     return os.path.join(os.environ.get("TMPDIR") or "/tmp", f"ai-baton-{os.getuid()}")
 
 
-def _kill_heartbeat(name: str) -> bool:
+def _kill_heartbeat(name: str, session_id: str = "") -> bool:
     """Stop a live heartbeat.sh for `name` (SIGTERM on the pid its pidfile names) and remove the
     pidfile. Returns whether one was found running — a stale pidfile (process already gone, e.g. the
-    session crashed) is just cleaned up, silently."""
-    pidfile = os.path.join(_baton_tmp(), f"heartbeat-{name}.pid")
+    session crashed) is just cleaned up, silently. heartbeat.sh keys its pidfile by the harness
+    session id when it has one, else by the name, so both are tried, the id first."""
+    alive = False
+    for key in (session_id, name):
+        if key and _kill_pidfile(os.path.join(_baton_tmp(), f"heartbeat-{key}.pid")):
+            alive = True
+    return alive
+
+
+def _kill_pidfile(pidfile: str) -> bool:
     alive = False
     try:
         with open(pidfile, encoding="utf-8") as f:
@@ -528,7 +536,7 @@ def _kill_heartbeat(name: str) -> bool:
     return alive
 
 
-def _restart_heartbeat(old_name: str, new_name: str, working: str) -> bool:
+def _restart_heartbeat(old_name: str, new_name: str, working: str, session_id: str = "") -> bool:
     """Stop the old name's heartbeat (if any) and, only when one was actually running, start a fresh one
     for the new name with the same focus. An ended (or archived, `restore_from_archive`-brought-back)
     session, or someone else's, has no heartbeat of its own to restart — starting one anyway would attach
@@ -537,7 +545,7 @@ def _restart_heartbeat(old_name: str, new_name: str, working: str) -> bool:
     an entry that was never theirs. Best-effort otherwise: heartbeat.sh needs a `claude`/`node` ancestor
     process to attach to — a bare CLI invocation (no owning session, e.g. this being run outside a Claude
     session) fails that lookup; the failure is reported to stderr and never fails the rename itself."""
-    was_running = _kill_heartbeat(old_name)
+    was_running = _kill_heartbeat(old_name, session_id)
     if not was_running:
         print(f"session.py: no heartbeat was running for {old_name} — none started for {new_name} either "
               f"(start one by hand if this session should have one)", file=sys.stderr)
@@ -581,7 +589,7 @@ def cmd_rename(a) -> None:
     except FileNotFoundError:
         pass
     record_name(a.new)
-    restarted = _restart_heartbeat(a.old, a.new, working)
+    restarted = _restart_heartbeat(a.old, a.new, working, meta.get("session_id", ""))
     print(f"renamed {os.path.relpath(old_path, CTX)} → {os.path.relpath(new_path, CTX)}"
           + (" (heartbeat restarted)" if restarted else " (heartbeat NOT restarted — see above)"))
 
