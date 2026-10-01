@@ -195,8 +195,8 @@ ACTIVITY_LIMIT = 40  # at most this many output lines, headers included (Done #5
 # commit" or a sentence mentioning it — that only a real command start should count. Matches right after
 # `^`, `&&`, `;`, `||` or `|`, with an optional `-C <path>` between `git` and the verb, so `cd <dir> &&
 # git commit …` and `git -C <dir> commit …` both count alongside the plain `git commit …` / `git push …`.
-GIT_COMMIT_RE = re.compile(r"(?:^|&&|\|\||;|\|)\s*git(?:\s+-C\s+\S+)?\s+commit\b", re.MULTILINE)
-GIT_PUSH_RE = re.compile(r"(?:^|&&|\|\||;|\|)\s*git(?:\s+-C\s+\S+)?\s+push\b", re.MULTILINE)
+GIT_COMMIT_RE = re.compile(r"(?:^|&&|\|\||;|\|)\s*git(?:\s+-C\s+\S+)?\s+commit\b")
+GIT_PUSH_RE = re.compile(r"(?:^|&&|\|\||;|\|)\s*git(?:\s+-C\s+\S+)?\s+push\b")
 PR_CREATE_RE = re.compile(r"(?<![\w-])gh\s+pr\s+create\b")
 PR_CREATE_API_RE = re.compile(r"(?<![\w-])gh\s+api\b(?:[^;|&\n]|\\\n)*?/pulls(?:[/?\s]|$)(?:[^;|&\n]|\\\n)*?-X\s+POST\b")
 PR_MERGE_RE = re.compile(r"pr-merge\.sh\s+\S+\s+(\d+)")

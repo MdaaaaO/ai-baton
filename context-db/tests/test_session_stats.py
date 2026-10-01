@@ -250,6 +250,7 @@ class Transcript(unittest.TestCase):
             ("git -C /tmp/work push -u origin feat/x", False, True),
             ("echo git commit is great", False, False),      # "git commit" as plain text, not invoked
             ("git status", False, False),
+            ("gh pr create --body \"$(cat <<'EOF'\nfirst line\ngit commit is not run here\nEOF\n)\"", False, False),  # a body line, not a segment
         ]
         for cmd, want_commit, want_push in cases:
             with self.subTest(cmd=cmd):
