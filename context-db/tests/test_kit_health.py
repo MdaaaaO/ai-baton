@@ -812,7 +812,7 @@ class Release(unittest.TestCase):
 
 
 class CloneChannelReport(unittest.TestCase):
-    """#59: a clone install's channel, installed tag and held preview (`.sync-preview`, shown verbatim — it
+    """A clone install's channel, installed tag and held preview (`.sync-preview`, shown verbatim — it
     already names the tag and the apply command); an `ok` last sync whose `.sync-status` detail names itself
     `unverified (reason)` gets its own WARN naming the hand-verify command."""
 
@@ -896,7 +896,8 @@ case "$cmd" in
     exit 0
     ;;
   "attestation verify")
-    if [ "${GH_STUB_ATTEST_RC:-0}" != "0" ]; then echo "stub: attestation failed" >&2; fi
+    [ "$3" = "--help" ] && exit "${GH_STUB_ATTEST_HELP_RC:-0}"
+    if [ "${GH_STUB_ATTEST_RC:-0}" != "0" ]; then echo "${GH_STUB_ATTEST_ERR:-stub: attestation failed}" >&2; fi
     exit "${GH_STUB_ATTEST_RC:-0}"
     ;;
 esac
@@ -905,7 +906,7 @@ exit 0
 
 
 class ManifestCheck(unittest.TestCase):
-    """#59: a plugin install's cache checked against the installed release's attested manifest — `gh release
+    """A plugin install's cache checked against the installed release's attested manifest — `gh release
     download` + `gh attestation verify` + `release_manifest.verify_no_git`, a stub `gh` on PATH, never the real
     `gh`, never the network."""
 
@@ -954,6 +955,21 @@ class ManifestCheck(unittest.TestCase):
         self.assertEqual(r.counts[kh.ERR], 1, r.lines)
         self.assertIn("attestation FAILED", r.findings[0][2])
 
+    def test_gh_without_attestation_command_is_warn(self):
+        kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_HELP_RC": "1"})
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+        self.assertIn("cannot check", r.findings[0][2])
+        self.assertIn("no `attestation` command", r.findings[0][2])
+
+    def test_attestation_without_an_answer_is_warn(self):
+        for err in ('Post "https://api.github.com/graphql": dial tcp: lookup api.github.com: no such host',
+                    "To get started with GitHub CLI, please run:  gh auth login"):
+            with self.subTest(err=err):
+                kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_RC": "1", "GH_STUB_ATTEST_ERR": err})
+                self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+                self.assertIn("cannot check", r.findings[0][2])
+                self.assertIn("got no answer", r.findings[0][2])
+
     def test_no_gh_is_warn(self):
         empty_bin = self.tmp_path / "empty-bin"
         empty_bin.mkdir()
@@ -968,7 +984,7 @@ class ManifestCheck(unittest.TestCase):
 
 
 class PendingUpdateCheck(unittest.TestCase):
-    """#59: when a newer release is out, the files a pending update would change — a path-level diff between the
+    """When a newer release is out, the files a pending update would change — a path-level diff between the
     installed and the newer release's manifests."""
 
     PLUGIN = {"repo": "example/kit", "commit": "", "version": "0.3.0", "updated": ""}

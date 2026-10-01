@@ -290,7 +290,7 @@ UNVERIFIED = re.compile(r"\bunverified\b(?:\s*\(([^)]*)\))?")
 
 
 def clone_channel_report(r: Report) -> None:
-    """§ 1, clone install only (#59): the release channel (`git config kit.channel` — `main` opts out to track
+    """§ 1, clone install only: the release channel (`git config kit.channel` — `main` opts out to track
     origin/main directly, else the release-tag channel sync.sh and sync-check.sh both default to), the installed
     release tag (`installed_release_clone`, the same tag choice sync.sh/sync-check.sh make), and a held preview
     when `.sync-preview` exists — its own first line already names the tag and the apply command (sync.sh's
@@ -299,7 +299,7 @@ def clone_channel_report(r: Report) -> None:
 
     Also reads `.sync-status` for a state kit-health has no other way to learn: an `ok` sync whose detail names
     itself `unverified (reason)` means the last sync applied a release without being able to check its manifest
-    (e.g. offline or no `gh` — #437's to write, not this skill's). Neither sync.sh nor sync-check.sh say anything
+    (e.g. offline or no `gh` — sync.sh writes that word, not this skill). Neither sync.sh nor sync-check.sh say anything
     about verification, so this is kit-health's own WARN, naming the quoted reason and the `gh attestation
     verify …` command (docs/contributing.md § Releases) to check by hand."""
     rc, out, _ = sh(["git", "-C", str(KIT), "config", "--get", "kit.channel"])
@@ -471,19 +471,38 @@ def download_manifest(repo: str, tag: str, dest_dir: Path, timeout: int = 30) ->
     return True, ""
 
 
-def attest_verify(repo: str, manifest_path: Path, timeout: int = 30) -> tuple[bool, str]:
+GH_NO_ANSWER = re.compile(r"could not resolve (?:host|hostname)|temporary failure in name resolution|name or service not known"
+                          r"|failed to connect|network is unreachable|no route to host|connection (?:refused|timed out)"
+                          r"|operation timed out|no such host|dial tcp|i/o timeout|tls handshake timeout|error connecting to"
+                          r"|gh auth login", re.I)
+
+
+def attest_verify(repo: str, manifest_path: Path, timeout: int = 30) -> tuple[str, str]:
     """`gh attestation verify` a downloaded manifest against `repo`'s release workflow (docs/contributing.md §
-    Releases) — proves the manifest's own provenance before `manifest_check` trusts its hashes."""
+    Releases) — proves the manifest's own provenance before `manifest_check` trusts its hashes. Three answers, the
+    same split sync.sh makes: ("ok", "") verified; ("failed", why) the check ran and said no; ("cannot", why) it
+    never got an answer — a `gh` from before `gh attestation` existed, a timeout, a network error or an
+    unauthenticated `gh` (`GH_NO_ANSWER`, gh's own wording). An error text this does not recognise counts as
+    failed: the strict reading is the safe one."""
+    gh_env = kit_profile.gh_env()
+    rc, _, err = sh(["gh", "attestation", "verify", "--help"], env=gh_env, timeout=timeout)
+    if rc == 127:
+        return "cannot", f"`gh` did not run: {err}"
+    if rc != 0:
+        return "cannot", "this `gh` has no `attestation` command — update `gh`"
     rc, out, err = sh(["gh", "attestation", "verify", str(manifest_path), "--repo", repo,
                         "--signer-workflow", f"{repo}/.github/workflows/release.yml"],
-                       env=kit_profile.gh_env(), timeout=timeout)
-    if rc != 0:
-        return False, (err or out).splitlines()[-1] if (err or out) else f"exit {rc}"
-    return True, ""
+                       env=gh_env, timeout=timeout)
+    if rc == 0:
+        return "ok", ""
+    why = (err or out).splitlines()[-1] if (err or out) else f"exit {rc}"
+    if rc == 127 or GH_NO_ANSWER.search(both(out, err)):
+        return "cannot", f"`gh attestation verify` got no answer: {why}"
+    return "failed", why
 
 
 def manifest_check(r: Report, plugin: dict, installed: str) -> None:
-    """§ 1, plugin install (#59): the plugin cache checked against the installed release's own attested manifest —
+    """§ 1, plugin install: the plugin cache checked against the installed release's own attested manifest —
     `gh release download` the `manifest.txt` asset, `gh attestation verify` it (proves provenance), then
     `release_manifest.verify_no_git` it against the live cache (proves the cache's own files match). The repo slug
     is `plugin['repo']` — the same source `release_check` already asked GitHub with, never a hardcoded slug (a
@@ -491,7 +510,7 @@ def manifest_check(r: Report, plugin: dict, installed: str) -> None:
 
     Outcomes: verified and matching → OK; an attestation or hash failure → ERR naming the first few differing
     files (this is the one case this check can actually prove wrong); anything that stops it from running at all
-    (no `gh`, unauthenticated, offline, no manifest asset on this release) → WARN naming why, never an ERR — a
+    (no `gh` or one too old, unauthenticated, offline, no manifest asset on this release) → WARN naming why, never an ERR — a
     cannot-run is not a cache that is wrong. Files present but unlisted by the manifest are a note on the OK line,
     not a failure: `verify_no_git` cannot tell a hand edit from a file simply never tracked without a git checkout
     to ask (docs/packaging.md)."""
@@ -510,8 +529,11 @@ def manifest_check(r: Report, plugin: dict, installed: str) -> None:
             r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — `{installed}` has no `manifest.txt` "
                   "release asset (a release cut before the manifest existed)")
             return
-        ok, why = attest_verify(repo, manifest_file)
-        if not ok:
+        state, why = attest_verify(repo, manifest_file)
+        if state == "cannot":
+            r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — {why}")
+            return
+        if state == "failed":
             r.add(ERR, "kit", f"plugin cache vs manifest: attestation FAILED — {why}")
             return
         try:
@@ -536,7 +558,7 @@ def manifest_check(r: Report, plugin: dict, installed: str) -> None:
 
 
 def pending_update_check(r: Report, plugin: dict, installed: str, latest: dict) -> None:
-    """§ 1, plugin install, only when `release_check` found a newer release out (#59): the files a pending update
+    """§ 1, plugin install, only when `release_check` found a newer release out: the files a pending update
     would change — a path-level diff (added/removed/changed) between the installed and the newer release's
     manifests, so the warning above says what `claude plugin update` would actually touch. Reuses `release_check`'s
     already-fetched `latest` (never asks GitHub twice for the tag) and `download_manifest` (same timeout bound):
