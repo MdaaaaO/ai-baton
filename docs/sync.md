@@ -85,12 +85,12 @@ checkout's own `origin` remote, never hardcoded), then check the manifest's `com
 the tag's own commit. Verified → applies as above. The check ran and **failed** (bad attestation or a
 manifest naming a different commit) → applies nothing, `.sync-status` is `error <reason>` and the run
 exits 1 with the reason on stderr — the one error that does, since `--accept` only ever runs in the
-foreground. The check **cannot run at
-all** — no `gh` on `PATH`, `gh` not authenticated, offline, or the release predates the manifest and
-carries no `manifest.txt` asset — → applies anyway: a clone must still be able to catch up with no
-network or an unauthenticated `gh`, so `.sync-status` is `ok …` with the standalone word `unverified`
-and a short reason appended (`kit-health`'s check, not `sync-check.sh`'s, warns on that word). `kit.channel
-main` never verifies — there is no release tag to verify against.
+foreground. The check **cannot run at all** — no `gh` on `PATH`, `gh` not authenticated, offline, an
+`origin` that is not on github.com, or a release that predates the manifest and carries no `manifest.txt`
+asset — → applies anyway: a clone must still be able to catch up with no network or an unauthenticated
+`gh`, so `.sync-status` is `ok …` with the standalone word `unverified` and a short reason appended
+(`kit-health`'s check, not `sync-check.sh`'s, warns on that word). `kit.channel main` never verifies —
+there is no release tag to verify against.
 
 A contributor who wants the old behaviour — always track `origin/main`, no hold — opts out with:
 
