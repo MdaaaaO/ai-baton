@@ -46,7 +46,7 @@ class KitRelease(unittest.TestCase):
         self.ws.mkdir()
         # the fake release tool: prints its arguments and the directory it ran in (the throwaway worktree)
         self.crel = self.tmp / "crel.sh"
-        self.crel.write_text('#!/bin/sh\necho "CREL $* in $(basename "$PWD")"\n')
+        self.crel.write_text('#!/bin/sh\n[ "$1" = next ] && { echo 0.2.0; exit 0; }\necho "CREL $* in $(basename "$PWD")"\n')
         self.crel.chmod(0o755)
 
     def git(self, *args, cwd):
@@ -134,6 +134,7 @@ class KitReleaseMarketplaceRef(unittest.TestCase):
         self.crel = fakebin / "crel.sh"
         self.crel.write_text(
             "#!/bin/sh\nset -e\n"
+            'if [ "$1" = "next" ]; then echo 0.2.0; exit 0; fi\n'
             'if [ "$1" = "release" ] && [ "$2" != "--dry-run" ]; then\n'
             "  git checkout -q -b release/v0.2.0\n"
             '  printf "0.2.0\\n" > VERSION\n'
@@ -210,10 +211,10 @@ class ConventionalReleaseVersionPin(unittest.TestCase):
 
 @unittest.skipUnless(MAKE, "make not installed")
 class KitReleaseLevelInference(unittest.TestCase):
-    """Below 1.0.0, kit_release/_dry read the fake release tool's own --dry-run output (never re-parse
-    commits themselves) to catch an inferred major and run with `minor` instead — every machine takes a
-    Machines-footer step the same way pre-1.0, it is not a 1.0.0. On 1.x, or with an explicit LEVEL, the
-    probe is skipped (or ignored) and nothing is overridden."""
+    """Below 1.0.0, kit_release/_dry ask the release tool for the next version (`next`, never their own reading
+    of the commits) to catch an inferred major and run with `minor` instead — every machine takes a
+    Machines-footer step the same way pre-1.0, it is not a 1.0.0. A tool that cannot name the next version cuts
+    nothing. On 1.x, or with an explicit LEVEL, the tool is not asked and nothing is overridden."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="kit-release-level-test."))
@@ -224,16 +225,18 @@ class KitReleaseLevelInference(unittest.TestCase):
         self.origin = self.tmp / "origin.git"
         self.ws = self.tmp / "ws"
         self.ws.mkdir()
-        # records every invocation's arguments; a bare `release --dry-run` probe (no level arg) answers with
-        # the "inferred" version jump from OLD_VER/NEW_VER, so the recipe reads a fake major/minor/patch
-        # without this stub re-implementing any commit parsing of its own
+        # records every invocation's arguments; `next` answers the way the real tool does — the bare version on
+        # stdout, or an `error:` line on stderr and exit 1 (NEXT_FAIL) — and `release` prints its status line
+        # on stderr, as the real one does, so a recipe that parsed that line would not pass here by accident
         self.crel = self.tmp / "crel.sh"
         self.crel.write_text(
             "#!/bin/sh\n"
             'echo "$*" >> "$CALL_LOG"\n'
-            'if [ "$1" = "release" ] && [ "$2" = "--dry-run" ] && [ -z "$3" ]; then\n'
-            '  printf "release %s -> %s\\n" "$OLD_VER" "$NEW_VER"\n'
+            'if [ "$1" = "next" ]; then\n'
+            '  if [ -n "$NEXT_FAIL" ]; then echo "error: $NEXT_FAIL" >&2; exit 1; fi\n'
+            '  printf "%s\\n" "$NEXT_VER"\n'
             "else\n"
+            '  echo "release status line" >&2\n'
             '  echo "CREL $* in $(basename "$PWD")"\n'
             "fi\n"
         )
@@ -268,43 +271,68 @@ class KitReleaseLevelInference(unittest.TestCase):
 
     def test_0x_inferred_major_runs_with_minor_and_notes_it(self):
         self.seed("0.1.0")
-        self.env["OLD_VER"], self.env["NEW_VER"] = "0.1.0", "1.0.0"
+        self.env["NEXT_VER"] = "1.0.0"
         r = self.make("kit_release_dry")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.calls(), ["release --dry-run", "release --dry-run minor"])
-        self.assertIn("using minor instead", r.stdout)
+        self.assertEqual(self.calls(), ["next", "release --dry-run minor"])
+        self.assertIn("cutting a minor instead", r.stdout)
+        self.assertIn("1.0.0", r.stdout)
         self.assertIn("LEVEL=major", r.stdout)
 
     def test_0x_inferred_minor_is_not_overridden(self):
         self.seed("0.1.0")
-        self.env["OLD_VER"], self.env["NEW_VER"] = "0.1.0", "0.2.0"
+        self.env["NEXT_VER"] = "0.2.0"
         r = self.make("kit_release_dry")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.calls(), ["release --dry-run", "release --dry-run"])
+        self.assertEqual(self.calls(), ["next", "release --dry-run"])
         self.assertNotIn("minor instead", r.stdout)
 
     def test_0x_inferred_patch_is_not_overridden(self):
         self.seed("0.1.0")
-        self.env["OLD_VER"], self.env["NEW_VER"] = "0.1.0", "0.1.1"
+        self.env["NEXT_VER"] = "0.1.1"
         r = self.make("kit_release_dry")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.calls(), ["release --dry-run", "release --dry-run"])
+        self.assertEqual(self.calls(), ["next", "release --dry-run"])
         self.assertNotIn("minor instead", r.stdout)
 
     def test_1x_inferred_major_is_not_overridden(self):
         self.seed("1.0.0")
-        self.env["OLD_VER"], self.env["NEW_VER"] = "1.0.0", "2.0.0"
+        self.env["NEXT_VER"] = "2.0.0"
         r = self.make("kit_release_dry")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.calls(), ["release --dry-run"])  # already 1.x — no probe needed
+        self.assertEqual(self.calls(), ["release --dry-run"])  # already 1.x — the tool is not asked
         self.assertNotIn("minor instead", r.stdout)
 
     def test_explicit_level_passes_through_untouched_on_0x(self):
         self.seed("0.1.0")
         r = self.make("kit_release_dry", "LEVEL=major")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self.calls(), ["release --dry-run major"])  # LEVEL given — no probe, no override
+        self.assertEqual(self.calls(), ["release --dry-run major"])  # LEVEL given — not asked, no override
         self.assertNotIn("minor instead", r.stdout)
+
+    def test_the_real_target_cuts_a_minor_too(self):
+        self.seed("0.1.0")
+        self.env["NEXT_VER"] = "1.0.0"
+        r = self.make("kit_release")
+        self.assertEqual(self.calls(), ["next", "release minor"], r.stdout + r.stderr)
+        self.assertIn("cutting a minor instead", r.stdout)
+
+    def test_a_tool_that_cannot_name_the_next_version_cuts_nothing(self):
+        for target in ("kit_release", "kit_release_dry"):
+            for fail, ver in (("nothing to release since v0.1.0", ""), ("", "not a version")):
+                with self.subTest(target=target, fail=fail, ver=ver):
+                    if self.origin.exists():
+                        shutil.rmtree(self.tmp / "seed"), shutil.rmtree(self.origin), shutil.rmtree(self.ws / ".claude")
+                    self.call_log.unlink(missing_ok=True)
+                    self.seed("0.1.0")
+                    self.env["NEXT_FAIL"], self.env["NEXT_VER"] = fail, ver
+                    r = self.make(target)
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)  # make's own exit for a failed recipe
+                    self.assertEqual(self.calls(), ["next"])  # `release` never ran
+                    self.assertIn("nothing cut", r.stdout)
+                    self.assertIn(fail or ver, r.stdout)  # the tool's own words reach the reader
+                    self.assertIn("LEVEL=", r.stdout)
+                    self.assertFalse((self.ws / ".worktrees" / "kit_release-run").exists(), "worktree left behind")
 
 
 if __name__ == "__main__":
