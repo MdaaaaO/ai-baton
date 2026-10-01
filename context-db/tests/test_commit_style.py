@@ -63,15 +63,15 @@ class Subjects(BlankStore):
         self.assertEqual(cs.check_subject("feat(kb): " + "x" * 62, "conventional"), [])
 
     def test_only_a_configured_tracker_key_may_lead_a_conventional_description(self):
-        kb.save_config({**kb.load_config(), "tracker": {"kind": "jira", "key_regex": r"\b(PROJ-\d+)\b"}})
+        kb.save_config({**kb.load_config(), "tracker": {"kind": "jira", "key_regex": r"\b(KEY-\d+)\b"}})
         kit_profile.env_config.cache_clear(); kit_profile.load.cache_clear()
-        self.assertEqual(cs.check_subject("feat(dbt): PROJ-123 add the fact table", "conventional"), [])
+        self.assertEqual(cs.check_subject("feat(dbt): KEY-123 add the fact table", "conventional"), [])
         # shaped like a key, but not this environment's key — and a key further in does not excuse the start
-        for refused in ("UTF-8 decode the body", "SHA-256 the tokens", "OTHER-1 add x", "PROJ add x", "Add x for PROJ-1"):
+        for refused in ("UTF-8 decode the body", "SHA-256 the tokens", "X-1 add x", "KEY add x", "Add x for KEY-1"):
             self.assertTrue(any("should start lower-case" in p for p in cs.check_subject(f"feat(kb): {refused}", "conventional")), refused)
-        kb.save_config({**kb.load_config(), "tracker": {"kind": "jira", "key_regex": "(PROJ-"}})  # not a regex: no exemption
+        kb.save_config({**kb.load_config(), "tracker": {"kind": "jira", "key_regex": "(KEY-"}})  # not a regex: no exemption
         kit_profile.env_config.cache_clear(); kit_profile.load.cache_clear()
-        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): PROJ-1 add x", "conventional")))
+        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): KEY-1 add x", "conventional")))
 
     def test_ticket_key_and_free(self):
         self.assertEqual(cs.check_subject("anything at all.", "free"), [])
