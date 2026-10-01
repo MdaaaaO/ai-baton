@@ -48,7 +48,23 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        catalogs INDEX.md (gen_index.py) and SESSION_INDEX.md (gen_sessions.py --no-archive) are
                        regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
-  brief-session        SessionStart compact → `ctx brief --session <session_id>`, byte-budgeted
+  brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and epic
+                       <epic key>", the session row's own `epic:` frontmatter value verbatim, or "and no
+                       context doc" when the row carries no `epic:` field at all), then `ctx brief --session
+                       <session_id>` re-budgeted by this adapter — its frontmatter cut to
+                       `session`/`epic`/`working_on`/`responsibilities` (`stats`, `heartbeat`, `session_id`,
+                       `ref`, `updated` and the `sections` summary dropped outright, the fields a 2026-10-01
+                       gap report found eating the budget before the body) and its `##` sections led by
+                       `SECTION_PRIORITY` when present — within `BRIEF_BUDGET`. Both are written and flushed to
+                       stdout before any context-doc lookup is even attempted: only once they are on stdout
+                       does this try to resolve the context doc the `epic:` field names through the store's
+                       own `resolve` rule, then — when one resolved — fetch its key and the head of its
+                       *Remaining work*, within a separate `EPIC_BUDGET`. The whole hook has `COMPACT_DEADLINE`
+                       seconds (under the hooks' own 10s `timeout`); the context-doc lookups (`resolve`/
+                       `find`/`get`) run only while more than 1.5s of it remain before each one starts, every
+                       one of them capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` recomputed right before
+                       that call, never a single value reused across more than one — skipped or timed out, one
+                       line `context doc: skipped (hook deadline)` stands in for that tail
 
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
@@ -80,7 +96,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
+from typing import Callable
 
 CTX_VERSION = "v0.6.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
 CTX_API = 1             # the ctx API `ctx --version` must report (its `(api N)` suffix) — bump only alongside a
@@ -88,7 +106,31 @@ CTX_API = 1             # the ctx API `ctx --version` must report (its `(api N)`
                          # exposes it so kit-health can catch a pinned install answering a different one
 CTX_REPO = "https://github.com/MdaaaaO/ctx-store"
 BRIEF_BUDGET = 2048     # bytes of a SessionStart brief (ctx's default is 4096; the start of a session is prime context)
+EPIC_BUDGET = 600       # bytes of a compact brief's context-doc tail (its key plus the head of its Remaining work)
+REMAINING_WORK_HEAD = 8  # lines of a context doc's Remaining work section a compact brief carries
+SESSION_RAW_BUDGET = 65536  # bytes `ctx brief --session --full` may answer with before this adapter filters and
+                            # re-budgets it itself — large enough that no ordinary session doc is cut before that
+EPIC_LOOKUP_TIMEOUT = 3  # seconds either extra ctx call (resolve, get) a compact brief makes may take: the session
+                         # brief itself already has HOOK_TIMEOUT; these two are nice-to-have, not worth the same wait
+SESSION_BRIEF_KEEP = ("session", "epic", "working_on", "responsibilities")  # the rest of a session doc's
+    # frontmatter (stats, heartbeat, session_id, ref, updated) is what a 2026-10-01 gap report measured eating a
+    # compact brief's budget before the body ever got any; this adapter keeps only these four fields, in this order
+RESPONSIBILITIES_MAX = 160  # characters of a kept `responsibilities` field a compact brief carries
+SECTION_PRIORITY = ("Open PRs", "Open decisions", "Assumptions", "Owns", "Worktrees")  # a compact brief's body
+                    # leads with these `##` sections, in this order, when present; every other section (there may
+                    # be none) keeps its original relative order after them
+SESSION_FM_LINE_KEYS = {"session", "session_id", "ref", "status", "epic", "repos", "working_on",
+                        "responsibilities", "stats", "heartbeat", "updated", "sections"}  # every line `ctx brief`
+    # prints between a session doc's header and its body: its frontmatter fields plus the derived `sections: …`
+    # summary line, both in the same "key: value" shape — the set this adapter's parser recognises and stops at
 HOOK_TIMEOUT = 8        # seconds one ctx call may take inside a hook (the hook entries allow 10)
+COMPACT_DEADLINE = 8    # seconds the whole brief-session hook may spend, start to finish (also under the hooks'
+                        # own 10s "timeout" in hooks/hooks.json and settings.json, with a margin a slow
+                        # process-start or lock wait can eat into): a compact brief used to make up to four ctx
+                        # calls in a row with no shared budget, so a harness kill could lose even the owner
+                        # line and session brief it had already finished computing — this bounds the whole
+                        # hook and the owner line plus session brief are flushed to stdout as soon as they are
+                        # ready, so only a skipped context-doc lookup is ever at risk
 LOCK_TIMEOUT = "3"      # CTX_LOCK_TIMEOUT for a hook's ctx call unless the user set one: a held lock must not stall a tool
 MESSAGE_MAX = 1000      # characters of validate findings returned as the systemMessage
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
@@ -451,7 +493,7 @@ def _store_args(root: Path) -> list[str] | None:
     return ["--store", str(root)] if root.is_dir() else None
 
 
-def _ctx(ctx: Path, store: list[str], *args: str, timeout: int = HOOK_TIMEOUT) -> subprocess.CompletedProcess:
+def _ctx(ctx: Path, store: list[str], *args: str, timeout: float = HOOK_TIMEOUT) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env.setdefault("CTX_LOCK_TIMEOUT", LOCK_TIMEOUT)
     return subprocess.run([str(ctx), *store, *args], env=env, capture_output=True, text=True, timeout=timeout,
@@ -541,6 +583,212 @@ def _session_id(payload: dict) -> str:
     return sid.strip() if isinstance(sid, str) else ""
 
 
+def _fit_lines(lines: list[str], budget: int) -> list[str]:
+    """`lines` kept within `budget` bytes, ctx's own `brief`/`get` tail convention (its `_fit`, reimplemented here:
+    this adapter re-budgets text ctx already answered, it does not call back into ctx for it): a trailing
+    "… n more lines, raise --budget" marker for whatever does not fit, backing out already-kept lines if the
+    marker itself would not fit otherwise."""
+    kept: list[str] = []
+    used = 0
+    for index, line in enumerate(lines):
+        size = len(line.encode("utf-8")) + 1
+        rest = len(lines) - index
+        marker_len = len(f"… {rest} more lines, raise --budget".encode("utf-8"))
+        if used + size + (marker_len + 1 if index < len(lines) - 1 else 0) > budget:
+            note = f"… {rest} more lines, raise --budget"
+            while kept and used + len(note.encode("utf-8")) + 1 > budget:
+                used -= len(kept.pop().encode("utf-8")) + 1
+                rest += 1
+                note = f"… {rest} more lines, raise --budget"
+            return kept + [note]
+        kept.append(line)
+        used += size
+    return kept
+
+
+def _split_brief_doc(raw: str) -> tuple[str, dict[str, str], str]:
+    """One `ctx brief --session`/`brief <doc>` answer, split into its header line (the doc's key and type), its
+    frontmatter as a dict in file order (the derived `sections: …` summary line included under that key), and
+    the body that follows the blank separator line. ("", {}, "") on empty input."""
+    lines = raw.splitlines()
+    if not lines:
+        return "", {}, ""
+    i = 1
+    fm: dict[str, str] = {}
+    while i < len(lines) and lines[i]:
+        key, sep, val = lines[i].partition(": ")
+        if not sep or key not in SESSION_FM_LINE_KEYS:
+            break
+        fm[key] = val
+        i += 1
+    if i < len(lines) and not lines[i]:
+        i += 1  # the blank separator before the body
+    return lines[0], fm, "\n".join(lines[i:])
+
+
+def _filtered_frontmatter(fm: dict[str, str]) -> list[str]:
+    """`fm` (from `_split_brief_doc`) cut to `SESSION_BRIEF_KEEP`, in that order — the fields a 2026-10-01 gap
+    report found a compaction's budget going to before the body ever got any (`stats`, `heartbeat`, plus
+    `session_id`/`ref`/`updated` and the `sections` summary) are dropped outright, not merely shortened."""
+    out = []
+    for key in SESSION_BRIEF_KEEP:
+        val = fm.get(key)
+        if val:
+            if key == "responsibilities" and len(val) > RESPONSIBILITIES_MAX:
+                val = val[:RESPONSIBILITIES_MAX]
+            out.append(f"{key}: {val}")
+    return out
+
+
+def _reorder_sections(body: str) -> str:
+    """`body`'s `## ` sections moved so `SECTION_PRIORITY` leads, in that order, when present; every other
+    section (there may be none, or none of the priority ones) keeps its original relative order after them."""
+    parts = re.split(r"(?m)^(## .+)$", body)
+    if len(parts) < 3:
+        return body
+    preamble = parts[0]
+    pairs = list(zip(parts[1::2], parts[2::2]))
+
+    def rank(index: int, heading: str) -> tuple[int, int]:
+        name = heading[3:].strip()
+        return (0, SECTION_PRIORITY.index(name)) if name in SECTION_PRIORITY else (1, index)
+    ordered = sorted(enumerate(pairs), key=lambda kv: rank(kv[0], kv[1][0]))
+    # a section moved off the end picks up the trailing newline `_doc_lines`'s own `body.strip("\n")` took off it
+    return preamble + "".join(h + (t if t.endswith("\n") else t + "\n") for _, (h, t) in ordered)
+
+
+def _resolve_epic_doc(ctx: Path, store: list[str], epic_key: str, remaining: Callable[[], float]) -> str | None:
+    """The context doc `epic_key` (a session's `epic:` frontmatter field) names, through the store's own
+    `resolve` rule (`ctx resolve`) — None when there is no key, the store sets no `resolve.key_regex`, the key
+    matches no doc, or a call fails (a compact brief degrades, it does not go silent over one of its two extra
+    reads). `resolve.fields` names `epic` — the same field this session's own doc carries, since that is what
+    tags which context doc it is on — and a field match outranks the context doc's own `resolve.section` match
+    (`Tracker & links`), so resolving a session's own `epic:` value finds that session, never the context doc
+    it names. When `ctx resolve` hands back a `sessions/…` doc for that reason, this falls back to a search
+    scoped to the context doc's own type (`ctx find --type epic`), the one `resolve.section` exists for.
+    `remaining` is re-called before each of the two ctx calls — a fast `resolve` does not buy `find` a second
+    helping of the same timeout — each capped at `min(EPIC_LOOKUP_TIMEOUT, remaining())`; less than 1.5s left
+    before either one raises `subprocess.TimeoutExpired` rather than making the call. That exception, whether
+    raised here or by a call that actually timed out, is let through, not swallowed — the caller
+    (`_compact_brief`) tells a timeout, which it must report as skipped, from an ordinary no-match, which it
+    must not."""
+    if not epic_key:
+        return None
+    if remaining() < 1.5:
+        raise subprocess.TimeoutExpired("ctx resolve", EPIC_LOOKUP_TIMEOUT)
+    try:
+        r = _ctx(ctx, store, "resolve", epic_key, timeout=min(EPIC_LOOKUP_TIMEOUT, remaining()))
+    except OSError:
+        return None
+    if r.returncode == 0:
+        row = _lines(r.stdout)
+        candidate = row[0].split(" · ", 1)[0].strip() if row else ""
+        if candidate and not candidate.startswith("sessions/"):
+            return candidate
+    if remaining() < 1.5:
+        raise subprocess.TimeoutExpired("ctx find", EPIC_LOOKUP_TIMEOUT)
+    try:
+        f = _ctx(ctx, store, "find", "--type", "epic", epic_key, timeout=min(EPIC_LOOKUP_TIMEOUT, remaining()))
+    except OSError:
+        return None
+    if f.returncode != 0:
+        return None
+    rows = _lines(f.stdout)  # rows[0] is "<n> hits"; the best hit, if any, follows it
+    return rows[1].split(" · ", 1)[0].strip() or None if len(rows) > 1 else None
+
+
+def _epic_remaining_head(ctx: Path, store: list[str], doc_key: str, remaining: Callable[[], float]) -> list[str]:
+    """The first `REMAINING_WORK_HEAD` lines of `doc_key`'s `## Remaining work` section, via `ctx get` (never a
+    raw file read) — [] when the doc has no such section or the call fails; less than 1.5s of `remaining()`
+    left raises `subprocess.TimeoutExpired` rather than making the call, the same signal a call that actually
+    timed out would raise (see `_resolve_epic_doc`) — neither is swallowed here."""
+    if remaining() < 1.5:
+        raise subprocess.TimeoutExpired("ctx get", EPIC_LOOKUP_TIMEOUT)
+    try:
+        r = _ctx(ctx, store, "get", doc_key, "--section", "Remaining work", timeout=min(EPIC_LOOKUP_TIMEOUT, remaining()))
+    except OSError:
+        return []
+    if r.returncode != 0:
+        return []
+    return r.stdout.splitlines()[:REMAINING_WORK_HEAD]
+
+
+def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
+    """The `brief-session` hook's work: one owner line (`compacted — re-grounded from sessions/<name> and epic
+    <key>`, the session row's own `epic:` frontmatter value verbatim, or `and no context doc` when the
+    row carries no `epic:` field at all), then this session's brief with `BRIEF_BUDGET` spent on the body
+    rather than on frontmatter the owner cannot act on — `ctx brief`'s own `--budget` has no way to drop
+    frontmatter keys or reorder sections (ctx-store's own `brief` would need a field allow-list for that), so
+    this re-budgets ctx's full answer itself. The owner line and the session brief are written and flushed to
+    stdout before any context-doc lookup is even attempted, not merely before the slowest of them: neither
+    needs anything beyond this session's own frontmatter, so a harness kill that lands during the slower
+    lookups below still leaves both of these on stdout. Only once they are flushed does this try to resolve
+    the context doc the `epic:` field names — up to three more ctx calls (`resolve`, `find`, `get`), each
+    against a per-call deadline recomputed right before it, not one `min(EPIC_LOOKUP_TIMEOUT, remaining)`
+    computed once and handed to two calls in a row (see `_resolve_epic_doc`/`_epic_remaining_head`). When a
+    context doc resolved, its key and the head of its *Remaining work* follow in a separate `EPIC_BUDGET` —
+    but only while more than 1.5s of the deadline remain before either group of lookups starts; skipped for
+    lack of time, or cut off by a call that still timed out, one line `context doc: skipped (hook deadline)`
+    stands in for that tail instead. The whole call has `COMPACT_DEADLINE` seconds, measured from entry; the
+    session brief call itself gets `min(HOOK_TIMEOUT, remaining)`. Prints nothing when there is no session id
+    on the hook payload, the deadline is already spent, or the session brief call itself fails or times out —
+    a ctx call that times out never raises past this function, so whatever was already printed stays
+    printed."""
+    start = time.monotonic()
+
+    def remaining() -> float:
+        return COMPACT_DEADLINE - (time.monotonic() - start)
+
+    sid = _session_id(payload)
+    if not sid or remaining() <= 0:
+        return
+    try:
+        r = _ctx(ctx, store, "brief", "--session", sid, "--full", "--budget", str(SESSION_RAW_BUDGET),
+                 timeout=min(HOOK_TIMEOUT, remaining()))
+    except subprocess.TimeoutExpired:
+        return
+    if r.returncode != 0:
+        return
+    header, fm, body = _split_brief_doc(r.stdout)
+    if not header:
+        return
+    doc_key = header.split(" (", 1)[0].strip()
+    epic_key = fm.get("epic", "")
+    owner = f"compacted — re-grounded from {doc_key} and " + (f"epic {epic_key}" if epic_key else "no context doc")
+    brief_lines = [header, *_filtered_frontmatter(fm)]
+    reordered = _reorder_sections(body)
+    if reordered.strip():
+        brief_lines += ["", *reordered.split("\n")]
+    sys.stdout.write("\n".join([owner, *_fit_lines(brief_lines, BRIEF_BUDGET)]) + "\n")
+    sys.stdout.flush()
+
+    epic_doc: str | None = None
+    skipped = False
+    if epic_key:
+        if remaining() > 1.5:
+            try:
+                epic_doc = _resolve_epic_doc(ctx, store, epic_key, remaining)
+            except subprocess.TimeoutExpired:
+                skipped = True
+        else:
+            skipped = True
+    tail: list[str] | None = None
+    if epic_doc:
+        if remaining() > 1.5:
+            try:
+                tail = [f"{epic_doc}:", *_epic_remaining_head(ctx, store, epic_doc, remaining)]
+            except subprocess.TimeoutExpired:
+                skipped = True
+        else:
+            skipped = True
+    if tail:
+        sys.stdout.write("\n" + "\n".join(_fit_lines(tail, EPIC_BUDGET)) + "\n")
+        sys.stdout.flush()
+    elif skipped:
+        sys.stdout.write("\ncontext doc: skipped (hook deadline)\n")
+        sys.stdout.flush()
+
+
 def hook(name: str) -> str:
     """What the hook prints (maybe nothing). Raises nothing the caller must handle beyond Exception."""
     payload = _payload()
@@ -585,14 +833,11 @@ def hook(name: str) -> str:
         return json.dumps({"systemMessage": f"ctx validate did not run: {first[:MESSAGE_MAX]}"})
     if name == "brief-registry":
         r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
-    elif name == "brief-session":
-        sid = _session_id(payload)
-        if not sid:
-            return ""
-        r = _ctx(ctx, store, "brief", "--session", sid, "--budget", str(BRIEF_BUDGET))
-    else:
+        return r.stdout if r.returncode == 0 else ""
+    if name == "brief-session":
+        _compact_brief(ctx, store, payload)  # writes and flushes its own output; see its docstring
         return ""
-    return r.stdout if r.returncode == 0 else ""
+    return ""
 
 
 HOOKS = ("pre-tool-use", "post-tool-use", "post-tool-use-async", "brief-registry", "brief-session")

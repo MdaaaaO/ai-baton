@@ -358,15 +358,81 @@ class SessionStart(Base):
 
     def test_compact_briefs_this_session(self):
         r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), FAKE_CTX_OUT="doc\n")
-        self.assertEqual((r.returncode, r.stdout), (0, "doc\n"))
-        [call] = self.calls()
+        self.assertEqual((r.returncode, r.stdout), (0, "compacted — re-grounded from doc and no context doc\ndoc\n"))
+        [call] = self.calls()  # no `epic:` field on the fake's one-line answer: no second (resolve/find) call
         self.assertEqual(call["argv"][:5], ["--store", str(self.root), "brief", "--session", self.sid])
+        self.assertIn("--full", call["argv"])
         self.assertIn("--budget", call["argv"])
 
     def test_a_failed_brief_prints_nothing(self):
         r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), FAKE_CTX_RC="2",
                          FAKE_CTX_OUT="partial", FAKE_CTX_ERR="NO_SUCH_DOC x: no such doc\n")
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+
+class CompactBriefHelpers(unittest.TestCase):
+    """The compact brief's own post-processing of a `ctx brief --session` answer — pure functions, no store, no
+    ctx: ctx's own `brief --budget` has no way to drop frontmatter keys or reorder `##` sections (`ctx help
+    brief`), so the adapter re-budgets ctx's full answer itself (`_compact_brief`, below)."""
+
+    def test_fit_lines_keeps_everything_that_fits(self):
+        mod = load_adapter()
+        lines = ["a", "b", "c"]
+        self.assertEqual(mod._fit_lines(lines, 4096), lines)
+
+    def test_fit_lines_adds_the_ctx_tail_marker_and_stays_within_budget(self):
+        mod = load_adapter()
+        lines = [f"line {i}" for i in range(50)]
+        kept = mod._fit_lines(lines, 80)
+        self.assertTrue(kept[-1].startswith("… "), kept[-1])
+        self.assertIn("more lines, raise --budget", kept[-1])
+        self.assertLessEqual(sum(len(ln.encode("utf-8")) + 1 for ln in kept), 80)
+
+    def test_split_brief_doc_separates_frontmatter_sections_line_and_body(self):
+        mod = load_adapter()
+        raw = ("sessions/foo (session, 10 bytes)\nsession: foo\nstats: turns 1\nheartbeat: 2026-01-01T00:00:00Z\n"
+               "sections: Notes (5)\n\n# Session: foo\n\n## Notes\nhi\n")
+        header, fm, body = mod._split_brief_doc(raw)
+        self.assertEqual(header, "sessions/foo (session, 10 bytes)")
+        self.assertEqual(fm, {"session": "foo", "stats": "turns 1", "heartbeat": "2026-01-01T00:00:00Z",
+                              "sections": "Notes (5)"})
+        self.assertEqual(body, "# Session: foo\n\n## Notes\nhi")
+
+    def test_split_brief_doc_on_empty_input(self):
+        mod = load_adapter()
+        self.assertEqual(mod._split_brief_doc(""), ("", {}, ""))
+
+    def test_filtered_frontmatter_keeps_only_the_named_fields_in_order(self):
+        mod = load_adapter()
+        fm = {"session": "foo", "session_id": "sid", "ref": "r1", "status": "active", "epic": "acme/widgets#42",
+              "repos": "acme/widgets", "working_on": "x", "responsibilities": "y" * 200, "stats": "turns 1",
+              "heartbeat": "2026-01-01T00:00:00Z", "updated": "2026-01-01"}
+        out = mod._filtered_frontmatter(fm)
+        self.assertEqual([ln.split(":", 1)[0] for ln in out], ["session", "epic", "working_on", "responsibilities"])
+        kept_resp = out[-1][len("responsibilities: "):]
+        self.assertEqual(len(kept_resp), mod.RESPONSIBILITIES_MAX)
+        self.assertEqual(kept_resp, "y" * mod.RESPONSIBILITIES_MAX)
+
+    def test_filtered_frontmatter_on_a_bare_session(self):
+        mod = load_adapter()
+        self.assertEqual(mod._filtered_frontmatter({"session": "foo", "status": "active"}), ["session: foo"])
+
+    def test_reorder_sections_leads_with_the_priority_list_in_order(self):
+        mod = load_adapter()
+        body = "# T\n\n## Notes\nn\n\n## Owns\no\n\n## Open PRs\np\n\n## Worktrees\nw\n"
+        out = mod._reorder_sections(body)
+        self.assertEqual(re.findall(r"(?m)^## (.+)$", out), ["Open PRs", "Owns", "Worktrees", "Notes"])
+        self.assertTrue(out.startswith("# T\n\n"))
+
+    def test_reorder_sections_without_any_heading_is_unchanged(self):
+        mod = load_adapter()
+        self.assertEqual(mod._reorder_sections("just a title\n"), "just a title\n")
+
+    def test_reorder_sections_keeps_non_priority_order_stable(self):
+        mod = load_adapter()
+        body = "## Zebra\nz\n\n## Apple\na\n\n## Open PRs\np\n"
+        out = mod._reorder_sections(body)
+        self.assertEqual(re.findall(r"(?m)^## (.+)$", out), ["Open PRs", "Zebra", "Apple"])
 
 
 class Wiring(unittest.TestCase):
@@ -770,6 +836,229 @@ class Adopt(Base):
         self.assertNotIn("## Log", archive.read_text(encoding="utf-8"))  # no section: the body-level dated list
         self.assertEqual(self.adapter("ctx", "maintain", **env).returncode, 0)  # a second run changes nothing
         self.assertEqual(self.adapter("ctx", "validate", **env).returncode, 0)
+
+
+SESSION_FOR_BRIEF = (
+    "---\nsession: lane-topic\nsession_id: {sid}\nstatus: active\nepic: {epic}\nworking_on: step three\n"
+    "responsibilities: " + ("owns the lane end to end " * 10) + "\nstats: turns 40 · ctx 100k\n"
+    "heartbeat: 2026-01-05T10:00:00Z\nupdated: 2026-01-05\n---\n# Session: lane-topic\n\n## Notes\n\nfree text\n\n"
+    "## Open PRs\n\n- acme/widgets#7 head aaa — waits on CI\n\n## Owns\n\n- the lane\n\n"
+    "## Open decisions\n\n- none pending\n")
+EPIC_FOR_BRIEF = (
+    "---\ntitle: Widgets\ntype: epic\ndomain: widgets\nstatus: active\nupdated: 2026-01-05\n---\n# Widgets\n\n"
+    "## Tracker & links\n\n- Epic: acme/widgets#42\n\n## Goal\n\ng\n\n## Key decisions & gotchas\n\n"
+    "## Remaining work\n\n" + "\n".join(f"- step {n}" for n in range(1, 12)) +
+    "\n\n## Session log\n\n- 2026-01-05 — first\n")
+
+
+class CompactBrief(Base):
+    """The `brief-session` hook's rewrite (#56, #420): one owner line naming this session and its own `epic:`
+    frontmatter value verbatim — written before any context-doc lookup is attempted, so it never waits on
+    `ctx resolve`/`ctx find` — then the session's own brief re-budgeted (bookkeeping frontmatter dropped, the
+    sections that matter led to the front), then — when a context doc resolved — its key and the head of its
+    *Remaining work*. Proven against the pinned ctx: a fake could not show whether `ctx resolve`/`ctx find`
+    answer the way the adapter now assumes."""
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_owner_line_section_order_and_remaining_work_head(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        (self.root / "widgets").mkdir()
+        (self.root / "widgets" / "rollout.md").write_text(EPIC_FOR_BRIEF, encoding="utf-8")
+        self.sid = "sid-ct-1"
+        (self.root / "sessions" / "lane-topic.md").write_text(
+            SESSION_FOR_BRIEF.format(sid=self.sid, epic="acme/widgets#42"), encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)  # the new docs validate clean too
+        r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), **env)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        out = r.stdout
+        lines = out.splitlines()
+        # the owner line is first, naming this session's own doc and its own `epic:` field verbatim — the
+        # resolved context doc (below, `ctx resolve` fell back to `ctx find --type epic` for it, since its own
+        # `epic:` field always wins a plain `ctx resolve`, naming itself) only ever shows up in the trailing block
+        self.assertEqual(lines[0], "compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42")
+        # dropped bookkeeping
+        for field in ("stats:", "heartbeat:", "session_id:", "ref:", "updated:", "sections:"):
+            self.assertNotIn(field, out)
+        # kept frontmatter, in the kept order
+        self.assertIn("session: lane-topic", out)
+        self.assertIn("epic: acme/widgets#42", out)
+        self.assertIn("working_on: step three", out)
+        self.assertIn("responsibilities: owns the lane", out)
+        # body sections in the stated order (## Assumptions, ## Worktrees are absent here, so skipped)
+        headings = re.findall(r"(?m)^## (.+)$", out)
+        self.assertEqual(headings[:4], ["Open PRs", "Open decisions", "Owns", "Notes"])
+        # the context doc's key and the head (not all 11) of its Remaining work
+        self.assertIn("widgets/rollout:", out)
+        self.assertIn("- step 1", out)
+        self.assertIn("- step 8", out)
+        self.assertNotIn("- step 9", out)
+        # within the stated budgets
+        mod = load_adapter()
+        owner_bytes = len(lines[0].encode("utf-8")) + 1
+        self.assertLessEqual(len(out.encode("utf-8")), owner_bytes + mod.BRIEF_BUDGET + mod.EPIC_BUDGET)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_no_epic_field_says_no_context_doc_and_appends_nothing(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        self.sid = "sid-ct-2"
+        (self.root / "sessions" / "lane-topic.md").write_text(
+            f"---\nsession: lane-topic\nsession_id: {self.sid}\nstatus: active\nworking_on: x\n---\n"
+            "# Session: lane-topic\n\n## Notes\n\nhi\n", encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), **env)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        self.assertEqual(r.stdout.splitlines()[0], "compacted — re-grounded from sessions/lane-topic and no context doc")
+        self.assertNotIn(":\n", r.stdout.split("\n\n")[-1])  # no trailing context-doc block appended
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_an_epic_field_that_resolves_to_nothing_still_names_the_epic_key(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        self.sid = "sid-ct-3"
+        (self.root / "sessions" / "lane-topic.md").write_text(
+            SESSION_FOR_BRIEF.format(sid=self.sid, epic="acme/widgets#99"), encoding="utf-8")  # no such doc
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), **env)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        # the owner line names the session row's own `epic:` value regardless of whether it resolves to a doc
+        self.assertEqual(r.stdout.splitlines()[0], "compacted — re-grounded from sessions/lane-topic and epic acme/widgets#99")
+        self.assertNotIn(":\n", r.stdout.split("\n\n")[-1])  # no trailing context-doc block appended
+        self.assertNotIn("skipped (hook deadline)", r.stdout)  # a plain no-match, not a timeout
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_no_session_id_or_no_row_stays_silent(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        anonymous = json.dumps({"cwd": str(self.t), "source": "compact"})
+        r = self.adapter("hook", "brief-session", stdin=anonymous, **env)
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        self.sid = "sid-ct-missing"  # registered nowhere
+        r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), **env)
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+
+BRIEF_FOR_DEADLINE = ("sessions/lane-topic (session, 10 bytes)\nsession: lane-topic\nepic: acme/widgets#42\n\n"
+                      "# Session: lane-topic\n\n## Notes\n\nhi\n")
+
+
+class CompactBriefDeadline(Base):
+    """A compact brief used to make up to four ctx calls in a row (`brief --session`, `resolve`, `find --type
+    epic`, `get --section`, each also able to wait `CTX_LOCK_TIMEOUT` on a lock) against the hooks' own 10s
+    `timeout` (hooks/hooks.json, settings.json), building its whole answer before printing a byte of it — a
+    harness kill lost even the owner line and session brief it had already computed. `COMPACT_DEADLINE` now
+    bounds the whole call; the owner line (naming this session's own `epic:` frontmatter value verbatim, never
+    a resolved doc) and the session brief are written and flushed before any context-doc lookup is even
+    attempted (#420) — not merely before the slowest of them — and each lookup's timeout is recomputed from
+    `remaining()` right before that call, never one value computed once and handed to two calls in a row
+    (the review on this change). A slow or timed-out context-doc lookup is replaced with one line rather than
+    risking the rest. A stubbed `_ctx` (not a real sleep, no real `ctx` needed) stands in for a slow
+    `resolve`."""
+
+    def setUp(self):
+        super().setUp()
+        self.mod = load_adapter()
+        self.mod.resolve = lambda: (self.fake, "override")
+        self.mod._context_root = lambda: self.root
+
+    def run_hook(self, stdin: str) -> str:
+        import contextlib
+        import io
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"CTX_STORE": ""}), \
+             mock.patch.object(sys, "stdin", io.StringIO(stdin)), contextlib.redirect_stdout(out):
+            self.mod.hook("brief-session")
+        return out.getvalue()
+
+    def test_a_slow_resolve_is_skipped_but_the_owner_line_and_brief_still_print(self):
+        def slow_ctx(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
+            if args[0] == "brief":
+                return subprocess.CompletedProcess(args, 0, stdout=BRIEF_FOR_DEADLINE, stderr="")
+            raise self.mod.subprocess.TimeoutExpired("ctx", timeout)  # resolve/find/get: always too slow
+        self.mod._ctx = slow_ctx
+        out = self.run_hook(self.payload(source="compact"))
+        # the owner line names the session row's own `epic:` value, not a resolved doc — it never waits on resolve
+        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42\n"), out)
+        self.assertIn("session: lane-topic", out)
+        self.assertIn("context doc: skipped (hook deadline)", out)
+
+    def test_a_fast_resolve_prints_the_full_output_as_before(self):
+        def fast_ctx(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
+            if args[0] == "brief":
+                return subprocess.CompletedProcess(args, 0, stdout=BRIEF_FOR_DEADLINE, stderr="")
+            if args[0] == "resolve":
+                return subprocess.CompletedProcess(args, 0, stdout="widgets/rollout · epic\n", stderr="")
+            if args[0] == "get":
+                return subprocess.CompletedProcess(args, 0, stdout="- step 1\n- step 2\n", stderr="")
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+        self.mod._ctx = fast_ctx
+        out = self.run_hook(self.payload(source="compact"))
+        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42\n"), out)
+        self.assertNotIn("skipped (hook deadline)", out)
+        self.assertIn("widgets/rollout:", out)
+        self.assertIn("- step 1", out)
+        self.assertIn("- step 2", out)
+
+    def test_deadline_leaves_margin_under_the_hooks_own_timeout(self):
+        for path in (KIT / "hooks" / "hooks.json", KIT / "settings.json"):
+            hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
+            timeouts = [h["timeout"] for groups in hooks.values() for g in groups for h in g["hooks"]
+                        if "brief-session" in h["command"]]
+            self.assertTrue(timeouts, path)
+            for t in timeouts:
+                self.assertLessEqual(self.mod.COMPACT_DEADLINE + 1, t, path)
+
+    def test_owner_line_and_brief_are_written_before_a_near_timeout_resolve_and_a_timed_out_find(self):
+        """The exact shape the review flagged: a `resolve` that answers just under `EPIC_LOOKUP_TIMEOUT` (here
+        it also names this session, so `_resolve_epic_doc` falls through to `find`), then a `find` that times
+        out. Each call's timeout is recomputed from the fake clock right before it is made — `find` does not
+        inherit the stale, already-almost-spent timeout `resolve` was given — and the owner line plus brief
+        are on stdout (write #1) well before either lookup is attempted (writes #2+, once skipped)."""
+        import contextlib
+        import io
+        clock = [0.0]
+        writes: list[tuple[float, str]] = []
+
+        class RecordingStdout(io.StringIO):
+            def write(self, s):
+                if s:
+                    writes.append((clock[0], s))
+                return super().write(s)
+
+        def fake_monotonic():
+            return clock[0]
+
+        def ctx_with_a_near_timeout_resolve_then_a_timed_out_find(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
+            if args[0] == "brief":
+                return subprocess.CompletedProcess(args, 0, stdout=BRIEF_FOR_DEADLINE, stderr="")
+            if args[0] == "resolve":
+                clock[0] += 2.9  # answers just under EPIC_LOOKUP_TIMEOUT; names this session, so a fallback follows
+                return subprocess.CompletedProcess(args, 0, stdout="sessions/lane-topic · session\n", stderr="")
+            if args[0] == "find":
+                clock[0] += timeout  # the per-call timeout it was actually given, recomputed, not reused from resolve
+                raise self.mod.subprocess.TimeoutExpired("ctx", timeout)
+            raise AssertionError(f"unexpected ctx verb for this scenario: {args[0]}")
+
+        self.mod._ctx = ctx_with_a_near_timeout_resolve_then_a_timed_out_find
+        with mock.patch.object(self.mod.time, "monotonic", fake_monotonic), \
+             mock.patch.dict(os.environ, {"CTX_STORE": ""}), \
+             mock.patch.object(sys, "stdin", io.StringIO(self.payload(source="compact"))), \
+             contextlib.redirect_stdout(RecordingStdout()):
+            self.mod.hook("brief-session")
+
+        self.assertTrue(writes, "nothing was written")
+        owner_and_brief_clock = writes[0][0]
+        later_clocks = [c for c, _ in writes[1:]]
+        self.assertEqual(owner_and_brief_clock, 0.0)  # written before either lookup ran
+        self.assertTrue(all(c > owner_and_brief_clock for c in later_clocks), writes)
+        full = "".join(s for _, s in writes)
+        self.assertTrue(full.startswith("compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42\n"))
+        self.assertIn("context doc: skipped (hook deadline)", full)
+        # find got its own timeout (remaining after resolve's 2.9s), not resolve's: it did not also wait ~3s
+        # of a reused value plus whatever resolve already spent — the two lookups together stayed well under
+        # the deadline, not anywhere near the ~11s a reused timeout could add up to
+        self.assertLessEqual(clock[0], self.mod.COMPACT_DEADLINE + 1)
 
 
 class PreToolUseDeny(Base):
