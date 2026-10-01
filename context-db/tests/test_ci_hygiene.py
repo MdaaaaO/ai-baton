@@ -563,5 +563,20 @@ class TreeReviewPrompt(unittest.TestCase):
         self.assertNotIn('claude "$@" "$prompt"', text)
 
 
+class CodeOwners(unittest.TestCase):
+    """A script a workflow runs is as privileged as the workflow: both paths need the owner's review."""
+
+    def test_every_github_path_a_workflow_runs_has_a_code_owner(self):
+        owned = [ln.split()[0] for ln in (KIT / ".github" / "CODEOWNERS").read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.startswith("#")]
+        called = set()
+        for wf in workflows():
+            called.update(re.findall(r"\.github/[\w./-]+\.(?:sh|py|mjs|js)\b", wf.read_text(encoding="utf-8")))
+        self.assertTrue(called, "no workflow calls a script under .github/ - drop this test or fix its regex")
+        for path in sorted(called):
+            self.assertTrue(any(("/" + path).startswith(o) for o in owned),
+                            f"{path} is run by a workflow but no CODEOWNERS entry covers it")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -43,7 +43,8 @@ deliberate one-off override, `git push --no-verify` skips it outright, a fresh c
 to `main` regardless. On GitHub the repo's `main` ruleset (PR required, no force-push or delete) stops
 most of those, but repo admins bypass it — so the hook stays as defence in depth that refuses before a push
 ever leaves the machine, and `.github/workflows/main-guard.yml` is the server-side backstop: on every push
-to `main` it checks the commit against a squash-merged PR and, when the two don't match, opens (or comments on) a tracking issue
+to `main` it checks the commit against a squash-merged PR, retrying a few times a few seconds apart before
+it decides there's no match, and when the two still don't match, opens (or comments on) a tracking issue
 — it cannot block the push, only flag it after the fact. Then, with `.claude/` on `main` and clean,
 it fetches and fast-forwards. It refuses — `.sync-status` says `error …` and it pulls nothing — when
 `.claude/` is on another branch, has uncommitted changes, or carries local commits on `main`: each
