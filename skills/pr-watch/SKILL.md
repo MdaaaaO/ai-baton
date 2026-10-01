@@ -108,8 +108,10 @@ low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line 
 `ACTION:` (`REPLY+RESOLVE` / `FIX+PUSH` / `RE-REQUEST-BOT` / `UPDATE-BRANCH` / `MERGE` / `WAIT(<who>)` /
 `INVESTIGATE-CHECK` / `REDRAW`, the last one alongside one `DIAGRAMS: OK | DRIFT | NO MARKER` line on a
 real `HEAD MOVED` event). **You perform the action** — replies, resolves, re-requests, merges post to
-GitHub and stay on the main model. Skip the fork for `HEAD MOVED` (just re-request the bot; the
-watcher's own sync emits none — it re-requests the bot itself),
+GitHub and stay on the main model. For `HEAD MOVED` do not fork: re-request the bot and run
+`python3 $BATON/skills/pr-open/diagram-plan.py --pr <o/r> <n> --check` yourself (one script call) —
+`DRIFT` (or a malformed marker) → redraw per `docs/diagrams.md`, `OK` / `NO MARKER` → nothing; the
+watcher's own sync emits no head move and gets no check. Skip the fork for
 `MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork
 `pr-event-brief` for it — it is not a PR event, there is nothing on the PR to triage). A brief slot
 marked `unverified` means fetch it yourself.
