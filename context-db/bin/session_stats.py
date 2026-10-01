@@ -184,6 +184,157 @@ GH_WRITE_RE = re.compile(
 # a real enqueue: `enqueue.sh <topic> /abs/worktree …` — not `cat enqueue.sh` or a mention in a comment
 ENQUEUE_RE = re.compile(r"enqueue\.sh\s+[a-z0-9][A-Za-z0-9._-]*\s+[/$\"']")
 
+# --- session-activity: what the session DID, derived from the same transcript, at flush time -------------
+# Identifiers only (paths, PR/issue numbers, command verbs) — never the rest of a command or any tool
+# result, so the leak scan never has a second surface to cover (#53). Each regex below anchors on the verb
+# itself, the same `(?<![\w-])` guard GH_WRITE_RE uses, and captures a trailing number only where the verb
+# always carries one (merge/comment/close take the item as an argument; create does not — a freshly created
+# PR/ticket's number is not yet known from the command that made it, so it is reported without one).
+ACTIVITY_LIMIT = 40  # at most this many output lines, headers included (Done #53)
+PR_CREATE_RE = re.compile(r"(?<![\w-])gh\s+pr\s+create\b")
+PR_CREATE_API_RE = re.compile(r"(?<![\w-])gh\s+api\b(?:[^;|&\n]|\\\n)*?/pulls(?:[/?\s]|$)(?:[^;|&\n]|\\\n)*?-X\s+POST\b")
+PR_MERGE_RE = re.compile(r"pr-merge\.sh\s+\S+\s+(\d+)")
+PR_COMMENT_RE = re.compile(r"(?<![\w-])gh\s+pr\s+comment\s+(\d+)")
+ISSUE_CREATE_RE = re.compile(r"(?<![\w-])gh\s+issue\s+create\b")
+ISSUE_COMMENT_RE = re.compile(r"(?<![\w-])gh\s+issue\s+comment\s+(\d+)")
+ISSUE_CLOSE_RE = re.compile(r"(?<![\w-])gh\s+issue\s+close\s+(\d+)")
+
+
+def _nearest_repo(path: str) -> tuple[str, str]:
+    """(repo name, path relative to it) for a file path touched by a Write/Edit/NotebookEdit call — the
+    nearest ancestor directory carrying a `.git` entry (a plain repo's directory, or a worktree's `.git`
+    FILE), its basename standing in for the repo. No such ancestor (a scratch file, a path outside any
+    checkout): ("?", the path as given) rather than guessing."""
+    d = os.path.dirname(os.path.abspath(path))
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return os.path.basename(d) or d, os.path.relpath(os.path.abspath(path), d)
+        parent = os.path.dirname(d)
+        if parent == d:
+            return "?", path
+        d = parent
+
+
+def collect_activity(path: str) -> list[dict]:
+    """What the session did, one pass over the raw transcript records (`transcripts.records` — the same
+    reader `session_retro.py` walks; no second parser). Returns an ordered list of non-empty groups
+    ({"header", "count", "lines"}) in the fixed order files / commits+pushes / PRs / tickets / drafts /
+    compactions — a header with no matching activity is simply absent (Done #53)."""
+    files: list[tuple[str, str]] = []
+    seen_files: set[tuple[str, str]] = set()
+    commits: list[str] = []
+    prs: list[str] = []
+    tickets: list[str] = []
+    drafts = 0
+    compactions: list[str] = []
+
+    for o in transcripts.records(path):
+        if o.get("isCompactSummary"):
+            ts = o.get("timestamp")
+            compactions.append(profile.local_str(ts, LOCAL_TZ) if ts else "?")
+            continue
+        if o.get("type") != "assistant":
+            continue
+        for b in (o.get("message") or {}).get("content") or []:
+            if not isinstance(b, dict) or b.get("type") != "tool_use":
+                continue
+            name = b.get("name", "")
+            inp = b.get("input") or {}
+            if name in ("Write", "Edit"):
+                p = inp.get("file_path")
+                if p:
+                    key = _nearest_repo(p)
+                    if key not in seen_files:
+                        seen_files.add(key); files.append(key)
+            elif name == "NotebookEdit":
+                p = inp.get("notebook_path")
+                if p:
+                    key = _nearest_repo(p)
+                    if key not in seen_files:
+                        seen_files.add(key); files.append(key)
+            elif name == "Bash":
+                cmd = (inp.get("command") or "").strip()
+                if cmd.startswith("git commit"):
+                    commits.append("commit")
+                elif cmd.startswith("git push"):
+                    commits.append("push")
+                if PR_CREATE_RE.search(cmd) or PR_CREATE_API_RE.search(cmd):
+                    prs.append("created")
+                m = PR_MERGE_RE.search(cmd)
+                if m:
+                    prs.append(f"merged #{m.group(1)}")
+                m = PR_COMMENT_RE.search(cmd)
+                if m:
+                    prs.append(f"commented #{m.group(1)}")
+                if ISSUE_CREATE_RE.search(cmd):
+                    tickets.append("created")
+                m = ISSUE_COMMENT_RE.search(cmd)
+                if m:
+                    tickets.append(f"commented #{m.group(1)}")
+                m = ISSUE_CLOSE_RE.search(cmd)
+                if m:
+                    tickets.append(f"closed #{m.group(1)}")
+            elif name.endswith("slack_send_message_draft"):
+                drafts += 1
+
+    groups = []
+    if files:
+        groups.append({"header": "Files edited", "count": len(files), "lines": [f"{r}: {p}" for r, p in files]})
+    if commits:
+        groups.append({"header": "Commits & pushes", "count": len(commits), "lines": list(commits)})
+    if prs:
+        groups.append({"header": "PRs", "count": len(prs), "lines": list(prs)})
+    if tickets:
+        groups.append({"header": "Tickets", "count": len(tickets), "lines": list(tickets)})
+    if drafts:
+        groups.append({"header": "Drafts", "count": drafts, "lines": []})
+    if compactions:
+        groups.append({"header": "Compactions", "count": len(compactions), "lines": list(compactions)})
+    return groups
+
+
+def fmt_activity(groups: list[dict], limit: int = ACTIVITY_LIMIT) -> list[str]:
+    """Render `collect_activity`'s groups as `header (count)` + `- line` bullets, at most `limit` lines
+    total. Over the limit: the header counts stay exact (the true total), and the single group
+    contributing the most bullet lines is cut short with one `… (+N)` line standing in for the rest —
+    never the other groups, and never a silent drop with no `(+N)` marker."""
+    total = sum(1 + len(g["lines"]) for g in groups)
+    over = total - limit
+    if over > 0 and groups:
+        gi = max(range(len(groups)), key=lambda i: len(groups[i]["lines"]))
+        lines = groups[gi]["lines"]
+        n = len(lines)
+        keep = max(0, n - over - 1)
+        hidden = n - keep
+        if hidden > 0:
+            groups[gi] = {**groups[gi], "lines": lines[:keep] + [f"… (+{hidden})"]}
+    out = []
+    for g in groups:
+        out.append(f"{g['header']} ({g['count']})")
+        out.extend(f"- {ln}" for ln in g["lines"])
+    return out
+
+
+def activity_for(session_id: str | None) -> list[dict] | None:
+    """`collect_activity` for this session's transcript (session_id, else $CLAUDE_CODE_SESSION_ID); None
+    when no id or no transcript is found — the caller decides how to say so."""
+    sid = session_id or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not sid:
+        return None
+    path = find_transcript(sid)
+    if not path:
+        return None
+    try:
+        return collect_activity(path)
+    except OSError as e:
+        print(f"session_stats: transcript {path} unreadable ({e}) — no activity this time", file=sys.stderr)
+        return None
+
+
+def no_transcript_line(session_id: str | None) -> str:
+    sid = session_id or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    return f"session-activity: no transcript for {sid or 'unknown'} — flush from memory"
+
 
 def collect(path: str) -> dict:
     """One pass over the transcript for turns/tools/timestamps/usage: a streamed request's usage
@@ -404,7 +555,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--session-id", default="")
     ap.add_argument("--format", choices=("line", "block", "json"), default="block")
+    ap.add_argument("--activity", action="store_true",
+                    help="print the grouped session-activity block (files/commits/PRs/tickets/drafts/compactions) instead of the stats block")
     a = ap.parse_args()
+    if a.activity:
+        groups = activity_for(a.session_id or None)
+        if groups is None:
+            print(no_transcript_line(a.session_id or None))
+            return 0
+        for line in fmt_activity(groups):
+            print(line)
+        return 0
     s = stats_for(a.session_id or None)
     if s is None:
         print("session_stats: no session id / transcript found (set CLAUDE_CODE_SESSION_ID or --session-id)", file=sys.stderr)

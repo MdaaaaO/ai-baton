@@ -626,3 +626,59 @@ class HeartbeatRestartHelpers(unittest.TestCase):
              unittest.mock.patch.object(self.mod.subprocess, "run") as run:
             self.assertFalse(self.mod._restart_heartbeat("old", "kit-x", "focus"))
         run.assert_not_called()
+
+
+class EndWritesWhatThisSessionDid(unittest.TestCase):
+    """session.py end: the activity block session_stats.py's --activity reader derives from the
+    transcript lands under `## What this session did`, right after `## Session stats` — never command
+    arguments or tool output, and never written at all when there is no transcript (#53). `find_transcript`
+    resolves `~/.claude/projects` through `HOME`, so a fake HOME isolates the transcript fully — no real
+    workspace or env store is ever touched."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "store" / ".context"
+        self.home = Path(self.tmp.name) / "home"
+        self.proj = self.home / ".claude" / "projects" / "-home-x"
+        self.proj.mkdir(parents=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write_transcript(self, sid: str, secret: str) -> None:
+        lines = [
+            {"type": "user", "timestamp": "2026-09-28T09:00:00Z", "message": {"content": "go"}},
+            {"type": "assistant", "requestId": "r1", "timestamp": "2026-09-28T09:00:01Z",
+             "message": {"id": "msg_r1", "model": "claude-sonnet-x",
+                         "usage": {"input_tokens": 10, "output_tokens": 5},
+                         "content": [{"type": "tool_use", "name": "Bash",
+                                       "input": {"command": f"git commit -m {secret}"}}]}},
+        ]
+        (self.proj / f"{sid}.jsonl").write_text(
+            "\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+
+    def test_end_writes_the_heading_right_after_session_stats(self):
+        secret = "zzz-not-a-real-argument-should-never-appear-99887766"
+        self._write_transcript("sess-end-activity", secret)
+        env = {"HOME": str(self.home)}
+        r = run("session.py", "register", "--name", "t-act", "--no-stats", root=self.root, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = run("session.py", "end", "--name", "t-act", "--session-id", "sess-end-activity", root=self.root, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = (self.root / "sessions" / "t-act.md").read_text(encoding="utf-8")
+        self.assertIn("## Session stats", doc)
+        self.assertIn("## What this session did", doc)
+        self.assertLess(doc.index("## Session stats"), doc.index("## What this session did"))
+        self.assertIn("Commits & pushes (1)", doc)
+        self.assertIn("- commit", doc)
+        self.assertNotIn(secret, doc)  # identifiers only — never the command's own arguments
+
+    def test_end_skips_the_heading_when_no_transcript_is_found(self):
+        env = {"HOME": str(self.home)}
+        r = run("session.py", "register", "--name", "t-noact", "--no-stats", root=self.root, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = run("session.py", "end", "--name", "t-noact", "--session-id", "no-such-session", root=self.root, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = (self.root / "sessions" / "t-noact.md").read_text(encoding="utf-8")
+        self.assertNotIn("## What this session did", doc)
+        self.assertNotIn("## Session stats", doc)  # no transcript: neither block is written

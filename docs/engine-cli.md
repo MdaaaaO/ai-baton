@@ -32,6 +32,7 @@ Live session registry (who is working on what, right now — see SESSION_INDEX.m
   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
   make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
+  make -C $BATON/context-db session-activity          # what this session did, grouped (files/commits/PRs/tickets/drafts/compactions), from the transcript
   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
   make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
   Every session-* target refreshes the row's `stats:` line from the transcript named by
@@ -451,7 +452,7 @@ options:
 
 ```text
 usage: session_stats.py [-h] [--session-id SESSION_ID]
-                        [--format {line,block,json}]
+                        [--format {line,block,json}] [--activity]
 
 session_stats.py — "stats for geeks" about ONE Claude Code session, from its transcript.
 
@@ -487,6 +488,9 @@ options:
   -h, --help            show this help message and exit
   --session-id SESSION_ID
   --format {line,block,json}
+  --activity            print the grouped session-activity block
+                        (files/commits/PRs/tickets/drafts/compactions) instead
+                        of the stats block
 ```
 
 ## `session_retro.py`

@@ -3,6 +3,7 @@ the rendered line/block). Stdlib unittest. Run: make -C .claude/context-db test.
 from __future__ import annotations
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -245,6 +246,91 @@ class Transcript(unittest.TestCase):
         finally:
             if saved is not None:
                 os.environ["CLAUDE_CODE_SESSION_ID"] = saved
+
+
+class Activity(unittest.TestCase):
+    """session_stats.py --activity / collect_activity + fmt_activity: what a session did, grouped
+    (files/commits/PRs/tickets/drafts/compactions), derived from the transcript at flush time — never
+    hooks, never a staging file, never command arguments or tool output (#53)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name)
+        self.repo_a = base / "repo-a"
+        self.repo_b = base / "repo-b"
+        (self.repo_a / ".git").mkdir(parents=True)
+        (self.repo_b / ".git").mkdir(parents=True)
+        self.proj = base / ".claude" / "projects" / "-home-x"
+        self.proj.mkdir(parents=True)
+        self.secret = "zzz-not-a-real-argument-should-never-appear-99887766"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _path(self, name: str) -> Path:
+        return self.proj / f"{name}.jsonl"
+
+    def test_collect_activity_groups_files_commits_prs_tickets_and_compactions(self):
+        lines = [
+            {"type": "user", "timestamp": "2026-09-28T09:00:00Z", "message": {"content": "go"}},
+            assistant("a1", "2026-09-28T09:00:01Z", [
+                tool("Edit", file_path=str(self.repo_a / "src" / "one.py"), old_string="x", new_string="y"),
+                tool("Edit", file_path=str(self.repo_b / "two.py"), old_string="x", new_string="y"),
+                tool("Bash", command="git commit -m 'wip'"),
+                tool("Bash", command=f"git push -u origin feat/53-x --token {self.secret}"),
+                tool("Bash", command=f"gh pr create --title x --body {self.secret}"),
+                tool("Bash", command=f"gh issue comment 9 --body {self.secret}"),
+            ]),
+            {"type": "assistant", "isCompactSummary": True, "timestamp": "2026-09-28T10:15:00Z", "message": {}},
+        ]
+        path = write_transcript(self.proj, "sess-act", lines)
+        groups = ss.collect_activity(str(path))
+        rendered = "\n".join(ss.fmt_activity(groups))
+        self.assertNotIn(self.secret, rendered)  # never command arguments, even a secret-shaped one
+        self.assertIn("Files edited (2)", rendered)
+        self.assertIn(f"- repo-a: {os.path.join('src', 'one.py')}", rendered)
+        self.assertIn("- repo-b: two.py", rendered)
+        self.assertIn("Commits & pushes (2)", rendered)
+        self.assertIn("- commit", rendered)
+        self.assertIn("- push", rendered)
+        self.assertIn("PRs (1)", rendered)
+        self.assertIn("- created", rendered)
+        self.assertIn("Tickets (1)", rendered)
+        self.assertIn("- commented #9", rendered)
+        self.assertIn("Compactions (1)", rendered)
+        self.assertLessEqual(len(rendered.splitlines()), ss.ACTIVITY_LIMIT)
+
+    def test_no_transcript_line_and_cli_exit_zero(self):
+        self.assertIsNone(ss.activity_for("no-such-session-at-all"))
+        self.assertEqual(ss.no_transcript_line("abc123"),
+                          "session-activity: no transcript for abc123 — flush from memory")
+        r = subprocess.run([sys.executable, str(BIN / "session_stats.py"), "--activity",
+                             "--session-id", "no-such-session-at-all"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(),
+                          "session-activity: no transcript for no-such-session-at-all — flush from memory")
+
+    def test_over_the_limit_truncates_only_the_longest_group_but_keeps_the_true_count(self):
+        edits = [tool("Edit", file_path=str(self.repo_a / f"f{i}.py"), old_string="x", new_string="y")
+                 for i in range(50)]
+        lines = [assistant("a1", "2026-09-28T09:00:01Z", edits)]
+        path = write_transcript(self.proj, "sess-act-big", lines)
+        groups = ss.collect_activity(str(path))
+        self.assertEqual(groups[0]["count"], 50)
+        out = ss.fmt_activity(groups)
+        self.assertLessEqual(len(out), ss.ACTIVITY_LIMIT)
+        self.assertEqual(out[0], "Files edited (50)")  # the header keeps the true count
+        self.assertTrue(any(ln.startswith("- … (+") for ln in out))
+
+    def test_drafts_are_counted_only_never_detailed(self):
+        lines = [assistant("a1", "2026-09-28T09:00:01Z", [
+            tool("mcp__slack__slack_send_message_draft", channel="c", text="t"),
+            tool("mcp__slack__slack_send_message_draft", channel="c", text="t2"),
+        ])]
+        path = write_transcript(self.proj, "sess-act-drafts", lines)
+        groups = ss.collect_activity(str(path))
+        out = ss.fmt_activity(groups)
+        self.assertEqual(out, ["Drafts (2)"])
 
 
 if __name__ == "__main__":
