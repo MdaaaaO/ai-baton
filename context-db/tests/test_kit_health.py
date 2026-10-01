@@ -224,6 +224,127 @@ class GitIgnoredScan(unittest.TestCase):
                 self.assertEqual(kh.git_ignored(root, ["SKILL.md"]), set())
 
 
+class AutoCompactCheck(unittest.TestCase):
+    """`autocompact_wiring()`: the real backstop is env `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, env
+    `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`, or a top-level `autoCompactWindow` (or an `env` block carrying
+    either variable) in `~/.claude/settings.json`, the workspace's `.claude/settings.json` (a clone's own
+    copy of the kit's `settings.json` — already set there) or `.claude/settings.local.json`. Unset
+    everywhere is a WARN; a match anywhere is OK. Always hermetic: a temp HOME and a temp workspace
+    (`CONTEXT_ROOT` pointed at `<workspace>/.context`), never the real `~/.claude`."""
+
+    def run_check(self, home: Path, workspace: Path, extra_env: dict | None = None):
+        kh = load_kit_health()
+        r = kh.Report()
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
+        env.pop("CLAUDE_CODE_DISABLE_1M_CONTEXT", None)
+        env["CONTEXT_ROOT"] = str(workspace / ".context")
+        env.update(extra_env or {})
+        with mock.patch.object(kh.Path, "home", return_value=home), \
+             mock.patch.dict(os.environ, env, clear=True):
+            kh.autocompact_wiring(r)
+        return kh, r
+
+    def test_unset_everywhere_warns(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("auto-compact backstop unset", text)
+
+    def test_user_settings_json_set_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(json.dumps({"autoCompactWindow": 200000}), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("autoCompactWindow", text)
+        self.assertIn("~/.claude/settings.json", text)
+
+    def test_cloud_env_var_set_is_ok_without_reading_settings(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"  # no settings files at all — the env var alone must suffice
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace, {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", text)
+
+    def test_a_session_capped_at_200k_is_ok_without_either(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace, {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"})
+        self.assertEqual(r.counts[kh.WARN], 0, "\n".join(r.lines))
+        self.assertIn("CLAUDE_CODE_DISABLE_1M_CONTEXT", "\n".join(r.lines))
+
+    def test_project_settings_key_is_ok(self):
+        """A clone install: the kit's own `settings.json` lands at `<workspace>/.claude/settings.json`."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            (workspace / ".claude").mkdir(parents=True)
+            (workspace / ".claude" / "settings.json").write_text(json.dumps({"autoCompactWindow": 200000}), encoding="utf-8")
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("autoCompactWindow", text)
+        self.assertIn("workspace", text)
+
+    def test_local_settings_env_block_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            (workspace / ".claude").mkdir(parents=True)
+            (workspace / ".claude" / "settings.local.json").write_text(
+                json.dumps({"env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"}}), encoding="utf-8")
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", text)
+        self.assertNotIn("200000", text)  # never print settings.local.json contents
+
+    def test_user_settings_env_block_disable_1m_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(
+                json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}}), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_DISABLE_1M_CONTEXT", text)
+
+    def test_settings_json_as_a_list_warns_without_exception(self):
+        """A settings.json whose top level is a JSON array (not an object) reads as unset — no exception."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
+
+    def test_non_utf8_settings_json_warns_without_exception(self):
+        """Non-UTF-8 bytes in a settings file must not raise — they read as unset, like a missing file."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_bytes(b"\xff\xfe\x00\xff not json either")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
+
+
 class DiskCheck(unittest.TestCase):
     """`disk_wiring()` — free-disk on `/`, `$HOME` and the scratch root, plus the top-cache sizes above
     `DISK_WARN_PCT` (a sandbox root overlay filled silently from an untended build cache; the first symptom was
@@ -525,6 +646,88 @@ class CtxPinCheck(unittest.TestCase):
         self.assertEqual(level, "WARN")
         self.assertIn("`CTX_SHA` is empty", line)
         self.assertNotIn("install &&", line)  # no fetch can verify against a pin that is not there
+
+
+class TemplateOverrideCheck(unittest.TestCase):
+    """§5 (engine): an environment's `_templates/<type>.md` override must not drop a `## ` heading its type
+    declares in `sections` — a throwaway `ctx-store/types` + env-store fixture (never the live kit's types
+    or template overrides), the `ConfigSection`/`StoreCase` pattern test_kb_store.py uses."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.types_dir = Path(self.tmp.name) / "types"
+        self.types_dir.mkdir()
+        self.templates_dir = Path(self.tmp.name) / "env_templates"
+        self.templates_dir.mkdir()
+        self.kh = load_kit_health()
+        self._saved = (self.kh.type_template.TYPES_DIR, self.kh.kit_profile.TEMPLATES_DIR)
+        self.kh.type_template.TYPES_DIR = self.types_dir
+        self.kh.kit_profile.TEMPLATES_DIR = self.templates_dir
+
+    def tearDown(self):
+        self.kh.type_template.TYPES_DIR, self.kh.kit_profile.TEMPLATES_DIR = self._saved
+        self.tmp.cleanup()
+
+    def write_type(self, sections: list[str], log_section: str | None = None) -> None:
+        data: dict = {"sections": sections}
+        if log_section is not None:
+            data["log"] = {"section": log_section}
+        (self.types_dir / "widget.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def run_check(self) -> tuple[str | None, str]:
+        r = self.kh.Report()
+        self.kh.template_override_check(r)
+        levels = [k for k, n in r.counts.items() if n]
+        return (levels[0] if levels else None), (r.lines[-1] if r.lines else "")
+
+    def test_no_override_is_silent(self):
+        self.write_type(["Goal"])
+        level, line = self.run_check()
+        self.assertIsNone(level)
+        self.assertEqual(line, "")
+
+    def test_a_type_with_no_declared_sections_is_never_checked(self):
+        self.write_type([])
+        (self.templates_dir / "widget.md").write_text("## Nothing\n", encoding="utf-8")
+        level, _line = self.run_check()
+        self.assertIsNone(level)
+
+    def test_override_keeping_every_section_is_ok(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n\n## Notes\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "OK")
+        self.assertIn("widget", line)
+
+    def test_override_dropping_a_section_warns_naming_it_and_the_fix(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("Notes", line)
+        self.assertIn("widget", line)
+        self.assertIn("fall back to the engine template", line)
+
+    def test_override_with_a_section_only_inside_fenced_code_warns(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n\n```\n## Notes\n```\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("drops Notes", line)
+
+    def test_override_naming_a_section_twice_warns(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n\n## Notes\n\n## Goal\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("Goal more than once", line)
+
+    def test_an_override_that_cannot_be_read_warns_instead_of_crashing(self):
+        self.write_type(["Goal"])
+        (self.templates_dir / "widget.md").write_bytes(b"## Goal\n\xff\xfe\n")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("cannot be read", line)
 
 
 class ConfigSection(unittest.TestCase):

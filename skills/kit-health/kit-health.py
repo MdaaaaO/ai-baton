@@ -19,12 +19,14 @@ Sections:
                   a retired capability key (`slack.enabled`, `github.signed_commits`) still in config.json
   4. machine    — this machine's wiring: environment name, CLAUDE.md imports, Makefile include, memory
                   symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell,
+                  the auto-compact backstop (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`),
                   free disk on `/`/`$HOME`/the scratch root with the usual build/package caches named above
                   DISK_WARN_PCT; one legacy line: a leftover `.claude/profiles/` clone (the layer retired
                   2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
                   scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
-                  and the pinned `ctx --version` answers the API the adapter expects
+                  and the pinned `ctx --version` answers the API the adapter expects; an environment's
+                  `_templates/<type>.md` override dropping a section its type declares
   6. stamp      — last green run of THIS environment: `.context/kit-health/HEALTH-<env>.md` (local; each
                   machine keeps its own; records kit_commit, kit_version and install_mode)
 --stamp writes that HEALTH file (kit_commit) when there are no errors and no un-accepted leak hit (other
@@ -52,6 +54,7 @@ import kit_profile  # noqa: E402
 import kb  # noqa: E402
 import frontmatter as fmt  # noqa: E402
 import leak_shapes  # noqa: E402
+import type_template  # noqa: E402
 
 CTX: Path | None = None   # overrides for a caller (a test) that names the workspace outright; None = resolve per call
 ROOT: Path | None = None
@@ -836,6 +839,50 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
           "set an IANA Region/City name (an abbreviation like `EST` or `EDT` is not one)")
 
 
+def autocompact_wiring(r: Report) -> None:
+    """The auto-compact backstop: env `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, env `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`,
+    or a top-level `autoCompactWindow` (or an `env` block carrying either variable) in any settings file this
+    install reads — `~/.claude/settings.json`, the workspace's `.claude/settings.json` (a clone's own copy of
+    the kit's `settings.json` — already set there), or the workspace's `.claude/settings.local.json`. A plugin
+    install ships no settings.json, so there only the user setting or the env var backstops it. Read-only: a
+    missing/unreadable/non-UTF-8/non-JSON file, or one whose top level is not an object, reads as unset, never
+    an error. Unset is a WARN, not an ERR — the harness's own default still applies (about 967K on a 1M-window
+    model)."""
+    if os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "").strip():
+        r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set in the environment")
+        return
+    if os.environ.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "").strip() == "1":
+        r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` — the session compacts at 200K")
+        return
+    candidates = [
+        (Path.home() / ".claude" / "settings.json", "`~/.claude/settings.json`"),
+        (root() / ".claude" / "settings.json", "the workspace's `.claude/settings.json`"),
+        (root() / ".claude" / "settings.local.json", "the workspace's `.claude/settings.local.json`"),
+    ]
+    for p, label in candidates:
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+        except (OSError, ValueError):
+            cfg = None
+        if not isinstance(cfg, dict):
+            continue
+        window = cfg.get("autoCompactWindow")
+        if isinstance(window, (int, float)) and not isinstance(window, bool) and window > 0:
+            r.add(OK, "machine", f"auto-compact backstop: `autoCompactWindow` set in {label}")
+            return
+        env = cfg.get("env")
+        if isinstance(env, dict):
+            if str(env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "")).strip():
+                r.add(OK, "machine", f"auto-compact backstop: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set in {label}'s `env` block")
+                return
+            if str(env.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "")).strip() == "1":
+                r.add(OK, "machine", f"auto-compact backstop: `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` in {label}'s `env` block")
+                return
+    r.add(WARN, "machine", "auto-compact backstop unset — nothing in the environment or a settings file sets it, "
+          "so a 1M-window model compacts only at about 967K; plugin install: `/autocompact 200k` sets the user "
+          "setting (cloud: `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`)")
+
+
 def seed_pairs() -> list[tuple[Path, Path]]:
     """(template in the kit, seeded copy on this machine) — what setup.sh seeds once and never overwrites."""
     return [(KIT / "context-db" / "context-README.template.md", ctx() / "README.md"),
@@ -972,6 +1019,7 @@ def sec_machine(r: Report) -> str:
     envname = kit_profile.name()
     identity_wiring(r)
     seed_wiring(r)
+    autocompact_wiring(r)
     if not (ENV / "config.json").is_file():
         r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):
@@ -1161,6 +1209,7 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
     r.add(OK if rc == 0 else ERR, "engine", "`kb.py list` " + ("reads the env store" if rc == 0 else f"failed: {both(out, err)[-300:]}"))
     ctx_store(r)
     ctx_pin_check(r)
+    template_override_check(r)
 
 
 def ctx_pin_check(r: Report) -> None:
@@ -1258,6 +1307,38 @@ def ctx_store(r: Report) -> None:
                               + "\n".join(found[:10]) + "\n```")
     else:
         r.add(ERR, "engine", f"`ctx_adapter.py adopt --check` failed: {both(out, err)[-300:]}")
+
+
+def template_override_check(r: Report) -> None:
+    """§5: an environment's `_templates/<type>.md` override (`kit_profile.template`, which `new.sh` prefers
+    over the engine template) must not drop a `## ` heading its type declares in `sections` — the engine
+    template guarantees every one; a hand-edited override can silently lose one, or carry one twice (the
+    store refuses a doc with a repeated heading). No override at all: no line (the common machine ships none);
+    one that keeps every declared section once: an OK line."""
+    for type_path in sorted(type_template.TYPES_DIR.glob("*.json")):
+        kind = type_path.stem
+        sections, _log_section = type_template.type_sections(type_path)
+        if not sections:
+            continue
+        override = kit_profile.template(kind)
+        if override is None:
+            continue
+        try:
+            text = override.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            r.add(WARN, "engine", f"`{rel(override)}` cannot be read ({e}) — the `{kind}` sections were not checked")
+            continue
+        missing = type_template.missing_sections(sections, text)
+        repeated = type_template.repeated_sections(sections, text)
+        if missing:
+            r.add(WARN, "engine", f"`{rel(override)}` drops {', '.join(missing)} that `{kind}` requires — "
+                  "restore the heading(s), or delete the override to fall back to the engine template")
+        if repeated:
+            r.add(WARN, "engine", f"`{rel(override)}` has {', '.join(repeated)} more than once — a `{kind}` doc "
+                  "made from it fails `ctx validate`: keep one heading, or delete the override to fall back to "
+                  "the engine template")
+        if not missing and not repeated:
+            r.add(OK, "engine", f"`{rel(override)}` keeps every section `{kind}` requires")
 
 
 # ── 6. stamp ────────────────────────────────────────────────────────────────────────────────
