@@ -41,8 +41,8 @@ a body that answers all three questions gets three lines back, a body that names
 plug-in point gets `UNSURE <question>` instead of a guess; these two cases (filed under `pr-open-*` since
 that is where the brief's call site will live) exercise the brief itself, which `pr-open` adopts in a
 follow-up; (5) `pr-event-brief`'s `DIAGRAMS:` line — a
-drifted plan on a real `HEAD MOVED` event reads `DRIFT` and picks `REDRAW`, and a `SYNCED` event (the
-watcher's own branch sync, never a `HEAD MOVED` line) carries no `DIAGRAMS:` line at all.
+drifted plan on a real `HEAD MOVED` event reads `DRIFT` and picks `REDRAW`, and a stale-review event
+(marked `(on older head <sha>)`, never a `HEAD MOVED` line) carries no `DIAGRAMS:` line at all.
 
 | run | what | tokens |
 |---|---|---|
@@ -74,7 +74,7 @@ suite or a behaviour case is added or renamed.
 | `kit-health` | 5+5 | — |
 | `kit-setup` | 5+5 | — |
 | `notion-page-review` | 5+5 | `notion-page-review-behaviour-not-applicable` |
-| `pr-event-brief` | 5+5 | `pr-event-brief-behaviour-head-moved-redraw`, `pr-event-brief-behaviour-synced-no-diagrams` |
+| `pr-event-brief` | 5+5 | `pr-event-brief-behaviour-head-moved-redraw`, `pr-event-brief-behaviour-stale-review-no-diagrams` |
 | `pr-open` | 6+6 | `pr-open-behaviour-cold-reader-ok`, `pr-open-behaviour-cold-reader-unsure`, `pr-open-behaviour-missing-assumed-line` |
 | `pr-review` | 5+5 | `pr-review-behaviour-no-post-before-approval`, `pr-review-behaviour-no-explainability-small-fix` |
 | `pr-scan` | 5+5 | — |
