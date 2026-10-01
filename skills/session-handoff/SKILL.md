@@ -114,12 +114,12 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       successor: …" note instead of being omitted; either way it is not a real prompt, so the Ended table
       never lists the session for it (`gen_sessions.py`'s `has_next_prompt`).
     - **Something to hand over:** draft the prompt a fresh session on this lane should be started with.
-      It opens with `### Since last handoff` — decisions taken (this session's ledger lines, the same
-      ones quoted below), PRs landed, open assumptions (the session file's `## Assumptions` list, when
+      It opens with `### Since last handoff` — decisions taken (one pointer to the ledger lines quoted
+      below, not a second copy), PRs landed, open assumptions (the session file's `## Assumptions` list, when
       present), and what moved in the epic doc's `## Architecture` section (when the doc has one) — built
       from the activity list (`make session-activity`, step 8) and the ledger lines already quoted below,
       no extra turn. A session with no predecessor handoff to diff against writes `first handoff` instead
-      of the block. Then the full state as today:
+      of the block. The block sits above the cap. Then the full state as today:
       ≤12 plain lines (no code fence inside), covering the session `NAME` to register (successor of `<this
       name>`), the epic and tickets *this session* owned, the files to read first (context doc sections,
       exports), what it owns and must NOT touch, the first task with its ticket, open follow-ups (drafts by
