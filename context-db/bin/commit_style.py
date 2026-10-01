@@ -137,6 +137,18 @@ def key_regex() -> str:
     return str((_config().get("tracker") or {}).get("key_regex") or "")
 
 
+def leads_with_key(desc: str) -> bool:
+    """True when `desc` starts with a tracker key of this environment (`tracker.key_regex`); False when the
+    config names no key shape, or one that is not a valid regex."""
+    rx = key_regex()
+    if not rx:
+        return False
+    try:
+        return re.match(rf"(?:{rx})", desc) is not None
+    except re.error:
+        return False
+
+
 def check_subject(subject: str, style: str) -> list[str]:
     """Problems with a subject line under `style` (empty list = ok)."""
     subject = subject.rstrip("\n")
@@ -154,13 +166,19 @@ def check_subject(subject: str, style: str) -> list[str]:
     if style == "conventional":
         m = CONVENTIONAL.match(subject)
         if not m:
-            problems.append("not `<type>(<scope>)!: <description>` — e.g. `feat(dbt): KEY-123 add the fact table`")
+            problems.append("not `<type>(<scope>)!: <description>` — e.g. `feat(dbt): add the fact table`")
         else:
             if m.group("type") not in TYPES:
                 problems.append(f"type `{m.group('type')}` is not one of {', '.join(TYPES)}")
             desc = m.group("desc")
-            if desc[:1].isupper() and not re.match(r"^[A-Z][A-Z0-9]*-\d+\b|^[A-Z]{2,}\b", desc):
-                problems.append("description starts with a capital letter (lowercase, imperative: `add …`, not `Add …`)")
+            # an upper-case first letter is refused, an acronym included (`API keys`) — the `pr-title` workflow's
+            # check refuses it too, so passing here must not mean failing there. The one exemption is this
+            # environment's own tracker key leading the description (`KEY-123 add …`, per `tracker.key_regex`):
+            # a key-shaped word that is no key (`UTF-8 …`) is refused, and so is every key where none is
+            # configured. A digit or a backtick is not an upper-case letter, so those pass.
+            if desc[:1].isupper() and not leads_with_key(desc):
+                problems.append("description starts with an upper-case letter (should start lower-case, "
+                                 "imperative: `add …`, not `Add …`)")
             rx = key_regex()
             if rx:
                 try:
