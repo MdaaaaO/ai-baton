@@ -68,7 +68,7 @@ Where a script emits a line, the model adds only the text after `—`; it never 
 | `WBD: covered \| gap <question>[, <question>]` | the review overview, every review | `review-runner` from `diagram-plan.py --pr` |
 
 `sketch.py check` prints `NO SKETCH` with exit 0 on a ticket that has no marker; the skill writes nothing for it
-(#384). Exit codes follow `diagram-plan.py`: `0` OK, `1` a `git`/tracker read failed, `2` bad usage, `3` MOVED,
+(#385). Exit codes follow `diagram-plan.py`: `0` OK, `1` a `git`/tracker read failed, `2` bad usage, `3` MOVED,
 STALE or MALFORMED.
 
 ## The sketch marker
