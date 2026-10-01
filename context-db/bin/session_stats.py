@@ -83,11 +83,12 @@ SPLIT_THRESHOLD_DEFAULT = 150_000  # tokens: an avg prefix at/above this over th
 SPLIT_WINDOW_DEFAULT = 20  # turns: require a full window before judging a trend, not one busy turn
 
 
-def _positive_int_env(name: str, default: int) -> int:
-    """A positive integer from the environment, else `default` — unset, not a number, zero and negative all
-    fall back, so a typo never turns the hint always-on or the window empty."""
+def _positive_int(raw: str, default: int) -> int:
+    """`raw` as a positive integer, else `default` — empty, not a number, zero and negative all fall back, so
+    a typo never turns the hint always-on or the window empty. The callers read the environment themselves,
+    with the name as a literal, so the env-var doc check can see the read."""
     try:
-        value = int(os.environ.get(name, ""))
+        value = int(raw)
     except ValueError:
         return default
     return value if value > 0 else default
@@ -95,12 +96,12 @@ def _positive_int_env(name: str, default: int) -> int:
 
 def split_threshold() -> int:
     """`SESSION_STATS_SPLIT_THRESHOLD` (tokens), else `SPLIT_THRESHOLD_DEFAULT` — same override shape as `prices()`."""
-    return _positive_int_env("SESSION_STATS_SPLIT_THRESHOLD", SPLIT_THRESHOLD_DEFAULT)
+    return _positive_int(os.environ.get("SESSION_STATS_SPLIT_THRESHOLD", ""), SPLIT_THRESHOLD_DEFAULT)
 
 
 def split_window() -> int:
     """`SESSION_STATS_SPLIT_WINDOW` (turns), else `SPLIT_WINDOW_DEFAULT`."""
-    return _positive_int_env("SESSION_STATS_SPLIT_WINDOW", SPLIT_WINDOW_DEFAULT)
+    return _positive_int(os.environ.get("SESSION_STATS_SPLIT_WINDOW", ""), SPLIT_WINDOW_DEFAULT)
 
 
 def price_for(model: str | None) -> tuple[float, float, float, float, float]:
