@@ -5,8 +5,10 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
 
 - Every poll it reads `compare/<base>...<head>.behind_by`; when > 0 and **no human `APPROVED` review
   exists** (approvals on any head — a push would dismiss them where the ruleset says so) it runs
-  `PUT pulls/N/update-branch` with `expected_head_sha` (GitHub-signed merge commit) and prints `SYNCED`.
-  An approval by the configured review bot (`github.review_bot`) or by a login in the configured
+  `PUT pulls/N/update-branch` with `expected_head_sha` (GitHub-signed merge commit) and logs `SYNCED`
+  to stderr (the Monitor output file) — bookkeeping, not a decision, so it never wakes the session; the
+  SKILL.md standing rule (`git fetch` + rebase before any further worktree push) is what a session reads
+  instead of an event for this. An approval by the configured review bot (`github.review_bot`) or by a login in the configured
   `github.bots` list (which covers the identity auto-merge.yml's own approval carries — a different
   login than the review bot's own account when it posts its Assessment; never hardcoded, gh-cli
   SKILL.md) does not count as that human approval: a PR approved only by one of
@@ -25,6 +27,7 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
   once that commit is the head, since a request sent earlier would review a head about to be replaced.
   A failed re-request is a `RE-REQUEST … failed` line. Any other move — a push landing in between — is a
   normal `HEAD MOVED`, and the session re-requests as before.
-- Consequences you own: a merge commit lands on the branch, so any further push from the worktree needs
-  `sign-queue --rebase`; CI re-runs on the PR.
+- Consequences you own: a merge commit lands on the branch, invisibly to the session until its next push —
+  the SKILL.md standing rule (`git fetch origin <branch>`, rebase onto it if ahead, `sign-queue --rebase`
+  where commits are signed) is what catches this, not an event; CI re-runs on the PR.
   The sync never fires on an approved PR — on approval, `pr-merge.sh` / `update-branch` by hand is the path.

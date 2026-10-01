@@ -12,8 +12,9 @@
 #   the bot's in-thread replies; new reviews (approve/changes/comment) from anyone but this login;
 #   new issue comments from anyone but this login; non-green checks; head moved (not by its own sync);
 #   merged/closed (exit). Own replies and bot "thanks" replies are filtered out. A review whose `commit_id`
-#   is not the current head is stale (superseded by a re-review) — dropped, with a stderr note; an approval
-#   on an older head still counts toward the merge, so it is emitted, marked `(on older head <sha>)`.
+#   is not the current head is stale, but a human does not automatically re-review after a push, so a
+#   human's stale verdict (any state) is still live information this cycle — emitted, marked
+#   `(on older head <sha>)`; only a bot's stale verdict is dropped, with a stderr note.
 #   Auto-sync (owner decision 2026-09-21): while the PR waits for review, keep its branch merged with the base branch —
 #   when it is behind, no human APPROVED review exists and the cooldown has passed, PUT pulls/N/update-branch
 #   (GitHub-signed merge commit). Emits BEHIND (approved, 403, 422) / CONFLICTS lines; SYNCED is bookkeeping,
@@ -303,15 +304,18 @@ while true; do
         [ -z "$init" ] && continue
         [ "$login" = "$me" ] && continue
         [ "$login" = "$bot" ] && continue      # bot verdicts are reported via the Assessment line
-        # A verdict on any head but the current one is stale — superseded by the re-review its own push
-        # will draw; drop it, a stderr note is enough (never silence, never a stdout wake-up for nothing to do).
-        # The one exception is an approval: GitHub keeps counting it toward the merge unless the branch rule
-        # dismisses stale reviews, so the session may be able to merge on it — emitted, with the head it is on.
+        # A verdict on any head but the current one is stale (superseded by what a re-review on the new
+        # head would say) — but a human does not automatically re-review after a push, and a CHANGES_REQUESTED
+        # keeps blocking the merge regardless of which head it names, so a human's stale verdict is still live
+        # information this cycle: emitted in every state, marked with the head it is on. Only a bot's stale
+        # verdict is dropped (stderr note only) — a bot re-reviews the new head on its own once asked. "Bot"
+        # here is the configured review bot (already skipped just above) or a login in github.bots.
         if [ "$cid" != "$cur" ]; then
-          if [ "$state" = APPROVED ]; then
-            new="$new; review APPROVED by $login (on older head $(printf %s "$cid" | cut -c1-9))"
-          else
+          inbots=$(printf '%s' "$bots" | jq -e --arg l "$login" 'type == "array" and (index($l) != null)' 2>/dev/null)
+          if [ "$inbots" = "true" ]; then
             echo "pr-watch: PR $pr dropping stale review $id ($state by $login) on $(printf %s "$cid" | cut -c1-9), current head is $(printf %s "$cur" | cut -c1-9)" >&2
+          else
+            new="$new; review $state by $login (on older head $(printf %s "$cid" | cut -c1-9))"
           fi
           continue
         fi

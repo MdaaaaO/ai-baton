@@ -18,6 +18,9 @@ every event the poll body can emit still runs first. Covers three regressions:
     watcher; a real push after a sync still reports HEAD MOVED, and a failed re-request is a line.
   - an expiry re-arm with the arming command reused verbatim (its original head) after the watcher had already
     followed a head move used to reset the state: HEAD MOVED again, the bot verdict replayed.
+  - a human's stale review (any state, not just APPROVED) used to be dropped to stderr like a bot's — but a
+    human does not automatically re-review after a push, so it is now emitted, marked with the head it is on;
+    only a stale verdict from the configured review bot or a login in `github.bots` is still dropped.
 Stdlib unittest, no network. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import json
@@ -374,17 +377,39 @@ class PrWatchStub(unittest.TestCase):
         self.assertEqual(r.stdout, f"PR {PR} MERGED\n")
         self.assertNotIn("BEHIND", r.stdout)
 
-    def test_a_stale_review_on_an_old_head_is_dropped_the_current_head_one_still_fires(self):
+    def test_a_humans_stale_changes_requested_is_emitted_marked_with_its_head(self):
+        # a human does not automatically re-review after a push, and CHANGES_REQUESTED keeps blocking the
+        # merge regardless of head — dropping it would leave the session unaware the merge is still blocked.
         old_head = "c" * 40
         self.seed_state(head=HEAD9)
         reviews = [{"id": 1, "user": {"login": "alice"}, "state": "CHANGES_REQUESTED", "commit_id": old_head},
                    {"id": 2, "user": {"login": "bob"}, "state": "APPROVED", "commit_id": FULL}]
         r = self.run_watch(reviews=json.dumps(reviews), identity_env={"PR_WATCH_SELF": "tester"})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(f"PR {PR} NEW: review APPROVED by bob", r.stdout)
-        self.assertNotIn("alice", r.stdout)
-        self.assertNotIn("CHANGES_REQUESTED", r.stdout)
-        self.assertIn("dropping stale review 1 (CHANGES_REQUESTED by alice)", r.stderr)
+        self.assertIn(
+            f"PR {PR} NEW: review CHANGES_REQUESTED by alice (on older head ccccccccc); review APPROVED by bob",
+            r.stdout)
+        self.assertNotIn("dropping stale review", r.stderr)
+
+    def test_a_humans_stale_commented_review_is_emitted_marked_with_its_head(self):
+        old_head = "c" * 40
+        self.seed_state(head=HEAD9)
+        reviews = [{"id": 1, "user": {"login": "alice"}, "state": "COMMENTED", "commit_id": old_head}]
+        r = self.run_watch(reviews=json.dumps(reviews), identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} NEW: review COMMENTED by alice (on older head ccccccccc)", r.stdout)
+        self.assertNotIn("dropping stale review", r.stderr)
+
+    def test_a_stale_verdict_from_a_configured_bots_login_is_dropped_to_stderr_only(self):
+        self.write_config(bots=["custom-ci[bot]"])  # not the configured review bot, but still on github.bots
+        old_head = "c" * 40
+        self.seed_state(head=HEAD9)
+        reviews = [{"id": 1, "user": {"login": "custom-ci[bot]"}, "state": "CHANGES_REQUESTED", "commit_id": old_head}]
+        r = self.run_watch(reviews=json.dumps(reviews), identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("custom-ci", r.stdout)
+        self.assertNotIn("NEW:", r.stdout)
+        self.assertIn("dropping stale review 1 (CHANGES_REQUESTED by custom-ci[bot])", r.stderr)
 
     def test_an_approval_on_an_old_head_is_still_emitted_marked_with_its_head(self):
         # it keeps counting toward the merge unless the branch rule dismisses stale reviews — dropping it would
@@ -429,8 +454,9 @@ class PrWatchStub(unittest.TestCase):
     def test_pr_lifecycle_open_review_push_approve_merge_prints_only_actionable_lines(self):
         wt, new_head = self.make_worktree_commit()
         old_head = "c" * 40
-        # the watcher already ran at least one cycle (init=1): the stale CHANGES_REQUESTED from before the push
-        # was already reported then, and must not repeat; only what changed since is actionable this cycle.
+        # init=1 but seen_r is empty: this is the first cycle the watcher actually sees review id 1, so alice's
+        # CHANGES_REQUESTED from before the push is new information this cycle too (a human does not
+        # automatically re-review after a push) — it fires on the same NEW line as bob's approval of the push.
         self.seed_state(head=old_head[:9])
         push = {"parents": [{"sha": old_head}], "committer": {"login": "tester"},
                 "commit": {"committer": {"date": "2026-01-01T00:00:00Z"}}}
@@ -445,13 +471,12 @@ class PrWatchStub(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(r.stdout, (
             f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;\n"
-            f"PR {PR} NEW: review APPROVED by bob\n"
+            f"PR {PR} NEW: review CHANGES_REQUESTED by alice (on older head ccccccccc); review APPROVED by bob\n"
             f"PR {PR} MERGED\n"
         ))
         self.assertNotIn("HEAD MOVED", r.stdout)
-        self.assertNotIn("alice", r.stdout)
         self.assertIn("own push", r.stderr)
-        self.assertIn("dropping stale review 1", r.stderr)
+        self.assertNotIn("dropping stale review", r.stderr)
 
 
 if __name__ == "__main__":
