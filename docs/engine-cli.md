@@ -422,7 +422,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        own `resolve` rule, then — when one resolved — fetch its key and the head of its
                        *Remaining work*, within a separate `EPIC_BUDGET`. The whole hook has `COMPACT_DEADLINE`
                        seconds (under the hooks' own 10s `timeout`); the context-doc lookups (`resolve`/
-                       `find`/`get`) run only while more than 1.5s of it remain before each one starts, every
+                       `get`) run only while more than 1.5s of it remain before each one starts, every
                        one of them capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` recomputed right before
                        that call, never a single value reused across more than one — skipped or timed out, one
                        line `context doc: skipped (hook deadline)` stands in for that tail
