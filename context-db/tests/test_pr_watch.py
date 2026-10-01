@@ -223,7 +223,7 @@ class PrWatchStub(unittest.TestCase):
     def test_a_failed_comments_page_is_reported_not_silently_skipped(self):
         r = self.run_watch(identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"STUB_COMMENTS_FAIL": "1"})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(f"ERROR {REPO}#{PR}", r.stdout)
+        self.assertIn(f"PR {PR} LOOKUP FAILED: review comments", r.stdout)
         self.assertIn("simulated comments failure", r.stdout)
 
     def test_unresolvable_identity_exits_2_never_falls_back_to_unknown(self):
@@ -306,11 +306,69 @@ class PrWatchStub(unittest.TestCase):
         last = 1_700_000_000
         self.seed_state(head=HEAD9, notgreen=FULL, notgreen_bad="unit-tests: FAILURE;",
                          notgreen_last=str(last), notgreen_step="82800")
-        r = self.run_watch(identity_env={"PR_WATCH_SELF": "tester"},
+        r = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "FAILURE")]),
+                            identity_env={"PR_WATCH_SELF": "tester"},
                             extra_env={"PR_WATCH_NOW": str(last + 82800 + 1)})
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;", r.stdout)
         self.assertEqual((self.state_dir() / "notgreen_step").read_text().strip(), "86400")
+
+    def test_a_due_check_not_green_reads_the_checks_again_and_lists_what_is_red_now(self):
+        last = 1_700_000_000
+        self.seed_state(head=HEAD9, notgreen=FULL, notgreen_bad="unit-tests: FAILURE;",
+                         notgreen_last=str(last), notgreen_step="3600")
+        r = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "SUCCESS"), self.check_run("lint", "FAILURE")]),
+                            identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_NOW": str(last + 3601)})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: lint: FAILURE;", r.stdout)
+        self.assertNotIn("unit-tests", r.stdout)
+
+    def test_a_due_check_not_green_whose_checks_went_green_is_not_repeated(self):
+        last = 1_700_000_000
+        self.seed_state(head=HEAD9, notgreen=FULL, notgreen_bad="unit-tests: FAILURE;",
+                         notgreen_last=str(last), notgreen_step="3600")
+        r = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "SUCCESS")]),
+                            identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_NOW": str(last + 3601)})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r.stdout)
+        self.assertIn("no longer red", r.stderr)
+        self.assertFalse((self.state_dir() / "notgreen_bad").exists())
+
+    def test_a_due_check_not_green_with_a_rerun_in_progress_waits(self):
+        last = 1_700_000_000
+        self.seed_state(head=HEAD9, notgreen=FULL, notgreen_bad="unit-tests: FAILURE;",
+                         notgreen_last=str(last), notgreen_step="3600")
+        rerun = {"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": None, "name": "unit-tests"}
+        r = self.run_watch(rollup=json.dumps([rerun]), identity_env={"PR_WATCH_SELF": "tester"},
+                            extra_env={"PR_WATCH_NOW": str(last + 3601)})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r.stdout)
+        self.assertEqual((self.state_dir() / "notgreen_step").read_text().strip(), "3600")
+
+    def test_a_lookup_failure_that_persists_is_announced_again_after_the_backoff_window(self):
+        now0 = 1_700_000_000
+        fail = {"STUB_COMPARE_FAIL": "1"}
+        r1 = self.run_watch(extra_env={**fail, "PR_WATCH_NOW": str(now0)}, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r1.stdout.count("LOOKUP FAILED"), 1, r1.stdout)
+        r2 = self.run_watch(extra_env={**fail, "PR_WATCH_NOW": str(now0 + 1800)}, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertNotIn("LOOKUP FAILED", r2.stdout)
+        r3 = self.run_watch(extra_env={**fail, "PR_WATCH_NOW": str(now0 + 3601)}, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertIn(f"PR {PR} LOOKUP FAILED: behind-by check", r3.stdout)
+        self.assertIn("(still failing)", r3.stdout)
+        r4 = self.run_watch(extra_env={**fail, "PR_WATCH_NOW": str(now0 + 3601 + 3600)}, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertNotIn("LOOKUP FAILED", r4.stdout)
+
+    def test_a_failed_reviews_or_issue_comments_listing_is_a_lookup_failure(self):
+        for var, what in (("STUB_REVIEWS_FAIL", "reviews"), ("STUB_ISSUE_FAIL", "issue comments")):
+            with self.subTest(var):
+                r = self.run_watch(identity_env={"PR_WATCH_SELF": "tester"}, extra_env={var: "1", "PR_WATCH_SYNC": "0"})
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn(f"PR {PR} LOOKUP FAILED: {what}", r.stdout)
+
+    def test_no_temp_file_is_left_behind(self):
+        self.run_watch(extra_env={"STUB_COMPARE_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
+        left = [p.name for p in self.tmp.iterdir() if p.is_file() and p != self.log]  # mktemp writes into TMPDIR
+        self.assertEqual(left, [])
 
     # --- #225: a bot-only approval must not block the auto-sync ---
 

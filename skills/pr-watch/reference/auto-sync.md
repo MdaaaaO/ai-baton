@@ -21,8 +21,8 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
 - A failure (403 workflow scope, 422 conflict) on the `update-branch` write itself is reported once per
   head and not retried — act per `reference/events.md`. `mergeable_state=dirty` is reported as
   `CONFLICTS` and never touched. The two reads that decide whether to even attempt a sync — the
-  behind-by fetch and the approvals-for-sync fetch — go through the same retry as every other
-  verdict-driving read: a failure there is never "not behind" or "0 approvals" (either would silently
+  behind-by fetch and the approvals-for-sync fetch — go through the same retry as every other read an
+  event depends on: a failure there is never "not behind" or "0 approvals" (either would silently
   skip a real sync, or sync and dismiss an actually-approved PR); it prints `LOOKUP FAILED` instead and
   the sync attempt is skipped for that cycle, retried on the next one.
 - The merge commit it lands is not reported again: the next poll recognises it (a two-parent `web-flow`

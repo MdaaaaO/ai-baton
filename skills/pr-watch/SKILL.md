@@ -67,15 +67,16 @@ is still emitted, in every state, marked `(on older head <sha>)`: humans do not 
 after a push. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
 non-green states. The full per-line table: `reference/events.md`.
 
-**A failed lookup is UNKNOWN, never red or green.** Every `gh` read a verdict depends on (PR info,
-behind-by, approvals, the check-status rollup) goes through a retry (3 attempts, `PR_WATCH_RETRY_DELAY`
-apart) before it is treated as a failure, and a failure that survives the retries never falls back to
-"nothing pending" (a silent GREEN) or "not behind" (a silent no-op) — it prints exactly one
-`PR N LOOKUP FAILED: <what> — <error>` line instead, deduped so the same failure persisting across
-cycles announces once (a changed error, or a recovery in between, announces again). **The same
-`CHECK NOT GREEN` on a settled head backs off additively** instead of firing once-ever: re-announced
-after 1h, then 3h, then 5h … +2h each time, capped by `PR_WATCH_BACKOFF_MAX` (default 86400s); the first
-announcement is still immediate, and `PR_WATCH_KNOWN_RED`'s mute is unaffected — a muted head stays
+**A failed lookup is UNKNOWN, never red or green.** Every `gh` read an event depends on (PR info,
+behind-by, approvals, the check-status rollup, the comment and review listings) gets 3 attempts,
+`PR_WATCH_RETRY_DELAY` apart, and a failure that survives them never falls back to "nothing pending"
+(a silent GREEN), "not behind" (a silent no-op) or "nothing new" — it prints one
+`PR N LOOKUP FAILED: <what> — <error>` line instead; a changed error, or a recovery in between,
+announces again. **A repeated alarm backs off additively**: the same `CHECK NOT GREEN` on an unchanged
+head, and a `LOOKUP FAILED` that lasts (`… (still failing)`), repeat after 1h, then 3h, then 5h … +2h
+each time, capped by `PR_WATCH_BACKOFF_MAX` (default 86400s). A due `CHECK NOT GREEN` reads the checks
+again first — it lists what is red now and is dropped when they went green. The first announcement is
+immediate, and `PR_WATCH_KNOWN_RED`'s mute is unaffected — a muted head stays
 silent. Details: `reference/events.md`, `reference/cost-controls.md`.
 
 ## Auto-sync with the base branch (since 2026-09-21)
@@ -131,8 +132,8 @@ to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot
 `OK` / `NO MARKER` → nothing; `DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD
 MOVED line only (the brief reruns the check itself), and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
 own sync emits no head move and gets no check. Skip the fork for
-`MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork
-`pr-event-brief` for it — it is not a PR event, there is nothing on the PR to triage). A brief slot
+`MERGED`/`CLOSED` (close out per `reference/events.md`), and `LOOKUP FAILED` / `ERROR …` (never fork
+`pr-event-brief` for either — a failed read is not a PR event, there is nothing on the PR to triage). A brief slot
 marked `unverified` means fetch it yourself.
 
 Whether to merge past a settled red check (a known-flaky test, an annotation you already judged

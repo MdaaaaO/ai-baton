@@ -38,19 +38,18 @@
 #   PR_WATCH_REPLAY=1: re-emit the current bot verdict / CHECK NOT GREEN on start even when the state dir already
 #   holds this head (default: a re-arm on a known head is silent about what it already reported; the state dir is
 #   ${TMPDIR:-/tmp}/pr-watch-<owner>-<repo>-<pr>/ and is shared by every session on the same machine).
-# A failed lookup is UNKNOWN, never read as red or green (a swallowed error must never read as a negative
-# result, WORKSPACE.md § Verification): every `gh` read a verdict depends on goes through `gh_retry` (3
-# attempts, PR_WATCH_RETRY_DELAY seconds apart, default 2 — 0 in tests). A read that still fails after retries
-# emits exactly one `PR <n> LOOKUP FAILED: <what> — <error text>` line for that cycle instead of a derived
-# `CHECK NOT GREEN` or BEHIND/mergeability alarm from the same missing data, deduped per <what> per PR (the
-# same failure persisting across cycles announces once; a change in the error, or a recovery in between, is
-# announced again — `lookup_failed`/`lookup_ok` below). PR_WATCH_NOW overrides "now" (tests only; the retry
-# delay and the backoff clock both read it).
-#   Additive backoff on a settled red: once a `CHECK NOT GREEN` has been announced
-#   for a head, the same alarm is re-announced after 1h, then 3h, then 5h … +2h each time, capped by
-#   PR_WATCH_BACKOFF_MAX seconds (default 86400) — not on every window, and not never-again either. The first
-#   announcement for a head is still immediate. PR_WATCH_KNOWN_RED's mute is unchanged by this: a muted head
-#   stays silent (stderr only, once) for as long as it is muted.
+# A failed lookup is UNKNOWN, never red and never green (WORKSPACE.md § Verification: a swallowed error must
+# never read as a negative result). Every read an event depends on (PR info, behind-by, approvals for the sync,
+# the check rollup, the three comment/review listings) goes through `gh_retry`: 3 attempts, PR_WATCH_RETRY_DELAY
+# seconds apart (default 2). A read that still fails prints one `PR <n> LOOKUP FAILED: <what> — <error text>`
+# line and the step that needed it is skipped for the cycle: no CHECK NOT GREEN, no BEHIND line and no sync is
+# derived from data that was never read.
+#   An alarm that persists backs off additively: after its first line it is silent for 1h, then 3h, then 5h …
+#   (+2h each time), capped by PR_WATCH_BACKOFF_MAX seconds (default 86400). Two alarms use it: a CHECK NOT
+#   GREEN on an unchanged head (the rollup is read again first: checks that went green end the alarm, and the
+#   line lists what is red now) and a LOOKUP FAILED with the same error text (` (still failing)` appended).
+#   A lookup that works again, or fails with another error, starts over. PR_WATCH_KNOWN_RED is unchanged: a
+#   muted head stays silent. PR_WATCH_NOW overrides "now" for the backoff and the sync cooldown (tests only).
 KIT="$(cd "$(dirname "$0")/../.." && pwd)"
 # shellcheck source=../_lib/portable.sh
 . "$KIT/skills/_lib/portable.sh"  # iso_to_epoch — GNU/Linux and macOS/BSD alike
@@ -98,51 +97,47 @@ usage() { echo "usage: pr-watch.sh <owner/repo> <pr_number> <head_sha_prefix> [<
 repo=$1; [ -z "$repo" ] && usage; shift
 [ $# -lt 2 ] && usage; [ $(( $# % 2 )) -ne 0 ] && usage
 base_dir="${TMPDIR:-/tmp}/pr-watch-$(printf %s "$repo" | tr / -)"
-# gh_retry's caller always reads $GHR_ERR right after `out=$(gh_retry ...)` — but that command substitution
-# runs gh_retry in a subshell, so a plain variable assignment inside it never reaches this process. A file
-# survives the subshell boundary; ghr_err_file is where gh_retry leaves the trimmed error for the caller to
-# read back into $GHR_ERR (helper below).
-ghr_err_file="${TMPDIR:-/tmp}/pr-watch-ghrerr.$$"
-ghr_err_read() { GHR_ERR=$(cat "$ghr_err_file" 2>/dev/null); }
 getv() { cat "$D/$1" 2>/dev/null; }                      # per-PR state: $D is set per round-robin step
 putv() { printf '%s\n' "$2" >"$D/$1"; }
 now_epoch() { if [ -n "${PR_WATCH_NOW:-}" ]; then printf '%s' "$PR_WATCH_NOW"; else date +%s; fi; }  # PR_WATCH_NOW: tests only
-# gh_retry <gh ...>: runs one `gh` read with retry — 3 attempts, PR_WATCH_RETRY_DELAY seconds apart (default
-# 2; tests set it near 0 so the suite does not really sleep). Prints the successful stdout; on a final
-# failure prints nothing and leaves the last attempt's stderr (first line, trimmed) in $ghr_err_file — call
-# ghr_err_read right after to load it into $GHR_ERR (a plain assignment inside gh_retry would not survive the
-# `$(gh_retry ...)` subshell the caller needs for stdout). The caller must report that via lookup_failed,
-# never read the empty/failed output as "no change" or "all clear".
+# gh_retry <gh ...>: one `gh` read, up to 3 attempts. The output is left in $GHR_OUT; after a failed last
+# attempt $GHR_ERR holds the first line of its stderr. Call it as a plain command, never inside $( ): a
+# subshell would lose both variables.
 gh_retry() {
-  delay=${PR_WATCH_RETRY_DELAY:-2}; attempt=1
+  ghr_n=1; ghr_e=$(mktemp)
   while :; do
-    e=$(mktemp)
-    out=$("$@" 2>"$e"); rc=$?
-    if [ "$rc" -eq 0 ]; then rm -f "$e"; : >"$ghr_err_file"; printf '%s' "$out"; return 0; fi
-    head -1 "$e" | tr -d '\r' >"$ghr_err_file"; rm -f "$e"
-    [ "$attempt" -ge 3 ] && return "$rc"
-    attempt=$((attempt + 1)); sleep "$delay"
+    GHR_OUT=$("$@" 2>"$ghr_e"); ghr_rc=$?
+    if [ "$ghr_rc" -eq 0 ]; then GHR_ERR=""; rm -f "$ghr_e"; return 0; fi
+    GHR_ERR=$(head -1 "$ghr_e" | tr -d '\r')
+    [ "$ghr_n" -ge 3 ] && { rm -f "$ghr_e"; return "$ghr_rc"; }
+    ghr_n=$((ghr_n + 1)); sleep "${PR_WATCH_RETRY_DELAY:-2}"
   done
 }
-# lookup_failed <pr> <what> <err>: the tri-state UNKNOWN event — one line, never a derived CHECK/BEHIND
-# alarm from the same failed data (the caller skips that derivation instead of calling this). Deduped per
-# <what> per PR in $D/lookup_fail_<what>: the SAME failure persisting across cycles announces once; a
-# changed error, or a failure after lookup_ok cleared the marker, announces again.
+# Additive backoff of one persisting alarm, per PR: $D/<name>_last is when its last line went out,
+# $D/<name>_step how long it stays silent after that (3600, then +7200 per line, capped).
+backoff_start() { putv "$1_last" "$(now_epoch)"; putv "$1_step" 3600; }
+backoff_due() {
+  bo_last=$(getv "$1_last"); bo_step=$(getv "$1_step")
+  [ -n "$bo_last" ] && [ $(( $(now_epoch) - bo_last )) -ge "${bo_step:-3600}" ]
+}
+backoff_widen() {
+  bo_step=$(getv "$1_step"); bo_step=$(( ${bo_step:-3600} + 7200 )); bo_max=${PR_WATCH_BACKOFF_MAX:-86400}
+  [ "$bo_step" -gt "$bo_max" ] && bo_step=$bo_max
+  putv "$1_last" "$(now_epoch)"; putv "$1_step" "$bo_step"
+}
+# lookup_failed <pr> <what> <err>: the UNKNOWN event. One line when <what> starts failing or its error text
+# changes; the same error on later cycles is silent until the backoff window has passed. The caller skips
+# whatever the read was for. lookup_ok <what> forgets the failure, so the next one is announced again.
+lookup_key() { printf 'lookup_fail_%s' "$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')"; }
 lookup_failed() {
-  pr=$1; what=$2; err=${3:-gh failed with no error text}
-  key=$(printf '%s' "$what" | tr -c 'A-Za-z0-9' '_')
-  f="$D/lookup_fail_$key"
-  prev=$(cat "$f" 2>/dev/null)
-  if [ "$prev" != "$err" ]; then
-    echo "PR $pr LOOKUP FAILED: $what — $err"
-    printf '%s' "$err" >"$f"
+  lf_key=$(lookup_key "$2"); lf_err=${3:-gh gave no error text}
+  if [ "$(getv "$lf_key")" != "$lf_err" ]; then
+    echo "PR $1 LOOKUP FAILED: $2 — $lf_err"; putv "$lf_key" "$lf_err"; backoff_start "$lf_key"
+  elif backoff_due "$lf_key"; then
+    echo "PR $1 LOOKUP FAILED: $2 — $lf_err (still failing)"; backoff_widen "$lf_key"
   fi
 }
-lookup_ok() {                                             # clears the marker so a later failure, even with
-  what=$2                                                 # identical text, is announced again (it recovered)
-  key=$(printf '%s' "$what" | tr -c 'A-Za-z0-9' '_')
-  rm -f "$D/lookup_fail_$key"
-}
+lookup_ok() { lf_key=$(lookup_key "$1"); rm -f "$D/$lf_key" "$D/${lf_key}_last" "$D/${lf_key}_step"; }
 # Register every watched PR. The state dir survives a re-arm: when it already holds this head, the event state
 # (bot verdict, CHECK NOT GREEN, seen ids) is kept so a re-armed watcher stays SILENT about what it already
 # reported and only emits what changed in the gap (2026-09-22 — every replayed line was a wasted ~$0.30 wake-up).
@@ -179,14 +174,12 @@ while true; do
   alive=""
   for pr in $prs; do
     D="$base_dir-$pr"; head=$(getv head); init=$(getv init)
-    info=$(gh_retry gh api "repos/$repo/pulls/$pr" --jq '"\(.head.sha) \(.base.ref) \(.mergeable_state)"'); irc=$?
-    ghr_err_read
+    gh_retry gh api "repos/$repo/pulls/$pr" --jq '"\(.head.sha) \(.base.ref) \(.mergeable_state)"'; irc=$?; info=$GHR_OUT
     if [ $irc -ne 0 ] || [ -z "$info" ]; then
-      # a failed fetch is never "no change" (and never green/red either) — one UNKNOWN line, keep watching
-      # next cycle instead of going silent or deriving a CHECK/BEHIND alarm from data that was never read
+      # a failed fetch is never "no change": say so and keep watching next cycle instead of going silent
       lookup_failed "$pr" "PR info" "${GHR_ERR:-empty response}"; alive="$alive $pr"; continue
     fi
-    lookup_ok "$pr" "PR info"
+    lookup_ok "PR info"
     cur=${info%% *}; rest=${info#* }; base=${rest%% *}; mstate=${rest##* }
     case "$cur" in "$head"*) ;; *)
       short=$(printf %s "$cur" | cut -c1-9)
@@ -236,25 +229,22 @@ while true; do
       if [ "$mstate" = dirty ]; then
         if [ "$(getv dirty_seen)" != "$cur" ]; then echo "PR $pr CONFLICTS with $base — rebase the worktree and enqueue sign-queue --rebase; auto-sync skipped"; putv dirty_seen "$cur"; fi
       else
-        behind=$(gh_retry gh api "repos/$repo/compare/$base...$cur" --jq .behind_by); behindrc=$?
-        ghr_err_read
+        gh_retry gh api "repos/$repo/compare/$base...$cur" --jq .behind_by; behindrc=$?; behind=$GHR_OUT
         if [ $behindrc -ne 0 ]; then
-          # a failed fetch is never "not behind" (that would silently skip a real sync forever) — one
-          # UNKNOWN line, never a derived BEHIND/CONFLICTS alarm from data that was never read
+          # a failed fetch is never "not behind": that would skip a sync the branch needs
           lookup_failed "$pr" "behind-by check" "$GHR_ERR"
         else
-          lookup_ok "$pr" "behind-by check"
+          lookup_ok "behind-by check"
           if [ "${behind:-0}" -gt 0 ] 2>/dev/null; then
             now=$(now_epoch); last_sync=$(getv last_sync)
             if [ $((now - ${last_sync:-0})) -ge "$sync_cool" ]; then
-              araw=$(gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100"); arc=$?
-              ghr_err_read
+              gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100"; arc=$?; araw=$GHR_OUT
               if [ $arc -ne 0 ]; then
                 # a failed fetch is never "0 approvals" — that would sync (and dismiss) an actually-approved PR;
-                # one UNKNOWN line, skip the sync attempt this cycle, retry next cycle instead
+                # skip the sync attempt this cycle, retry next cycle instead
                 lookup_failed "$pr" "approvals (sync check)" "$GHR_ERR"
               else
-                lookup_ok "$pr" "approvals (sync check)"
+                lookup_ok "approvals (sync check)"
                 # Neither the configured review bot's own approval nor a login in the configured `github.bots`
                 # list (which auto-merge.yml's REVIEWER — the identity its own approval carries, a different
                 # login than github.review_bot when the bot posts its Assessment under its own account —
@@ -312,8 +302,10 @@ while true; do
     # every node without telling them apart drops every StatusContext silently: it never counts as pending and
     # never counts as bad, so a PR whose only red signal is an external CI status (a required status context)
     # gets reported green. Map state to the same tri-state conclusion/status pair a CheckRun carries instead.
-    if [ -n "$cur" ] && [ "$(getv notgreen)" != "$cur" ]; then
-      roll=$(gh_retry gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq '
+    # A head that already has its line is read again only when the backoff window of that line has passed.
+    ng=$(getv notgreen); ng_bad=$(getv notgreen_bad)
+    if [ -n "$cur" ] && { [ "$ng" != "$cur" ] || { [ -n "$ng_bad" ] && backoff_due notgreen; }; }; then
+      gh_retry gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq '
         .statusCheckRollup[] |
         if .__typename == "StatusContext" then
           (if (.state=="PENDING" or .state=="EXPECTED") then "IN_PROGRESS" else "COMPLETED" end) as $status |
@@ -321,14 +313,12 @@ while true; do
           "\($status)\t\($concl)\t\(.context // "")"
         else
           "\(.status // "")\t\(.conclusion // "")\t\(.name // "")"
-        end'); rollrc=$?
-      ghr_err_read
+        end'; rollrc=$?; roll=$GHR_OUT
       if [ $rollrc -ne 0 ]; then
-        # a failed rollup fetch is never "nothing pending, nothing bad" (that reads as a silent GREEN) —
-        # one UNKNOWN line, never a derived CHECK NOT GREEN from data that was never read
+        # a failed rollup fetch is never "nothing pending, nothing bad": that would read as green
         lookup_failed "$pr" "check status" "$GHR_ERR"
       else
-        lookup_ok "$pr" "check status"
+        lookup_ok "check status"
         pend=$(printf '%s\n' "$roll" | awk -F'\t' '$1=="QUEUED"||$1=="IN_PROGRESS"||$1=="PENDING"||$1=="WAITING"||$1=="REQUESTED"' | grep -c . )
         bad=$(printf '%s\n' "$roll" | awk -F'\t' '$1=="COMPLETED" && $2!="" && $2!="SUCCESS" && $2!="SKIPPED" && $2!="NEUTRAL" {print $3": "$2}' | sort -u | tr '\n' ';')
         if [ -n "$bad" ] && [ "$pend" = 0 ]; then
@@ -344,32 +334,19 @@ while true; do
             done
           fi
           if [ "$mute" = 1 ]; then
-            # muted stays muted for as long as it is muted — never populate the backoff state below, so
-            # a mute never starts re-announcing itself once PR_WATCH_KNOWN_RED's grace period would've
-            # elapsed; that is a different proposal than this one and is deliberately not implemented here
+            # a muted head keeps no backoff state: it stays silent for as long as it is muted
             echo "pr-watch: PR $pr CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED ($bad)" >&2
-            putv notgreen "$cur"
+            rm -f "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step"
           else
             echo "PR $pr CHECK NOT GREEN: $bad"
-            putv notgreen "$cur"; putv notgreen_bad "$bad"; putv notgreen_last "$(now_epoch)"; putv notgreen_step 3600
+            if [ "$ng" = "$cur" ]; then backoff_widen notgreen; else backoff_start notgreen; fi
+            putv notgreen_bad "$bad"
           fi
-        fi
-      fi
-    elif [ -n "$cur" ]; then
-      # same head already announced at least once (above) — additive backoff re-announces the same alarm
-      # after 1h, then 3h, then 5h … +2h each time, capped by PR_WATCH_BACKOFF_MAX, instead of once-ever
-      # (the old behavior) or every 120s window (ten wake-ups for one cause). A muted head never reaches
-      # here with bad set (notgreen_bad stays empty), so PR_WATCH_KNOWN_RED's mute is unaffected.
-      bad=$(getv notgreen_bad)
-      if [ -n "$bad" ]; then
-        last=$(getv notgreen_last); step=$(getv notgreen_step); step=${step:-3600}
-        now=$(now_epoch)
-        if [ $((now - ${last:-0})) -ge "$step" ]; then
-          echo "PR $pr CHECK NOT GREEN: $bad"
-          putv notgreen_last "$now"
-          max=${PR_WATCH_BACKOFF_MAX:-86400}
-          newstep=$((step + 7200)); [ "$newstep" -gt "$max" ] && newstep=$max
-          putv notgreen_step "$newstep"
+          putv notgreen "$cur"
+        elif [ "$pend" = 0 ] && [ "$ng" = "$cur" ]; then
+          # the red this head was announced with is gone (a re-run went green): nothing left to repeat
+          echo "pr-watch: PR $pr checks on $(printf %s "$cur" | cut -c1-9) are no longer red — CHECK NOT GREEN is not repeated" >&2
+          rm -f "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step"
         fi
       fi
     fi
@@ -378,10 +355,10 @@ while true; do
     # never read the same as "no new comments" — that silently drops whatever page failed, possibly for good
     # (the ids on it are never retried once the state dir has moved past them); report it and skip this listing
     # for the cycle instead.
-    cerr=$(mktemp)
-    craw=$(gh api --paginate "repos/$repo/pulls/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(if .in_reply_to_id then "reply" else "top" end)"' 2>"$cerr"); crc=$?
-    if [ $crc -ne 0 ]; then echo "ERROR $repo#$pr $(head -1 "$cerr" | tr -d '\r')"
+    gh_retry gh api --paginate "repos/$repo/pulls/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(if .in_reply_to_id then "reply" else "top" end)"'; crc=$?; craw=$GHR_OUT
+    if [ $crc -ne 0 ]; then lookup_failed "$pr" "review comments" "$GHR_ERR"
     else
+      lookup_ok "review comments"
       for rec in $craw; do
         id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; kind=${rest##*:}
         grep -qxF "$id" "$D/seen_c" && continue; echo "$id" >>"$D/seen_c"
@@ -391,11 +368,10 @@ while true; do
         new="$new; review comment $id by $login ($kind)"
       done
     fi
-    rm -f "$cerr"
-    rerr=$(mktemp)
-    rraw=$(gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state):\(.commit_id)"' 2>"$rerr"); rrc=$?
-    if [ $rrc -ne 0 ]; then echo "ERROR $repo#$pr $(head -1 "$rerr" | tr -d '\r')"
+    gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state):\(.commit_id)"'; rrc=$?; rraw=$GHR_OUT
+    if [ $rrc -ne 0 ]; then lookup_failed "$pr" "reviews" "$GHR_ERR"
     else
+      lookup_ok "reviews"
       for rec in $rraw; do
         id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; rest2=${rest#*:}; state=${rest2%%:*}; cid=${rest2#*:}
         grep -qxF "$id" "$D/seen_r" && continue; echo "$id" >>"$D/seen_r"
@@ -420,11 +396,10 @@ while true; do
         new="$new; review $state by $login"
       done
     fi
-    rm -f "$rerr"
-    icerr=$(mktemp)
-    iraw=$(gh api --paginate "repos/$repo/issues/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login)"' 2>"$icerr"); icrc=$?
-    if [ $icrc -ne 0 ]; then echo "ERROR $repo#$pr $(head -1 "$icerr" | tr -d '\r')"
+    gh_retry gh api --paginate "repos/$repo/issues/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login)"'; icrc=$?; iraw=$GHR_OUT
+    if [ $icrc -ne 0 ]; then lookup_failed "$pr" "issue comments" "$GHR_ERR"
     else
+      lookup_ok "issue comments"
       for rec in $iraw; do
         id=${rec%%:*}; login=${rec##*:}
         grep -qxF "$id" "$D/seen_i" && continue; echo "$id" >>"$D/seen_i"
@@ -433,7 +408,6 @@ while true; do
         new="$new; issue comment $id by $login"
       done
     fi
-    rm -f "$icerr"
     [ -n "$new" ] && echo "PR $pr NEW:${new#;}"
     st=$(gh pr view "$pr" --repo "$repo" --json state --jq .state 2>/dev/null)
     [ "$st" = "MERGED" ] && { echo "PR $pr MERGED"; continue; }
