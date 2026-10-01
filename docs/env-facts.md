@@ -64,7 +64,9 @@ skips it), `tracker.close_reasons`, `tracker.repos`, `github.org`,
 `systems.signed_commits` are what every reader gates on now; `kit_profile.py get slack.enabled` / `get
 github.signed_commits` still answer for one release, from `systems.*`, with a deprecation warning on stderr —
 `kit_profile.DEPRECATED_ALIASES`), `tz_default`, `labels`,
-`self_assessment`, `diagrams` (pr-open's per-repo diagram overlays), `commits` (commit-subject style, `commit-style.md`), `datalake`, `cost` (cost-report's spend table,
+`self_assessment`, `diagrams` (pr-open's per-repo diagram overlays), `verify` (`verify.repos.<owner/repo>.cmd`
+/ `.timeout` — pr-open's local verify command for the `## Verified` section; absent = pr-open asks the session
+to cite the commands it ran instead), `commits` (commit-subject style, `commit-style.md`), `datalake`, `cost` (cost-report's spend table,
 identity, phases — optional, absent = private mode), `datalake.kind` (warehouse vendor — optional, picks the
 `datalake-<vendor>` manifest), `datalake.mcp_tools` (MCP tool names that differ by vendor connector, e.g.
 `datalake.mcp_tools.probe` — optional, absent = no such probe here), `kit.install_mode` (`clone`|`plugin`|`dev-checkout` — written by `setup.sh`, never by

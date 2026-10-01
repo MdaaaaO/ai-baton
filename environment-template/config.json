@@ -93,6 +93,15 @@
       }
     }
   },
+  "verify": {
+    "_comment": "repos.<owner/repo>.cmd: shell command pr-open's `## Verified` step runs in the pushed worktree, on the head that was pushed, to fill the body's `## Verified` section (skills/pr-open/verified.py). .timeout: seconds before it is killed (default 300). Optional per repo; absent = pr-open asks the session to cite the commands it ran instead of running one.",
+    "repos": {
+      "<owner/repo>": {
+        "cmd": "<shell command, e.g. make test>",
+        "timeout": 300
+      }
+    }
+  },
   "commits": {
     "_comment": "default: conventional | ticket-key | free (kit default conventional); repos.<owner/repo>: per-repo override, set as one object with `kb.py config-set commits '{…}'`. A repo's own .claude/commit-style marker or commitlint config wins. Spec: docs/commit-style.md.",
     "default": "conventional",
