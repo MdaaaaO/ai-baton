@@ -347,6 +347,233 @@ class PrLookupDisplay(unittest.TestCase):
         self.assertNotIn("no PR yet", err)
 
 
+def _fake_git_bin(tmp: Path) -> Path:
+    """A `git` that answers `ls-remote` from $FAKE_LS_REMOTE (fail = exit 128 with an error on stderr, noisy =
+    a warning on stderr plus $FAKE_TIP as the branch tip, exit 0) and hands every other call to the real git."""
+    fakebin = tmp / "fakebin-git"
+    fakebin.mkdir()
+    git = fakebin / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        "for a in \"$@\"; do\n"
+        "  if [ \"$a\" = ls-remote ]; then\n"
+        "    case \"$FAKE_LS_REMOTE\" in\n"
+        "      fail) echo \"fatal: unable to access 'https://example.invalid/': Could not resolve host\" >&2; exit 128;;\n"
+        "      noisy) echo 'warning: redirecting to https://example.invalid/new.git/' >&2\n"
+        "             printf '%s\\trefs/heads/main\\n' \"$FAKE_TIP\"; exit 0;;\n"
+        "    esac\n"
+        "  fi\n"
+        "done\n"
+        f"exec {shutil.which('git')} \"$@\"\n"
+    )
+    git.chmod(0o755)
+    return fakebin
+
+
+def _clean_repo_one_ahead(root: Path):
+    """A clean worktree with two commits and no remote-tracking ref; returns (worktree, sha of the first commit)."""
+    wt = root / "repo"
+    wt.mkdir()
+    git_env = _env(root)
+    git = ["git", "-C", str(wt), "-c", "user.name=t", "-c", "user.email=t"]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(wt)], check=True, env=git_env)
+    for content in ("a\n", "b\n"):
+        (wt / "a.txt").write_text(content)
+        subprocess.run([*git, "add", "a.txt"], check=True, env=git_env)
+        subprocess.run([*git, "commit", "-q", "-m", "chore: seed"], check=True, env=git_env)
+    first = subprocess.run([*git, "rev-parse", "HEAD~1"], check=True, env=git_env, capture_output=True, text=True).stdout.strip()
+    return wt, first
+
+
+class EnqueueStops(unittest.TestCase):
+    """enqueue.sh stops with a message that names what failed: the style tool, the remote lookup or the
+    metadata call — and none of them leaves a job, a claim marker or a temp file behind."""
+
+    def _run(self, tmp: Path, wt: Path, msg_text: str, *extra: str, env_extra=None, files=True):
+        ctx = tmp / "ws" / ".context"
+        ctx.mkdir(parents=True, exist_ok=True)
+        msg = tmp / "msg.txt"
+        msg.write_text(msg_text)
+        env = _env(tmp, ctx)
+        env.update(env_extra or {})
+        args = ["sh", str(ENQUEUE), "stops", str(wt), "main", str(msg)]
+        if files:
+            args += ["--files", "a.txt"]
+        args += ["--ticket", "none", "--epic", "none", "--summary", "s", "--by", "t", *extra]
+        r = subprocess.run(args, env=env, capture_output=True, text=True, timeout=60)
+        return r, ctx
+
+    def assert_nothing_left(self, tmp: Path, ctx: Path):
+        self.assertEqual(list(ctx.rglob("*.sh")), [], "a stopped enqueue must not queue a job")
+        self.assertEqual(list(ctx.rglob("*.claim")) + list(ctx.rglob("*.tmp.*")), [])
+        self.assertEqual(list(tmp.glob("tmp.*")), [], "the stderr capture file must be removed")
+
+    def test_a_style_tool_that_cannot_run_is_not_reported_as_a_style_violation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "ws").mkdir()
+            wt = _seed_repo(tmp / "ws")
+            (wt / ".claude").mkdir()
+            (wt / ".claude" / "commit-style").write_text("shouty\n")  # not a style the tool knows
+            r, ctx = self._run(tmp, wt, "fix: change a\n", "--pr", "1")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("commit_style.py check failed to run", r.stderr)
+            self.assertNotIn("does not follow the repo's commit style", r.stderr)
+            self.assert_nothing_left(tmp, ctx)
+
+    def test_a_style_violation_still_says_fix_the_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "ws").mkdir()
+            wt = _seed_repo(tmp / "ws")
+            r, ctx = self._run(tmp, wt, "Fixed things\n", "--pr", "1")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("does not follow the repo's commit style", r.stderr)
+            self.assertNotIn("failed to run", r.stderr)
+            self.assert_nothing_left(tmp, ctx)
+
+    def test_a_failed_remote_lookup_stops_with_gits_own_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "ws").mkdir()
+            wt, _first = _clean_repo_one_ahead(tmp / "ws")
+            fakebin = _fake_git_bin(tmp)
+            env_extra = {"PATH": str(fakebin) + os.pathsep + os.environ["PATH"], "FAKE_LS_REMOTE": "fail"}
+            r, ctx = self._run(tmp, wt, "fix: change a\n", "--pr", "1", env_extra=env_extra, files=False)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("git ls-remote origin main failed", r.stderr)
+            self.assertIn("Could not resolve host", r.stderr)
+            self.assertNotIn("nothing to commit", r.stderr)
+            self.assert_nothing_left(tmp, ctx)
+
+    def test_a_warning_on_a_successful_remote_lookup_does_not_refuse_a_push_only_retry(self):
+        # git and ssh write to stderr on success too (a redirect warning, a new known-hosts line)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "ws").mkdir()
+            wt, first = _clean_repo_one_ahead(tmp / "ws")
+            fakebin = _fake_git_bin(tmp)
+            env_extra = {"PATH": str(fakebin) + os.pathsep + os.environ["PATH"], "FAKE_LS_REMOTE": "noisy",
+                         "FAKE_TIP": first}
+            r, ctx = self._run(tmp, wt, "fix: change a\n", "--pr", "1", env_extra=env_extra, files=False)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("HEAD is 1 commit(s) ahead", r.stderr)
+            self.assertEqual(len(list(ctx.rglob("*.sh"))), 1)
+            self.assertEqual(list(tmp.glob("tmp.*")), [], "the stderr capture file must be removed")
+
+    def test_a_rejected_metadata_flag_stops_the_enqueue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "ws").mkdir()
+            wt = _seed_repo(tmp / "ws")
+            r, ctx = self._run(tmp, wt, "fix: change a\n", "--pr", "abc")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("--pr expects a bare PR number", r.stderr)
+            self.assertIn("signq.py meta failed", r.stderr)
+            self.assert_nothing_left(tmp, ctx)
+
+    def test_a_staged_deletion_is_matched_as_a_literal_path(self):
+        # `b.txt` must not pass because a staged deletion named `bXtxt` matches it as a pattern
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "ws").mkdir()
+            wt = _seed_repo(tmp / "ws")
+            git_env = _env(tmp)
+            git = ["git", "-C", str(wt), "-c", "user.name=t", "-c", "user.email=t"]
+            (wt / "bXtxt").write_text("x\n")
+            subprocess.run([*git, "add", "bXtxt"], check=True, env=git_env)
+            subprocess.run([*git, "commit", "-q", "-m", "chore: add"], check=True, env=git_env)
+            subprocess.run([*git, "rm", "-q", "bXtxt"], check=True, env=git_env)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            msg = tmp / "msg.txt"
+            msg.write_text("fix: change a\n")
+
+            def enqueue(path):
+                return subprocess.run(["sh", str(ENQUEUE), "del", str(wt), "main", str(msg), "--files", path, "--ticket",
+                                       "none", "--epic", "none", "--pr", "1", "--summary", "s", "--by", "t"],
+                                      env=_env(tmp, ctx), capture_output=True, text=True, timeout=60)
+
+            wrong = enqueue("b.txt")
+            self.assertEqual(wrong.returncode, 2, wrong.stdout + wrong.stderr)
+            self.assertIn("b.txt is neither in the worktree nor tracked", wrong.stderr)
+            right = enqueue("bXtxt")
+            self.assertEqual(right.returncode, 0, right.stdout + right.stderr)
+            self.assertIn("bXtxt is an already-staged deletion", right.stderr)
+
+
+class DrainSurvives(unittest.TestCase):
+    """One odd job never costs the rest of the drain: a job file that vanishes is skipped, a drain that raised
+    gives the lock back, and the "remote moved" hint needs git's own rejection line."""
+
+    def _queue(self, tmp: Path):
+        ctx = tmp / "ws" / ".context"
+        ctx.mkdir(parents=True)
+        sq = _load_in(ctx)
+        sq.Q.mkdir(parents=True, exist_ok=True)
+        return sq
+
+    def _drain(self, sq, rc: int = 0) -> str:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            got = sq.main(["run"])
+        self.assertEqual(got, rc, buf.getvalue())
+        return buf.getvalue()
+
+    def test_a_job_file_that_disappears_mid_drain_is_skipped_and_the_summary_still_prints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._queue(Path(tmp))
+            second = sq.Q / "20260101T000000Z-001-b.sh"
+            second.write_text('# META {"topic": "b"}\necho "pushed feedfacefeedface G second"\n')
+            first = sq.Q / "20260101T000000Z-000-a.sh"
+            first.write_text(f'# META {{"topic": "a"}}\nrm -f "{second}"\necho "pushed deadbeefdeadbeef G first"\n')
+            out = self._drain(sq)
+            self.assertIn("job file disappeared mid-drain", out)
+            self.assertIn("summary", out)
+            self.assertIn("1 pushed", out)
+            self.assertNotIn("feedface", out)
+            self.assertFalse(first.exists())
+
+    def test_the_lock_is_free_again_after_a_drain_that_raised(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._queue(Path(tmp))
+            with mock.patch.object(sq, "_drain", side_effect=RuntimeError("boom")):
+                try:
+                    sq.cmd_run([])
+                    self.fail("the drain should have raised")
+                except RuntimeError:
+                    # the traceback still holds cmd_run's frame here, so only an explicit release frees the lock
+                    probe = open(sq.LOCK, "a+")
+                    try:
+                        fcntl.flock(probe.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except OSError:
+                        self.fail("the lock is still held after the drain raised")
+                    finally:
+                        probe.close()
+
+    def test_the_remote_moved_hint_needs_gits_own_rejection_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._queue(Path(tmp))
+            job = sq.Q / "20260101T000000Z-000-a.sh"
+            job.write_text('# META {"topic": "a"}\necho " ! [rejected]        main -> main (some reason)"\nexit 1\n')
+            self.assertIn("remote moved", self._drain(sq, rc=1))
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._queue(Path(tmp))
+            job = sq.Q / "20260101T000000Z-000-a.sh"
+            job.write_text('# META {"topic": "a"}\necho "fix: rejected payments are retried"\nexit 1\n')
+            out = self._drain(sq, rc=1)
+            self.assertIn("FAILED", out)
+            self.assertNotIn("remote moved", out)
+
+    def test_a_topic_that_starts_with_a_number_survives_a_job_name_without_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._queue(Path(tmp))
+            (sq.Q / "20260101T000000Z-46-fix.sh").write_text("echo legacy\n")
+            (sq.Q / "20260101T000001Z-000-46-fix.sh").write_text("echo current\n")
+            (sq.Q / "20260101T000002Z-plain.sh").write_text("echo legacy\n")
+            self.assertEqual([j.topic for j in sq.load_jobs()], ["46-fix", "46-fix", "plain"])
+
+
 @unittest.skipUnless(shutil.which("make"), "make not installed")
 class WorkspaceMkSignGate(unittest.TestCase):
     """The host-side `make sign*` targets carry the same not-applicable gate as the session side: a machine

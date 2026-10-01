@@ -102,10 +102,15 @@ if [ -z "$(git -C "$wt" status --short)" ]; then
   # ls-remote piped straight into cut (the old shape) hides a real network/auth failure behind cut's own
   # (near-always-zero) exit status: capture ls-remote's own output and exit code first, so a lookup that
   # actually failed is never read as "branch doesn't exist yet" (empty output, exit 0, is the real "none").
-  if ls_remote_out=$(git -C "$wt" ls-remote --heads origin "$br" 2>&1); then
+  # stderr goes to its own file: git and ssh also write there on success (a redirect warning, a new
+  # known-hosts line), and that text must never end up in the tip.
+  ls_remote_err=$(mktemp)
+  if ls_remote_out=$(git -C "$wt" ls-remote --heads origin "$br" 2>"$ls_remote_err"); then
+    rm -f "$ls_remote_err"
     remote_tip=$(printf '%s' "$ls_remote_out" | cut -f1)
   else
-    echo "enqueue.sh: git ls-remote origin $br failed: $ls_remote_out" >&2
+    echo "enqueue.sh: git ls-remote origin $br failed: $(cat "$ls_remote_err")" >&2
+    rm -f "$ls_remote_err"
     exit 2
   fi
   if [ -n "$remote_tip" ] && git -C "$wt" cat-file -e "$remote_tip^{commit}" 2>/dev/null; then
@@ -160,11 +165,14 @@ if [ -n "$files" ]; then
   # such paths are in neither worktree nor index. They are already part of the commit, so drop them
   # from the add line; anything else that is neither present nor tracked is a typo -> refuse.
   kept=""
+  # read once, with its own exit status: inside a pipe a failed git would read as "not a staged deletion"
+  staged_del=$(git -C "$wt" diff --cached --name-only --diff-filter=D) \
+    || { echo "enqueue.sh: git diff --cached failed in $wt — cannot tell which paths are staged deletions" >&2; exit 2; }
   set -f  # a path is a word, never a glob
   for f in $files; do
     # sq(): a route dir with \$param or a name with ' stays one literal path in the job script
     if [ -e "$wt/$f" ] || git -C "$wt" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then kept="$kept $(sq "$f")"
-    elif git -C "$wt" diff --cached --name-only --diff-filter=D | grep -qx "$f"; then echo "note: $f is an already-staged deletion, included via the index" >&2
+    elif printf '%s\n' "$staged_del" | grep -qxF -- "$f"; then echo "note: $f is an already-staged deletion, included via the index" >&2
     else echo "--files: $f is neither in the worktree nor tracked" >&2; exit 2; fi
   done
   set +f
@@ -212,7 +220,10 @@ while :; do
     # as taken too — `sign_retry` renames it back to this very name.
     if [ ! -e "$try" ] && [ ! -e "$try.failed" ]; then
       job=$try
-      trap 'rm -f "$claim"' EXIT
+      # EXIT alone is not enough: a shell killed by a signal skips it, so INT/TERM/HUP exit through it
+      tmp=""
+      trap 'rm -f "$claim" ${tmp:+"$tmp"}' EXIT
+      trap 'exit 130' INT TERM HUP
       break
     fi
     rm -f "$claim"

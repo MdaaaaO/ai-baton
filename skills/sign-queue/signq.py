@@ -278,8 +278,9 @@ class Job:
     @property
     def topic(self) -> str:
         # the timestamp prefix, optionally followed by the same-second collision suffix enqueue.sh adds
-        # since the fix (`-NNN-`) — a legacy job from before it has no suffix to strip either way.
-        return str(self.meta.get("topic") or re.sub(r"^\d{8}T\d{6}Z-(?:\d+-)?", "", self.name)[:-3])
+        # (`-NNN-`, always three digits) — a legacy job from before it has no suffix to strip, and a
+        # topic that itself starts with a number (`46-fix`) keeps it.
+        return str(self.meta.get("topic") or re.sub(r"^\d{8}T\d{6}Z-(?:\d{3}-)?", "", self.name)[:-3])
 
     @property
     def log(self) -> Path:
