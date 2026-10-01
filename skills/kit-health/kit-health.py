@@ -1312,7 +1312,11 @@ def template_override_check(r: Report) -> None:
         override = kit_profile.template(kind)
         if override is None:
             continue
-        missing = type_template.missing_sections(sections, override.read_text(encoding="utf-8"))
+        try:
+            missing = type_template.missing_sections(sections, override.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError) as e:
+            r.add(WARN, "engine", f"`{rel(override)}` cannot be read ({e}) — the `{kind}` sections were not checked")
+            continue
         if missing:
             r.add(WARN, "engine", f"`{rel(override)}` drops {', '.join(missing)} that `{kind}` requires — "
                   "restore the heading(s), or delete the override to fall back to the engine template")

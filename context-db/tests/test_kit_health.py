@@ -627,6 +627,13 @@ class TemplateOverrideCheck(unittest.TestCase):
         self.assertIn("widget", line)
         self.assertIn("fall back to the engine template", line)
 
+    def test_an_override_that_cannot_be_read_warns_instead_of_crashing(self):
+        self.write_type(["Goal"])
+        (self.templates_dir / "widget.md").write_bytes(b"## Goal\n\xff\xfe\n")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("cannot be read", line)
+
 
 class ConfigSection(unittest.TestCase):
     """kit-health § 3 (config) on a throw-away store — never the live one (kb.ENV / kit_profile.ENV_DIR
