@@ -544,7 +544,8 @@ class SecKitSyncDedup(unittest.TestCase):
         with mock.patch.object(kh, "sh", fake_sh), \
              mock.patch.object(kh.kit_profile, "plugin_install", lambda *a, **k: None), \
              mock.patch.object(kh, "install_mode_check", lambda *a, **k: None), \
-             mock.patch.object(kh, "release_check", lambda *a, **k: None), \
+             mock.patch.object(kh, "release_check", lambda *a, **k: ("", None, False)), \
+             mock.patch.object(kh, "clone_channel_report", lambda *a, **k: None), \
              mock.patch.object(kh, "review_ratio", lambda *a, **k: None):
             kh.sec_kit(r, 90)
             if adopt_check is not None:
