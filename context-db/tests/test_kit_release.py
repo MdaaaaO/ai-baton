@@ -210,7 +210,7 @@ class ConventionalReleaseVersionPin(unittest.TestCase):
 
 @unittest.skipUnless(MAKE, "make not installed")
 class KitReleaseLevelInference(unittest.TestCase):
-    """#452: below 1.0.0, kit_release/_dry read the fake release tool's own --dry-run output (never re-parse
+    """Below 1.0.0, kit_release/_dry read the fake release tool's own --dry-run output (never re-parse
     commits themselves) to catch an inferred major and run with `minor` instead — every machine takes a
     Machines-footer step the same way pre-1.0, it is not a 1.0.0. On 1.x, or with an explicit LEVEL, the
     probe is skipped (or ignored) and nothing is overridden."""
