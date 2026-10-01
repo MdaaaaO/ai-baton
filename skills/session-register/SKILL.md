@@ -2,8 +2,8 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "26"
-  updated: "2026-09-30"
+  version: "27"
+  updated: "2026-10-01"
   reviewed: "2026-09-24"
 user-invocable: true
 ---
@@ -114,6 +114,11 @@ SessionStart hook prints (from the next session start; once a compaction drops t
 you registered or renamed after the start — the block shows the name of that moment — `kit_profile.py footer`
 prints the current one). It is the last line of every PR body and PR comment on your own PRs
 (`pr-open`, `pr-watch`); never an AI attribution line.
+
+The same hook re-grounds you after a compaction too: its `compact` matcher opens with one line naming your
+session file and, when one resolves, its context doc, then your session brief — `session`/`epic`/`working_on`/
+`responsibilities` first, `## Open PRs`/`## Open decisions`/`## Assumptions`/`## Owns`/`## Worktrees` ahead of
+whatever else you wrote — and the context doc's *Remaining work* head, so a compaction does not cost you either.
 
 **Name every ctx write as yourself (since v0.6.0, #393).** The ctx MCP server writes as one shared process
 identity unless a call says otherwise, so a ctx tool call that omits `actor` on a doc your session owns (your own

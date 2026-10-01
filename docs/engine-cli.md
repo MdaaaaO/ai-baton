@@ -409,7 +409,14 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        catalogs INDEX.md (gen_index.py) and SESSION_INDEX.md (gen_sessions.py --no-archive) are
                        regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
-  brief-session        SessionStart compact → `ctx brief --session <session_id>`, byte-budgeted
+  brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and
+                       <context-doc key>", or "and no context doc" when none resolves through the store's
+                       `resolve` rule), then `ctx brief --session <session_id>` re-budgeted by this adapter —
+                       its frontmatter cut to `session`/`epic`/`working_on`/`responsibilities` (`stats`,
+                       `heartbeat`, `session_id`, `ref`, `updated` and the `sections` summary dropped outright,
+                       the fields a 2026-10-01 gap report found eating the budget before the body) and its `##`
+                       sections led by `SECTION_PRIORITY` when present — within `BRIEF_BUDGET`; then, when a
+                       context doc resolved, its key and the head of its *Remaining work*, within `EPIC_BUDGET`
 
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
