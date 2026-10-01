@@ -23,7 +23,7 @@ the new head on its own once asked.
 | `PR N BEHIND <base> … update-branch 422 (merge conflict or head moved): …` | the update-branch call was refused — re-read before this line fires: merged/closed by then prints only `MERGED`/`CLOSED` below, nothing BEHIND | a real conflict: rebase the worktree + `sign-queue --rebase` |
 | `PR N CONFLICTS with <base>` | `mergeable_state=dirty` | rebase the worktree, resolve, `sign-queue --rebase` |
 | `PR N MERGED` / `CLOSED` | done | verify the deploy by image tag; close the ticket; the Monitor exits |
-| `ERROR <repo> startup: …` | a config or identity lookup failed before any PR was polled; the watcher exits 2 — no `PR N` prefix, since it is not a state change. A read that fails while a PR is watched is `LOOKUP FAILED` above | fix the named config key or identity, then arm again. **Never fork `pr-event-brief` for this line** — it is not a PR event, there is nothing on the PR to triage |
+| `ERROR <repo> startup: …` | a config or identity lookup failed before any PR was polled; the watcher exits non-zero — no `PR N` prefix, since it is not a state change. A read that fails while a PR is watched is `LOOKUP FAILED` above | fix the named config key or identity, then arm again. **Never fork `pr-event-brief` for this line** — it is not a PR event, there is nothing on the PR to triage |
 
 Filtered out on purpose: your own comments/reviews, the review bot's in-thread replies ("Perfect, thanks…"),
 repeated non-green states, and a stale verdict (`commit_id` not the current head) from the configured
