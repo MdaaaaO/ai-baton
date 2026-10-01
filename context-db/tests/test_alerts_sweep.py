@@ -107,6 +107,18 @@ class Pagination(unittest.TestCase):
     def test_a_failed_read_returns_a_named_failure_not_no_op(self):
         self.assertIn("alerts-sweep: read failed — state not advanced", skill_body())
 
+    def test_a_failed_read_keeps_the_connectors_error_text_not_a_bare_label(self):
+        # A failed read is UNKNOWN, not "nothing to report" — the fixed label alone (what step 2 used to
+        # return) loses the one thing that tells a transient blip from an auth/permission problem worth
+        # fixing. Both the step-2 instruction and the Return value contract must say to keep it.
+        body = skill_body()
+        self.assertIn("error text", body)
+        self.assertNotRegex(
+            body,
+            r"return exactly `alerts-sweep: read failed — state not advanced`",
+            "the Return value contract still demands the bare label with no error text",
+        )
+
 
 class SelfExecutingTrailer(unittest.TestCase):
     """`context: fork` means only this fork ever reads the rest of SKILL.md — the main session sees nothing

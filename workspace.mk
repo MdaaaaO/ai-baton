@@ -25,18 +25,25 @@ KIT := $(patsubst %/,%,$(dir $(_WORKSPACE_MK)))
 _SIGNQ = python3 "$(KIT)/skills/sign-queue/signq.py"
 JOB ?=
 V   ?=
+# gate text only — never a $(shell ...) Make variable: that would run kit_profile.py eagerly at parse time,
+# including under `make -n`. As plain shell text pasted into one recipe line below, `make -n` only prints
+# it; nothing runs until the recipe's own shell does. Where systems.signed_commits is false (a solo
+# workspace with no signing key) every sign* target prints one line and exits 0, never touching signq.py.
+# kit_profile.py exits 1 for "no env store / key absent" (kit default: false) and 2 or more when the store
+# could not be read — that one stops with the error, it is never read as "false".
+_SIGN_GATE_SC = sge="$$(mktemp)"; sc="$$(python3 "$(KIT)/context-db/bin/kit_profile.py" get systems.signed_commits 2>"$$sge")"; sgrc=$$?; sgerr="$$(cat "$$sge")"; rm -f "$$sge"; if [ "$$sgrc" -ge 2 ]; then echo "sign-queue: systems.signed_commits could not be read — $$sgerr" >&2; exit 2; fi
+_SIGN_NA = echo "sign-queue: not applicable here — signed_commits is false"
 
 # the owner's entry points move jobs a pre-workspace-queue kit left under the kit dir first (a no-op once done);
 # signq.py itself never migrates as a side effect
 sign:
-	@$(_SIGNQ) migrate-legacy -q && $(_SIGNQ) run $(if $(V),-v,)
+	@$(_SIGN_GATE_SC); if [ "$$sc" != "true" ]; then $(_SIGN_NA); else $(_SIGNQ) migrate-legacy -q && $(_SIGNQ) run $(if $(V),-v,); fi
 
 sign_list:
-	@$(_SIGNQ) migrate-legacy -q && $(_SIGNQ) list
+	@$(_SIGN_GATE_SC); if [ "$$sc" != "true" ]; then $(_SIGN_NA); else $(_SIGNQ) migrate-legacy -q && $(_SIGNQ) list; fi
 
 sign_show sign_log sign_retry sign_drop:
-	@test -n "$(JOB)" || { echo "usage: make $@ JOB=<index|topic>  (see make sign_list)"; exit 1; }
-	@$(_SIGNQ) $(patsubst sign_%,%,$@) "$(JOB)"
+	@$(_SIGN_GATE_SC); if [ "$$sc" != "true" ]; then $(_SIGN_NA); elif [ -z "$(JOB)" ]; then echo "usage: make $@ JOB=<index|topic>  (see make sign_list)"; exit 1; else $(_SIGNQ) $(patsubst sign_%,%,$@) "$(JOB)"; fi
 
 # ── .claude workspace repo sync ──────────────────────────────────────────────────────────
 # .claude/ is its own git repo (see .claude/docs/sync.md) and its main is PR-only: sync.sh

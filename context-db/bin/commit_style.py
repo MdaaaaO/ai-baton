@@ -245,6 +245,9 @@ def main(argv: list[str]) -> int:
     except OSError as e:
         print(f"commit_style: {e}", file=sys.stderr)
         return 2
+    except Exception as e:  # a crash is never exit 1: a caller reads 1 as "fix the message"
+        print(f"commit_style: internal error — {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
 
 
 def _main(argv: list[str]) -> int:
@@ -274,6 +277,15 @@ def _main(argv: list[str]) -> int:
         return 0
     if a.arg is None:
         ap.error(f"{a.cmd} needs a {'message file' if a.cmd == 'check' else 'subject'}")
+    if style == "ticket-key":
+        # a key shape that is missing or does not compile is a config error (exit 2): no message can satisfy it
+        rx = key_regex()
+        if not rx:
+            raise SystemExit("style ticket-key but the env config has no tracker.key_regex")
+        try:
+            re.compile(rx)
+        except re.error as e:
+            raise SystemExit(f"tracker.key_regex is not a valid regex: {e}")
     if a.cmd == "check":
         text = sys.stdin.read() if a.arg == "-" else Path(a.arg).read_text(encoding="utf-8", errors="replace")
         problems = check_message(text, style, comment_char(d))
