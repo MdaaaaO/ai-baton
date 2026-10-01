@@ -71,8 +71,15 @@ check_kit() {
       tag="$(git for-each-ref --merged origin/main --sort=-version:refname --format='%(refname:short)' 'refs/tags/v[0-9]*' 2>/dev/null | head -n 1)"
     fi
     if [ -n "$tag" ]; then
-      git merge-base --is-ancestor "refs/tags/$tag" HEAD 2>/dev/null \
-        || warn "$label: release $tag is waiting (what it changes: .sync-preview) — \`make claude_sync\` applies it"
+      if ! git merge-base --is-ancestor "refs/tags/$tag" HEAD 2>/dev/null; then
+        # a tag --accept already rejected is reported once, above, straight from .sync-status
+        # (`error …`) — sync.sh writes no .sync-preview for it, so this second warning would be
+        # both redundant and misleading about what `make claude_sync` will actually do
+        rejtag=""
+        [ -f "$dir/.sync-rejected" ] && rejtag="$(cut -d' ' -f1 "$dir/.sync-rejected" 2>/dev/null)"
+        [ "$rejtag" = "$tag" ] \
+          || warn "$label: release $tag is waiting (what it changes: .sync-preview) — \`make claude_sync\` applies it"
+      fi
     elif [ "$behind" -gt 0 ]; then
       warn "$label: origin/main is $behind commit(s) ahead (a PR merged) — \`make claude_sync\` fast-forwards"
     fi

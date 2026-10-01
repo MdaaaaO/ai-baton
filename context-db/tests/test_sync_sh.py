@@ -2,8 +2,12 @@
 offline, error, lock-busy skipped), the fetch timeout with and without a `timeout` binary, sync.log rotation and
 the sha line only when HEAD moved, the release-tag channel (tag selection, the held preview, --accept, the
 `kit.channel main` opt-out), the manifest verification `--accept` runs before applying a release tag (verified,
-failed attestation, a manifest naming the wrong commit, no `gh` on PATH, a release with no manifest.txt asset —
-against a stub `gh` on PATH, never the network or the real `gh`), and which states sync-check warns about (#42).
+failed attestation, a manifest naming the wrong commit, no `gh` on PATH, a release with no manifest.txt asset,
+an unknown download failure, a verify call that times out or gets no answer, a verdict whose wording overlaps
+"no answer" — against a stub `gh` on PATH, never the network or the real `gh`), a rejected tag staying rejected
+across an unattended run (.sync-rejected) instead of reading as merely `held` again, origin_owner_repo's host
+matching (ssh/https/ssh:// forms, an explicit port, a look-alike host rejected, an ssh host alias left
+unparsed), and which states sync-check warns about.
 Stdlib unittest, no network: a hung or unreachable origin is faked with `remote.origin.uploadpack`.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
@@ -34,10 +38,12 @@ def _env(home: Path, path: str | None = None) -> dict:
 
 
 # A stub `gh` for verify_release (sync.sh): every call is logged (one line per invocation) to
-# $GH_STUB_LOG, and GH_AUTH_RC / GH_DOWNLOAD_RC / GH_DOWNLOAD_ERR / GH_ATTEST_HELP_RC / GH_ATTEST_RC / GH_ATTEST_ERR /
-# GH_MANIFEST_CONTENT (all optional; unset reads as success) choose what each subcommand does. A
-# successful "release download" writes $GH_MANIFEST_CONTENT to <the --dir value>/manifest.txt, same
-# as the real `gh` would land the asset. Never the real `gh`, never the network.
+# $GH_STUB_LOG, and GH_AUTH_RC / GH_DOWNLOAD_RC / GH_DOWNLOAD_ERR / GH_DOWNLOAD_SLEEP / GH_ATTEST_HELP_RC /
+# GH_ATTEST_RC / GH_ATTEST_ERR / GH_ATTEST_SLEEP / GH_MANIFEST_CONTENT (all optional; unset reads as success,
+# no sleep) choose what each subcommand does. A successful "release download" writes $GH_MANIFEST_CONTENT to
+# <the --dir value>/manifest.txt, same as the real `gh` would land the asset. The *_SLEEP vars stand in for a
+# call that hangs — sync.sh's own with_timeout is what must notice and kill it. Never the real `gh`, never the
+# network.
 GH_STUB = r"""#!/bin/bash
 echo "$*" >> "$GH_STUB_LOG"
 case "$*" in
@@ -48,6 +54,7 @@ case "$*" in
     fi
     exit 0 ;;
   "release download "*)
+    sleep "${GH_DOWNLOAD_SLEEP:-0}"
     rc="${GH_DOWNLOAD_RC:-0}"
     if [ "$rc" != 0 ]; then
       echo "${GH_DOWNLOAD_ERR:-gh: release not found (stub)}" >&2
@@ -66,6 +73,7 @@ case "$*" in
   "attestation verify --help"*)
     exit "${GH_ATTEST_HELP_RC:-0}" ;;
   "attestation verify "*)
+    sleep "${GH_ATTEST_SLEEP:-0}"
     rc="${GH_ATTEST_RC:-0}"
     if [ "$rc" != 0 ]; then
       echo "${GH_ATTEST_ERR:-gh: attestation verification failed (stub)}" >&2
@@ -88,7 +96,8 @@ class SyncSh(unittest.TestCase):
         self.git("-c", "init.defaultBranch=main", "init", "-q", str(seed), cwd=self.tmp)
         shutil.copy(KIT / "sync.sh", seed / "sync.sh")
         shutil.copy(KIT / "sync-check.sh", seed / "sync-check.sh")
-        (seed / ".gitignore").write_text(".sync.lock\n.sync.lock.d/\n.sync-status\n.sync-preview\nsync.log\n")
+        (seed / ".gitignore").write_text(
+            ".sync.lock\n.sync.lock.d/\n.sync-status\n.sync-preview\n.sync-rejected\nsync.log\n")
         self.git("add", "-A", cwd=seed)
         self.git("commit", "-qm", "seed", cwd=seed)
         self.git("push", "-q", str(self.origin), "HEAD:main", cwd=seed)
@@ -98,6 +107,7 @@ class SyncSh(unittest.TestCase):
         self.status_file = self.kit / ".sync-status"
         self.log_file = self.kit / "sync.log"
         self.preview_file = self.kit / ".sync-preview"
+        self.rejected_file = self.kit / ".sync-rejected"
 
     # ── helpers ──
     def git(self, *args, cwd):
@@ -142,8 +152,12 @@ class SyncSh(unittest.TestCase):
         self.git("push", "-q", str(self.origin), name, cwd=self.seed)
 
     def path_without(self, *names) -> str:
-        """A PATH of symlinks to every executable on PATH except `names` (e.g. no `timeout`, no `flock`)."""
+        """A PATH of symlinks to every executable on PATH except `names` (e.g. no `timeout`, no `flock`);
+        built once per distinct `names` and reused, same as gh_bin(), so a test may call this more than
+        once (e.g. once per sync() in a multi-step scenario) without tripping over its own directory."""
         d = self.tmp / ("bin-" + "-".join(names))
+        if d.exists():
+            return str(d)
         d.mkdir()
         for p in os.environ.get("PATH", "").split(os.pathsep):
             if not os.path.isdir(p):
@@ -637,9 +651,36 @@ class SyncSh(unittest.TestCase):
             with self.subTest(suffix=suffix):
                 self.fake_github_remote(suffix)
                 out = subprocess.run(
-                    ["bash", "-c", 'eval "$(sed -n \'/^origin_owner_repo() {/,/^}/p\' "$0")"; origin_owner_repo',
+                    [SH, "-c", 'eval "$(sed -n \'/^origin_owner_repo() {/,/^}/p\' "$0")"; origin_owner_repo',
                      str(self.kit / "sync.sh")], cwd=self.kit, capture_output=True, text=True)
                 self.assertEqual(out.stdout.strip(), "example/kit-sync-test", out.stderr)
+
+    def _origin_owner_repo(self, url: str) -> str:
+        """Run the extracted origin_owner_repo() against an arbitrary `remote.origin.url`, under `sh`
+        (not `bash`) since the function is POSIX sh and must not accidentally lean on a bashism."""
+        self.git("remote", "set-url", "origin", url, cwd=self.kit)
+        out = subprocess.run(
+            [SH, "-c", 'eval "$(sed -n \'/^origin_owner_repo() {/,/^}/p\' "$0")"; origin_owner_repo',
+             str(self.kit / "sync.sh")], cwd=self.kit, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out.stdout.strip()
+
+    def test_origin_owner_repo_accepts_an_explicit_port(self):
+        for url in ("ssh://git@github.com:22/example/kit-sync-test.git",
+                    "ssh://git@ssh.github.com:443/example/kit-sync-test.git"):
+            with self.subTest(url=url):
+                self.assertEqual(self._origin_owner_repo(url), "example/kit-sync-test")
+
+    def test_origin_owner_repo_rejects_a_lookalike_host(self):
+        # "notgithub.com" ends in "github.com" but is not it; must not match just because the
+        # literal substring is there
+        self.assertEqual(self._origin_owner_repo("https://notgithub.com/example/kit-sync-test"), "")
+
+    def test_origin_owner_repo_leaves_an_ssh_host_alias_unparsed(self):
+        # an ssh config alias like "github.com-work" (a common way to juggle multiple accounts) is
+        # not github.com even though it starts with that string — deliberately left unparsed, same
+        # as any other host sync.sh does not recognise, rather than guessed at
+        self.assertEqual(self._origin_owner_repo("git@github.com-work:example/kit-sync-test.git"), "")
 
     def test_accept_passes_the_origin_repo_to_gh(self):
         self.fake_github_remote(".git")
@@ -757,6 +798,149 @@ class SyncSh(unittest.TestCase):
                               self.status_file.read_text())
                 self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
 
+    def test_accept_attestation_verify_bad_credentials_applies_unverified(self):
+        # gh's own "not authenticated" wording at the verify call, not the earlier `gh auth status`
+        # gate: still "no answer from GitHub" about the manifest, not a verdict on it
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_RC="1",
+                           GH_ATTEST_ERR="HTTP 401: Bad credentials (https://api.github.com/x)")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("unverified (attestation verify got no answer from github)", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
+
+    def test_accept_unrecognised_download_failure_applies_unverified(self):
+        # a manifest.txt that cannot be downloaded for any reason at all is unverified, even one that
+        # matches none of the specific causes (no asset, offline) sync.sh otherwise names
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = self.gh_env(GH_DOWNLOAD_RC="1", GH_DOWNLOAD_ERR="gh: something went sideways (stub)")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("unverified (manifest download failed", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha, "an unrecognised failure still applies")
+
+    def test_accept_rejection_wins_even_when_its_wording_overlaps_no_answer(self):
+        # gh prints a genuine verdict ("Sigstore verification failed") together with network-sounding
+        # text ("dial tcp") in the same message: the verdict must still win and reject, never read as
+        # "no answer from github" just because the wording overlaps
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        before = self.rev_parse("HEAD", cwd=self.kit)
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_RC="1",
+                           GH_ATTEST_ERR="Sigstore verification failed: dial tcp: lookup api.github.com")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("nothing", r.stderr.lower())
+        self.assertEqual(self.status()[1], "error")
+        self.assertIn("v0.1.0", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), before)
+        self.assertTrue(self.rejected_file.exists())
+        self.assertIn("v0.1.0", self.rejected_file.read_text())
+
+    # ── .sync-rejected: a rejected tag stays rejected across an unattended run ──
+    def test_rejected_tag_stays_error_until_fixed_or_superseded(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        start = self.rev_parse("HEAD", cwd=self.kit)
+        wrong_sha = "0" * 40
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {wrong_sha}\n")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(self.status()[1], "error")
+        self.assertTrue(self.rejected_file.exists())
+        self.assertEqual(self.rejected_file.read_text().split(" ", 1)[0], "v0.1.0")
+
+        # a later unattended run (no --accept) on the same rejected tag: must stay `error`, naming
+        # the tag and reason, not silently flip to `held` as though nothing had happened
+        r = self.sync(env=self.gh_env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "error")
+        self.assertIn("v0.1.0", self.status_file.read_text())
+        self.assertFalse(self.preview_file.exists())
+        self.assertTrue(self.rejected_file.exists(), "still remembered — not applied, not re-held")
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), start)
+
+        # a newer release tag than the rejected one: held as usual, and the stale .sync-rejected
+        # is cleared rather than carried forward against a tag it was never about
+        self.origin_commit("b")
+        self.seed_tag("v0.2.0")
+        r = self.sync(env=self.gh_env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "held")
+        self.assertEqual(self.status()[2], "v0.2.0")
+        self.assertFalse(self.rejected_file.exists(), "a later held tag clears the stale rejection")
+
+        # --accept applies the (now correctly attested) newer release: .sync-rejected stays gone
+        tag_sha = self.rev_parse("v0.2.0^{commit}", cwd=self.seed)
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
+        self.assertFalse(self.rejected_file.exists())
+
+    def test_rerunning_accept_on_a_rejected_tag_reverifies_from_scratch(self):
+        # the whole point of remembering the rejection is to stop an unattended run from re-holding
+        # it — an explicit --accept must still re-run the check every time, so a fixed release (a
+        # corrected manifest) goes through rather than staying rejected forever
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        wrong_sha = "0" * 40
+        r = self.sync(env=self.gh_env(GH_MANIFEST_CONTENT=f"commit {wrong_sha}\n"), args=["--accept"])
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertTrue(self.rejected_file.exists())
+
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        r = self.sync(env=self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n"), args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
+        self.assertFalse(self.rejected_file.exists())
+
+    def test_accept_manifest_download_timeout_applies_unverified(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = dict(self.gh_env(GH_DOWNLOAD_SLEEP="5"), SYNC_FETCH_TIMEOUT="1")
+        r = self.sync(env=env, args=["--accept"], timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("unverified (manifest download timed out)", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
+
+    def test_accept_attestation_verify_timeout_applies_unverified(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = dict(self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_SLEEP="5"),
+                   SYNC_FETCH_TIMEOUT="1")
+        r = self.sync(env=env, args=["--accept"], timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("unverified (attestation verify got no answer from github)", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
+
     def test_accept_kit_channel_main_skips_verification(self):
         self.git("config", "kit.channel", "main", cwd=self.kit)
         self.origin_commit("a")
@@ -771,12 +955,12 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tip_sha)
 
     def test_sync_check_silent_on_unverified_ok(self):
-        # the `unverified` word is kit-health's to warn on — sync-check has no `ok)` case at
-        # all, so this locks that in rather than relying on an absence to stay accidental. A real
-        # sync first, so hooks/origin/main are all in order; other checks (e.g. the env-store check)
-        # may still warn about unrelated fixture state, so assert on the sync status line only,
-        # matching the count-based style used elsewhere in this file rather than requiring total
-        # silence.
+        # the standalone word `unverified` and its reason live in `.sync-status` and in `make
+        # claude_sync`'s own output only — sync-check has no `ok)` case at all, so this locks that in
+        # rather than relying on an absence to stay accidental. A real sync first, so hooks/origin/main
+        # are all in order; other checks (e.g. the env-store check) may still warn about unrelated
+        # fixture state, so assert on the sync status line only, matching the count-based style used
+        # elsewhere in this file rather than requiring total silence.
         self.sync()
         self.status_file.write_text("2026-01-01T00:00:00Z ok kit@abc1234 (v0.1.0) unverified (no gh on PATH)\n")
         out = self.check()

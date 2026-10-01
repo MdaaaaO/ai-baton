@@ -60,10 +60,10 @@ refused pull is seen by the next session instead of staying silent:
 |---|---|---|
 | `pending <epoch>` | written just before the fetch (bounded by `timeout 60`, or a shell watchdog where `timeout` is missing); still there = the run was killed | when older than 5 minutes |
 | `ok <kit@sha>` | fetched; fast-forwarded, already in step, or already past the held tag | never |
-| `ok <kit@sha> unverified (<reason>)` | `--accept` applied a release tag whose manifest attestation could not be checked (no `gh` or one too old, not authenticated, offline, an `origin` off github.com, or the release has no `manifest.txt` asset) | not from `sync-check.sh` — the standalone word `unverified` is kit-health's check to warn on |
-| `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | not from the status line — its kit check names the waiting tag for as long as `HEAD` lacks it |
+| `ok <kit@sha> unverified (<reason>)` | `--accept` applied a release tag whose manifest attestation could not be checked (no `gh` or one too old, not authenticated, a manifest.txt that could not be downloaded for any reason, or the verify call itself got no answer) | not from `sync-check.sh` — the standalone word `unverified` and the reason are in `.sync-status` and in `make claude_sync`'s output only |
+| `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | not from the status line — its kit check names the waiting tag for as long as `HEAD` lacks it (unless `.sync-rejected` already names this tag — see below) |
 | `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
-| `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed, or an accepted release tag failed manifest verification | always |
+| `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed, an accepted release tag failed manifest verification, or a previously rejected tag is still waiting | always |
 
 ## Channel: release tags or `main`
 
@@ -82,17 +82,35 @@ Before that fast-forward, `--accept` verifies the held tag against its attested 
 [`CONTRIBUTING.md`](../CONTRIBUTING.md) § Releases documents: download the tag's `manifest.txt` release
 asset, `gh attestation verify` it against `.github/workflows/release.yml` (owner/repo read from the
 checkout's own `origin` remote, never hardcoded), then check the manifest's `commit <sha>` line against
-the tag's own commit. Verified → applies as above. The check ran and **failed** (bad attestation or a
-manifest naming a different commit) → applies nothing, `.sync-status` is `error <reason>` and the run
-exits 1 with the reason on stderr — the one error that does, since `--accept` only ever runs in the
-foreground. The check **cannot run at all** — no `gh` on `PATH`, a `gh` from before `gh attestation`
-existed, `gh` not authenticated, offline (also when the verify call itself gets no answer: no network, a
-rate limit, a server error), an `origin`
-that is not on github.com, or a release that predates the manifest and carries no `manifest.txt` asset
-— → applies anyway: a clone must still be able to catch up with no network or an unauthenticated
-`gh`, so `.sync-status` is `ok …` with the standalone word `unverified` and a short reason appended
-(`kit-health`'s check, not `sync-check.sh`'s, warns on that word). `kit.channel main` never verifies —
-there is no release tag to verify against.
+the tag's own commit. Verified → applies as above. The check ran and **failed** — `gh attestation verify`
+rejected the manifest (any failure of that call other than "no answer from GitHub", below — an HTTP 404
+included) or the manifest names a different commit than the tag — → applies nothing, `.sync-status` is
+`error <reason>` and the run exits 1 with the reason on stderr — the one error that does, since `--accept`
+only ever runs in the foreground. The tag and reason are also written to the ignored `.sync-rejected`
+(one line: `<tag> <reason>`); see below for what that changes about the next unattended run.
+
+The check **cannot run at all** — no `gh` on `PATH`, a `gh` from before `gh attestation` existed, `gh`
+not authenticated, an `origin` that is not on github.com (an ssh host alias such as
+`git@github.com-work:owner/repo`, which looks like a github.com remote but is not one, counts — it is
+left unparsed rather than guessed at), a `manifest.txt` that could not be downloaded for **any** reason
+at all (no asset, network, timeout, anything else — a release that predates the manifest and carries no
+`manifest.txt` asset included), or the verify call itself got no answer from GitHub (network, timeout, a
+rate limit, a server error, bad credentials — gh's own rejection of the manifest is never read as this,
+even when its wording overlaps) — → applies anyway: a clone must still be able to catch up with no
+network or an unauthenticated `gh`, so `.sync-status` is `ok …` with the standalone word `unverified` and
+a short reason appended. The word and the reason live in `.sync-status` and in `make claude_sync`'s
+output; `sync-check.sh` does not warn on it. `kit.channel main` never verifies — there is no release tag
+to verify against.
+
+**A rejected tag stays rejected.** `.sync-rejected` (ignored, same shape as `.sync-status`'s detail: one
+line, `<tag> <reason>`) remembers the tag the check last **failed** — not one it could merely not check —
+so that the next unattended run (no `--accept`) does not overwrite the rejection with `held <tag>` as if
+nothing had happened: when the tag `sync.sh` would otherwise hold is the one named in `.sync-rejected`, it
+reports `error` again instead, with the same reason. A later release tag than the rejected one is held as
+usual (and the stale `.sync-rejected` is cleared). The file is removed once a release applies, verified or
+unverified. Re-running `sh .claude/sync.sh --accept` on the rejected tag verifies it again from scratch —
+once the release is fixed (a new manifest, a corrected tag), the check can pass and the release goes
+through.
 
 A contributor who wants the old behaviour — always track `origin/main`, no hold — opts out with:
 
