@@ -686,7 +686,7 @@ class SyncSh(unittest.TestCase):
     def test_origin_owner_repo_reads_the_common_forms(self):
         for url in ("git@github.com:example/kit-sync-test.git",
                     "https://github.com/example/kit-sync-test",
-                    "https://user@github.com/example/kit-sync-test.git",
+                    "https://git@github.com/example/kit-sync-test.git",
                     "ssh://git@github.com/example/kit-sync-test"):
             with self.subTest(url=url):
                 self.assertEqual(self._origin_owner_repo(url), "example/kit-sync-test")
