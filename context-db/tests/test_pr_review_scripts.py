@@ -172,6 +172,49 @@ class FetchContextStub(unittest.TestCase):
         self.assertGreaterEqual(bundle["bundle"]["skipped"], 1)
         self.assertIn("skipped", r.stdout)
 
+    # --- an empty/missing login in config.json must fail fast, not run with ME="" (every "mine"/"own PR"
+    #     comparison in the script would then silently match an empty author field) ---
+
+    def test_empty_login_in_config_fails_fast(self):
+        self.state_dir.joinpath("config.json").write_text(json.dumps(
+            {"login": "", "bots": [], "bundle_max_files": 60, "bundle_max_kb": 200}))
+        r, out = self.run_fetch([])
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("no login", r.stderr)
+        self.assertFalse(out.exists())
+
+    def test_missing_login_key_in_config_fails_fast(self):
+        self.state_dir.joinpath("config.json").write_text(json.dumps(
+            {"bots": [], "bundle_max_files": 60, "bundle_max_kb": 200}))
+        r, out = self.run_fetch([])
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("no login", r.stderr)
+
+    # --- incomplete review-thread pagination (a `gh api graphql` call that never comes back with data):
+    #     the snapshot is still written, flagged in the manifest AND named in errors.txt, so a reader of
+    #     either sees that the thread counts are not the whole list. ---
+
+    def test_incomplete_thread_pagination_is_flagged_and_named(self):
+        files = [{"filename": "a.txt", "status": "added", "changes": 1, "additions": 1, "deletions": 0}]
+        r, out = self.run_fetch(files, extra_env={"STUB_GRAPHQL_JSON": ""})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        manifest = json.loads((out / "manifest.json").read_text())
+        self.assertFalse(manifest["threads_complete"])
+        self.assertIn("review threads incomplete", (out / "errors.txt").read_text())
+        self.assertIn("errors:", r.stdout)
+
+    def test_missing_config_names_the_file_not_the_login(self):
+        self.state_dir.joinpath("config.json").unlink()
+        r, out = self.run_fetch([])
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("no readable config.json", r.stderr)
+
+    def test_unparsable_config_says_so(self):
+        self.state_dir.joinpath("config.json").write_text("{not json")
+        r, out = self.run_fetch([])
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("cannot be parsed", r.stderr)
+
 
 @unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
 class TrackerKeyLint(unittest.TestCase):
