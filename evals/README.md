@@ -68,7 +68,7 @@ re-check it whenever a suite or a behaviour case is added or renamed.
 | `repo-docs` | 5+5 | — |
 | `self-assessment` | 5+5 | — |
 | `session-handoff` | 7+6 | — |
-| `session-register` | 5+5 | — |
+| `session-register` | 5+5 | `session-register-behaviour-narrate-back-first`, `session-register-behaviour-no-work-before-narrate-back` |
 | `session-retro` | 5+5 | — |
 | `sign-queue` | 5+5 | `sign-queue-behaviour-enqueue-not-paste`, `sign-queue-behaviour-not-applicable` |
 | `signed-git-commits` | 5+5 | `signed-git-commits-behaviour-not-applicable` |

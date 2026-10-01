@@ -58,6 +58,7 @@ SESS_DIR = os.path.join(CTX, "sessions")
 FIELDS = ["session", "session_id", "ref", "status", "epic", "repos",
           "working_on", "responsibilities", "stats", "heartbeat", "updated"]
 STATS_HEADING = "## Session stats"
+ACTIVITY_HEADING = "## What this session did"
 NEXT_HEADING = "## Next session"
 NOTES_HEADING = "## Notes"
 OPEN_PRS_HEADING = "## Open PRs"
@@ -459,6 +460,12 @@ def cmd_end(a) -> None:
         import session_stats
         _apply_stats(meta, st)
         body = _replace_section(body, STATS_HEADING, session_stats.fmt_block(st))
+        # Right after Session stats (new sections append to the body's current end, and Session stats
+        # was just placed there): what the session did, derived from the same transcript, so a flush
+        # reviews instead of recalls. Empty/no groups -> content "" -> _replace_section withdraws/skips
+        # the heading instead of leaving it empty.
+        groups = session_stats.activity_for(getattr(a, "session_id", "") or None)
+        body = _replace_section(body, ACTIVITY_HEADING, "\n".join(session_stats.fmt_activity(groups)) if groups else "")
     write_doc(path, meta, body)
     if st is not None:
         _ledger_append(meta, st)  # after the doc: a failed doc write must not leave a ledger row for an un-ended session

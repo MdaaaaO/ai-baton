@@ -16,9 +16,10 @@
 #   make -C $BATON/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
 #                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
 #   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
-#   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + sessions/_ledger.md row
+#   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + ## What this session did + sessions/_ledger.md row
 #   make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
 #   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
+#   make -C $BATON/context-db session-activity          # what this session did, grouped (files/commits/PRs/tickets/drafts/compactions), from the transcript
 #   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
 #   make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
 #   Every session-* target refreshes the row's `stats:` line from the transcript named by
@@ -81,7 +82,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
+.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
 # An explicit `SESSION_ID=` (command line or shell environment) wins as-is; otherwise take the CURRENT, expanded
 # value of CLAUDE_CODE_SESSION_ID (`:=`, not `?=`/`=`, which would store the unexpanded reference text — `sq` below
 # reads SESSION_ID with $(value …), so a lazily-expanded default would leak the literal "$(CLAUDE_CODE_SESSION_ID)").
@@ -277,6 +278,12 @@ session-rename:
 # make session-stats [SESSION_ID=<uuid>] — the stats block for the handoff (no registry write)
 session-stats:
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py stats $(STATSFLAGS)
+
+# make session-activity [SESSION_ID=<uuid>] — what this session did (files/commits/PRs/tickets/drafts/
+# compactions), derived from the transcript at flush time; no registry write. Same SESSION_ID override
+# as session-stats.
+session-activity:
+	@$(PY) $(BIN)/session_stats.py --activity $(if $(value SESSION_ID),--session-id $(call sq,SESSION_ID),)
 
 session-index:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) gen_sessions.py $(if $(NOARCHIVE),--no-archive,)

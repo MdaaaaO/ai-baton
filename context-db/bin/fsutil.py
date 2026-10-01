@@ -1,14 +1,23 @@
-"""fsutil.py — the engine's safe file writes: whole-file replace and an advisory lock. Stdlib only (POSIX `fcntl`;
+"""fsutil.py — the engine's shared file I/O: a safe whole-file replace, an advisory lock, and reading a CLI
+argument that is either a path or `-` for stdin (every small tool that takes `<file | ->` shares this one
+reader, so two tools never carry the same read helper under different names). Stdlib only (POSIX `fcntl`;
 where it is missing the lock is a no-op and the write stays atomic)."""
 from __future__ import annotations
 import contextlib
 import os
+import sys
 import tempfile
+from pathlib import Path
 
 try:
     import fcntl
 except ImportError:  # pragma: no cover — non-POSIX host
     fcntl = None  # type: ignore[assignment]
+
+
+def read_arg(arg: str) -> str:
+    """The text at `arg`, or stdin when `arg` is `-` — the shared body behind every `<file | ->` CLI argument."""
+    return sys.stdin.read() if arg == "-" else Path(arg).read_text(encoding="utf-8", errors="replace")
 
 
 def atomic_write(path: str, text: str) -> None:

@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "25"
+  version: "26"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -39,8 +39,18 @@ worktree.
    (no `## Next session`, or a "no successor" note) is not listed at all — there is nothing to pick up.
    A predecessor that ended more than `SESSION_ARCHIVE_DAYS` (7) days ago is no longer in the index —
    it was swept to `sessions/archive/<name>.md` (listed in `sessions/archive/INDEX.md`, prompt intact).
-   Register under the name it proposes, read what it lists, claim what it names. Re-verify anything
-   time-sensitive (draft sent?, PR merged?) against the surface first.
+   Register under the name it proposes, read what it lists, claim what it names.
+   **Narrate back before touching anything else.** Right after reading `## Next session`, say the
+   state back in five lines — Owns · Landed · Open · First step · Not known — before any edit,
+   comment, worktree or push (only registration, the heartbeat and re-arming PR watches, steps 3-4
+   below, may run first). Check each time-sensitive claim (a PR merged, a draft sent, a ticket
+   closed) against the surface before stating it; put anything unverifiable under Not known.
+   Confirm with one carousel (`docs/carousel.md`): Proceed (recommended when nothing drifted) ·
+   Different first step · Stop — a correction is the carousel's free-text answer. No tool available
+   (a headless or scheduled run): print the five lines, log them, and proceed only with the steps
+   the handoff prompt marks standing go; the rest waits in a `Decisions` block. Either way, log the
+   five lines — joined with ` · ` — as this session's first Session log entry (`ctx_log` on the
+   epic context doc).
 2. **Decide coordination:** if another *active* session already owns the epic/PR/worktree you
    are about to touch, agree ownership explicitly (one `SendMessage`, or leave it to them) —
    don't both edit the same PR or run git in the same worktree. If no one owns it, you do.
