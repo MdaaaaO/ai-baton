@@ -38,18 +38,23 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
    Exit 3 = another sweep holds the lock; answer `NO-OP` and say so in one line.
 2. Read the table. Column meanings: `PRIO` 1 = direct request to the user, 2 = follow-up on a PR they
    already reviewed (new head or author replied), 3 = team request with no human review yet,
-   4 = swept PR with no human review, 5 = the rest. `*` = first time surfaced. `!` = over the deep
+   4 = swept PR with no human review, 5 = the rest, 6 = the user's own review already sits on this head and
+   nothing waits on them (`kind=done`: kept while their APPROVE / REQUEST_CHANGES stands on an open PR, and
+   once for a review the kit posted; it never counts as new). `*` = first time surfaced. `!` = over the deep
    threshold (600 lines) — a `pr-review --deep` candidate. `A` = passed the trivial-PR auto-approve gate
    (`.auto.eligible` in `queue.json`; the summary line carries `auto=<n> auto_mode=<mode>`). `C` = eligible
    for the unattended auto-COMMENT path (`.auto_comment.eligible` in `queue.json`; the summary line carries
    `auto_comment=<n> auto_comment_mode=<mode>`; § Unattended auto-COMMENT below — off by default). `HUMANS` = last state per human reviewer
    (`APP`, `CHA`, `COM`). `THREADS/BOT` = unresolved threads / review-bot (`github.review_bot`) Assessment on
    this head (`🟢`/`🟡`/`🔴`, `-` if none or no bot configured). `STATE` = `.state_label` from `queue.json`
-   (`row-state.py`, no `gh` call) — the row's own ledger-derived state and the section it renders in below.
+   (`row-state.py`, no `gh` call) — the row's state from its kind, the user's own review on this head and the
+   ledger, and the section it renders in below.
 3. Decide **NO-OP vs brief**: if the summary says `new=0`, answer with the single word `NO-OP` — nothing
    else. `new` counts the **shown** rows that were not surfaced before on this head with this kind
    (`--mark` records exactly those), so a follow-up or an `A` row that was already reported is not new
-   again; a new head, a new author reply, or a first-time `A` flag is. Otherwise answer with the brief below.
+   again; a new head, a new author reply, or a first-time `A` flag is. A prio-6 row is never new — the
+   user's own review is no reason for a brief; it only rides along when something else is. Otherwise answer
+   with the brief below.
 
 ## Answer (exactly this shape — real markdown, NO code fence, so the terminal draws the table)
 
@@ -61,6 +66,12 @@ recompute the grouping here). Each section is its own table, same columns as bef
 `State` column; an empty section prints `none` instead of an empty table. The ≤8-row cap (`max_rows`) is
 on the **total** rows shown across all five sections, `.[:$m]` in `queue.json`'s own prio order — section
 order groups what's shown, it never re-ranks which rows make the cut.
+
+What each section holds: **Needs you** — a STOP hold, or the author replied in a thread the user opened
+(whatever verdict they left). **New — not started** — never reviewed, plus re-requests the auto path covers.
+**Handled this tick** — a review the kit posted on this head since the last brief (shown once, then dropped as
+done). **Follow-up — manual** — reviewed on an older head; nothing acts unless asked. **Watching** — the
+user's APPROVE or REQUEST_CHANGES stands on this head and the PR is still open: the next move is the author's.
 
 **Needs you**
 | # | PR | Prio | Why now | Size | Humans · Thr · Bot | Author · Title | State |
@@ -87,19 +98,19 @@ order groups what's shown, it never re-ranks which rows make the cut.
 Column rules (same meaning in every section):
 - `#` — row number, counting across sections (not restarting per section); `PR` — always a `[repo#n](url)`
   link, repo without the `<org>/` prefix.
-- `Prio` — `<n> · <word>`: `1 · direct`, `2 · follow-up`, `3 · team`, `4 · sweep`, `5 · other`; append ` ‼ deep`
+- `Prio` — `<n> · <word>`: `1 · direct`, `2 · follow-up`, `3 · team`, `4 · sweep`, `5 · other`, `6 · reviewed`; append ` ‼ deep`
   for `!` (over the deep threshold) and ` ✓ auto` for `A` (passed the trivial gate). Drop the raw `*` marker — first-time
   rows are already counted in `new`.
 - `Why now` — one short clause of fact (≤ 40 chars) that adds something the other columns do not: prio 1 → `requested MM-DD`;
   prio 2 → `new head since your APPROVE` / `author replied in N threads`; prio 3 → `via <team>` (one of the env config's `github.owner_teams`);
-  prio 4/5 → `opened MM-DD`. Never write "no human review", "no review yet", "bot green" or a thread count here — the
+  prio 4/5 → `opened MM-DD`; prio 6 → `your review on this head`. Never write "no human review", "no review yet", "bot green" or a thread count here — the
   `Humans · Thr · Bot` column already carries those.
 - `Size` — `lines/files` (no spaces).
 - `Humans · Thr · Bot` — last state per human reviewer (`APP`/`CHA`/`COM`, comma-joined, `–` if none) · unresolved
   thread count · review-bot Assessment on this head (`🟢`/`🟡`/`🔴`, `–` if none).
 - `Author · Title` — first name from the profile's `github.display_names` map (`python3 $BATON/context-db/bin/kit_profile.py get github.display_names`),
   otherwise the login verbatim (never a capitalised login) · title truncated to 45 characters with `…`; never wrap a cell.
-- `State` — `.state_label` verbatim (e.g. `handled (review #123456)`, `needs you (STOP)`, `new (auto)`, `follow-up (manual)`, `watching`).
+- `State` — `.state_label` verbatim (e.g. `handled (review #123456)`, `needs you (STOP)`, `new (auto)`, `follow-up (manual)`, `watching (you approved)`).
 - Header line: date **and** time as `YYYY-MM-DD HH:MM UTC` (from `date -u`), counts from the summary line; `dropped:` lists only
   non-zero buckets.
 - Trailing lines: `**Auto**` repeats the gate facts only (`class`, `packages`, CI, threads from `queue.json .auto`) or `none`;

@@ -6,8 +6,10 @@
 #
 # kind: new = never reviewed by us; re_review = we reviewed an older head; follow_up = same head we reviewed,
 # but a thread WE opened has a reply we have not answered (last comment not ours). Our own open-but-unanswered
-# threads never re-surface — the open thread is the gate, not a to-do.
-# new (summary) = shown rows not yet `surfaced` on this (head, kind); NO-OP for the fork = new=0.
+# threads never re-surface — the open thread is the gate, not a to-do. done = our review sits on this head and
+# nothing waits on us: kept (lowest prio, never counted as new) while our APPROVE / REQUEST_CHANGES stands on an
+# open PR, and once for a review the kit posted (ledger `reviewed` / `auto_commented`); everything else drops.
+# new (summary) = shown rows not yet `surfaced` on this (head, kind), `done` rows aside; NO-OP for the fork = new=0.
 # errors= counts gh calls that failed after a retry (a failed call is never an empty queue); retries= the ones
 # that recovered. Concurrency: one scan at a time (.scan.lock); every ledger append takes .ledger.lock.
 set -uo pipefail
@@ -137,6 +139,12 @@ while IFS= read -r row; do
   if gh_json "reviews $key" api --paginate "repos/$repo/pulls/$num/reviews?per_page=100"; then reviews=$(jq -sc 'add // []' <<<"$RESP"); else deg='["reviews"]'; degraded=$((degraded+1)); fi
   mine=$(jq -c --arg me "$ME" '[.[] | select(.user.login==$me and .state!="PENDING")] | last // null' <<<"$reviews")
   my_head=$(jq -r 'if .==null then "" else ((((.body // "") | [capture("pr-review:v1 head=(?<h>[0-9a-f]+)")] | first | .h) // .commit_id)) end' <<<"$mine")
+  # our own review on THIS head: the standing verdict (APPROVED / CHANGES_REQUESTED — a later COMMENT of ours does
+  # not replace it), else our last review there; null when we have none on this head
+  mine_cur=$(jq -c --arg me "$ME" --arg h "$head" 'def rh: ((((.body // "") | [capture("pr-review:v1 head=(?<h>[0-9a-f]+)")] | first | .h) // .commit_id));
+    [.[] | select(.user.login==$me and .state!="PENDING" and rh==$h)] as $cur
+    | (([$cur[] | select(.state=="APPROVED" or .state=="CHANGES_REQUESTED")] | last) // ($cur | last) // null)
+    | if .==null then null else {state, review_id: .id} end' <<<"$reviews")
   humans=$(jq -c --argjson b "$BOTS" --arg me "$ME" '[.[] | select((.user.login as $u | ($b|index($u))|not) and .user.login!=$me and (.state=="APPROVED" or .state=="CHANGES_REQUESTED" or (.state=="COMMENTED" and ((.body//"")|length)>0)))] | group_by(.user.login) | map({login: .[0].user.login, state: (last.state)})' <<<"$reviews")
   approved=$(jq -r '[.[] | select(.state=="APPROVED")] | length' <<<"$humans")
   changes=$(jq -r '[.[] | select(.state=="CHANGES_REQUESTED")] | length' <<<"$humans")
@@ -149,8 +157,13 @@ while IFS= read -r row; do
   lset=$(jq -c --arg repo "$repo" --argjson pr "$num" --arg h "$head" '[.[] | select(.repo==$repo and .pr==$pr and .head==$h)]' <<<"$LEDGER_JSON")
   has(){ jq -e --arg s "$1" 'map(.status) | index($s)' >/dev/null <<<"$lset"; }
   lstatus=$(jq -r 'map(.status) | (if index("reviewed") then "reviewed" elif index("replied") then "replied" elif index("skipped") then "skipped" elif index("auto_approved") then "auto_approved" elif index("shadow_approve") then "shadow_approve" elif index("shadow_fallback") then "shadow_fallback" elif index("held") then "held" elif index("shadow_comment") then "shadow_comment" elif index("surfaced") then "surfaced" else "" end)' <<<"$lset")
-  if [ "$my_head" = "$head" ] || has reviewed; then
-    if [ "$(jq -r .mine <<<"$threads")" != "0" ] && [ "$(jq -r .mine <<<"$threads")" != "null" ]; then kind=follow_up; else dropped_done=$((dropped_done+1)); continue; fi
+  if [ "$my_head" = "$head" ] || has reviewed || has auto_commented; then
+    vstate=$(jq -r '.state // ""' <<<"$mine_cur")
+    if [ "$(jq -r .mine <<<"$threads")" != "0" ] && [ "$(jq -r .mine <<<"$threads")" != "null" ]; then kind=follow_up
+    elif has skipped || has shadow_approve || has auto_approved || has shadow_comment; then dropped_done=$((dropped_done+1)); continue
+    elif [ "$vstate" = APPROVED ] || [ "$vstate" = CHANGES_REQUESTED ]; then kind="done"   # our verdict stands on this head: watched while the PR is open
+    elif { has reviewed || has auto_commented; } && ! jq -e '[.[] | select(.status=="surfaced" and .kind=="done")] | length > 0' >/dev/null <<<"$lset"; then kind="done"   # a review the kit posted: reported once
+    else dropped_done=$((dropped_done+1)); continue; fi
   elif [ -n "$my_head" ]; then kind=re_review
   elif has skipped; then dropped_skip=$((dropped_skip+1)); continue
   elif has shadow_approve || has auto_approved || has shadow_comment; then dropped_done=$((dropped_done+1)); continue   # shadow_fallback stays: it is an ordinary row; a `held` row stays too (interactive pr-review still needs it)
@@ -170,21 +183,24 @@ while IFS= read -r row; do
     *) FAILS=$((FAILS+1)); echo "FAIL bot-verdict $key: $(head -c 160 "$bot_err" | tr '\n' ' ')" >> "$ERR" ;;
   esac
   rm -f "$bot_err"
-  n=$((n+1))
+  # a done row costs no enrich slot (it was dropped before it was kept) and never rides an auto path
+  if [ "$kind" = "done" ]; then auto='null'; else n=$((n+1)); fi
   hlen=$(jq -r 'length' <<<"$humans")
-  if [ "$src" = direct ]; then prio_val=1
+  if [ "$kind" = "done" ]; then prio_val=6
+  elif [ "$src" = direct ]; then prio_val=1
   elif [ "$kind" != new ]; then prio_val=2
   elif [ "$src" = team ] && [ "$hlen" = 0 ]; then prio_val=3
   elif [ "$hlen" = 0 ]; then prio_val=4
   else prio_val=5; fi
   # unattended auto-COMMENT gate (opt-in, `auto_comment.mode`): direct review requests only by default
-  # (`prios`), never a follow-up, never a re-request on a PR we already reviewed (unless
-  # `auto_comment.include_re_review`), never a bot author, never a head already `held` (a STOP finding sent
-  # it back to the interactive walk — it stays an ordinary row but never re-counts toward the cap), capped
-  # at `max_per_tick` runners this tick.
+  # (`prios`), never a follow-up, never a head we already reviewed, never a re-request on a PR we already
+  # reviewed (unless `auto_comment.include_re_review`), never a bot author, never a head already `held` (a
+  # STOP finding sent it back to the interactive walk — it stays an ordinary row but never re-counts toward
+  # the cap), capped at `max_per_tick` runners this tick.
   ac_eligible=false; ac_reason="mode off"
   if [ "$AUTOC_MODE" != off ]; then
     if [ "$kind" = follow_up ]; then ac_reason="follow-up"
+    elif [ "$kind" = "done" ]; then ac_reason="already reviewed"
     elif [ "$kind" = re_review ] && [ "$AUTOC_REREVIEW" != true ]; then ac_reason="re-review"
     elif has held; then ac_reason="held"
     elif in_list "$author" "$BOTS"; then ac_reason="bot author"
@@ -199,22 +215,26 @@ while IFS= read -r row; do
     --argjson humans "$humans" --argjson approved "$approved" --argjson changes "$changes" --argjson threads "$threads" \
     --arg bot "$bot" --arg lstatus "$lstatus" --argjson surfaced "$surfaced" --argjson deg "$deg" --argjson deep "$DEEP" --arg url "$(jq -r .html_url <<<"$pr")" --argjson auto "$auto" \
     --argjson req "$(jq -c '[.requested_reviewers[].login] + [.requested_teams[].slug | "@"+.]' <<<"$pr")" \
-    --argjson prio "$prio_val" --argjson ac_eligible "$ac_eligible" --arg ac_reason "$ac_reason" \
+    --argjson prio "$prio_val" --argjson mine "$mine_cur" --argjson ac_eligible "$ac_eligible" --arg ac_reason "$ac_reason" \
     '{repo:$repo, pr:$pr, head:$head, src:$src, kind:$kind, author:$author, title:$title, updated:$upd, base:$base,
       lines:($add+$del), files:$files, humans:$humans, approved:$approved, changes_requested:$changes, threads:$threads,
       bot:$bot, ledger:$lstatus, surfaced:$surfaced, degraded:$deg, deep:(($add+$del)>$deep), url:$url, requested:$req, auto:$auto,
       auto_comment: {eligible:$ac_eligible, reason:$ac_reason},
-      prio:$prio}' >> "$OUT/candidates.jsonl"
+      mine:$mine, prio:$prio}' >> "$OUT/candidates.jsonl"
 done < "$OUT/union.jsonl"
 
 # 4. rank + present — `new` and `auto` are counted over the SHOWN rows, which are exactly the rows --mark records
 jq -s 'sort_by([.prio, (.updated|explode|map(-.))])' "$OUT/candidates.jsonl" > "$OUT/queue.json"
-# one `state` (+ `section`, `state_label`) per row from the ledger's latest entry for that PR on the
-# current head — no extra gh call, the brief renders by `.section` instead of inventing the grouping itself.
-python3 "$ROW_STATE" --queue "$OUT/queue.json" --ledger "$LEDGER" > "$OUT/queue.json.state" \
-  && mv "$OUT/queue.json.state" "$OUT/queue.json"
+# one `state` (+ `section`, `state_label`) per row from the row's own kind / review and the ledger's entries
+# for that PR — no extra gh call, the brief renders by `.section` instead of inventing the grouping itself.
+# A failure counts as a sweep error: the rows then carry no section, and that must not read as a clean tick.
+if python3 "$ROW_STATE" --queue "$OUT/queue.json" --ledger "$LEDGER" > "$OUT/queue.json.state" 2>>"$ERR.raw"; then
+  mv "$OUT/queue.json.state" "$OUT/queue.json"
+else
+  FAILS=$((FAILS+1)); echo "FAIL row-state: rows carry no state/section: $(tail -c 160 "$ERR.raw" | tr '\n' ' ')" >> "$ERR"; rm -f "$OUT/queue.json.state"
+fi
 shown=$(jq --argjson m "$MAXROWS" '.[:$m] | length' "$OUT/queue.json"); cand=$(jq length "$OUT/queue.json")
-newc=$(jq --argjson m "$MAXROWS" '[.[:$m][] | select(.surfaced|not)] | length' "$OUT/queue.json")
+newc=$(jq --argjson m "$MAXROWS" '[.[:$m][] | select((.surfaced|not) and .kind!="done")] | length' "$OUT/queue.json")
 autoc=$(jq --argjson m "$MAXROWS" '[.[:$m][] | select(.auto.eligible // false)] | length' "$OUT/queue.json")
 autocmt=$(jq --argjson m "$MAXROWS" '[.[:$m][] | select(.auto_comment.eligible // false)] | length' "$OUT/queue.json")
 if [ "$QUIET" = 0 ]; then

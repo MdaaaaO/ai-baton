@@ -8,7 +8,10 @@ per row of; the fork that reports the queue never spawns anything itself.
 Against a stub `gh` (and, for the bot-author case, a `python3` shim that fakes an eligible
 `trivial-check.py` verdict without running the real gate — that gate's own `gh` surface is exercised by
 `test_pr_review_scripts.py` / the trivial-check tests, not here). No network. Stdlib unittest.
-Run: make -C .claude/context-db test."""
+
+`ReviewedHeadRows` drives the same stub through the rows whose head already carries our review: which ones
+stay in the queue (and in which brief section `row-state.py` puts them), which drop, and that a failing
+`row-state.py` is a counted sweep error. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import json
 import os
@@ -97,6 +100,16 @@ case "$path" in
 esac
 """
 
+# a `python3` shim that fails `row-state.py` the way a crash would — everything else passes through.
+PY_SHIM_ROW_STATE_FAILS = r"""#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    *row-state.py) echo "row-state: boom" >&2; exit 1 ;;
+  esac
+done
+exec "__REAL_PYTHON3__" "$@"
+"""
+
 # a `python3` shim that fakes trivial-check.py as eligible (patch-bump) — everything else (kit_profile.py
 # calls pr-scan.sh and bot-verdict.sh make) passes through to the real interpreter unchanged.
 PY_SHIM = r"""#!/usr/bin/env bash
@@ -111,8 +124,9 @@ exec "__REAL_PYTHON3__" "$@"
 """
 
 
-@unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
-class AutoCommentGate(unittest.TestCase):
+class ScanHarness:
+    """A workspace, a stub `gh` and the helpers to run one sweep and read its queue.json back."""
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="kit-prscan-autocomment-test."))
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -134,12 +148,12 @@ class AutoCommentGate(unittest.TestCase):
         }
         self.state_dir.joinpath("config.json").write_text(json.dumps(cfg))
 
-    def env(self, use_py_shim: bool = False, **stub) -> dict:
+    def env(self, use_py_shim: bool = False, py_shim: str = PY_SHIM, **stub) -> dict:
         path = f"{self.bin}{os.pathsep}{os.environ['PATH']}"
         if use_py_shim:
             shim_dir = self.tmp / "pyshim"; shim_dir.mkdir(exist_ok=True)
             shim = shim_dir / "python3"
-            shim.write_text(PY_SHIM.replace("__REAL_PYTHON3__", sys.executable))
+            shim.write_text(py_shim.replace("__REAL_PYTHON3__", sys.executable))
             shim.chmod(0o755)
             path = f"{shim_dir}{os.pathsep}{path}"
         base = {k: v for k, v in os.environ.items() if k not in ("CONTEXT_ROOT", "PR_REVIEW_HOME", "PR_SCAN_OUT")}
@@ -150,8 +164,8 @@ class AutoCommentGate(unittest.TestCase):
         base.update(stub)
         return base
 
-    def run_scan(self, env: dict):
-        return subprocess.run(["bash", str(PR_SCAN), "--quiet"], env=env, capture_output=True, text=True, timeout=60)
+    def run_scan(self, env: dict, *args: str):
+        return subprocess.run(["bash", str(PR_SCAN), "--quiet", *args], env=env, capture_output=True, text=True, timeout=60)
 
     def queue(self):
         latest = self.tmp / "scanout" / "latest"
@@ -161,6 +175,14 @@ class AutoCommentGate(unittest.TestCase):
         rows = [r for r in self.queue() if r["pr"] == num]
         self.assertEqual(len(rows), 1, self.queue())
         return rows[0]
+
+    def write_ledger(self, rows: list) -> None:
+        self.state_dir.joinpath("ledger.jsonl").write_text(
+            "".join(json.dumps(r) + "\n" for r in rows))
+
+
+@unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
+class AutoCommentGate(ScanHarness, unittest.TestCase):
 
     # --- prio filter: a direct review request (prio 1, in `auto_comment.prios`) is eligible ---
 
@@ -321,10 +343,6 @@ class AutoCommentGate(unittest.TestCase):
     # `shadow_approve` head already is (PR#373 review): it must not resurface as `kind=new` and steal a
     # `max_per_tick` slot a fresh direct request needs ---
 
-    def write_ledger(self, rows: list) -> None:
-        self.state_dir.joinpath("ledger.jsonl").write_text(
-            "".join(json.dumps(r) + "\n" for r in rows))
-
     def test_shadow_comment_row_is_dropped_and_never_counts_toward_cap(self):
         self.write_config(prios=[1], max_per_tick=1)
         shadow_head = "2" * 40
@@ -375,6 +393,112 @@ class AutoCommentGate(unittest.TestCase):
         self.assertEqual(row401["auto_comment"]["reason"], "held")
         row402 = self.row(402)
         self.assertTrue(row402["auto_comment"]["eligible"], row402["auto_comment"])  # cap slot not stolen
+
+
+def my_review(state: str, head: str, review_id: int) -> dict:
+    return {"id": review_id, "user": {"login": ME}, "state": state, "body": "", "commit_id": head}
+
+
+@unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
+class ReviewedHeadRows(ScanHarness, unittest.TestCase):
+    """A head that already carries our review, with no reply waiting on us: the row stays in the queue
+    as `kind=done` while our verdict stands, once for a review the kit posted, and drops otherwise."""
+
+    def sweep_env(self, entries: dict, **stub) -> dict:
+        """entries: pr number -> (head, my reviews on it); every PR arrives via the repo sweep."""
+        cfg = json.loads(self.state_dir.joinpath("config.json").read_text())
+        cfg["sweep_repos"] = [REPO]
+        self.state_dir.joinpath("config.json").write_text(json.dumps(cfg))
+        sweep = [{"number": n, "updatedAt": "2099-01-01T00:00:00Z", "isDraft": False,
+                  "author": {"login": "alice", "is_bot": False}, "headRefOid": head}
+                 for n, (head, _) in entries.items()]
+        env = {"STUB_SWEEP_JSON": json.dumps(sweep)}
+        for n, (head, reviews) in entries.items():
+            env[f"STUB_PR_{n}_JSON"] = json.dumps(pr_json(n, "alice", head, updated_at="2099-01-01T00:00:00Z"))
+            env[f"STUB_REVIEWS_{n}_JSON"] = json.dumps(reviews)
+        env.update(stub)
+        return self.env(**env)
+
+    def test_our_verdict_on_the_current_head_keeps_the_row_as_watching(self):
+        self.write_config(prios=[1])
+        h1, h2, h3 = "a" * 40, "b" * 40, "c" * 40
+        env = self.sweep_env({
+            701: (h1, [my_review("APPROVED", h1, 7001)]),
+            702: (h2, [my_review("CHANGES_REQUESTED", h2, 7002)]),
+            703: (h3, []),
+        })
+        r = self.run_scan(env, "--mark")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for num, label in ((701, "watching (you approved)"), (702, "watching (you requested changes)")):
+            row = self.row(num)
+            self.assertEqual((row["kind"], row["prio"], row["section"], row["state_label"]),
+                             ("done", 6, "Watching", label), row)
+            self.assertFalse(row["auto_comment"]["eligible"])
+        self.assertEqual(self.row(703)["section"], "New — not started")
+        self.assertEqual([row["pr"] for row in self.queue()][0], 703)   # a reviewed row never outranks an open one
+        self.assertIn(" new=1 ", r.stdout)                              # only the unreviewed PR counts as new
+        # still open, same heads: the next sweep keeps watching them and has nothing new to report
+        r = self.run_scan(env, "--mark")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.row(701)["section"], "Watching")
+        self.assertIn(" new=0 ", r.stdout)
+
+    def test_a_reviewed_head_alone_is_not_news(self):
+        self.write_config(prios=[1])
+        head = "d" * 40
+        r = self.run_scan(self.sweep_env({704: (head, [my_review("APPROVED", head, 7004)])}), "--mark")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.row(704)["section"], "Watching")
+        self.assertIn(" new=0 ", r.stdout)   # the fork answers NO-OP: our own review is not a reason for a brief
+
+    def test_a_kit_posted_comment_is_handled_once_then_dropped(self):
+        self.write_config(prios=[1])
+        head, other = "e" * 40, "f" * 40
+        self.write_ledger([{"repo": REPO, "pr": 705, "head": head, "status": "auto_commented", "event": "COMMENT",
+                            "review_id": 7005, "comments": 2, "ts": "2026-01-01T00:00:00Z"}])
+        env = self.sweep_env({705: (head, [my_review("COMMENTED", head, 7005)]), 706: (other, [])})
+        r = self.run_scan(env, "--mark")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        row = self.row(705)
+        self.assertEqual((row["kind"], row["section"], row["state_label"]),
+                         ("done", "Handled this tick", "handled (review #7005)"), row)
+        r = self.run_scan(env, "--mark")   # shown and marked above: this sweep drops it as done
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn(705, [row["pr"] for row in self.queue()], self.queue())
+        self.assertIn("done=1 ", r.stdout)
+
+    def test_a_comment_posted_outside_the_kit_still_drops_as_done(self):
+        self.write_config(prios=[1])
+        head = "1" * 40
+        r = self.run_scan(self.sweep_env({707: (head, [my_review("COMMENTED", head, 7007)])}))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.queue(), [])
+        self.assertIn("done=1 ", r.stdout)
+
+    def test_a_reply_in_our_thread_outranks_the_verdict_we_left(self):
+        self.write_config(prios=[1])
+        head = "2" * 40
+        env = self.sweep_env({708: (head, [my_review("CHANGES_REQUESTED", head, 7008)])},
+                             STUB_GRAPHQL_708_JSON=json.dumps(follow_up_threads(ME, "alice")))
+        r = self.run_scan(env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        row = self.row(708)
+        self.assertEqual((row["kind"], row["section"], row["state_label"]),
+                         ("follow_up", "Needs you", "needs you (author replied)"), row)
+
+    def test_a_failing_row_state_is_a_counted_sweep_error(self):
+        self.write_config(prios=[1])
+        env = self.sweep_env({709: ("3" * 40, [])})
+        shim_env = self.env(use_py_shim=True, py_shim=PY_SHIM_ROW_STATE_FAILS)
+        env["PATH"] = shim_env["PATH"]
+        r = self.run_scan(env)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("errors=1 ", r.stdout)
+        errors = (self.tmp / "scanout" / "latest" / "errors.txt").read_text()
+        self.assertIn("FAIL row-state", errors)
+        self.assertIn("boom", errors)
+        self.assertEqual(self.row(709)["kind"], "new")   # the queue itself survives, without a section
+        self.assertNotIn("section", self.row(709))
 
 
 if __name__ == "__main__":
