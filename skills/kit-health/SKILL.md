@@ -2,8 +2,8 @@
 name: kit-health
 description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Walks each finding (Fix, Ticket, Accept), reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
 metadata:
-  version: "61"
-  updated: "2026-09-30"
+  version: "62"
+  updated: "2026-10-01"
   reviewed: "2026-09-27"
   facts: "aws.profile kit-health"
 user-invocable: true
