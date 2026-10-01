@@ -8,11 +8,17 @@ Checks every content doc for:
   - an ISO `updated` date that parses,
   - INDEX.md being up to date (regenerate and diff).
 
+Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & gotchas*
+(`docs/carousel.md` § After the answer) — a line that is ledger-shaped (starts with a bare date,
+then has `→`) but is missing its `; not <rejected>` clause. Any other line in that section (a
+free-form gotcha, an arrow in prose, a date in parentheses) never warns.
+
 Operates on the content root gen_index takes from kit_profile.context_root() (docs/layout.md's
 "Content root" paragraph). Run via `make -C $BATON/context-db verify`. Stdlib only.
 """
 from __future__ import annotations
 import os
+import re
 import sys
 from datetime import datetime
 
@@ -37,6 +43,43 @@ ACTIVE_SIZE_WARN = 30 * 1024  # ~8k tokens
 # SESSION_INDEX.md is read at every session start (WORKSPACE.md § Sessions); gen_sessions.py keeps
 # ended rows short and capped (MAX_ENDED), so passing this means active rows have bloated. Non-fatal.
 SESSION_INDEX_WARN = 10 * 1024
+
+# Decision-ledger shape (docs/carousel.md § After the answer): "YYYY-MM-DD · <question> → <chosen>;
+# not <rejected options> — <one clause why>". A line only counts as ledger-shaped (and so only then
+# gets checked for the rest) when it starts with a bare date AND has the arrow — arrows in prose are common.
+LEDGER_SECTION_RE = re.compile(r"^##\s+Key decisions & gotchas\s*$", re.MULTILINE)
+NEXT_HEADING_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
+LEDGER_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\b")
+LEDGER_ARROW = "→"
+LEDGER_REJECTED = "; not "
+
+
+def ledger_warnings(root: str, rows: list[dict]) -> list[tuple[str, str]]:
+    """Malformed decision-ledger lines under each doc's Key decisions & gotchas section."""
+    found = []
+    for r in rows:
+        path = os.path.join(root, r["_path"])
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        m = LEDGER_SECTION_RE.search(text)
+        if not m:
+            continue
+        rest = text[m.end():]
+        nxt = NEXT_HEADING_RE.search(rest)
+        body = rest[:nxt.start()] if nxt else rest
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            candidate = line[2:].strip() if line[:2] in ("- ", "* ") else line
+            if not (LEDGER_DATE_RE.match(candidate) and LEDGER_ARROW in candidate):
+                continue  # not ledger-shaped (a free-form gotcha, or a date in parentheses) — never warns
+            if LEDGER_REJECTED not in candidate:
+                found.append((r["_path"], line))  # a ledger line without its rejected options
+    return found
 
 
 def main() -> int:
@@ -101,6 +144,16 @@ def main() -> int:
         print(f"⚠ SESSION_INDEX.md is {si // 1024}KB (> {SESSION_INDEX_WARN // 1024}KB) — it is read at every "
               f"session start; trim the active rows' working_on/responsibilities or lower MAX_ENDED",
               file=sys.stderr)
+
+    # Decision-ledger shape (non-fatal) — a line that already starts with a date and has the
+    # `→` arrow (so it looks like a ledger entry) but is missing its `; not <rejected>` clause
+    # (docs/carousel.md § After the answer).
+    bad_ledger = ledger_warnings(gi.ROOT, rows)
+    if bad_ledger:
+        print(f"⚠ {len(bad_ledger)} Key decisions & gotchas line(s) look ledger-shaped (a date, "
+              f"then `→`) but miss the `; not <rejected>` clause:", file=sys.stderr)
+        for p, line in bad_ledger:
+            print(f"  - {p}: {line}", file=sys.stderr)
 
     if errors:
         print(f"FAIL — {len(errors)} problem(s):", file=sys.stderr)
