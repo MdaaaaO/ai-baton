@@ -284,7 +284,9 @@ and the `main-guard` retry loop (`.github/scripts/main-guard.sh`, with a stub `g
 - **A new engine module gets a test module**; a shared helper (`frontmatter.py`, `transcripts.py`, `leak_shapes.py`)
   is the only copy — a second parser or reader is a review finding.
 - **A ctx-store type's required `sections`** must each be a `## ` heading of its template
-  (`context-db/_templates/<type>.md`) — `tests/test_type_template.py` enforces it. A section is safe to add to a
+  (`context-db/_templates/<type>.md`), once and outside fenced code, and a declared `log.section` is one of them —
+  `tests/test_type_template.py` enforces it, and kit-health § 5 checks an environment's template override the same
+  way. A section is safe to add to a
   type's `sections` only once **every** existing store already has that heading: a migration can rewrite a doc's
   content, never invent a section that is not there, so a required section a doc lacks fails `ctx validate` forever.
 - **A test never reads the machine's store.** It points `kit_profile.ENV_DIR` / `kb.ENV` at a throw-away blank one

@@ -35,6 +35,8 @@ class LiveStoreTies(unittest.TestCase):
             self.assertTrue(template.is_file(), f"{type_path.stem}: declares sections but has no template")
             missing = tt.missing_sections(sections, template.read_text(encoding="utf-8"))
             self.assertEqual(missing, [], f"{type_path.stem}: {missing} not a heading of {template.name}")
+            repeated = tt.repeated_sections(sections, template.read_text(encoding="utf-8"))
+            self.assertEqual(repeated, [], f"{type_path.stem}: {repeated} more than once in {template.name}")
 
     def test_declared_log_section_is_among_declared_sections(self):
         for type_path in sorted(tt.TYPES_DIR.glob("*.json")):
@@ -63,6 +65,22 @@ class FixtureFindings(unittest.TestCase):
         template = "## Goal\n\n## Notes\n"
         self.assertEqual(tt.missing_sections(["Goal", "Notes"], template), [])
         self.assertEqual(tt.missing_sections(["Goal", "Risks"], template), ["Risks"])
+
+    def test_a_heading_inside_fenced_code_is_not_a_section(self):
+        for fence in ("```", "~~~"):
+            with self.subTest(fence=fence):
+                template = f"## Goal\n\n{fence}markdown\n## Notes\n{fence}\n\n## After\n"
+                self.assertEqual(tt.heading_list(template), ["Goal", "After"])
+                self.assertEqual(tt.missing_sections(["Goal", "Notes"], template), ["Notes"])
+
+    def test_a_heading_is_read_the_way_the_store_reads_it(self):
+        template = "##  Goal  \n## Notes ##\n##\tTabbed\n##NoSpace\n### Deeper\n# Title\n"
+        self.assertEqual(tt.heading_list(template), ["Goal", "Notes ##"])
+
+    def test_a_section_named_twice_is_found(self):
+        template = "## Goal\n\n## Notes\n\n## Goal\n"
+        self.assertEqual(tt.missing_sections(["Goal", "Notes"], template), [])
+        self.assertEqual(tt.repeated_sections(["Goal", "Notes"], template), ["Goal"])
 
     def test_log_section_outside_declared_sections_is_found(self):
         self.assertFalse(tt.log_section_untied(["Goal", "Log"], "Log"))

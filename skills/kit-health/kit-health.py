@@ -1301,9 +1301,9 @@ def ctx_store(r: Report) -> None:
 def template_override_check(r: Report) -> None:
     """§5: an environment's `_templates/<type>.md` override (`kit_profile.template`, which `new.sh` prefers
     over the engine template) must not drop a `## ` heading its type declares in `sections` — the engine
-    template guarantees every one; a hand-edited override can silently lose one. No override at all, or one
-    that keeps every declared section: no line (nothing worth reporting on the common machine, which ships
-    none)."""
+    template guarantees every one; a hand-edited override can silently lose one, or carry one twice (the
+    store refuses a doc with a repeated heading). No override at all: no line (the common machine ships none);
+    one that keeps every declared section once: an OK line."""
     for type_path in sorted(type_template.TYPES_DIR.glob("*.json")):
         kind = type_path.stem
         sections, _log_section = type_template.type_sections(type_path)
@@ -1313,14 +1313,20 @@ def template_override_check(r: Report) -> None:
         if override is None:
             continue
         try:
-            missing = type_template.missing_sections(sections, override.read_text(encoding="utf-8"))
+            text = override.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
             r.add(WARN, "engine", f"`{rel(override)}` cannot be read ({e}) — the `{kind}` sections were not checked")
             continue
+        missing = type_template.missing_sections(sections, text)
+        repeated = type_template.repeated_sections(sections, text)
         if missing:
             r.add(WARN, "engine", f"`{rel(override)}` drops {', '.join(missing)} that `{kind}` requires — "
                   "restore the heading(s), or delete the override to fall back to the engine template")
-        else:
+        if repeated:
+            r.add(WARN, "engine", f"`{rel(override)}` has {', '.join(repeated)} more than once — a `{kind}` doc "
+                  "made from it fails `ctx validate`: keep one heading, or delete the override to fall back to "
+                  "the engine template")
+        if not missing and not repeated:
             r.add(OK, "engine", f"`{rel(override)}` keeps every section `{kind}` requires")
 
 

@@ -13,6 +13,7 @@ Stdlib only.
 """
 from __future__ import annotations
 import json
+import re
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
@@ -21,15 +22,46 @@ TYPES_DIR = ENGINE / "ctx-store" / "types"
 TEMPLATES_DIR = ENGINE / "_templates"
 
 
+HEADING = re.compile(r"^## +(.*?)\s*$")
+FENCE = re.compile(r"^(```|~~~)")
+
+
+def heading_list(template_text: str) -> list[str]:
+    """Every `## ` heading of a template's text, in order and with repeats — read the way the store reads a
+    section (`ctx validate`): a heading inside fenced code is not one, the trailing words are kept as they are."""
+    found: list[str] = []
+    fence = None
+    for line in template_text.split("\n"):
+        mark = FENCE.match(line)
+        if mark:
+            if fence is None:
+                fence = mark.group(1)
+            elif line.startswith(fence):
+                fence = None
+            continue
+        if fence is None:
+            m = HEADING.match(line)
+            if m:
+                found.append(m.group(1))
+    return found
+
+
 def template_headings(template_text: str) -> set[str]:
-    """Every `## ` heading of a template's text (the trailing words kept, markup untouched)."""
-    return {ln[3:].strip() for ln in template_text.splitlines() if ln.startswith("## ")}
+    """The distinct `## ` headings of a template's text (`heading_list`)."""
+    return set(heading_list(template_text))
 
 
 def missing_sections(sections: list[str], template_text: str) -> list[str]:
     """`sections` that are not a `## ` heading of `template_text`, in the order given — empty when every one is."""
     headings = template_headings(template_text)
     return [s for s in sections if s not in headings]
+
+
+def repeated_sections(sections: list[str], template_text: str) -> list[str]:
+    """`sections` whose heading is in `template_text` more than once, in the order given — the store refuses a
+    doc with the same `## ` heading twice, so a template that repeats one scaffolds docs that never validate."""
+    headings = heading_list(template_text)
+    return [s for s in sections if headings.count(s) > 1]
 
 
 def type_sections(type_path: Path) -> tuple[list[str], str | None]:

@@ -627,6 +627,20 @@ class TemplateOverrideCheck(unittest.TestCase):
         self.assertIn("widget", line)
         self.assertIn("fall back to the engine template", line)
 
+    def test_override_with_a_section_only_inside_fenced_code_warns(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n\n```\n## Notes\n```\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("drops Notes", line)
+
+    def test_override_naming_a_section_twice_warns(self):
+        self.write_type(["Goal", "Notes"])
+        (self.templates_dir / "widget.md").write_text("## Goal\n\n## Notes\n\n## Goal\n", encoding="utf-8")
+        level, line = self.run_check()
+        self.assertEqual(level, "WARN")
+        self.assertIn("Goal more than once", line)
+
     def test_an_override_that_cannot_be_read_warns_instead_of_crashing(self):
         self.write_type(["Goal"])
         (self.templates_dir / "widget.md").write_bytes(b"## Goal\n\xff\xfe\n")
