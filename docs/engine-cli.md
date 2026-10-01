@@ -175,8 +175,10 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                #   is not one of this environment's own tracker.repos;
                                                                #   an `<org>/<repo>` path naming THIS environment's own
                                                                #   org is a hit only when `<repo>` is not itself a public
-                                                               #   repo of that org (another `gh api` lookup; unreachable
-                                                               #   keeps the hit); exit 1 prints one `<line>: <what>
+                                                               #   repo of that org (one more `gh api` lookup per such
+                                                               #   repo, which --public/--private do not skip;
+                                                               #   unreachable keeps the hit; an `@<org>/<team>` handle
+                                                               #   always stays one); exit 1 prints one `<line>: <what>
                                                                #   <redacted>` per hit, never the value itself; exit 3 =
                                                                #   the env store could not be loaded — treat like a hit,
                                                                #   never like exit 0

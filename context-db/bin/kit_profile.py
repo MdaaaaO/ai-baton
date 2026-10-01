@@ -31,8 +31,10 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                #   is not one of this environment's own tracker.repos;
                                                                #   an `<org>/<repo>` path naming THIS environment's own
                                                                #   org is a hit only when `<repo>` is not itself a public
-                                                               #   repo of that org (another `gh api` lookup; unreachable
-                                                               #   keeps the hit); exit 1 prints one `<line>: <what>
+                                                               #   repo of that org (one more `gh api` lookup per such
+                                                               #   repo, which --public/--private do not skip;
+                                                               #   unreachable keeps the hit; an `@<org>/<team>` handle
+                                                               #   always stays one); exit 1 prints one `<line>: <what>
                                                                #   <redacted>` per hit, never the value itself; exit 3 =
                                                                #   the env store could not be loaded — treat like a hit,
                                                                #   never like exit 0
@@ -858,11 +860,12 @@ def public_text_hits(text: str, cfg: dict, owner: str) -> tuple[list[tuple[int, 
     no kit-dependency exclusion (this is not the kit's own tree, nothing here is "the kit naming itself") and
     no identity values (mentioning yourself in your own issue/PR is normal, not a leak).
 
-    When `owner` is this environment's own `github.org`, an `<org>/<repo>` path hit is dropped when `<repo>` is
-    itself a public repo of `org` — an ordinary cross-repo reference within one's own public work, same as the
-    full-URL form already is (`cross_org_shapes` already carries the different-org case). Every other finding,
-    including a private/internal repo of `org` and any hit when `owner` is a different org, is untouched
-    (`_resolve_same_owner_org_hits`)."""
+    When `owner` is this environment's own `github.org`, an `<org>/<repo>` hit — the org-path shape, or a
+    `tracker.repos` full slug of that org — is dropped when `<repo>` is itself a public repo of `org`: an
+    ordinary cross-repo reference within one's own public work, same as the full-URL form already is
+    (`cross_org_shapes` already carries the different-org case). Every other finding, including a
+    private/internal repo of `org`, an `@<org>/<team>` handle, a bare repo name and any hit when `owner` is a
+    different org, is untouched (`_resolve_same_owner_org_hits`)."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import leak_shapes  # noqa: E402  — same dir
     errors: list[str] = []
@@ -879,23 +882,30 @@ def public_text_hits(text: str, cfg: dict, owner: str) -> tuple[list[tuple[int, 
     hits = leak_shapes.scan(text, pats)
     org = str((cfg.get("github") or {}).get("org") or "")
     if org and owner.lower() == org.lower():
-        hits = _resolve_same_owner_org_hits(hits, org)
+        hits = _resolve_same_owner_org_hits(hits, org, text)
     return hits, errors + verrors
 
 
-def _resolve_same_owner_org_hits(hits: list[tuple[int, str, str]], org: str) -> list[tuple[int, str, str]]:
-    """`hits` with every `leak_shapes.ORG_PATH_WHAT` entry resolved against `org`'s own public repos: a
-    `<org>/<repo>` hit is dropped when `repo_is_public(org, repo)` is True, kept unchanged when False (a
-    private or internal repo of `org` is still a leak), and kept with a note appended to `what` when the lookup
-    cannot answer (`None` — no `gh`, no network, a timeout, a non-zero exit or output `repo_is_public` cannot
-    parse) — a failed lookup must read as "still a hit", never silently as "clean". One lookup per distinct
-    `repo`, cached here for the single call this is used from."""
+def _resolve_same_owner_org_hits(hits: list[tuple[int, str, str]], org: str,
+                                 text: str) -> list[tuple[int, str, str]]:
+    """`hits` (from a scan of `text`) with every `<org>/<repo>` entry — `leak_shapes.ORG_PATH_WHAT`, or a
+    `leak_shapes.TRACKER_REPO_WHAT` slug owned by `org` — resolved against `org`'s own public repos: the hit is
+    dropped when `repo_is_public(org, repo)` is True, kept unchanged when False (a private or internal repo of
+    `org` is still a leak), and kept with a note appended to `what` when the lookup cannot answer (`None` — no
+    `gh`, no network, a timeout, a non-zero exit or output `repo_is_public` cannot parse) — a failed lookup
+    must read as "still a hit", never silently as "clean". A match its line also carries as `@<org>/<name>` is
+    a team handle, not a repo path: kept, no lookup (a public repo that happens to share the team's name must
+    not clear it). One lookup per distinct `repo`, cached here for the single call this is used from."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import leak_shapes  # noqa: E402  — same dir
+    lines = text.split("\n")  # `leak_shapes.scan` numbers the lines of this same split, from 1
+    prefix = org.lower() + "/"
     cache: dict[str, bool | None] = {}
     out: list[tuple[int, str, str]] = []
     for n, what, matched in hits:
-        if what == leak_shapes.ORG_PATH_WHAT and "/" in matched:
+        is_path = what == leak_shapes.ORG_PATH_WHAT and "/" in matched
+        is_slug = what == leak_shapes.TRACKER_REPO_WHAT and matched.lower().startswith(prefix)
+        if (is_path or is_slug) and "@" + matched not in lines[n - 1]:
             repo = matched.split("/", 1)[1].rstrip(".-")  # the path shape takes a sentence's closing period along
             repo = repo[:-len(".git")] if repo.endswith(".git") else repo
             if repo not in cache:
@@ -915,10 +925,12 @@ def public_text_check(path: str, repo: str, *, public: bool | None = None) -> in
     `leak_shapes.redact()`), 2 (usage: a bad `--repo` slug or an unreadable `<file>`), 3 (the env store could not
     be loaded, or its tables were malformed — the value half of the scan did not run, so a clean result would be
     a false negative; callers must treat exit 3 as "do not post", the same as a hit, never as exit 0). Applies
-    only when `repo` is public (skips the `gh api` lookup when `public` is already known — True/False, the CLI's
-    `--public`/`--private`, so a test never touches the network) and is not one of this environment's OWN
-    `tracker.repos` — this environment's own facts in its own repos are not a leak, they are the repo doing its
-    job."""
+    only when `repo` is public (skips the `gh api` lookup for `repo` itself when `public` is already known —
+    True/False, the CLI's `--public`/`--private`) and is not one of this environment's OWN `tracker.repos` —
+    this environment's own facts in its own repos are not a leak, they are the repo doing its job. `public`
+    does not cover the text: where `repo`'s owner is this environment's `github.org`, each distinct
+    `<org>/<repo>` the text names still costs one `gh api` lookup (`_resolve_same_owner_org_hits`), so only a
+    text that names none is checked without the network."""
     m = REPO_SLUG_RE.match(repo)
     if not m:
         print(f"kit_profile: public-text-check: {repo!r} is not an <owner>/<repo> slug", file=sys.stderr)

@@ -272,6 +272,44 @@ class SameOwnerOrgPath(unittest.TestCase):
         calls = [ln for ln in self.call_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
         self.assertEqual(calls, [f"repos/{self.ORG}/pubrepo"])
 
+    def test_a_team_handle_stays_a_hit_even_when_a_public_repo_has_its_name(self):
+        self.write_stub()
+        f = self.write(f"cc @{self.ORG}/pubrepo for a look\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("ac…", r.stdout)
+        self.assertFalse(self.call_log.exists(), "a team handle is never looked up as a repo")
+
+    def test_a_public_tracker_repo_of_the_same_owner_passes(self):
+        write_config(self.root, {"environment": "t", "github": {"org": self.ORG},
+                                 "tracker": {"kind": "github", "repos": [f"{self.ORG}/pubrepo"]}})
+        self.write_stub()
+        f = self.write(f"tracked in {self.ORG}/pubrepo, see https://github.com/{self.ORG}/pubrepo/issues/7\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = [ln for ln in self.call_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        self.assertEqual(calls, [f"repos/{self.ORG}/pubrepo"])
+
+    def test_a_private_tracker_repo_of_the_same_owner_fails(self):
+        write_config(self.root, {"environment": "t", "github": {"org": self.ORG},
+                                 "tracker": {"kind": "github", "repos": [f"{self.ORG}/privrepo"]}})
+        self.write_stub()
+        f = self.write(f"tracked in {self.ORG}/privrepo\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("tracker.repos", r.stdout)
+        self.assertNotIn("lookup failed", r.stdout)
+
+    def test_a_tracker_repo_slug_is_unresolved_for_a_foreign_target(self):
+        # no stub on PATH: the same-owner lookup must not run when the text goes to another org's repo
+        write_config(self.root, {"environment": "t", "github": {"org": self.ORG},
+                                 "tracker": {"kind": "github", "repos": [f"{self.ORG}/pubrepo"]}})
+        f = self.write(f"tracked in {self.ORG}/pubrepo\n")
+        r = run(str(f), "--repo", "other" + "org/project", "--public", root=self.root)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("tracker.repos", r.stdout)
+        self.assertNotIn("lookup failed", r.stdout)
+
     def test_same_owner_private_repo_fails(self):
         self.write_stub()
         f = self.write(f"see {self.ORG}/privrepo for details\n")
