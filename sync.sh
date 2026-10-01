@@ -117,6 +117,8 @@ sync_release() {
   local tag=$1 target before
   target="$(git rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)"
   before="$(git rev-parse HEAD 2>/dev/null)"
+  # an unreadable tag must not look like "already there": the ancestor test below fails on an empty target too
+  [ -n "$target" ] || { FAIL="kit: release tag $tag does not resolve to a commit"; return 1; }
   rm -f "$PREVIEW"
   if [ "$target" = "$before" ] || ! git merge-base --is-ancestor "$before" "$target" 2>/dev/null; then
     PULLED="kit@$(git rev-parse --short HEAD)"
