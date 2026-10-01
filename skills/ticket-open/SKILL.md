@@ -2,7 +2,7 @@
 name: ticket-open
 description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating it."
 metadata:
-  version: "15"
+  version: "16"
   updated: "2026-10-01"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
@@ -47,7 +47,8 @@ kind X in this environment" and stop — never improvise.
    adds only this skill's own piece, it does not restate the contract). `Sizing: opus` → draw the target
    state: WHERE the change sits (placement), the target shape of WHAT changes, and one WHY row when an
    alternative existed; Mermaid for WHERE where `tracker.kind` renders it (GitHub), else a table for WHAT
-   and a nested list for WHERE. Then stamp the marker onto the drawn section:
+   and a nested list for WHERE — drawn by a Sonnet worker with the brief in `docs/diagrams.md` § The
+   drawing brief; the main session validates and keeps it. Then stamp the marker onto the drawn section:
    `python3 $BATON/skills/ticket-open/sketch.py stamp --repo-slug <owner/repo> --paths <entry>[,<entry>…] --components <name>[,<name>…]`
    (the section on stdin) and use its stdout as the Sketch section. Every other Sizing writes one line,
    `Sketch: SKIP (<reason>)` — the Sizing model plus a few words, e.g. `sonnet-sized, specified fix` —

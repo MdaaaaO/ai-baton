@@ -9,6 +9,11 @@ labels: []
 
 <!-- The change in how sessions behave, in 1–3 sentences. -->
 
+## Whiteboard
+
+<!-- Only when the change moves a session flow (a step order, a hook, a hand-off): one line — where it
+     plugs in → what changes — or `Sketch: SKIP (<reason>)`; `docs/diagrams.md` says when a drawing is due. -->
+
 ## Why
 
 <!-- What went wrong or is missing — the session, skill or machine where it showed up. -->
