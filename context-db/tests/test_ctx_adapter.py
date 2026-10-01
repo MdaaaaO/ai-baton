@@ -852,11 +852,12 @@ EPIC_FOR_BRIEF = (
 
 
 class CompactBrief(Base):
-    """The `brief-session` hook's rewrite (#56): one owner line naming this session and its resolved context
-    doc, then the session's own brief re-budgeted (bookkeeping frontmatter dropped, the sections that matter
-    led to the front), then — when a context doc resolved — its key and the head of its *Remaining work*.
-    Proven against the pinned ctx: a fake could not show whether `ctx resolve`/`ctx find` answer the way the
-    adapter now assumes."""
+    """The `brief-session` hook's rewrite (#56, #420): one owner line naming this session and its own `epic:`
+    frontmatter value verbatim — written before any context-doc lookup is attempted, so it never waits on
+    `ctx resolve`/`ctx find` — then the session's own brief re-budgeted (bookkeeping frontmatter dropped, the
+    sections that matter led to the front), then — when a context doc resolved — its key and the head of its
+    *Remaining work*. Proven against the pinned ctx: a fake could not show whether `ctx resolve`/`ctx find`
+    answer the way the adapter now assumes."""
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_owner_line_section_order_and_remaining_work_head(self):
@@ -872,9 +873,10 @@ class CompactBrief(Base):
         self.assertEqual((r.returncode, r.stderr), (0, ""))
         out = r.stdout
         lines = out.splitlines()
-        # the owner line is first, naming this session's own doc and the context doc `ctx resolve` fell back to
-        # `ctx find --type epic` for (its own `epic:` field always wins a plain `ctx resolve`, naming itself)
-        self.assertEqual(lines[0], "compacted — re-grounded from sessions/lane-topic and widgets/rollout")
+        # the owner line is first, naming this session's own doc and its own `epic:` field verbatim — the
+        # resolved context doc (below, `ctx resolve` fell back to `ctx find --type epic` for it, since its own
+        # `epic:` field always wins a plain `ctx resolve`, naming itself) only ever shows up in the trailing block
+        self.assertEqual(lines[0], "compacted — re-grounded from sessions/lane-topic and acme/widgets#42")
         # dropped bookkeeping
         for field in ("stats:", "heartbeat:", "session_id:", "ref:", "updated:", "sections:"):
             self.assertNotIn(field, out)
@@ -911,7 +913,7 @@ class CompactBrief(Base):
         self.assertNotIn(":\n", r.stdout.split("\n\n")[-1])  # no trailing context-doc block appended
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
-    def test_an_epic_field_that_resolves_to_nothing_says_no_context_doc(self):
+    def test_an_epic_field_that_resolves_to_nothing_still_names_the_epic_key(self):
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
         self.sid = "sid-ct-3"
@@ -920,7 +922,10 @@ class CompactBrief(Base):
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
         r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), **env)
         self.assertEqual((r.returncode, r.stderr), (0, ""))
-        self.assertEqual(r.stdout.splitlines()[0], "compacted — re-grounded from sessions/lane-topic and no context doc")
+        # the owner line names the session row's own `epic:` value regardless of whether it resolves to a doc
+        self.assertEqual(r.stdout.splitlines()[0], "compacted — re-grounded from sessions/lane-topic and acme/widgets#99")
+        self.assertNotIn(":\n", r.stdout.split("\n\n")[-1])  # no trailing context-doc block appended
+        self.assertNotIn("skipped (hook deadline)", r.stdout)  # a plain no-match, not a timeout
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_no_session_id_or_no_row_stays_silent(self):
@@ -943,9 +948,13 @@ class CompactBriefDeadline(Base):
     epic`, `get --section`, each also able to wait `CTX_LOCK_TIMEOUT` on a lock) against the hooks' own 10s
     `timeout` (hooks/hooks.json, settings.json), building its whole answer before printing a byte of it — a
     harness kill lost even the owner line and session brief it had already computed. `COMPACT_DEADLINE` now
-    bounds the whole call, and the owner line plus session brief are flushed to stdout as soon as they are
-    ready; a slow or timed-out context-doc lookup is replaced with one line rather than risking the rest.
-    A stubbed `_ctx` (not a real sleep, no real `ctx` needed) stands in for a slow `resolve`."""
+    bounds the whole call; the owner line (naming this session's own `epic:` frontmatter value verbatim, never
+    a resolved doc) and the session brief are written and flushed before any context-doc lookup is even
+    attempted (#420) — not merely before the slowest of them — and each lookup's timeout is recomputed from
+    `remaining()` right before that call, never one value computed once and handed to two calls in a row
+    (ctx-store#56 review). A slow or timed-out context-doc lookup is replaced with one line rather than
+    risking the rest. A stubbed `_ctx` (not a real sleep, no real `ctx` needed) stands in for a slow
+    `resolve`."""
 
     def setUp(self):
         super().setUp()
@@ -969,7 +978,8 @@ class CompactBriefDeadline(Base):
             raise self.mod.subprocess.TimeoutExpired("ctx", timeout)  # resolve/find/get: always too slow
         self.mod._ctx = slow_ctx
         out = self.run_hook(self.payload(source="compact"))
-        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and no context doc\n"), out)
+        # the owner line names the session row's own `epic:` value, not a resolved doc — it never waits on resolve
+        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and acme/widgets#42\n"), out)
         self.assertIn("session: lane-topic", out)
         self.assertIn("context doc: skipped (hook deadline)", out)
 
@@ -984,7 +994,7 @@ class CompactBriefDeadline(Base):
             return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
         self.mod._ctx = fast_ctx
         out = self.run_hook(self.payload(source="compact"))
-        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and widgets/rollout\n"), out)
+        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and acme/widgets#42\n"), out)
         self.assertNotIn("skipped (hook deadline)", out)
         self.assertIn("widgets/rollout:", out)
         self.assertIn("- step 1", out)
@@ -998,6 +1008,57 @@ class CompactBriefDeadline(Base):
             self.assertTrue(timeouts, path)
             for t in timeouts:
                 self.assertLessEqual(self.mod.COMPACT_DEADLINE + 1, t, path)
+
+    def test_owner_line_and_brief_are_written_before_a_near_timeout_resolve_and_a_timed_out_find(self):
+        """The exact shape the review flagged: a `resolve` that answers just under `EPIC_LOOKUP_TIMEOUT` (here
+        it also names this session, so `_resolve_epic_doc` falls through to `find`), then a `find` that times
+        out. Each call's timeout is recomputed from the fake clock right before it is made — `find` does not
+        inherit the stale, already-almost-spent timeout `resolve` was given — and the owner line plus brief
+        are on stdout (write #1) well before either lookup is attempted (writes #2+, once skipped)."""
+        import contextlib
+        import io
+        clock = [0.0]
+        writes: list[tuple[float, str]] = []
+
+        class RecordingStdout(io.StringIO):
+            def write(self, s):
+                if s:
+                    writes.append((clock[0], s))
+                return super().write(s)
+
+        def fake_monotonic():
+            return clock[0]
+
+        def ctx_with_a_near_timeout_resolve_then_a_timed_out_find(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
+            if args[0] == "brief":
+                return subprocess.CompletedProcess(args, 0, stdout=BRIEF_FOR_DEADLINE, stderr="")
+            if args[0] == "resolve":
+                clock[0] += 2.9  # answers just under EPIC_LOOKUP_TIMEOUT; names this session, so a fallback follows
+                return subprocess.CompletedProcess(args, 0, stdout="sessions/lane-topic · session\n", stderr="")
+            if args[0] == "find":
+                clock[0] += timeout  # the per-call timeout it was actually given, recomputed, not reused from resolve
+                raise self.mod.subprocess.TimeoutExpired("ctx", timeout)
+            raise AssertionError(f"unexpected ctx verb for this scenario: {args[0]}")
+
+        self.mod._ctx = ctx_with_a_near_timeout_resolve_then_a_timed_out_find
+        with mock.patch.object(self.mod.time, "monotonic", fake_monotonic), \
+             mock.patch.dict(os.environ, {"CTX_STORE": ""}), \
+             mock.patch.object(sys, "stdin", io.StringIO(self.payload(source="compact"))), \
+             contextlib.redirect_stdout(RecordingStdout()):
+            self.mod.hook("brief-session")
+
+        self.assertTrue(writes, "nothing was written")
+        owner_and_brief_clock = writes[0][0]
+        later_clocks = [c for c, _ in writes[1:]]
+        self.assertEqual(owner_and_brief_clock, 0.0)  # written before either lookup ran
+        self.assertTrue(all(c > owner_and_brief_clock for c in later_clocks), writes)
+        full = "".join(s for _, s in writes)
+        self.assertTrue(full.startswith("compacted — re-grounded from sessions/lane-topic and acme/widgets#42\n"))
+        self.assertIn("context doc: skipped (hook deadline)", full)
+        # find got its own timeout (remaining after resolve's 2.9s), not resolve's: it did not also wait ~3s
+        # of a reused value plus whatever resolve already spent — the two lookups together stayed well under
+        # the deadline, not anywhere near the ~11s a reused timeout could add up to
+        self.assertLessEqual(clock[0], self.mod.COMPACT_DEADLINE + 1)
 
 
 class PreToolUseDeny(Base):

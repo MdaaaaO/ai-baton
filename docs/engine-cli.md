@@ -410,18 +410,22 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
   brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and
-                       <context-doc key>", or "and no context doc" when none resolves through the store's
-                       `resolve` rule), then `ctx brief --session <session_id>` re-budgeted by this adapter —
-                       its frontmatter cut to `session`/`epic`/`working_on`/`responsibilities` (`stats`,
-                       `heartbeat`, `session_id`, `ref`, `updated` and the `sections` summary dropped outright,
-                       the fields a 2026-10-01 gap report found eating the budget before the body) and its `##`
-                       sections led by `SECTION_PRIORITY` when present — within `BRIEF_BUDGET`; then, when a
-                       context doc resolved, its key and the head of its *Remaining work*, within `EPIC_BUDGET`.
-                       The owner line and the session brief are written and flushed to stdout the moment they
-                       are ready; the whole hook has `COMPACT_DEADLINE` seconds (under the hooks' own 10s
-                       `timeout`), so the context-doc lookups (`resolve`/`find`/`get`) run only while more than
-                       1.5s of it remain, each capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` — skipped or
-                       timed out, one line `context doc: skipped (hook deadline)` stands in for that tail
+                       <epic key>", the session row's own `epic:` frontmatter value verbatim, or "and no
+                       context doc" when the row carries no `epic:` field at all), then `ctx brief --session
+                       <session_id>` re-budgeted by this adapter — its frontmatter cut to
+                       `session`/`epic`/`working_on`/`responsibilities` (`stats`, `heartbeat`, `session_id`,
+                       `ref`, `updated` and the `sections` summary dropped outright, the fields a 2026-10-01
+                       gap report found eating the budget before the body) and its `##` sections led by
+                       `SECTION_PRIORITY` when present — within `BRIEF_BUDGET`. Both are written and flushed to
+                       stdout before any context-doc lookup is even attempted: only once they are on stdout
+                       does this try to resolve the context doc the `epic:` field names through the store's
+                       own `resolve` rule, then — when one resolved — fetch its key and the head of its
+                       *Remaining work*, within a separate `EPIC_BUDGET`. The whole hook has `COMPACT_DEADLINE`
+                       seconds (under the hooks' own 10s `timeout`); the context-doc lookups (`resolve`/
+                       `find`/`get`) run only while more than 1.5s of it remain before each one starts, every
+                       one of them capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` recomputed right before
+                       that call, never a single value reused across more than one — skipped or timed out, one
+                       line `context doc: skipped (hook deadline)` stands in for that tail
 
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
