@@ -38,7 +38,9 @@ diagram in the body must raise no Explainability finding, since that class fires
 review or an Interface/contract change; (4) the cold-reader brief (`docs/cold-reader.md`) — there is no
 skill to fire, so the case feeds the brief's own prompt an artefact body and checks its one-line output:
 a body that answers all three questions gets three lines back, a body that names files but never the
-plug-in point gets `UNSURE <question>` instead of a guess; (5) `pr-event-brief`'s `DIAGRAMS:` line — a
+plug-in point gets `UNSURE <question>` instead of a guess; these two cases (filed under `pr-open-*` since
+that is where the brief's call site will live) exercise the brief itself, which `pr-open` adopts in a
+follow-up; (5) `pr-event-brief`'s `DIAGRAMS:` line — a
 drifted plan on a real `HEAD MOVED` event reads `DRIFT` and picks `REDRAW`, and a `SYNCED` event (the
 watcher's own branch sync, never a `HEAD MOVED` line) carries no `DIAGRAMS:` line at all.
 
