@@ -556,17 +556,20 @@ class RenameSubcommand(unittest.TestCase):
                                 repos="", working=working, resp="", note="", next="")
         self.mod.cmd_register(a)
 
-    def test_rename_hands_the_rows_session_id_to_the_heartbeat_restart(self):
-        # The heartbeat's pidfile is keyed by the harness session id on the row, so the restart needs it.
-        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "sess-rename"}):
+    def test_rename_hands_the_callers_session_id_to_the_heartbeat_restart_not_the_rows(self):
+        # Two sessions registered under one name share the row, and the id on it is the id of whichever
+        # registered last. The session that renames must stop and restart its own loop, not that one's.
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "sess-registered-last"}):
             self._register("t-old-id", working="on something")
-        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "sess-caller"}), \
+             unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
             self.mod.cmd_rename(argparse.Namespace(old="t-old-id", new="kit-real-id"))
-        rh.assert_called_once_with("t-old-id", "kit-real-id", "on something", "sess-rename")
+        rh.assert_called_once_with("t-old-id", "kit-real-id", "on something", "sess-caller")
 
     def test_rename_moves_the_file_and_rewrites_frontmatter_and_title(self):
         self._register("t-old-lane", working="on something")
-        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": ""}), \
+             unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
             self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-real-topic"))
         rh.assert_called_once_with("t-old-lane", "kit-real-topic", "on something", "")
         self.assertFalse((self.root / "sessions" / "t-old-lane.md").exists())
@@ -645,6 +648,37 @@ class HeartbeatRestartHelpers(unittest.TestCase):
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
+
+    def _loop_under_the_name(self, name: str, started_by: str) -> tuple:
+        """A live process with a pidfile under `name` and a log whose start line names `started_by`."""
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        pidfile = Path(self.tmp.name) / f"heartbeat-{name}.pid"
+        pidfile.write_text(str(proc.pid), encoding="utf-8")
+        pidfile.with_suffix(".log").write_text(
+            f"2026-01-01 start name={name} owner=1 interval=21600 session={started_by}\n", encoding="utf-8")
+        return proc, pidfile
+
+    def test_kill_heartbeat_leaves_a_loop_under_the_name_that_another_session_started(self):
+        proc, pidfile = self._loop_under_the_name("t-shared", "sess-other")
+        with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+            self.assertFalse(self.mod._kill_heartbeat("t-shared", "sess-mine"))
+        self.assertIsNone(proc.poll(), "another session's loop must keep running")
+        self.assertTrue(pidfile.exists())
+
+    def test_kill_heartbeat_stops_a_loop_under_the_name_that_the_callers_session_started(self):
+        proc, pidfile = self._loop_under_the_name("t-legacy", "sess-mine")
+        with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+            self.assertTrue(self.mod._kill_heartbeat("t-legacy", "sess-mine"))
+        proc.wait(timeout=5)
+        self.assertFalse(pidfile.exists())
+
+    def test_restart_heartbeat_does_not_report_a_start_that_was_a_no_op(self):
+        done = subprocess.CompletedProcess([], 0, "heartbeat for kit-x already running (pid 4242)", "")
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=True), \
+             unittest.mock.patch.object(self.mod.subprocess, "run", return_value=done):
+            self.assertFalse(self.mod._restart_heartbeat("old", "kit-x", "focus"))
 
     def test_kill_heartbeat_with_no_pidfile_is_a_noop(self):
         with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):

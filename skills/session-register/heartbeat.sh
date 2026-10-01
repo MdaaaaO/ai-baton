@@ -17,12 +17,14 @@
 # writes the `## Session stats` block into the session file and a row into sessions/_ledger.md,
 # so even a session that never ran session-handoff leaves its numbers behind.
 # Log/pidfile: $TMPDIR/ai-baton-<uid>/heartbeat-<key>.{log,pid} where <key> is $CLAUDE_CODE_SESSION_ID
-# when the harness set one, else the session NAME (second start for the SAME key = no-op). Keying on
-# the session id — not the name alone — means two live sessions that end up registered under the same
-# NAME (a naming accident, not something this script enforces) still get independent heartbeats instead
-# of one treating the other's pidfile as its own. Namespaced under TMPDIR (a per-user dir on macOS
-# already; `ai-baton-<uid>` makes it one on Linux too, where TMPDIR is usually unset and bare /tmp is
-# shared between users).
+# when the harness set one, else the session NAME. Keying on the session id — not the name alone —
+# means two live sessions that end up registered under the same NAME (a naming accident, not something
+# this script enforces) still get independent heartbeats instead of one treating the other's pidfile
+# as its own. A second start is a no-op for the same key, and for the same NAME and owner process under
+# any other key: a loop started under the bare name by an older kit, or under an earlier session id, is
+# still this session's loop (each loop's log names its owner in its start line). Namespaced under TMPDIR
+# (a per-user dir on macOS already; `ai-baton-<uid>` makes it one on Linux too, where TMPDIR is usually
+# unset and bare /tmp is shared between users).
 TZ_DEFAULT=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" tz 2>/dev/null || echo UTC)  # identity-aware: plugin option, else WORKSPACE_TZ, else the store
 set -u
 NAME=${1:?usage: heartbeat.sh <session-name> ["<working on>"] [interval-seconds]}
@@ -53,6 +55,19 @@ if [ -z "${HEARTBEAT_DETACHED:-}" ]; then
     p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
   done
   [ -n "$CLAUDE_PID" ] || { echo "heartbeat: could not find the owning claude process" >&2; exit 1; }
+  # The same owner may already run a loop for NAME under another key (the bare name, an earlier session
+  # id). Its log's last start line names the owner: same NAME and same owner means that loop is ours.
+  for pf in "$BATON_TMP"/heartbeat-*.pid; do
+    [ -f "$pf" ] || continue
+    other=$(cat "$pf" 2>/dev/null)
+    case "$other" in ''|*[!0-9]*) continue;; esac
+    kill -0 "$other" 2>/dev/null || continue
+    last=$(grep -F ' start name=' "${pf%.pid}.log" 2>/dev/null | tail -n 1)
+    case "$last" in
+      *" start name=$NAME owner=$CLAUDE_PID interval="*)
+        echo "heartbeat for $NAME already running (pid $other, same owner, ${pf##*/})"; exit 0;;
+    esac
+  done
   [ -n "$SESSION_ID" ] || echo "heartbeat: CLAUDE_CODE_SESSION_ID unset — the row will carry no stats" >&2
   export HEARTBEAT_DETACHED=1 CLAUDE_PID CLAUDE_CODE_SESSION_ID="$SESSION_ID"
   detach "$LOG" bash "$0" "$NAME" "$WORKING" "$INTERVAL"

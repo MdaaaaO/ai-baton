@@ -503,15 +503,35 @@ def _baton_tmp() -> str:
 
 
 def _kill_heartbeat(name: str, session_id: str = "") -> bool:
-    """Stop a live heartbeat.sh for `name` (SIGTERM on the pid its pidfile names) and remove the
-    pidfile. Returns whether one was found running — a stale pidfile (process already gone, e.g. the
-    session crashed) is just cleaned up, silently. heartbeat.sh keys its pidfile by the harness
-    session id when it has one, else by the name, so both are tried, the id first."""
+    """Stop the CALLER's live heartbeat.sh for `name` (SIGTERM on the pid its pidfile names) and remove
+    the pidfile. Returns whether one was found running — a stale pidfile (process already gone, e.g. the
+    session crashed) is just cleaned up, silently. `session_id` is the caller's own harness session id:
+    heartbeat.sh keys its pidfile by it, and by the name when there is none. A pidfile under the name is
+    the caller's when the caller has no session id, or when that loop's log names the caller's id (a loop
+    an older kit started under the bare name). Any other loop under the name belongs to another session
+    registered under the same name, and is left running."""
+    tmp = _baton_tmp()
     alive = False
-    for key in (session_id, name):
-        if key and _kill_pidfile(os.path.join(_baton_tmp(), f"heartbeat-{key}.pid")):
-            alive = True
+    if session_id and _kill_pidfile(os.path.join(tmp, f"heartbeat-{session_id}.pid")):
+        alive = True
+    by_name = os.path.join(tmp, f"heartbeat-{name}.pid")
+    if not session_id or _loop_session(by_name) == session_id:
+        alive = _kill_pidfile(by_name) or alive
     return alive
+
+
+def _loop_session(pidfile: str):
+    """The harness session id a heartbeat loop was started with, read from the last start line of the
+    log beside its pidfile: "" when the loop had none, None when the log does not say."""
+    try:
+        with open(pidfile[:-len(".pid")] + ".log", encoding="utf-8", errors="replace") as f:
+            starts = [line for line in f if " start name=" in line]
+    except OSError:
+        return None
+    m = re.search(r" session=(\S+)", starts[-1]) if starts else None
+    if not m:
+        return None
+    return "" if m.group(1) == "none" else m.group(1)
 
 
 def _kill_pidfile(pidfile: str) -> bool:
@@ -537,8 +557,10 @@ def _kill_pidfile(pidfile: str) -> bool:
 
 
 def _restart_heartbeat(old_name: str, new_name: str, working: str, session_id: str = "") -> bool:
-    """Stop the old name's heartbeat (if any) and, only when one was actually running, start a fresh one
-    for the new name with the same focus. An ended (or archived, `restore_from_archive`-brought-back)
+    """Stop the caller's heartbeat for the old name (if any) and, only when one was actually running, start
+    a fresh one for the new name with the same focus. `session_id` is the caller's own harness session id,
+    never the one on the row: two sessions registered under one name share that row, and its id is the id
+    of whichever registered last. An ended (or archived, `restore_from_archive`-brought-back)
     session, or someone else's, has no heartbeat of its own to restart — starting one anyway would attach
     heartbeat.sh to the CALLER's `claude` process and `CLAUDE_CODE_SESSION_ID`, so every touch would write
     the caller's transcript stats into the renamed row, and the caller's own session-end would later end
@@ -547,8 +569,8 @@ def _restart_heartbeat(old_name: str, new_name: str, working: str, session_id: s
     session) fails that lookup; the failure is reported to stderr and never fails the rename itself."""
     was_running = _kill_heartbeat(old_name, session_id)
     if not was_running:
-        print(f"session.py: no heartbeat was running for {old_name} — none started for {new_name} either "
-              f"(start one by hand if this session should have one)", file=sys.stderr)
+        print(f"session.py: no heartbeat of this session was running for {old_name} — none started for "
+              f"{new_name} either (start one by hand if this session should have one)", file=sys.stderr)
         return False
     script = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                             "..", "..", "skills", "session-register", "heartbeat.sh"))
@@ -564,6 +586,10 @@ def _restart_heartbeat(old_name: str, new_name: str, working: str, session_id: s
         detail = (r.stderr or r.stdout).strip()
         print(f"session.py: heartbeat restart for {new_name} did not start ({detail or 'no output'})"
               " — the old one was stopped — start it by hand", file=sys.stderr)
+        return False
+    if "already running" in r.stdout:  # exit 0, but nothing was started: a loop of this session is still up
+        print(f"session.py: heartbeat for {new_name} was not started ({r.stdout.strip()})"
+              " — stop that loop and start the new heartbeat by hand", file=sys.stderr)
         return False
     return True
 
@@ -589,7 +615,8 @@ def cmd_rename(a) -> None:
     except FileNotFoundError:
         pass
     record_name(a.new)
-    restarted = _restart_heartbeat(a.old, a.new, working, meta.get("session_id", ""))
+    # the caller's own session id, not the row's: the row may carry another session's (see _restart_heartbeat)
+    restarted = _restart_heartbeat(a.old, a.new, working, os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip())
     print(f"renamed {os.path.relpath(old_path, CTX)} → {os.path.relpath(new_path, CTX)}"
           + (" (heartbeat restarted)" if restarted else " (heartbeat NOT restarted — see above)"))
 
