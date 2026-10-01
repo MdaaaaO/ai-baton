@@ -213,7 +213,11 @@ manifest.txt --root <checkout>` then checks the manifest's own claims against a 
 - The kit checkout is the workspace's `.claude/` clone. A plugin install has no clone (the plugin cache is not
   a git checkout), so point `KIT_CHECKOUT` at a clone of the kit repo and include the file by path:
   `make -f $BATON/workspace.mk kit_release_dry KIT_CHECKOUT=<kit clone>` (`$BATON` — the kit root — `docs/glossary.md`). The level is
-  inferred from the subjects (`feat` → minor, `!` / `BREAKING CHANGE:` → major, else patch) unless given.
+  inferred from the subjects (`feat` → minor, `!` / `BREAKING CHANGE:` → major, else patch) unless given. Below
+  `1.0.0`, an inferred major is cut as a minor instead and the target says so — every machine takes that
+  Machines-footer step the same way pre-1.0, it does not mean a `1.0.0`; pass `LEVEL=major` to cut `1.0.0` anyway.
+  When the release tool cannot name the next version, nothing is cut and the target says why.
+  From `1.0.0` on, an inferred major is never overridden.
 - Release PRs need no issue (`pr-issue` exempts them) and get no Claude review.
 - `v0.0.0` marks the history before Conventional Commits; the first release lists what came after it.
 - **A failed release job:** re-run it. Each step does only what is missing — a tag already on the commit is
@@ -283,6 +287,12 @@ and the `main-guard` retry loop (`.github/scripts/main-guard.sh`, with a stub `g
   code (`tests/test_<module>.py`), on a temp store or `CONTEXT_ROOT`, never on this machine's `.context/`.
 - **A new engine module gets a test module**; a shared helper (`frontmatter.py`, `transcripts.py`, `leak_shapes.py`)
   is the only copy — a second parser or reader is a review finding.
+- **A ctx-store type's required `sections`** must each be a `## ` heading of its template
+  (`context-db/_templates/<type>.md`), once and outside fenced code, and a declared `log.section` is one of them —
+  `tests/test_type_template.py` enforces it, and kit-health § 5 checks an environment's template override the same
+  way. A section is safe to add to a
+  type's `sections` only once **every** existing store already has that heading: a migration can rewrite a doc's
+  content, never invent a section that is not there, so a required section a doc lacks fails `ctx validate` forever.
 - **A test never reads the machine's store.** It points `kit_profile.ENV_DIR` / `kb.ENV` at a throw-away blank one
   (clearing the `lru_cache`s) or passes its own `CONTEXT_ROOT` to every subprocess; one that drops `CONTEXT_ROOT` to
   test the resolver either only resolves the path or runs a kit copy in a temp dir. Tests are stdlib only, need no
