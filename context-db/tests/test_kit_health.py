@@ -224,6 +224,127 @@ class GitIgnoredScan(unittest.TestCase):
                 self.assertEqual(kh.git_ignored(root, ["SKILL.md"]), set())
 
 
+class AutoCompactCheck(unittest.TestCase):
+    """`autocompact_wiring()`: the real backstop is env `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, env
+    `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`, or a top-level `autoCompactWindow` (or an `env` block carrying
+    either variable) in `~/.claude/settings.json`, the workspace's `.claude/settings.json` (a clone's own
+    copy of the kit's `settings.json` — already set there) or `.claude/settings.local.json`. Unset
+    everywhere is a WARN; a match anywhere is OK. Always hermetic: a temp HOME and a temp workspace
+    (`CONTEXT_ROOT` pointed at `<workspace>/.context`), never the real `~/.claude`."""
+
+    def run_check(self, home: Path, workspace: Path, extra_env: dict | None = None):
+        kh = load_kit_health()
+        r = kh.Report()
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
+        env.pop("CLAUDE_CODE_DISABLE_1M_CONTEXT", None)
+        env["CONTEXT_ROOT"] = str(workspace / ".context")
+        env.update(extra_env or {})
+        with mock.patch.object(kh.Path, "home", return_value=home), \
+             mock.patch.dict(os.environ, env, clear=True):
+            kh.autocompact_wiring(r)
+        return kh, r
+
+    def test_unset_everywhere_warns(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("auto-compact backstop unset", text)
+
+    def test_user_settings_json_set_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(json.dumps({"autoCompactWindow": 200000}), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("autoCompactWindow", text)
+        self.assertIn("~/.claude/settings.json", text)
+
+    def test_cloud_env_var_set_is_ok_without_reading_settings(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"  # no settings files at all — the env var alone must suffice
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace, {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", text)
+
+    def test_a_session_capped_at_200k_is_ok_without_either(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace, {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"})
+        self.assertEqual(r.counts[kh.WARN], 0, "\n".join(r.lines))
+        self.assertIn("CLAUDE_CODE_DISABLE_1M_CONTEXT", "\n".join(r.lines))
+
+    def test_project_settings_key_is_ok(self):
+        """A clone install: the kit's own `settings.json` lands at `<workspace>/.claude/settings.json`."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            (workspace / ".claude").mkdir(parents=True)
+            (workspace / ".claude" / "settings.json").write_text(json.dumps({"autoCompactWindow": 200000}), encoding="utf-8")
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("autoCompactWindow", text)
+        self.assertIn("workspace", text)
+
+    def test_local_settings_env_block_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            (workspace / ".claude").mkdir(parents=True)
+            (workspace / ".claude" / "settings.local.json").write_text(
+                json.dumps({"env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"}}), encoding="utf-8")
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", text)
+        self.assertNotIn("200000", text)  # never print settings.local.json contents
+
+    def test_user_settings_env_block_disable_1m_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(
+                json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}}), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_DISABLE_1M_CONTEXT", text)
+
+    def test_settings_json_as_a_list_warns_without_exception(self):
+        """A settings.json whose top level is a JSON array (not an object) reads as unset — no exception."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
+
+    def test_non_utf8_settings_json_warns_without_exception(self):
+        """Non-UTF-8 bytes in a settings file must not raise — they read as unset, like a missing file."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_bytes(b"\xff\xfe\x00\xff not json either")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
+
+
 class DiskCheck(unittest.TestCase):
     """`disk_wiring()` — free-disk on `/`, `$HOME` and the scratch root, plus the top-cache sizes above
     `DISK_WARN_PCT` (a sandbox root overlay filled silently from an untended build cache; the first symptom was
@@ -345,21 +466,29 @@ class CtxStoreCheck(unittest.TestCase):
         self.assertEqual(self.check(2, "")[0], "ERR")
 
 
+GOOD_SHA = "ab" * 20  # a made-up 40-hex commit sha, not a real ctx-store commit — only its shape matters here
+OTHER_SHA = "cd" * 20
+
+
 class CtxPinCheck(unittest.TestCase):
     """§ 5 also checks the ctx AT THE PIN, not just whether `.context/` is adopted: `where` finds the pinned
     executable (never installs it), then `<ctx> --version` is run directly and compared against the API
-    `ctx_adapter.py version`'s second line names — no adopted store is needed for either call."""
+    `ctx_adapter.py version`'s second line names — no adopted store is needed for either call. Once the api
+    matches, `ctx_adapter.py pin` reports the sha the install at the pin verified — also read-only, no
+    second clone — and is folded into the same single finding."""
 
     def check(self, **answers) -> tuple[str, str]:
         kh = load_kit_health()
 
         def fake_sh(cmd, **kw):
             if cmd[-1] == "version":
-                return answers.get("adapter_version", (0, "v0.4.0\napi 1", ""))
+                return answers.get("adapter_version", (0, f"v0.4.0\napi 1\nsha {GOOD_SHA}", ""))
             if cmd[-1] == "where":
                 return answers.get("where", (0, "/opt/ctx", ""))
             if cmd[-1] == "--version":
                 return answers.get("ctx_version", (0, "ctx 0.4.0 (api 1)", ""))
+            if cmd[-1] == "pin":
+                return answers.get("pin", (0, f"pinned_sha {GOOD_SHA}\ncloned_sha {GOOD_SHA}\nverified true", ""))
             raise AssertionError(cmd)
 
         r = kh.Report()
@@ -372,6 +501,7 @@ class CtxPinCheck(unittest.TestCase):
         level, line = self.check()
         self.assertEqual(level, "OK")
         self.assertIn("api 1", line)
+        self.assertIn(f"sha {GOOD_SHA} verified", line)
 
     def test_pin_missing_is_a_warning_with_the_fix(self):
         level, line = self.check(where=(1, "", "not installed"))
@@ -399,6 +529,42 @@ class CtxPinCheck(unittest.TestCase):
         level, line = self.check(ctx_version=(0, "garbage", ""))
         self.assertEqual(level, "WARN")
         self.assertIn("api none", line)
+
+    def test_matching_api_under_kit_ctx_skips_the_sha_check(self):
+        # the pin status describes the pinned cache, not whatever KIT_CTX points at — irrelevant here
+        with mock.patch.dict(os.environ, {"KIT_CTX": "/opt/other/ctx"}):
+            level, line = self.check(pin=(1, "", "should not be called"))
+        self.assertEqual(level, "OK")
+        self.assertNotIn("sha", line)
+
+    def test_no_sha_record_is_a_warning_the_install_predates_the_check(self):
+        level, line = self.check(pin=(1, "", "no sha record"))
+        self.assertEqual(level, "WARN")
+        self.assertIn("api 1", line)
+        self.assertIn("sha not recorded", line)
+        self.assertIn("remove `/opt`", line)  # `install` alone returns the copy at the pin untouched
+        self.assertIn("ctx_adapter.py adopt`", line)
+
+    def test_an_unverified_sha_is_a_warning(self):
+        level, line = self.check(pin=(0, f"pinned_sha {GOOD_SHA}\ncloned_sha \nverified false", ""))
+        self.assertEqual(level, "WARN")
+        self.assertIn("sha unverified at install", line)
+        self.assertNotIn("offline", line)  # an offline install fails at the clone and records nothing
+        self.assertIn("remove `/opt`", line)
+
+    def test_a_pin_stale_against_the_current_adapter_sha_is_a_warning(self):
+        level, line = self.check(pin=(0, f"pinned_sha {OTHER_SHA}\ncloned_sha {OTHER_SHA}\nverified true", ""))
+        self.assertEqual(level, "WARN")
+        self.assertIn(f"verified sha {OTHER_SHA}", line)
+        self.assertIn(f"now expects {GOOD_SHA}", line)
+        self.assertIn("remove `/opt`", line)
+
+    def test_an_adapter_without_a_sha_pin_names_the_constant_not_a_reinstall(self):
+        level, line = self.check(adapter_version=(0, "v0.4.0\napi 1\nsha ", ""),
+                                 pin=(0, "pinned_sha \ncloned_sha \nverified false", ""))
+        self.assertEqual(level, "WARN")
+        self.assertIn("`CTX_SHA` is empty", line)
+        self.assertNotIn("install &&", line)  # no fetch can verify against a pin that is not there
 
 
 class TemplateOverrideCheck(unittest.TestCase):

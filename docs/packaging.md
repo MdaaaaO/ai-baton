@@ -87,9 +87,9 @@ its own path otherwise.
 
 | | clone | plugin |
 |---|---|---|
-| moves with | every merge to `main` | every release — Claude Code caches a plugin by its `version`, which only a release bumps (§ Version discipline) |
-| how | `make claude_sync` (or `sh .claude/sync.sh`), and the `SessionEnd` hook in `settings.json` runs it in the background; a fast-forward only (`docs/sync.md`) | `claude plugin marketplace update ai-baton-kit` (re-read the marketplace), then `claude plugin update ai-baton@ai-baton-kit`, then restart Claude Code — skills, agents and the SessionStart hook load at startup |
-| learning there is one | `sync-check.sh` at `session-register` warns when the kit is behind `origin/main` | the repository's GitHub Releases (the `release` workflow publishes one per tag); `/kit-health` warns when a newer release is out and prints the commands above |
+| moves with | every release tag on `main` (`kit.channel main`: every merge) | every release — Claude Code caches a plugin by its `version`, which only a release bumps (§ Version discipline) |
+| how | `make claude_sync` (or `sh .claude/sync.sh --accept`) fast-forwards to the newest release tag; the `SessionEnd` hook in `settings.json` runs `sync.sh` without `--accept` in the background, which only fetches and holds a new tag with a preview (`docs/sync.md`) | `claude plugin marketplace update ai-baton-kit` (re-read the marketplace), then `claude plugin update ai-baton@ai-baton-kit`, then restart Claude Code — skills, agents and the SessionStart hook load at startup |
+| learning there is one | `sync-check.sh` at `session-register` warns when a release tag is waiting (`.sync-status` `held <tag>`, what it changes in `.sync-preview`) | the repository's GitHub Releases (the `release` workflow publishes one per tag); `/kit-health` warns when a newer release is out and prints the commands above |
 | afterwards | `/kit-health` when the PR says an environment needs a step | `/kit-health`: it re-stamps `HEALTH-<env>.md` with the new `kit_version`, and § 6 lists the units changed since the last stamp |
 
 A hand edit under the plugin cache is lost on the next update (`kit-health` § 1 warns about one); a kit change is a

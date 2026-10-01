@@ -1,6 +1,7 @@
-"""sync.sh + sync-check.sh against a temp clone and a bare origin: the .sync-status states (pending, ok, offline,
-error, lock-busy skipped), the fetch timeout with and without a `timeout` binary, sync.log rotation and the sha line
-only when HEAD moved, and which states sync-check warns about (#42). Stdlib unittest, no network: a hung or
+"""sync.sh + sync-check.sh against a temp clone and a bare origin: the .sync-status states (pending, ok, held,
+offline, error, lock-busy skipped), the fetch timeout with and without a `timeout` binary, sync.log rotation and
+the sha line only when HEAD moved, the release-tag channel (tag selection, the held preview, --accept, the
+`kit.channel main` opt-out), and which states sync-check warns about (#42). Stdlib unittest, no network: a hung or
 unreachable origin is faked with `remote.origin.uploadpack`. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import fcntl
@@ -40,7 +41,7 @@ class SyncSh(unittest.TestCase):
         self.git("-c", "init.defaultBranch=main", "init", "-q", str(seed), cwd=self.tmp)
         shutil.copy(KIT / "sync.sh", seed / "sync.sh")
         shutil.copy(KIT / "sync-check.sh", seed / "sync-check.sh")
-        (seed / ".gitignore").write_text(".sync.lock\n.sync.lock.d/\n.sync-status\nsync.log\n")
+        (seed / ".gitignore").write_text(".sync.lock\n.sync.lock.d/\n.sync-status\n.sync-preview\nsync.log\n")
         self.git("add", "-A", cwd=seed)
         self.git("commit", "-qm", "seed", cwd=seed)
         self.git("push", "-q", str(self.origin), "HEAD:main", cwd=seed)
@@ -49,14 +50,19 @@ class SyncSh(unittest.TestCase):
         self.git("clone", "-q", "-b", "main", str(self.origin), str(self.kit), cwd=self.tmp)
         self.status_file = self.kit / ".sync-status"
         self.log_file = self.kit / "sync.log"
+        self.preview_file = self.kit / ".sync-preview"
 
     # ── helpers ──
     def git(self, *args, cwd):
         subprocess.run(["git", *args], cwd=cwd, env=self.env, check=True, capture_output=True, timeout=60)
 
-    def sync(self, env=None, timeout=60):
-        return subprocess.run([SH, str(self.kit / "sync.sh")], env=env or self.env, capture_output=True,
-                              text=True, timeout=timeout)
+    def rev_parse(self, ref, cwd) -> str:
+        return subprocess.run(["git", "rev-parse", ref], cwd=cwd, env=self.env, check=True,
+                              capture_output=True, text=True, timeout=60).stdout.strip()
+
+    def sync(self, env=None, timeout=60, args=None):
+        return subprocess.run([SH, str(self.kit / "sync.sh"), *(args or [])], env=env or self.env,
+                              capture_output=True, text=True, timeout=timeout)
 
     def check(self) -> str:
         r = subprocess.run([SH, str(self.kit / "sync-check.sh")], env=self.env, capture_output=True, text=True,
@@ -73,11 +79,20 @@ class SyncSh(unittest.TestCase):
         script.chmod(0o755)
         self.git("config", "remote.origin.uploadpack", str(script), cwd=self.kit)
 
-    def origin_commit(self, name="f"):
-        (self.seed / name).write_text(name)
+    def origin_commit(self, name="f", msg=None):
+        """`msg` defaults to `name` (every existing caller wants that); pass a distinct one when a
+        test greps the preview/log for `name` and the commit subject must not also match it."""
+        path = self.seed / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name)
         self.git("add", name, cwd=self.seed)
-        self.git("commit", "-qm", name, cwd=self.seed)
+        self.git("commit", "-qm", msg or name, cwd=self.seed)
         self.git("push", "-q", str(self.origin), "HEAD:main", cwd=self.seed)
+
+    def seed_tag(self, name):
+        """A lightweight tag on the seed's current HEAD, pushed to origin (`sync.sh` fetches --tags)."""
+        self.git("tag", name, cwd=self.seed)
+        self.git("push", "-q", str(self.origin), name, cwd=self.seed)
 
     def path_without(self, *names) -> str:
         """A PATH of symlinks to every executable on PATH except `names` (e.g. no `timeout`, no `flock`)."""
@@ -431,6 +446,94 @@ class SyncSh(unittest.TestCase):
         self.sync()
         self.assertEqual(self.status()[1], "error")
         self.assertIn("uncommitted", self.check())
+
+    # ── release channel: tag selection, the held preview, --accept, the `main` opt-out ──
+    def test_default_channel_holds_the_highest_merged_release_tag(self):
+        # two releases, then an unreleased commit: a bare run holds the highest tag origin/main
+        # contains, not whatever commit origin/main is actually at
+        start_sha = self.rev_parse("HEAD", cwd=self.kit)
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.origin_commit("b")
+        self.seed_tag("v0.2.0")
+        self.origin_commit("c")
+        r = self.sync()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "held")
+        self.assertEqual(self.status()[2], "v0.2.0")
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), start_sha,
+                          "a held run applies nothing: HEAD stays where it started")
+
+    def test_held_preview_lists_commits_and_unattended_files(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.origin_commit("skills/widget/SKILL.md", msg="add the widget skill")
+        self.origin_commit("settings.json", msg="wire the widget hook")
+        self.seed_tag("v0.2.0")
+        self.sync()
+        self.assertEqual(self.status()[1], "held")
+        preview = self.preview_file.read_text()
+        self.assertIn("v0.2.0", preview)
+        self.assertIn("commits:", preview)
+        skills_marker = preview.index("changed skills/agents/hooks:")
+        unattended_marker = preview.index("other files that run unattended:")
+        skills_hit = preview.index("skills/widget/SKILL.md")
+        settings_hit = preview.index("settings.json")
+        self.assertTrue(skills_marker < skills_hit < unattended_marker, "the skill shows under its own heading")
+        self.assertTrue(unattended_marker < settings_hit, "settings.json shows under the unattended-files heading")
+
+    def test_accept_applies_the_held_tag_not_further(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.origin_commit("b")  # unreleased: must stay un-applied
+        self.sync()
+        self.assertEqual(self.status()[1], "held")
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        r = self.sync(args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("v0.1.0", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha, "accept stops at the tag, not origin/main")
+        self.assertFalse(self.preview_file.exists())
+
+    def test_kit_channel_main_bypasses_the_hold(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.origin_commit("b")  # unreleased
+        self.git("config", "kit.channel", "main", cwd=self.kit)
+        tip_sha = self.rev_parse("HEAD", cwd=self.seed)
+        r = self.sync()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertFalse(self.preview_file.exists())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tip_sha, "kit.channel main tracks origin/main, tags aside")
+
+    def test_sync_check_names_a_waiting_release_not_a_commit_count(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        self.assertEqual(self.status()[1], "held")
+        out = self.check()
+        self.assertIn("release v0.1.0 is waiting", out)
+        self.assertNotIn("commit(s) ahead", out)
+
+    def test_sync_check_is_silent_at_the_tag_with_unreleased_commits_on_origin(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync(args=["--accept"])
+        self.origin_commit("b")  # unreleased: the release channel is not behind because of it
+        self.sync()
+        self.assertEqual(self.status()[1], "ok")
+        out = self.check()
+        self.assertNotIn("is waiting", out)
+        self.assertNotIn("commit(s) ahead", out)
+
+    def test_sync_check_on_the_main_channel_still_counts_commits(self):
+        self.git("config", "kit.channel", "main", cwd=self.kit)
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.git("fetch", "-q", "--tags", "origin", cwd=self.kit)
+        self.assertIn("origin/main is 1 commit(s) ahead", self.check())
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ settings.local.json
 .sync.lock
 .sync.lock.d/
 .sync-status
+.sync-preview
 sync.log
 __pycache__/
 *.pyc

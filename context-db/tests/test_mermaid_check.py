@@ -30,10 +30,15 @@ _STUBS = {
     ),
     # `parse` throws only for a block containing the sentinel this test writes, so a real syntax bug is
     # never needed to prove the CRLF fence is found and reaches the parser.
+    # Without globalThis.window initialized at import time, labelled nodes failed with DOMPurify.addHook error (#441).
     "mermaid": (
         '{"name":"mermaid","version":"0.0.0","main":"index.js"}',
+        "const windowAtImport = typeof globalThis.window !== 'undefined';\n"
         "module.exports = {\n  initialize() {},\n  async parse(text) {\n"
-        "    if (text.includes('SENTINEL_BAD')) { throw new Error('bad syntax here'); }\n"
+        "    if (!windowAtImport && (text.includes('[') || text.includes('('))) {\n"
+        "      throw new Error('DOMPurify.addHook is not a function');\n"
+        "    }\n"
+        "    if (text.includes('SENTINEL_BAD') || text.includes('SYNTAX_ERROR')) { throw new Error('bad syntax here'); }\n"
         "    return { diagramType: 'flowchart' };\n  }\n};\n",
     ),
 }
@@ -101,6 +106,21 @@ class MermaidCheckTest(unittest.TestCase):
             self.assertIn("package.json", r.stderr)
         finally:
             shutil.rmtree(bare, ignore_errors=True)
+
+    def test_labelled_flowchart_parses_ok(self):
+        # A flowchart with labelled nodes failed with "DOMPurify.addHook is not a function" (#441)
+        # when dompurify and mermaid were imported before globalThis.window was initialized.
+        body = "```mermaid\nflowchart LR\n  a[x] --> b[y]\n```\n"
+        r = self.run_check("labelled.md", body)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("OK (flowchart)", r.stdout)
+
+    def test_syntax_error_fails(self):
+        # A syntax error in a mermaid block fails the check with exit 1 and reports FAIL.
+        body = "```mermaid\nflowchart LR\n  a --> SYNTAX_ERROR\n```\n"
+        r = self.run_check("syntax-err.md", body)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("FAIL", r.stdout)
 
 
 if __name__ == "__main__":

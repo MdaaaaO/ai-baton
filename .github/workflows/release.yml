@@ -1,10 +1,16 @@
 name: release
 
 # The CI half of a kit release (docs/contributing.md § Releases). On a push to main whose commit is a
-# squash-merged `chore(release): X.Y.Z`: check VERSION agrees, tag that commit vX.Y.Z and publish a GitHub
-# Release whose notes are the version's CHANGELOG.md section. Any other commit: the job is skipped.
+# squash-merged `chore(release): X.Y.Z`: check VERSION agrees, tag that commit vX.Y.Z, publish a GitHub
+# Release whose notes are the version's CHANGELOG.md section, carrying an attested manifest of the
+# tagged commit — `commit <sha>` plus one sha256 line per tracked file, built by
+# context-db/bin/release_manifest.py and checked with `gh attestation verify manifest.txt --repo
+# MdaaaaO/ai-baton --signer-workflow MdaaaaO/ai-baton/.github/workflows/release.yml`
+# (docs/contributing.md § Releases). Any other commit: the job is skipped.
 # Self-healing (#43): each step does only what is missing, so re-running a failed run finishes a half-done
 # release — tag pushed but no Release: the Release is created from the existing tag; both there: a no-op.
+# A draft Release stays editable even with immutable releases on (the repo setting), so a half-uploaded
+# draft is finished by re-uploading (`--clobber`) and publishing, never by re-creating it.
 # Inline rather than conventional-release's reusable tag.yml. Runs on GitHub-hosted runners like every workflow; only on a
 # push to main, i.e. code that was already merged — never a pull request's (docs/contributing.md § Where CI runs).
 # Nothing is published as a package — the kit is no library.
@@ -29,7 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write  # push the tag, create the release
+      contents: write      # push the tag, create the release
+      attestations: write  # attest the manifest
+      id-token: write      # sign the attestation (Sigstore OIDC)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,11 +63,46 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release tag "$VERSION" --push
 
-      # Whenever the commit carries its tag, new or from an earlier attempt: creates the Release only when
-      # `gh release view` says "release not found"; any other gh error fails the step.
+      - name: Build the release manifest
+        if: steps.detect.outputs.tag != ''
+        run: python3 context-db/bin/release_manifest.py build --out manifest.txt
+
+      # The manifest's own build-provenance attestation (no secrets: Sigstore signs with the job's OIDC
+      # token) — docs/contributing.md § Releases has the verify command. Before the Release step, so a
+      # published Release never exists without it; a re-run attests the same bytes again, which is harmless.
+      - name: Attest the manifest
+        if: steps.detect.outputs.tag != ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: manifest.txt
+
+      # Whenever the commit carries its tag, new or from an earlier attempt: a missing Release is
+      # created as a draft (immutable releases, the repo setting, only lock a published one), the
+      # manifest uploaded, then the draft published; an already-published Release is a no-op. A draft
+      # left over from an interrupted run (upload or publish failed) is finished, not re-created:
+      # `--clobber` makes a second upload of the same deterministic manifest harmless. Only gh's
+      # "release not found" counts as missing; any other gh error fails the step.
       - name: GitHub Release
         if: steps.detect.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.detect.outputs.version }}
-        run: uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release publish-release "$VERSION"
+          TAG: ${{ steps.detect.outputs.tag }}
+        run: |
+          if state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>&1)"; then
+            :
+          elif [[ "$state" == *"release not found"* ]]; then
+            state=missing
+          else
+            echo "$state" >&2
+            exit 1
+          fi
+          if [[ "$state" == "missing" ]]; then
+            uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release notes "$VERSION" > notes.md
+            gh release create "$TAG" manifest.txt --title "$TAG" --notes-file notes.md --draft --verify-tag
+            state=true
+          fi
+          if [[ "$state" == "true" ]]; then
+            gh release upload "$TAG" manifest.txt --clobber
+            gh release edit "$TAG" --draft=false
+          fi

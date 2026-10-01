@@ -71,8 +71,8 @@ flowchart TB
 - **Context DB**: `.context/` beside the kit (or `CLAUDE_PROJECT_DIR/.context` on a plugin install, `CONTEXT_ROOT`
   to override). Its spec is `.context/README.md` (seeded from `context-db/context-README.template.md`); the env
   store's is `docs/env-facts.md`.
-- **Hooks and sync**: on a clone, `settings.json` runs `sync.sh` at `SessionEnd` (a fast-forward of `.claude/` to
-  `origin/main`, never a commit), and `hooks/pre-push` and `hooks/commit-msg` are git hooks installed by `setup.sh` /
+- **Hooks and sync**: on a clone, `settings.json` runs `sync.sh` at `SessionEnd` (a fetch that holds a new release
+  tag with a preview until `make claude_sync` fast-forwards `.claude/` to it, never a commit), and `hooks/pre-push` and `hooks/commit-msg` are git hooks installed by `setup.sh` /
   `sync.sh` (`core.hooksPath`). On a plugin install `hooks/hooks.json` runs at `SessionStart`: `session-env`
   re-exports plugin `userConfig` identity as `WORKSPACE_*`, plus `CLAUDE_PROJECT_DIR` and `BATON`, and
   `workspace-rules` injects `WORKSPACE.md`. On both paths the ctx-store adapter (`context-db/bin/ctx_adapter.py`) runs

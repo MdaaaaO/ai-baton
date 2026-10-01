@@ -19,6 +19,7 @@ Sections:
                   a retired capability key (`slack.enabled`, `github.signed_commits`) still in config.json
   4. machine    — this machine's wiring: environment name, CLAUDE.md imports, Makefile include, memory
                   symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell,
+                  the auto-compact backstop (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`),
                   free disk on `/`/`$HOME`/the scratch root with the usual build/package caches named above
                   DISK_WARN_PCT; one legacy line: a leftover `.claude/profiles/` clone (the layer retired
                   2026-09-25) → delete it
@@ -835,6 +836,50 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
           "set an IANA Region/City name (an abbreviation like `EST` or `EDT` is not one)")
 
 
+def autocompact_wiring(r: Report) -> None:
+    """The auto-compact backstop: env `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, env `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`,
+    or a top-level `autoCompactWindow` (or an `env` block carrying either variable) in any settings file this
+    install reads — `~/.claude/settings.json`, the workspace's `.claude/settings.json` (a clone's own copy of
+    the kit's `settings.json` — already set there), or the workspace's `.claude/settings.local.json`. A plugin
+    install ships no settings.json, so there only the user setting or the env var backstops it. Read-only: a
+    missing/unreadable/non-UTF-8/non-JSON file, or one whose top level is not an object, reads as unset, never
+    an error. Unset is a WARN, not an ERR — the harness's own default still applies (about 967K on a 1M-window
+    model)."""
+    if os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "").strip():
+        r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set in the environment")
+        return
+    if os.environ.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "").strip() == "1":
+        r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` — the session compacts at 200K")
+        return
+    candidates = [
+        (Path.home() / ".claude" / "settings.json", "`~/.claude/settings.json`"),
+        (root() / ".claude" / "settings.json", "the workspace's `.claude/settings.json`"),
+        (root() / ".claude" / "settings.local.json", "the workspace's `.claude/settings.local.json`"),
+    ]
+    for p, label in candidates:
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+        except (OSError, ValueError):
+            cfg = None
+        if not isinstance(cfg, dict):
+            continue
+        window = cfg.get("autoCompactWindow")
+        if isinstance(window, (int, float)) and not isinstance(window, bool) and window > 0:
+            r.add(OK, "machine", f"auto-compact backstop: `autoCompactWindow` set in {label}")
+            return
+        env = cfg.get("env")
+        if isinstance(env, dict):
+            if str(env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "")).strip():
+                r.add(OK, "machine", f"auto-compact backstop: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set in {label}'s `env` block")
+                return
+            if str(env.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "")).strip() == "1":
+                r.add(OK, "machine", f"auto-compact backstop: `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` in {label}'s `env` block")
+                return
+    r.add(WARN, "machine", "auto-compact backstop unset — nothing in the environment or a settings file sets it, "
+          "so a 1M-window model compacts only at about 967K; plugin install: `/autocompact 200k` sets the user "
+          "setting (cloud: `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`)")
+
+
 def seed_pairs() -> list[tuple[Path, Path]]:
     """(template in the kit, seeded copy on this machine) — what setup.sh seeds once and never overwrites."""
     return [(KIT / "context-db" / "context-README.template.md", ctx() / "README.md"),
@@ -971,6 +1016,7 @@ def sec_machine(r: Report) -> str:
     envname = kit_profile.name()
     identity_wiring(r)
     seed_wiring(r)
+    autocompact_wiring(r)
     if not (ENV / "config.json").is_file():
         r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):
@@ -1168,11 +1214,19 @@ def ctx_pin_check(r: Report) -> None:
     second line names (`ctx_adapter.CTX_API`) — a machine whose cached install predates a pin bump, or whose
     `KIT_CTX` override points at an unrelated build, would otherwise drift from what the hooks (the PreToolUse
     deny, `validate --changed --adopt`) assume without kit-health ever saying so. Read-only: `where` finds the
-    pinned executable (never installs it), then `<ctx> --version` is run directly — no adopted store needed."""
+    pinned executable (never installs it), then `<ctx> --version` is run directly — no adopted store needed.
+
+    Once the api matches, the sha `install` pinned this copy against (`ctx_adapter.py pin`, read from the record
+    beside the pinned `ctx` — never a second clone, so this stays offline too): unverified at install time (no
+    network, or the clone's commit could not be read) warns rather than passing silently, and a copy whose
+    recorded sha no longer matches `version`'s third line (the pin was bumped — the tag moved, or just re-pinned
+    — since this was fetched) warns to reinstall. Skipped under `KIT_CTX`: that record describes the pinned
+    cache, not whatever override is actually in use."""
     adapter = "python3 $BATON/context-db/bin/ctx_adapter.py"
     fix = f"`{adapter} install && {adapter} adopt`"
     rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "version"])
     want = next((ln.split(" ", 1)[1] for ln in out.splitlines() if ln.startswith("api ")), "")
+    want_sha = next((ln.split(" ", 1)[1] for ln in out.splitlines() if ln.startswith("sha ")), "")
     if rc != 0 or not want:
         r.add(ERR, "engine", f"`{adapter} version` failed: {both(out, err)[-300:]}")
         return
@@ -1195,8 +1249,31 @@ def ctx_pin_check(r: Report) -> None:
             how = f"remove `{Path(ctx_path).parent}` (a stale copy at the pin), then {fix}"
         r.add(WARN, "engine", f"ctx pin: `{ctx_path} --version` reports api {got or 'none'}, the adapter expects "
                               f"api {want} — {how}")
+        return
+    base = f"ctx pin: `{ctx_path} --version` reports api {want}"
+    if os.environ.get("KIT_CTX", "").strip():
+        r.add(OK, "engine", base)
+        return
+    # `install` returns a usable pinned copy untouched (no new fetch, no new record): removing it comes first
+    refetch = f"remove `{Path(ctx_path).parent}` (the copy at the pin), then {fix}"
+    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "pin"])
+    if rc != 0:
+        r.add(WARN, "engine", f"{base}; sha not recorded for this install (older than this check) — {refetch}")
+        return
+    info = dict(ln.split(" ", 1) for ln in out.splitlines() if " " in ln)
+    verified = info.get("verified") == "true"
+    pinned_sha = info.get("pinned_sha", "")
+    if not want_sha:
+        r.add(WARN, "engine", f"{base}; the adapter pins no sha (`CTX_SHA` is empty), so no install can be "
+                              "verified — set it beside `CTX_VERSION` in ctx_adapter.py")
+    elif not verified:
+        r.add(WARN, "engine", f"{base}; sha unverified at install (the clone's commit could not be read, or the "
+                              f"adapter pinned no sha then) — {refetch}")
+    elif pinned_sha != want_sha:
+        r.add(WARN, "engine", f"{base}; this install verified sha {pinned_sha}, the adapter now expects "
+                              f"{want_sha} — {refetch}")
     else:
-        r.add(OK, "engine", f"ctx pin: `{ctx_path} --version` reports api {want}")
+        r.add(OK, "engine", f"{base}, sha {pinned_sha} verified")
 
 
 def ctx_store(r: Report) -> None:
