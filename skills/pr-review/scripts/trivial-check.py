@@ -84,9 +84,13 @@ def gh(*args, paginate=False, allow_fail=False):
     if paginate:  # concatenated JSON arrays
         out = []
         dec = json.JSONDecoder(); s = p.stdout.strip(); i = 0
-        while i < len(s):
-            obj, j = dec.raw_decode(s, i); out.extend(obj if isinstance(obj, list) else [obj]); i = j
-            while i < len(s) and s[i].isspace(): i += 1
+        try:
+            while i < len(s):
+                obj, j = dec.raw_decode(s, i); out.extend(obj if isinstance(obj, list) else [obj]); i = j
+                while i < len(s) and s[i].isspace(): i += 1
+        except json.JSONDecodeError:
+            if allow_fail: return None
+            print(json.dumps({"eligible": False, "error": True, "reasons": [f"gh api returned invalid JSON: {' '.join(args)}"]})); sys.exit(1)
         return out
     try:
         return json.loads(p.stdout) if p.stdout.strip() else None
@@ -211,7 +215,7 @@ def required_checks(repo, base_ref):
     readable): `source` is "rulesets", "protection" or "rulesets+protection" (None when no check is
     required); `readable` is False only when NEITHER source could be read (the rulesets endpoint
     answers 200 with an empty list for a repo without rules, so an empty list is a successful read)."""
-    rules = gh(f"repos/{repo}/rules/branches/{base_ref}", allow_fail=True)
+    rules = gh(f"repos/{repo}/rules/branches/{base_ref}", paginate=True, allow_fail=True)  # every page: a rule past the first is still required
     from_rules = set()
     if isinstance(rules, list):
         for rule in rules:

@@ -304,6 +304,29 @@ class TrivialCheck(unittest.TestCase):
             required, source, readable = self.tc.required_checks("acme/widgets", "main")
         self.assertEqual((required, source, readable), (["ci"], "rulesets", True))
 
+    def test_required_checks_reads_every_page_of_the_rulesets(self):
+        def page(name):
+            return json.dumps([{"type": "required_status_checks",
+                                "parameters": {"required_status_checks": [{"context": name}]}}])
+        # `gh api --paginate` prints one JSON array per page, back to back
+        responses = {"rules/branches/main": (0, page("ci") + page("late")),
+                     "protection/required_status_checks": (1, "")}
+        fake = self._fake_run(responses); seen = []
+        def run(cmd, **kwargs):
+            seen.append(cmd)
+            return fake(cmd, **kwargs)
+        with mock.patch.object(self.tc.subprocess, "run", side_effect=run):
+            required, source, readable = self.tc.required_checks("acme/widgets", "main")
+        self.assertEqual((required, source, readable), (["ci", "late"], "rulesets", True))
+        self.assertIn("--paginate", next(c for c in seen if "rules/branches/main" in " ".join(c)))
+
+    def test_required_checks_treats_an_unparsable_rulesets_answer_as_unread(self):
+        responses = {"rules/branches/main": (0, "<html>not json</html>"),
+                     "protection/required_status_checks": (1, "")}
+        with mock.patch.object(self.tc.subprocess, "run", side_effect=self._fake_run(responses)):
+            required, source, readable = self.tc.required_checks("acme/widgets", "main")
+        self.assertEqual((required, source, readable), ([], None, False))
+
     def test_required_checks_falls_back_to_protection_when_ruleset_names_none(self):
         responses = {
             "rules/branches/main": (0, "[]"),
