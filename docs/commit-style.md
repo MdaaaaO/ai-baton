@@ -33,9 +33,18 @@ file to someone else's repo — propose it to the owner if the style there reall
 
 | style | subject | notes |
 |---|---|---|
-| `conventional` | `<type>(<scope>)!: <description>` | types `feat fix docs chore refactor test ci build perf style revert`; scope lowercase `[a-z0-9._/-]` (the component: `dbt`, `dag`, `<service>`, `kit`); `!` = breaking; description lowercase imperative, ≤ 72 chars total, no trailing period; **tracker key inside the description** — `feat(dbt): KEY-123 add the fact table`, never `KEY-123: …` |
+| `conventional` | `<type>(<scope>)!: <description>` | types `feat fix docs chore refactor test ci build perf style revert`; scope lowercase `[a-z0-9._/-]` (the component: `dbt`, `dag`, `<service>`, `kit`); `!` = breaking; description lowercase imperative, ≤ 72 chars total, no trailing period; **tracker key inside the description** — `feat(dbt): KEY-123 add the fact table`, never `KEY-123: …`; where the repo's own title check refuses an upper-case start, later in it — `feat(dbt): add the fact table (KEY-123)` |
 | `ticket-key` | `<KEY>: <description>` | key per the env config's `tracker.key_regex`; ≤ 72 chars, no trailing period |
 | `free` | anything non-empty | for repos that explicitly want no rule |
+
+A `conventional` description starts lower-case. An acronym leading it is refused like any other
+upper-case start (`feat(kb): API keys` → `feat(kb): rotate the API keys`); a digit or a backtick
+leading is fine. The one exemption is this environment's own tracker key leading the description
+(`KEY-123 add …`, the form in the table above), recognised by `tracker.key_regex`: a key-shaped word
+that is no key (`UTF-8 decode …`) is refused, and where no upper-case key shape is configured (GitHub
+issues, `#123`) nothing is exempt. The kit repo's `pr-title` workflow runs the release tool's own title
+check, which refuses every upper-case start, a leading key too: a repo that runs that check puts the
+key later in the description (the kit's own titles end with `(#123)`).
 
 Always accepted: `Merge …`, `Revert "…"`, `fixup! …`, `squash! …` (git writes them). A message's
 second line must be blank; every line that starts with the comment char (`#`, or the repo's `core.commentChar`) is

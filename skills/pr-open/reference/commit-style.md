@@ -11,7 +11,9 @@ is not a repo that overrode.
   style revert`, lowercase scope (the component: `dbt`, `dag`, `<service>`, `kit`), `!` for a breaking change,
   lowercase imperative description, ≤ 72 chars, no trailing period. **The tracker key goes inside the
   description** (`feat(dbt): KEY-123 add the fact table`), never as the prefix — the key is text in the title
-  (§ Links) and a link in the body.
+  (§ Links) and a link in the body. An upper-case start is refused unless it is this environment's own key
+  (`tracker.key_regex`); where the repo's own title check refuses a leading key too (the release tool's does),
+  put it later: `feat(dbt): add the fact table (KEY-123)`.
 - **PR title = the squash-commit subject.** Under squash merging the title becomes the commit on `main`, so it
   passes the same check (`commit_style.py title`). The type maps to the type label (step 3): `feat` →
   `enhancement`, `fix` → `bug`, `docs` → `documentation`; other types take no type label unless the repo has one.

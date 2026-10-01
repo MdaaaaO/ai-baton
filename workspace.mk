@@ -72,6 +72,10 @@ claude_sync:
 # release, not whatever main holds when it updates. A failed pin leaves the branch and worktree too.
 #   make kit_release_dry               # the next version and its changelog section (as of origin/main), nothing written
 #   make kit_release [LEVEL=minor]     # branch, commit, push, PR (LEVEL: major|minor|patch|X.Y.Z; default inferred)
+# Below 1.0.0, an inferred major (a `BREAKING CHANGE:`/Machines footer) is cut as a minor instead — every machine
+# takes that step before 1.0 — unless LEVEL names one explicitly (LEVEL=major still cuts 1.0.0). The check asks
+# the tool itself (`next`, never its own reading of the commits); when the tool cannot name the next version,
+# nothing is cut and the recipe says why, so an accidental 1.0.0 never rides on a failed check.
 # conventional-release's own version is an exact pin, not a floating range — one pin, .github/versions.env, next to
 # this file (the workspace's own kit checkout; #85's KIT_CHECKOUT names a release's git checkout when it differs
 # from where workspace.mk itself lives, but the tool version tracks this file, like every other target here).
@@ -93,7 +97,22 @@ kit_release_dry kit_release:
 	@test ! -e "$(_REL_WT)" || { echo "$(_REL_WT) exists — a release run in progress, or left over: git -C '$(KIT_CHECKOUT)' worktree remove --force '$(_REL_ABS)'"; exit 1; }
 	@git -C "$(KIT_CHECKOUT)" worktree add -q --detach "$(_REL_ABS)" origin/main
 	@eval "$$($(_CTXROOT) python3 "$(_REL_WT)/context-db/bin/kit_profile.py" gh-env)"; \
-	  out="$$(cd "$(_REL_WT)" && $(_CREL) release $(if $(filter kit_release_dry,$@),--dry-run) $(LEVEL))"; rc=$$?; \
+	  lvl="$(LEVEL)"; \
+	  if [ -z "$$lvl" ] && [ "$$(cut -d. -f1 "$(_REL_WT)/VERSION" 2>/dev/null)" = "0" ]; then \
+	    probe="$$(cd "$(_REL_WT)" && $(_CREL) next 2>&1)"; prc=$$?; \
+	    next="$$(printf '%s\n' "$$probe" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1)"; \
+	    if [ $$prc -ne 0 ] || [ -z "$$next" ]; then \
+	      printf '%s\n' "$$probe"; \
+	      echo "kit_release: the release tool did not name the next version (exit $$prc, output above) — nothing cut; fix that, or pass LEVEL=patch|minor|major"; \
+	      git -C "$(KIT_CHECKOUT)" worktree remove --force "$(_REL_ABS)"; \
+	      [ $$prc -ne 0 ] && exit $$prc; exit 1; \
+	    fi; \
+	    case "$$next" in 0.*) ;; *) \
+	      lvl=minor; \
+	      echo "kit_release: the commits infer $$next while the kit is 0.x — cutting a minor instead (pass LEVEL=major to cut 1.0.0)";; \
+	    esac; \
+	  fi; \
+	  out="$$(cd "$(_REL_WT)" && $(_CREL) release $(if $(filter kit_release_dry,$@),--dry-run) $$lvl)"; rc=$$?; \
 	  br="$$(git -C "$(_REL_WT)" branch --show-current)"; \
 	  printf '%s\n' "$$out"; \
 	  if [ $$rc -ne 0 ] && [ -n "$$br" ]; then \
