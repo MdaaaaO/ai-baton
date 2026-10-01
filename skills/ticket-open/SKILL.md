@@ -2,7 +2,7 @@
 name: ticket-open
 description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating it."
 metadata:
-  version: "13"
+  version: "14"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
@@ -37,7 +37,9 @@ kind X in this environment" and stop — never improvise.
    Sizing, so `ticket-pickup` doesn't re-derive it later — it verifies this call and acts on it. Write it
    with `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main session>" "<reason>"` so it
    parses back the same way; it goes in the body, not a label (label sets differ per repo, the kit stays
-   repo-agnostic).
+   repo-agnostic). Once the block is drafted (step 4's Sketch included) and before creating the ticket, a
+   `Sizing: opus` ticket runs the cold-reader gate on the drafted body — `docs/cold-reader.md` — and writes
+   its result line in before the ticket is posted.
 4. **Sketch — gated on the Sizing line** (`docs/diagrams.md`, the whiteboard-defence contract; this step
    adds only this skill's own piece, it does not restate the contract). `Sizing: opus` → draw the target
    state: WHERE the change sits (placement), the target shape of WHAT changes, and one WHY row when an

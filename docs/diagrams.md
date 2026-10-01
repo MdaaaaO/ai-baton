@@ -158,6 +158,13 @@ itself (`docs/delegation.md` § Sizing). The brief has three parts:
 
 The worker writes nothing and posts nothing; the main session pastes.
 
+## Cold-reader brief
+
+A second, unrelated gate on the same artefacts (#378): a `haiku` fork reads only the artefact text — no
+repo, no transcript, no context doc — and narrates it cold. The prompt, the gate (which artefacts are not
+`SKIP`), the mismatch protocol and the result line moved to [`docs/cold-reader.md`](cold-reader.md) once
+this page's own budget had no room left for them.
+
 ## Budgets
 
 No new skill, no new agent, and no new line in `WORKSPACE.md`. Each skill gains a few lines that link here.

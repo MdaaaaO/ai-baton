@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "20"
+  version: "21"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -121,7 +121,9 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       today, or since the last handoff, quoted verbatim (`docs/carousel.md`), and the open PRs / watchers to
       re-arm (or "none"). The ledger lines count toward the ≤12-line cap: when they do not all fit, quote
       only the newest ones that do and point at the context doc's *Key decisions & gotchas* section for the
-      rest — never a paraphrase, only verbatim lines or that pointer. Run `python3
+      rest — never a paraphrase, only verbatim lines or that pointer. Before `session-end`, run the
+      cold-reader gate on the drafted prompt (`docs/cold-reader.md`) and fix it on a miss before handing
+      it off. Run `python3
       $BATON/context-db/bin/kit_profile.py scratch` once and use the **printed path** (a per-session dir
       that exists on every machine — never a bare `/tmp` path, which sessions overwrite; shell variables do
       not survive between tool calls, so the Write call takes the literal path) for `<dir>/next.md`, then
