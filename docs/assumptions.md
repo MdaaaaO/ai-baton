@@ -23,8 +23,9 @@ Shape; the eval near miss this guards is the opposite failure, an unstated assum
 ## Storage
 
 Open lines live under `## Assumptions` in the session's own registry file, next to `## Open
-decisions` — same file, same reason: it survives a compaction (`docs/carousel.md` § No tool — #56
-re-prints both) and a session end.
+decisions` — same file, same reason: it survives a compaction and a session end. After a
+compaction, re-read it yourself until the kit re-prints it (`docs/carousel.md` § No tool — #56);
+the compaction brief does not print it on its own.
 
 ## Checkpoints — where a due line surfaces
 

@@ -73,5 +73,8 @@ verified.py check <body-file | -> [--pr <owner/repo> <n>]
 
 ## Optional sections
 
-`## Not in this PR` and `## One honest limit`, each at most 3 lines, directly after `## Verified`. Neither is
-checked by `verified.py` — they are prose, not evidence claims.
+`## Not in this PR` and `## One honest limit`, each at most 3 lines (the cap is the section itself),
+directly after `## Verified`. Neither is checked by `verified.py` — they are prose, not evidence claims.
+`## One honest limit` also carries every due `Assumed:` line (revisit: pr-open) still open on the
+session (`docs/assumptions.md`); those lines follow the 3-line limit and do not count toward it — at
+most 4, since more means the session should have asked earlier.
