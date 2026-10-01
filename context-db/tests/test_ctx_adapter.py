@@ -838,6 +838,34 @@ class Adopt(Base):
         self.assertEqual(self.adapter("ctx", "validate", **env).returncode, 0)
 
 
+class ResolveRule(Base):
+    """The kit's `resolve.fields` names no field: a field match would outrank the context doc's own
+    `resolve.section` match (`Tracker & links`), and every session doc carries the same key in its own
+    `epic:` frontmatter field, so a field match would always win and `ctx resolve <key>` would always name
+    the querying session, never the context doc the key belongs to. Proven against the pinned ctx, not a
+    fake: a stub could not show which doc the store's own settings make `ctx resolve` prefer."""
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_resolve_returns_the_epic_doc_not_the_session_row(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        key = "acme/gadgets#3"
+        (self.root / "gadgets").mkdir()
+        (self.root / "gadgets" / "rollout.md").write_text(
+            "---\ntitle: Gadgets\ntype: epic\ndomain: gadgets\nstatus: active\nupdated: 2026-01-05\n---\n"
+            "# Gadgets\n\n## Tracker & links\n\n- Epic: " + key + "\n\n## Goal\n\ng\n\n"
+            "## Key decisions & gotchas\n\n## Remaining work\n\n## Session log\n\n- 2026-01-05 — first\n",
+            encoding="utf-8")
+        self.sid = "sid-resolve-1"
+        (self.root / "sessions" / "lane-topic.md").write_text(
+            f"---\nsession: lane-topic\nsession_id: {self.sid}\nstatus: active\nepic: {key}\n"
+            "updated: 2026-01-05\n---\n# Session: lane-topic\n\n## Notes\n\nfree text\n", encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)  # the new docs validate clean too
+        r = self.adapter("ctx", "resolve", key, **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines()[0].split(" · ", 1)[0].strip(), "gadgets/rollout")
+
+
 SESSION_FOR_BRIEF = (
     "---\nsession: lane-topic\nsession_id: {sid}\nstatus: active\nepic: {epic}\nworking_on: step three\n"
     "responsibilities: " + ("owns the lane end to end " * 10) + "\nstats: turns 40 · ctx 100k\n"
@@ -854,10 +882,10 @@ EPIC_FOR_BRIEF = (
 class CompactBrief(Base):
     """The `brief-session` hook's rewrite (#56, #420): one owner line naming this session and its own `epic:`
     frontmatter value verbatim — written before any context-doc lookup is attempted, so it never waits on
-    `ctx resolve`/`ctx find` — then the session's own brief re-budgeted (bookkeeping frontmatter dropped, the
+    `ctx resolve` — then the session's own brief re-budgeted (bookkeeping frontmatter dropped, the
     sections that matter led to the front), then — when a context doc resolved — its key and the head of its
-    *Remaining work*. Proven against the pinned ctx: a fake could not show whether `ctx resolve`/`ctx find`
-    answer the way the adapter now assumes."""
+    *Remaining work*. Proven against the pinned ctx: a fake could not show whether `ctx resolve`
+    answers the way the adapter now assumes."""
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_owner_line_section_order_and_remaining_work_head(self):
@@ -874,8 +902,9 @@ class CompactBrief(Base):
         out = r.stdout
         lines = out.splitlines()
         # the owner line is first, naming this session's own doc and its own `epic:` field verbatim — the
-        # resolved context doc (below, `ctx resolve` fell back to `ctx find --type epic` for it, since its own
-        # `epic:` field always wins a plain `ctx resolve`, naming itself) only ever shows up in the trailing block
+        # resolved context doc (below, from `ctx resolve`'s own section match: the store's `resolve.fields`
+        # names no field, so a session's own `epic:` frontmatter never outranks it) only ever shows up in the
+        # trailing block
         self.assertEqual(lines[0], "compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42")
         # dropped bookkeeping
         for field in ("stats:", "heartbeat:", "session_id:", "ref:", "updated:", "sections:"):
@@ -944,8 +973,8 @@ BRIEF_FOR_DEADLINE = ("sessions/lane-topic (session, 10 bytes)\nsession: lane-to
 
 
 class CompactBriefDeadline(Base):
-    """A compact brief used to make up to four ctx calls in a row (`brief --session`, `resolve`, `find --type
-    epic`, `get --section`, each also able to wait `CTX_LOCK_TIMEOUT` on a lock) against the hooks' own 10s
+    """A compact brief used to make up to three ctx calls in a row (`brief --session`, `resolve`,
+    `get --section`, each also able to wait `CTX_LOCK_TIMEOUT` on a lock) against the hooks' own 10s
     `timeout` (hooks/hooks.json, settings.json), building its whole answer before printing a byte of it — a
     harness kill lost even the owner line and session brief it had already computed. `COMPACT_DEADLINE` now
     bounds the whole call; the owner line (naming this session's own `epic:` frontmatter value verbatim, never
@@ -1009,12 +1038,12 @@ class CompactBriefDeadline(Base):
             for t in timeouts:
                 self.assertLessEqual(self.mod.COMPACT_DEADLINE + 1, t, path)
 
-    def test_owner_line_and_brief_are_written_before_a_near_timeout_resolve_and_a_timed_out_find(self):
-        """The exact shape the review flagged: a `resolve` that answers just under `EPIC_LOOKUP_TIMEOUT` (here
-        it also names this session, so `_resolve_epic_doc` falls through to `find`), then a `find` that times
-        out. Each call's timeout is recomputed from the fake clock right before it is made — `find` does not
-        inherit the stale, already-almost-spent timeout `resolve` was given — and the owner line plus brief
-        are on stdout (write #1) well before either lookup is attempted (writes #2+, once skipped)."""
+    def test_owner_line_and_brief_are_written_before_a_near_timeout_resolve_and_a_timed_out_get(self):
+        """The exact shape the review flagged: a `resolve` that answers just under `EPIC_LOOKUP_TIMEOUT` (naming
+        the context doc, not this session), then a `get` (the *Remaining work* fetch) that times out. Each
+        call's timeout is recomputed from the fake clock right before it is made — `get` does not inherit the
+        stale, already-almost-spent timeout `resolve` was given — and the owner line plus brief are on stdout
+        (write #1) well before either lookup is attempted (writes #2+, once skipped)."""
         import contextlib
         import io
         clock = [0.0]
@@ -1029,18 +1058,18 @@ class CompactBriefDeadline(Base):
         def fake_monotonic():
             return clock[0]
 
-        def ctx_with_a_near_timeout_resolve_then_a_timed_out_find(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
+        def ctx_with_a_near_timeout_resolve_then_a_timed_out_get(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
             if args[0] == "brief":
                 return subprocess.CompletedProcess(args, 0, stdout=BRIEF_FOR_DEADLINE, stderr="")
             if args[0] == "resolve":
-                clock[0] += 2.9  # answers just under EPIC_LOOKUP_TIMEOUT; names this session, so a fallback follows
-                return subprocess.CompletedProcess(args, 0, stdout="sessions/lane-topic · session\n", stderr="")
-            if args[0] == "find":
+                clock[0] += 2.9  # answers just under EPIC_LOOKUP_TIMEOUT, naming the context doc
+                return subprocess.CompletedProcess(args, 0, stdout="widgets/rollout · epic\n", stderr="")
+            if args[0] == "get":
                 clock[0] += timeout  # the per-call timeout it was actually given, recomputed, not reused from resolve
                 raise self.mod.subprocess.TimeoutExpired("ctx", timeout)
             raise AssertionError(f"unexpected ctx verb for this scenario: {args[0]}")
 
-        self.mod._ctx = ctx_with_a_near_timeout_resolve_then_a_timed_out_find
+        self.mod._ctx = ctx_with_a_near_timeout_resolve_then_a_timed_out_get
         with mock.patch.object(self.mod.time, "monotonic", fake_monotonic), \
              mock.patch.dict(os.environ, {"CTX_STORE": ""}), \
              mock.patch.object(sys, "stdin", io.StringIO(self.payload(source="compact"))), \
@@ -1055,10 +1084,25 @@ class CompactBriefDeadline(Base):
         full = "".join(s for _, s in writes)
         self.assertTrue(full.startswith("compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42\n"))
         self.assertIn("context doc: skipped (hook deadline)", full)
-        # find got its own timeout (remaining after resolve's 2.9s), not resolve's: it did not also wait ~3s
+        # get got its own timeout (remaining after resolve's 2.9s), not resolve's: it did not also wait ~3s
         # of a reused value plus whatever resolve already spent — the two lookups together stayed well under
         # the deadline, not anywhere near the ~11s a reused timeout could add up to
         self.assertLessEqual(clock[0], self.mod.COMPACT_DEADLINE + 1)
+
+
+    def test_a_session_row_from_a_store_not_re_adopted_yet_is_no_context_doc(self):
+        """A store adopted before the kit dropped `resolve.fields` still answers `ctx resolve` with the
+        session's own row until `adopt` runs again. `_resolve_epic_doc` reads that as no context doc, never
+        as the context doc, and makes no second call."""
+        calls = []
+
+        def ctx_naming_the_session(ctx, store, *args, timeout=self.mod.HOOK_TIMEOUT):
+            calls.append(args[0])
+            return subprocess.CompletedProcess(args, 0, stdout="sessions/lane-topic · session\n", stderr="")
+
+        self.mod._ctx = ctx_naming_the_session
+        self.assertIsNone(self.mod._resolve_epic_doc(self.fake, [], "acme/widgets#42", lambda: 9.0))
+        self.assertEqual(calls, ["resolve"])
 
 
 class PreToolUseDeny(Base):
