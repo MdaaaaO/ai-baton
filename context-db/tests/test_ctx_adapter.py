@@ -220,7 +220,7 @@ class Install(Base):
 
 
 class InstallShaPin(Base):
-    """`install`'s sha check (#440): the clone's own commit must match the pin — a mismatch (the tag now resolves
+    """`install`'s sha check: the clone's own commit must match the pin — a mismatch (the tag now resolves
     elsewhere, whether retagged after the fact or simply pinned wrong) installs nothing and names both shas; a
     commit that cannot be read at all is applied anyway, recorded unverified (owner decision, 2026-10-01: a
     verify that cannot run is not the same as one that ran and disagreed)."""
@@ -252,7 +252,7 @@ class InstallShaPin(Base):
 
     def test_a_tag_moved_after_the_pin_is_caught_as_a_mismatch(self):
         """The pin recorded the tag's original commit; upstream then force-moved the tag to a second commit — the
-        same case the design calls out (#59): a release tag that can later point somewhere else."""
+        same case the design calls out: a release tag that can later point somewhere else."""
         mod = load_adapter()
         url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
         original = self.commit_sha(url, mod.CTX_VERSION)

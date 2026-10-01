@@ -353,7 +353,7 @@ class CtxPinCheck(unittest.TestCase):
     """§ 5 also checks the ctx AT THE PIN, not just whether `.context/` is adopted: `where` finds the pinned
     executable (never installs it), then `<ctx> --version` is run directly and compared against the API
     `ctx_adapter.py version`'s second line names — no adopted store is needed for either call. Once the api
-    matches, `ctx_adapter.py pin` reports the sha the install at the pin verified (#440) — also read-only, no
+    matches, `ctx_adapter.py pin` reports the sha the install at the pin verified — also read-only, no
     second clone — and is folded into the same single finding."""
 
     def check(self, **answers) -> tuple[str, str]:
