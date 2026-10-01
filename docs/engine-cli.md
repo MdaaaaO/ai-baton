@@ -418,7 +418,11 @@ older kit's types. No recorded version, or one that does not parse, compares as 
 like any other mismatch. A digest match with a recorded `kept` list still reports it — one `differs:` line per
 file, exit 5 — a kept file does not stop being a local edit just because nothing else about the store moved. No
 record at all (a store adopted before any of this existed) is the least surprising case to treat as `behind`: one
-plain `adopt` run (no `--check`) brings the record current, kept list, version and all. The same version record
+plain `adopt` run (no `--check`) brings the record current, kept list, version and all. `adopt --check --no-validate`
+answers the same `behind`/`ahead`/`differs` lines from the record alone, skipping `ctx validate` entirely — it needs
+no ctx executable at all, so it can never take long or time out; "is this an adopted store" is then a file test
+(the store's own `ctx-store.json` at the content root) rather than ctx's own answer, the one exception named above.
+The same version record
 also guards a plain `adopt`: one whose own kit is older than what the store last recorded refuses outright (exit
 2, naming both versions, `--replace` overrides) rather than hand the store an older release's types — ctx-store's
 own `init --upgrade` does not check a type's `version` against what is already installed (it diffs bytes and the
@@ -466,7 +470,9 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
   python3 ctx_adapter.py pin              # the sha `install` found at the pinned location, and whether it verified;
                                            # exit 1 when nothing is installed or the copy predates this check
-  python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
+  python3 ctx_adapter.py adopt [--check [--no-validate]] [--replace]  # ctx init with the kit's settings; --check
+                                           # only reports; --check --no-validate skips the whole-store `ctx
+                                           # validate` and only compares the recorded digest — cheap, never touches ctx
   python3 ctx_adapter.py mcp              # the ctx MCP server on the store; each write tool call names its own `actor`
                                            # (the caller's registered session name) — MCP_ACTOR (or CTX_ACTOR) is
                                            # only the floor for a write that names none
@@ -477,12 +483,16 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
 
 Exit codes: 0 ok (one line `ahead: …` when `--check` finds the store last adopted by a newer kit than this one) ·
 1 not installed · 2 usage or I/O error, one stderr line (a plain `adopt` also refuses this way, leaving the store
-untouched, when the record names a kit version newer than this one's — `--replace` overrides it) · 3 adopted, with
-validation findings · 4 not adopted (`adopt --check`) · 5 adopted, but a store file differs from the kit's — kept,
-one `differs:` line per file (`adopt --replace` takes the kit's); `--check` reports the same files from its own
-record rather than re-running `ctx init` · 6 adopted, but the store's recorded digest of the kit's settings/types
-is missing or stale, and no newer-kit record explains the gap (`adopt --check` only — a plain `adopt` records a
-fresh one). Precedence when more than one would apply: 3 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.
+untouched, when the record names a kit version newer than this one's — `--replace` overrides it; `--no-validate`
+without `--check` is the same usage error) · 3 adopted, with validation findings — a store that is also behind
+still prints its own `behind:` line alongside the findings, same exit code · 4 not adopted (`adopt --check`;
+`--no-validate` answers this from a `ctx-store.json` file test at the content root rather than asking ctx) · 5
+adopted, but a store file differs from the kit's — kept, one `differs:` line per file (`adopt --replace` takes the
+kit's); `--check` reports the same files from its own record rather than re-running `ctx init` · 6 adopted, but the
+store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap
+(`adopt --check` only — a plain `adopt` records a fresh one; `--no-validate` skips `ctx validate` entirely and only
+compares the record, so findings cannot occur there — 0/5/6 still answer, and it never touches ctx). Precedence
+when more than one would apply: 3 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.
 A hook always exits 0. Stdlib only.
 
 positional arguments:

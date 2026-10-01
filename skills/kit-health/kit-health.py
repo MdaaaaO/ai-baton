@@ -1279,6 +1279,14 @@ def ctx_pin_check(r: Report) -> None:
         r.add(OK, "engine", f"{base}, sha {pinned_sha} verified")
 
 
+def store_behind_warn(adapter: str) -> str:
+    """The one WARN text for a store whose recorded settings/types digest is stale or missing (`adopt --check`
+    exit 6) — also added alongside the findings WARN when exit 3's stdout carries a `behind: ` line too (a
+    store can be both at once; neither code hides the other, see `ctx_adapter.py`'s own precedence)."""
+    return (f"store behind: `.context/`'s settings or types predate the kit's — `{adapter} adopt` "
+            f"(records a fresh digest, brings the store's settings/types forward)")
+
+
 def ctx_store(r: Report) -> None:
     """Is `.context/` an adopted ctx store? Read-only (`ctx_adapter.py adopt --check`): the hooks validate, audit and
     deny direct writes only on an adopted store, so a store that is not is a finding with the one-time fix."""
@@ -1294,8 +1302,7 @@ def ctx_store(r: Report) -> None:
         r.add(WARN, "engine", f"store not adopted: `.context/` is not a ctx store, so the hooks neither validate nor route "
                               f"writes through ctx — `{adapter} adopt` (`ctx init`; a store file you changed is kept)")
     elif rc == 6:
-        r.add(WARN, "engine", f"store behind: `.context/`'s settings or types predate the kit's — `{adapter} adopt` "
-                              f"(records a fresh digest, brings the store's settings/types forward)")
+        r.add(WARN, "engine", store_behind_warn(adapter))
     elif rc == 5:
         kept = [ln[len("differs: "):].split(" — ", 1)[0] for ln in out.splitlines() if ln.startswith("differs: ")]
         named = ", ".join(f"`{f}`" for f in kept) if kept else "a store file"
@@ -1305,6 +1312,8 @@ def ctx_store(r: Report) -> None:
         found = [ln[len("finding: "):] for ln in out.splitlines() if ln.startswith("finding: ")]
         r.add(WARN, "engine", f"ctx validate: {len(found)} finding(s) in the store — fix each with the ctx tools:\n```\n"
                               + "\n".join(found[:10]) + "\n```")
+        if any(ln.startswith("behind: ") for ln in out.splitlines()):
+            r.add(WARN, "engine", store_behind_warn(adapter))  # findings (exit 3) must not hide a store that is also behind
     else:
         r.add(ERR, "engine", f"`ctx_adapter.py adopt --check` failed: {both(out, err)[-300:]}")
 

@@ -1096,6 +1096,86 @@ class AdoptBehind(Base):
         self.assertIn("warn: could not record the adopted digest under state/", r.stdout)
         self.assertIn("adopt --check will keep reading this store as behind", r.stdout)
 
+    def test_findings_and_a_stale_record_both_print(self):
+        """A store with a validation finding that is also behind must not have the `behind:` line swallowed just
+        because findings (exit 3) wins the exit code — both lines reach stdout, the precedence only picks which
+        exit code wins."""
+        r = self.adapter("adopt", "--check", KIT_CTX=str(self.fake), FAKE_CTX_RC="3",
+                          FAKE_CTX_ERR="SCHEMA_VIOLATION d/bad status\n")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)  # findings still win the exit code
+        self.assertIn("finding: SCHEMA_VIOLATION d/bad status", r.stdout)
+        self.assertIn("behind:", r.stdout)  # no record at all is also a stale record (see `_recorded_state`)
+
+
+class AdoptNoValidate(Base):
+    """`adopt --check --no-validate`: the same record comparison as a full `--check` (`behind`/`ahead`/`differs`),
+    but without ever running `ctx validate` — so this path needs no ctx executable at all and can never take
+    long or time out. "Is this an adopted store" is then a file test, the store's own `ctx-store.json` at the
+    content root, rather than asking ctx — the fake `ctx` in these tests never writes that file for real, so a
+    test that wants to look adopted writes a stand-in itself."""
+
+    def digest_path(self) -> Path:
+        return self.root / "state" / "ctx-adapter" / "adopted-kit.json"
+
+    def adopt_once(self) -> None:
+        """A full adopt against the fake ctx, so the store carries a current digest record — then a stand-in
+        `ctx-store.json` (the fake never writes store files; the no-validate path tests this one file test on
+        its own, never ctx's own `init`)."""
+        r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        (self.root / "ctx-store.json").write_text("{}\n", encoding="utf-8")
+
+    def test_without_check_is_exit_2(self):
+        r = self.adapter("adopt", "--no-validate")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--no-validate requires --check", r.stderr)
+
+    def test_no_ctx_store_json_is_not_adopted(self):
+        r = self.adapter("adopt", "--check", "--no-validate")  # no KIT_CTX either: must not need to resolve it
+        self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
+        self.assertIn("not adopted", r.stdout)
+
+    def test_never_calls_ctx_even_when_one_is_available(self):
+        """The cheap path does not just tolerate a missing ctx — it never calls it at all, proven against the
+        fake, which logs every call it receives."""
+        self.adopt_once()
+        before = len(self.calls())
+        r = self.adapter("adopt", "--check", "--no-validate", KIT_CTX=str(self.fake))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(len(self.calls()), before)
+
+    def test_matching_record_is_clean(self):
+        self.adopt_once()
+        r = self.adapter("adopt", "--check", "--no-validate")  # no KIT_CTX: ctx is not even installed
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_stale_record_is_behind(self):
+        self.adopt_once()
+        self.digest_path().unlink()  # a store adopted before this digest existed carries no record at all
+        r = self.adapter("adopt", "--check", "--no-validate")
+        self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
+        self.assertIn("behind:", r.stdout)
+
+    def test_a_kept_file_on_record_is_differs(self):
+        r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="kept: .ctx/types/epic.json\nok: 1 adopted\n")
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        (self.root / "ctx-store.json").write_text("{}\n", encoding="utf-8")
+        r = self.adapter("adopt", "--check", "--no-validate")
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("differs: .ctx/types/epic.json — kept (edited here); `ctx_adapter.py adopt --replace` "
+                      "takes the kit's", r.stdout)
+
+    def test_a_newer_recorded_version_is_ahead(self):
+        self.adopt_once()
+        state = json.loads(self.digest_path().read_text(encoding="utf-8"))
+        state["digest"] = "0" * 64  # also stale, so this is a genuine mismatch, not just a version bump
+        state["version"] = "99.0.0"  # newer than any real kit release
+        self.digest_path().write_text(json.dumps(state), encoding="utf-8")
+        r = self.adapter("adopt", "--check", "--no-validate")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ahead: the store was adopted by kit 99.0.0", r.stdout)
+        self.assertNotIn("behind", r.stdout)
+
 
 class MigrateTargetToleratesKeptExit(unittest.TestCase):
     """`make migrate`'s second line must not fail the whole recipe when `ctx_adapter.py adopt` exits 5 (a store

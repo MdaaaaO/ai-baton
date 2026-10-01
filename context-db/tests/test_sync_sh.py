@@ -551,10 +551,12 @@ class SyncCheckStoreBehind(unittest.TestCase):
         shutil.copy(KIT / "sync-check.sh", self.kit / "sync-check.sh")
         (self.kit / "context-db" / "bin" / "kb.py").write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
         self.rc_file = self.tmp / "adopt-check-rc"
+        self.argv_file = self.tmp / "adopt-check-argv"
         (self.kit / "context-db" / "bin" / "ctx_adapter.py").write_text(
             "#!/usr/bin/env python3\n"
             "import os, sys\n"
             f"p = {str(self.rc_file)!r}\n"
+            f"open({str(self.argv_file)!r}, 'w').write(' '.join(sys.argv[1:]))\n"
             "sys.exit(int(open(p).read().strip()) if os.path.exists(p) else 0)\n"
         )
         self.env = _env(self.tmp)
@@ -583,6 +585,12 @@ class SyncCheckStoreBehind(unittest.TestCase):
         for rc in (1, 3, 4, 5):
             self.set_adopt_check_rc(rc)
             self.assertNotIn("content store", self.check(), f"rc={rc}")
+
+    def test_passes_no_validate(self):
+        # the cheap record-only mode: sync-check runs on every session-register, so it must never ask for a
+        # whole-store `ctx validate` — the stub logs the argv it actually received
+        self.check()
+        self.assertEqual(self.argv_file.read_text(), "adopt --check --no-validate")
 
 
 if __name__ == "__main__":

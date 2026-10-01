@@ -491,6 +491,30 @@ class CtxStoreCheck(unittest.TestCase):
         self.assertEqual(level, "OK")
         self.assertIn("a store file was edited here and kept", line)
 
+    def run_ctx_store(self, rc: int, out: str) -> "Report":
+        kh = load_kit_health()
+        with mock.patch.object(kh, "sh", lambda cmd, **kw: (rc, out, "")):
+            r = kh.Report()
+            kh.ctx_store(r)
+        return r
+
+    def test_findings_with_a_behind_line_adds_both_warns(self):
+        # exit 3 (findings) must not hide a store that is also behind: both the findings WARN and the same
+        # `store behind` WARN exit 6 uses reach the report
+        r = self.run_ctx_store(3, "store /x: …\nfinding: SCHEMA_VIOLATION d/bad status: schema violation\n"
+                                   "behind: the store's settings or types predate the kit's — "
+                                   "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
+        self.assertEqual(r.counts["WARN"], 2)
+        self.assertIn("1 finding(s)", r.lines[-2])
+        self.assertIn("store behind", r.lines[-1])
+        self.assertIn("ctx_adapter.py adopt`", r.lines[-1])
+
+    def test_findings_without_a_behind_line_adds_only_the_findings_warn(self):
+        r = self.run_ctx_store(3, "store /x: …\nfinding: SCHEMA_VIOLATION d/bad status: schema violation")
+        self.assertEqual(r.counts["WARN"], 1)
+        self.assertIn("1 finding(s)", r.lines[-1])
+        self.assertNotIn("store behind", "\n".join(r.lines))
+
 
 class SecKitSyncDedup(unittest.TestCase):
     """§ 1 (`sec_kit`) forwards every `sync-check.sh` line as a WARN — except the content-store-behind one, which
