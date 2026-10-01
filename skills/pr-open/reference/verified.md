@@ -11,7 +11,7 @@ PR/commit reference instead of a bare assertion.
 **1. A declared command ran (`verify.repos.<owner/repo>.cmd` is set).** `verified.py run` prints this
 verbatim; paste it under the `## Verified` heading as-is:
 
-```
+````
 Command: `make -C context-db ci` (timeout 300s)
 Head: `a1b2c3d4e`
 Exit: `0`
@@ -19,12 +19,18 @@ Exit: `0`
 ```
 <last 15 lines of stdout+stderr, colour codes stripped, ≤ 1200 bytes>
 ```
-```
+````
 
 A non-zero `Exit:` (or `Exit: `timeout``) is not hidden or retried — `pr-open` opens the PR as a draft, keeps
 the failing tail, and says so in its one-line report. `check` refuses this shape only when the fenced block
 is empty — a `Command:`/`Exit:` pair with no pasted output is the same bare claim as free prose, just dressed
 up.
+
+The fence around the tail is longer than the longest backtick run the tail itself contains (minimum three
+backticks) — `verified.py run` picks it, so a stray ` ``` ` line in a tool's own output can never close the
+block early. `check` tracks the opening fence the same way and only treats a `## ` heading, the footer, or a
+diagram-plan marker as the section's end when it is outside a fence — one inside the tail (part of the
+command's real output) is left alone.
 
 **2. No declared command.** Cite every command the session actually ran, one line each, in
 `evidence_check.py`'s own `` `cmd` → `output` `` shape:
@@ -54,7 +60,11 @@ verified.py check <body-file | -> [--pr <owner/repo> <n>]
 
 1. **Bare claim.** Every line in the `## Verified` section (shape 2/3 above) or the fenced tail (shape 1)
    carries evidence; a body with no `## Verified` heading at all passes too — this tool checks claim shape,
-   never whether the section exists.
+   never whether the section exists. The section ends at the next `## ` heading, the body's mandatory
+   footer line (`` session `<name>` ``), an HTML comment line (the `<!-- diagram-plan: … -->` marker can
+   also follow the footer), or end of text — whichever comes first, blank lines ignored — so a `##
+   Verified` section that happens to be the body's last heading never swallows the footer into its claim
+   shape.
 2. **Stale head** (only with `--pr`, only when the section carries a `Head:` line — shape 1). Compares the
    recorded sha's first 9 characters against `gh api repos/<owner/repo>/pulls/<n> --jq .head.sha`'s own first
    9 — `pr-merge.sh`'s `head_of` display width. A mismatch prints `STALE <old> → <new>`, exit 3: the worktree

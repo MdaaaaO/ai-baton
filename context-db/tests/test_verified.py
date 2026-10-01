@@ -73,6 +73,19 @@ class RunCmd(unittest.TestCase):
         self.assertIn("Exit: `0`", block)
         self.assertIn("```\nok\n```", block)
 
+    def test_fence_for_picks_a_fence_longer_than_the_longest_run(self):
+        self.assertEqual(v.fence_for("plain output"), "```")
+        self.assertEqual(v.fence_for("a ``` line in the middle"), "````")
+        self.assertEqual(v.fence_for("````already fenced````"), "`````")
+
+    def test_render_block_tail_with_backticks_round_trips(self):
+        r = {"command": "make test", "head": "abc1234de", "exit": 0,
+             "tail": "before\n```\nnested fence\n```\nafter"}
+        block = v.render_block(r, 300)
+        # the chosen fence is longer than the ``` run in the tail, so it isn't closed early
+        start, section = v.verified_section(f"## Verified\n{block}\n")
+        self.assertEqual(v.bare_claims(start, section), [])
+
 
 class RunCli(unittest.TestCase):
     def _run(self, *args):
@@ -128,6 +141,29 @@ class CheckBareClaim(unittest.TestCase):
         start, section = v.verified_section(body)
         bad = v.bare_claims(start, section)
         self.assertEqual([c for _, c in bad], ["it works trust me"])
+
+    def test_cited_commands_body_ending_with_the_footer_passes(self):
+        # ## Verified is the body's last heading — the footer must not land inside the section.
+        body = "## Verified\n- `pytest -q` → `12 passed`\n\nsession `widget-session`\n"
+        start, section = v.verified_section(body)
+        self.assertEqual(v.bare_claims(start, section), [])
+        self.assertNotIn("session", section)
+
+    def test_cited_commands_body_with_diagram_marker_then_footer_passes(self):
+        body = ("## Verified\n- `pytest -q` → `12 passed`\n\n"
+                "<!-- diagram-plan: facets=skills dominant=skills -->\nsession `widget-session`\n")
+        start, section = v.verified_section(body)
+        self.assertEqual(v.bare_claims(start, section), [])
+        self.assertNotIn("session", section)
+        self.assertNotIn("diagram-plan", section)
+
+    def test_heading_inside_a_fenced_tail_does_not_end_the_section_early(self):
+        body = ("## Verified\nCommand: `make test`\nHead: `abc1234de`\nExit: `0`\n\n"
+                 "````\n## not a heading\nsession `not-a-footer`\n````\n\nsession `widget-session`\n")
+        start, section = v.verified_section(body)
+        self.assertEqual(v.bare_claims(start, section), [])
+        self.assertIn("## not a heading", section)
+        self.assertNotIn("session `widget-session`", section)
 
 
 class CheckCli(unittest.TestCase):

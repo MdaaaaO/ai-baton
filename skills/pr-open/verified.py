@@ -52,7 +52,9 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 VERIFIED_HEAD = "## Verified"
 NOT_VERIFIED_RE = re.compile(r"^Not verified locally:\s*\S")
 HEAD_LINE_RE = re.compile(r"^Head:\s*`([0-9A-Fa-f]{7,40})`", re.MULTILINE)
-FENCE_RE = re.compile(r"```[^\n]*\n(.*?)\n?```", re.DOTALL)
+FENCE_RE = re.compile(r"^(`{3,})[^\n]*\n(.*?)\n\1[ \t]*$", re.DOTALL | re.MULTILINE)
+FENCE_OPEN_RE = re.compile(r"^(`{3,})")
+FOOTER_RE = re.compile(r"^session `")  # the body's mandatory last line (SKILL.md step 1)
 
 
 # ── run ──────────────────────────────────────────────────────────────────────────────────────
@@ -99,22 +101,34 @@ def run_cmd(repo_dir: str, cmd: str, timeout: int) -> dict:
     return {"command": cmd, "head": head, "exit": exit_code, "tail": bound_tail(output)}
 
 
+def fence_for(text: str) -> str:
+    """A backtick fence longer than any backtick run in `text` (minimum 3), so a stray ``` line in the
+    tail can never close the block early."""
+    longest = max((len(m.group(0)) for m in re.finditer(r"`+", text)), default=0)
+    return "`" * max(3, longest + 1)
+
+
 def render_block(r: dict, timeout: int) -> str:
+    fence = fence_for(r["tail"])
     return "\n".join([
         f"Command: `{r['command']}` (timeout {timeout}s)",
         f"Head: `{r['head']}`",
         f"Exit: `{r['exit']}`",
         "",
-        "```",
+        fence,
         r["tail"],
-        "```",
+        fence,
     ])
 
 
 # ── check ────────────────────────────────────────────────────────────────────────────────────
 def verified_section(body: str) -> tuple[int, str] | None:
     """(the 1-based line the section's text starts on, that text) — None when the body carries no
-    `## Verified` heading at all."""
+    `## Verified` heading at all. The section ends at the next `## ` heading, the mandatory footer line
+    (`session `<name>``), an HTML comment line (a diagram-plan marker can follow the footer too), or end
+    of text — whichever comes first — so a `## Verified` section that is the body's last heading does not
+    swallow the footer. A line inside a fenced tail (shape 1) is never mistaken for one of those endings,
+    and blank lines never end the section themselves."""
     lines = body.splitlines()
     start = None
     for i, line in enumerate(lines):
@@ -124,10 +138,27 @@ def verified_section(body: str) -> tuple[int, str] | None:
     if start is None:
         return None
     end = len(lines)
+    in_fence = False
+    fence_len = 0
     for j in range(start, len(lines)):
-        if lines[j].startswith("## "):
+        line = lines[j]
+        stripped = line.strip()
+        if in_fence:
+            if re.fullmatch(rf"`{{{fence_len},}}", stripped):
+                in_fence = False
+            continue
+        if not stripped:
+            continue
+        m = FENCE_OPEN_RE.match(stripped)
+        if m:
+            in_fence = True
+            fence_len = len(m.group(1))
+            continue
+        if line.startswith("## ") or stripped.startswith("<!--") or FOOTER_RE.match(stripped):
             end = j
             break
+    while end > start and not lines[end - 1].strip():
+        end -= 1
     return start + 1, "\n".join(lines[start:end])
 
 
