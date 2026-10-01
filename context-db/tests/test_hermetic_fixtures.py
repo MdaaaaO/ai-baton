@@ -149,6 +149,21 @@ class HermeticEnvDisablesGitHousekeeping(unittest.TestCase):
             cfg = self._read_config(tmp, trust=tmp)
         self.assertEqual(cfg, {"gc.auto": "0", "maintenance.auto": "false"})
 
+    def test_a_commit_in_a_fixture_starts_no_background_maintenance(self):
+        """The effect itself, read from git's own trace: with the two knobs off, `git commit` runs neither
+        `git maintenance run --auto` nor `git gc --auto`. A git too old to start either passes trivially."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**hermetic_env(tmp), "GIT_TRACE": "1"}
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env, capture_output=True)
+            (repo / "f").write_text("x\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "f"], check=True, env=env, capture_output=True)
+            r = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "x"],
+                               check=True, env=env, capture_output=True, text=True)
+        self.assertNotIn("maintenance run", r.stderr)
+        self.assertNotIn("gc --auto", r.stderr)
+
 
 class ExtendGitConfigAppendsAfterHermeticEnv(unittest.TestCase):
     """A fixture that layers its own git config (signing, a remote url, …) on top of hermetic_env() must append
