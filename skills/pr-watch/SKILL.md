@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "21"
+  version: "22"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 ---
@@ -106,7 +106,8 @@ Don't read the PR yourself at full prefix when a line lands. Invoke the forked s
 `pr-event-brief <owner/repo> <n> "<event line>"` (Skill tool; it runs on the `triage` agent — Sonnet,
 low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line brief ending in one
 `ACTION:` (`REPLY+RESOLVE` / `FIX+PUSH` / `RE-REQUEST-BOT` / `UPDATE-BRANCH` / `MERGE` / `WAIT(<who>)` /
-`INVESTIGATE-CHECK`). **You perform the action** — replies, resolves, re-requests, merges post to
+`INVESTIGATE-CHECK` / `REDRAW`, the last one alongside one `DIAGRAMS: OK | DRIFT | NO MARKER` line on a
+real `HEAD MOVED` event). **You perform the action** — replies, resolves, re-requests, merges post to
 GitHub and stay on the main model. Skip the fork for `HEAD MOVED` (just re-request the bot; the
 watcher's own sync emits none — it re-requests the bot itself),
 `MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork

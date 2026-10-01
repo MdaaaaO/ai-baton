@@ -2,7 +2,7 @@
 name: pr-event-brief
 description: "Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN line a pr-watch Monitor emits; the main session then performs the action."
 metadata:
-  version: "11"
+  version: "12"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "github.review_bot"
@@ -72,6 +72,15 @@ re-request or merge anything — the main session does that.
 5. `repos/$repo/commits/<head.sha>/check-runs` → not-green completed runs by name (a check
    cancelled right after a draft toggle is normal; say so).
 6. Read the `pr-watch` skill § "Rules this encodes" only if you need the merge gates.
+7. **Only when `$event` is a real `HEAD MOVED to <sha>` line** — never for `SYNCED with <base>` (the
+   watcher's own branch sync, which prints no `HEAD MOVED` line at all, so this step never applies to it;
+   do not run the check or invent a verdict just because a sync moved the head): run
+   `python3 $BATON/skills/pr-open/diagram-plan.py --pr $repo $pr --check` and read its one stdout line —
+   `OK <plan>` → `DIAGRAMS: OK`; `NO MARKER — …` → `DIAGRAMS: NO MARKER`; `DRIFT <old> → <new>` →
+   `DIAGRAMS: DRIFT` (keep `<old> → <new>` for the `WHY` slot); `MALFORMED MARKER — <bad>; fresh plan:
+   <new>` → `DIAGRAMS: DRIFT` too (`docs/diagrams.md` folds a malformed marker into drift — keep `<bad> →
+   <new>` for `WHY`). The exit code is informational only; the drift, no-marker and malformed cases all
+   exit 3 alike, so read the printed line, not the code.
 
 ## Answer (exactly this shape, ≤10 lines — the code block ONLY, no preamble, no summary after it)
 
@@ -81,9 +90,13 @@ EVENT: <the event line, trimmed>
 BOT: <n/a | 🟢/🟡/🔴 "<clause>" on <sha7> | none on this head | stale (on <sha7>) | run without Assessment | unverified (event says: …)>
 THREADS: <k unresolved> — <id by login: gist> ; …
 HUMANS: <login STATE, …> | none
-ACTION: <REPLY+RESOLVE | FIX+PUSH | RE-REQUEST-BOT | UPDATE-BRANCH | MERGE | WAIT(<who/what>) | INVESTIGATE-CHECK>
+DIAGRAMS: <OK | DRIFT | NO MARKER>
+ACTION: <REPLY+RESOLVE | FIX+PUSH | RE-REQUEST-BOT | UPDATE-BRANCH | MERGE | WAIT(<who/what>) | INVESTIGATE-CHECK | REDRAW>
 WHY: <one sentence, the single decisive fact>
 ```
+
+`DIAGRAMS:` is the brief's one optional line: include it only for a real `HEAD MOVED to <sha>` event
+(Gather step 7) and omit it entirely for every other event, `SYNCED with <base>` included.
 
 The main session performs `ACTION` directly only when standing go already covers it; otherwise the
 `ACTION` becomes the recommended option of the carousel question it asks the user (`docs/carousel.md`).
@@ -95,7 +108,10 @@ existing FIX+PUSH / REPLY+RESOLVE rules below decide instead, exactly as they wo
 when `reviewDecision` APPROVED + zero unresolved threads + `clean`, **and** (bot configured: 🟢 on the
 head) or (`BOT: n/a`: no bot condition at all); `WAIT(<login>)` when a
 named human must act; `INVESTIGATE-CHECK` for a real red check; `FIX+PUSH` when the bot or a human
-asked for a code change. If a fact could not be fetched, write `unverified` in that slot. A `BOT: n/a`
+asked for a code change; `REDRAW` whenever `DIAGRAMS:` reads `DRIFT` on a real `HEAD MOVED` event —
+this overrides every other rule above for that event (`docs/diagrams.md`'s contract), and `WHY` then
+names the check's own `<old> → <new>` (or `<bad> → <new>` on a malformed marker) rather than a fresh
+sentence. If a fact could not be fetched, write `unverified` in that slot. A `BOT: n/a`
 slot means this machine has no review bot at all — never `RE-REQUEST-BOT`, the merge gate is CI + human
 review only. An `unverified` BOT slot
 on a `BOT REVIEW on <sha>` event whose `<sha>` (the watcher's short prefix) is a prefix of step 1's `head.sha` —
