@@ -91,7 +91,7 @@ several machines or several people.
 4. What sessions learn goes into `.context/` as rows of a markdown DB with a generated index.
 5. Sessions register in a live registry and hand off through one context doc per initiative.
 6. Kit changes are PR-only. Each machine picks up a release itself: a clone's SessionEnd hook holds the new tag
-   with a preview and `make claude_sync` applies it, a plugin runs `claude plugin update`.
+   with a preview and `make claude_sync` applies it, a plugin install runs `claude plugin update`.
 
 ## Stays healthy on every machine
 
