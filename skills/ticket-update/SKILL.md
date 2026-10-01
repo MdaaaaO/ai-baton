@@ -2,7 +2,7 @@
 name: ticket-update
 description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "16"
+  version: "17"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
@@ -28,7 +28,7 @@ sections that have something new. Never restate a prior comment.
 🟢 2026-09-14 — <status headline>
 
 **Win** — what landed (linked PR / commit / query result)
-**Pivot** — ONLY when direction changed, and why   ← the "indication" marker; scan for these
+**Pivot** — **Was** … / **Now** … / **Why** …   ← ONLY when direction changed; the "indication" marker
 **Next** — the next concrete step + who owns it
 **Verified** — <claim> · <evidence>
 ```
@@ -36,8 +36,9 @@ sections that have something new. Never restate a prior comment.
 - **Omit empty sections.** A quiet update may be just `🟢 … — **Next** …`. Don't scaffold blanks.
 - **One line per section**; a bullet list only when there is genuinely >1 item; a Markdown table
   only when comparing numbers (counts / diffs / days); `code` for identifiers.
-- **Pivot is the trace anchor** — every change of direction gets one, with the *why*, so a reader
-  can scan *where* the work turned without reading every comment.
+- **Pivot is a delta, not prose — `**Was** — … / **Now** — … / **Why** — …`,** on every ticket, sketch
+  or not. *Why* cites the ledger line (`docs/carousel.md` § After the answer, *Key decisions & gotchas*)
+  when the pivot follows a recorded decision, else one clause — a reader scans *where* it turned.
 - **Pivot redraws the sketch — only when a marker is there.** The ticket carries a sketch marker
   (`docs/diagrams.md` § The sketch marker) **and** this Pivot moved WHERE it sits or WHAT its shape
   is → the Pivot section adds the before → after rendering (`docs/diagrams.md` § Rendering: Mermaid
@@ -52,8 +53,7 @@ sections that have something new. Never restate a prior comment.
   <evidence>` per claim. `<evidence>` is a command with its output line (`` `cmd` → `output` ``), a
   URL, or a PR / commit reference (`#<n>`, `<owner>/<repo>#<n>`, a commit hash, or a PR URL) —
   `context-db/bin/evidence_check.py` checks that shape is there, never that the claim is true.
-- **Links clickable** everywhere — keys rendered from `tracker.url_template`, PRs by full URL.
-  Mentions follow the adapter.
+- **Links clickable** everywhere — keys rendered from `tracker.url_template`, PRs by full URL; mentions follow the adapter.
 - **Status glyphs, one leading:** 🟢 progressing · 🟡 waiting/soft-blocked · ⛔ blocked · 🔵 pivot · ✅ done.
 
 ## Cadence — post landed changes, not steps

@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "21"
+  version: "22"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -113,7 +113,13 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       abandoned — and it is worth a one-line marker for a reader of the raw file, `NEXT` may hold a "No
       successor: …" note instead of being omitted; either way it is not a real prompt, so the Ended table
       never lists the session for it (`gen_sessions.py`'s `has_next_prompt`).
-    - **Something to hand over:** draft the prompt a fresh session on this lane should be started with:
+    - **Something to hand over:** draft the prompt a fresh session on this lane should be started with.
+      It opens with `### Since last handoff` — decisions taken (one pointer to the ledger lines quoted
+      below, not a second copy), PRs landed, open assumptions (the session file's `## Assumptions` list, when
+      present), and what moved in the epic doc's `## Architecture` section (when the doc has one) — built
+      from the activity list (`make session-activity`, step 8) and the ledger lines already quoted below,
+      no extra turn. A session with no predecessor handoff to diff against writes `first handoff` instead
+      of the block. The block sits above the cap. Then the full state as today:
       ≤12 plain lines (no code fence inside), covering the session `NAME` to register (successor of `<this
       name>`), the epic and tickets *this session* owned, the files to read first (context doc sections,
       exports), what it owns and must NOT touch, the first task with its ticket, open follow-ups (drafts by
