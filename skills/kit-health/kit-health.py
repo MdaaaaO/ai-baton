@@ -21,8 +21,9 @@ Sections:
                   symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell,
                   the auto-compact backstop (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`),
                   free disk on `/`/`$HOME`/the scratch root with the usual build/package caches named above
-                  DISK_WARN_PCT; one legacy line: a leftover `.claude/profiles/` clone (the layer retired
-                  2026-09-25) → delete it
+                  DISK_WARN_PCT; a stale `$CLAUDE_ENV_FILE` (a `BATON`/`CLAUDE_PROJECT_DIR` path that no longer
+                  exists, or an `export BATON=` line outside the session-env block); one legacy line: a leftover
+                  `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
                   scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
                   and the pinned `ctx --version` answers the API the adapter expects; an environment's
@@ -40,6 +41,7 @@ import functools
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1014,12 +1016,54 @@ def sandbox_detected(markers: list) -> bool:
     return False
 
 
+_ENV_FILE_EXPORT_RE = re.compile(r"^export (BATON|CLAUDE_PROJECT_DIR)=(.*)$")
+
+
+def env_file_wiring(r: Report) -> None:
+    """`$CLAUDE_ENV_FILE` gone stale: a `BATON`/`CLAUDE_PROJECT_DIR` line whose path no longer exists (a
+    workspace or install that moved or was removed since the SessionStart hook last wrote it), or an `export
+    BATON=` line sitting outside the `kit_profile.SESSION_ENV_BEGIN`/`SESSION_ENV_END` block the hook replaces
+    (residue from before the hook switched to replacing that block in place, which the block-replace never
+    touches). Unset, missing or unreadable: no finding — never the file's other content, which may hold secrets."""
+    path = os.environ.get("CLAUDE_ENV_FILE", "").strip()
+    if not path:
+        return
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return
+    inside = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == kit_profile.SESSION_ENV_BEGIN:
+            inside = True
+            continue
+        if stripped == kit_profile.SESSION_ENV_END:
+            inside = False
+            continue
+        m = _ENV_FILE_EXPORT_RE.match(stripped)
+        if not m:
+            continue
+        var, raw = m.group(1), m.group(2)
+        try:
+            value = shlex.split(raw)[0] if raw.strip() else ""
+        except ValueError:
+            value = raw
+        if value and not Path(value).exists():
+            r.add(WARN, "machine", f"`$CLAUDE_ENV_FILE` exports `{var}={value}`, which does not exist — stale "
+                  "session env file, start a new session to let the SessionStart hook refresh it")
+        if var == "BATON" and not inside:
+            r.add(WARN, "machine", f"`$CLAUDE_ENV_FILE` carries `export BATON={value}` outside the session-env "
+                  "block — delete the stray line, the hook only replaces the block")
+
+
 def sec_machine(r: Report) -> str:
     r.h("4 · This machine — wiring")
     envname = kit_profile.name()
     identity_wiring(r)
     seed_wiring(r)
     autocompact_wiring(r)
+    env_file_wiring(r)
     if not (ENV / "config.json").is_file():
         r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):
