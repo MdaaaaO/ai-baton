@@ -112,9 +112,11 @@ Usage:
                                                  (N overrides every ttl); --check = exit 3 when any
   kb.py migrate [--check | --off]               → bring the store up to the kit's schema: renamed system
                                                  flags moved (value kept), missing flags added (seeded from
-                                                 their legacy flag, else false), rows under a renamed kind
-                                                 (`slack.channels` → `slack.channel`) moved; prints the
-                                                 skills now off here; --check = dry run, exit 3 when pending; --off = only that list
+                                                 their legacy flag, else false), missing top-level config keys
+                                                 added (a release's blank default, skipping OPTIONAL_CONFIG_KEYS),
+                                                 rows under a renamed kind (`slack.channels` → `slack.channel`)
+                                                 moved; prints the skills now off here; --check = dry run, exit 3
+                                                 when pending; --off = only that list
   kb.py init --blank                           → create an empty store (never overwrites anything)
   kb.py init --personal                        → blank store + the zero-config GitHub-only fill: identity
                                                  from `gh api user`, tracked repos from the workspace clones,

@@ -116,7 +116,8 @@ def check_env_store(errors: list[str]) -> str:
         return ""
     # optional keys: absent means the kit default (commit_style.py falls back to `conventional`)
     for k in sorted(want_keys - set(cfg) - {"environment"} - OPTIONAL):
-        errors.append(f"{rel}: missing top-level key '{k}' (see environment-template/config.json)")
+        errors.append(f"{rel}: missing top-level key '{k}' — run `python3 $BATON/context-db/bin/kb.py migrate` "
+                      "(see environment-template/config.json)")
     envname = str(cfg.get("environment") or "").strip()
     if not envname:
         errors.append(f"{rel}: 'environment' must name this environment (`kb.py config-set environment <name>`)")
