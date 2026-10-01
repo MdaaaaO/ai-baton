@@ -2,7 +2,7 @@
 name: ticket-pickup
 description: "Verifies a ticket's Sizing line against the default branch, decides main session vs a background sub-agent and model, sizes a missing line, and claims the ticket. Use when picking up, starting or resuming a tracker ticket. Not for creating one (`ticket-open`) or posting a progress update (`ticket-update`)."
 metadata:
-  version: "4"
+  version: "5"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
   facts: "tracker.kind"
@@ -39,11 +39,16 @@ evidence lines the ticket cites and the state of any Plan steps against the curr
 - The ticket's shape changed enough that the original sizing no longer fits (e.g. every Plan step but one is
   already done) → re-size using the table in `docs/delegation.md` § Sizing, and say why the call changed.
 
-**Sketch check — beside the Sizing verification** (`docs/diagrams.md` § The sketch marker). Run
-`python3 $BATON/skills/ticket-open/sketch.py check <ticket text> --repo-dir <repo>` and put its line in the
-pickup report: `SKETCH OK` — say so; `MOVED <path>` — say the sketch must be redrawn before the build
-starts; `STALE SKETCH <old>→<new>` or `MALFORMED SKETCH <line>` — say so too, same as a `MOVED` result;
-`NO SKETCH` — nothing in the report.
+**Sketch check — beside the Sizing verification** (`docs/diagrams.md` § The sketch marker). `check`
+defaults `--base` to `origin/main` — on a repo whose default branch differs, name it explicitly:
+`gh repo view <owner/repo> --json defaultBranchRef -q .defaultBranchRef.name` (or `git symbolic-ref
+refs/remotes/origin/HEAD` in `--repo-dir`). Run
+`python3 $BATON/skills/ticket-open/sketch.py check <ticket text> --repo-dir <repo> --base
+origin/<default branch>` and put its line in the pickup report: `SKETCH OK` — say so; `MOVED <path>` —
+say the sketch must be redrawn before the build starts; `STALE SKETCH <old>→<new>` or
+`MALFORMED SKETCH <line>` — say so too, same as a `MOVED` result; `NO SKETCH` — nothing in the report.
+Exit 1 (a `git` read failed) → report the `FAIL` line from stderr; never read the empty stdout as
+`NO SKETCH`.
 
 ## 3. Decide — main session or a worker, and the model
 

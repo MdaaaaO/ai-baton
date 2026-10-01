@@ -261,8 +261,15 @@ class TicketUpdateRedrawRule(unittest.TestCase):
         self.assertIn("sketch marker", self.body)
         self.assertIn("before", self.body)
         self.assertIn("after", self.body)
-        self.assertIn("sketch.py stamp", self.body)
+        self.assertIn(
+            "sketch.py stamp --repo-slug <owner/repo> --paths <entry>[,<entry>…]\n"
+            "  --components <name>[,<name>…]",
+            self.body,
+        )
         self.assertIn("docs/diagrams.md", self.body)
+
+    def test_skill_says_restamp_uses_the_pivots_new_placements(self):
+        self.assertIn("the pivot's NEW placements", self.body)
 
     def test_skill_says_no_marker_means_no_redraw(self):
         self.assertIn("No marker on the ticket", " ".join(self.body.split()))
@@ -302,6 +309,16 @@ class TicketPickupSketchCheckLines(unittest.TestCase):
 
     def test_skill_says_moved_blocks_the_build(self):
         self.assertIn("redrawn before the build", self.body)
+
+    def test_skill_names_the_base_flag_for_a_non_main_default_branch(self):
+        squeezed = " ".join(self.body.split())
+        self.assertIn("defaultBranchRef", squeezed)
+        self.assertIn("--base origin/<default branch>", squeezed)
+
+    def test_skill_says_exit_1_reports_fail_not_no_sketch(self):
+        squeezed = " ".join(self.body.split())
+        self.assertIn("report the `FAIL` line from stderr", squeezed)
+        self.assertIn("never read the empty stdout as `NO SKETCH`", squeezed)
 
 
 if __name__ == "__main__":
