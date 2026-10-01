@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "25"
+  version: "26"
   updated: "2026-10-01"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -49,8 +49,8 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    (`ctx_str_replace`) and add the next step if one emerged (`ctx_insert`) (an environment without that
    file skips this step).
 3. **Task-specific docs** — if you did a PR review, update `.context/pr-reviews/<repo>.md`
-   and its README; if on-call, append `.context/on-call/rotations/<week>.md`; if it's Thursday and
-   you're the self-assessment session, append `.context/self-assessment/weeks/<week>.md` — through the ctx
+   and its README; if on-call, append `.context/on-call/rotations/<week>.md`; if you're the
+   self-assessment session, append `.context/self-assessment/weeks/<week>.md` — through the ctx
    tools as in step 1. New docs are created with `make -C $BATON/context-db new TYPE=… DOMAIN=… SLUG=…`.
 4. **Memory** — only if a *situational* fact worth recalling emerged (not an always-on rule — those
    go to `WORKSPACE.md` § Rules). Write or update the note **and** add or fix its one-line entry in
@@ -74,16 +74,16 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    and treat the list as a checklist: every item is reflected in the context doc above or named here as
    deliberately left out; no transcript → one line saying so, then flush from memory as before. The same
    block lands under `## What this session did` at `session-end`. Then the stats (owner decision,
-   2026-09-19: "stats for geeks"): run
-   `make -C $BATON/context-db session-stats` (zero model turns; derived from the transcript via
-   `$CLAUDE_CODE_SESSION_ID`) and put:
-   - the **one-liner** (the `stats:` value the registry row carries: turns · hours · ctx peak/avg ·
-     cache-read · out · ~$ · compactions · tool calls · PRs · tickets · sign jobs · drafts) into the
-     context doc's wind-down **Session log** entry;
-   - the **block** (window, prompts, token split, spend basis, top tools, delegation, PR + ticket lists,
-     hand-offs) is written for you under `## Session stats` in `.context/sessions/<name>.md` by
-     `session-end` (step 9), together with one row in `.context/sessions/_ledger.md` — don't paste it
-     twice. Add one line of *judgment* next to the numbers in the context doc (what drove the cost: fat
+   2026-09-19: "stats for geeks"). Run `make -C $BATON/context-db session-stats` — it prints **the
+   block** (window, prompts, token split, spend basis, top tools, delegation, PR + ticket lists,
+   hand-offs; zero model turns, derived from the transcript via `$CLAUDE_CODE_SESSION_ID`), which lands
+   for you under `## Session stats` in `.context/sessions/<name>.md`, together with one row in
+   `.context/sessions/_ledger.md`, when `session-end` runs (step 9) — don't paste it twice. Then put:
+   - the **one-liner** — already on your registry row's `stats:` field (turns · hours · ctx peak/avg ·
+     cache-read · out · ~$ · compactions · tool calls · PRs · tickets · sign jobs · drafts; kept current
+     by every register/touch/end, no extra command needed) — into the context doc's wind-down
+     **Session log** entry;
+   - one line of *judgment* next to the numbers in the context doc (what drove the cost: fat
      prefix × watcher events, a CI-log read at full prefix, etc.) — the numbers alone don't teach the
      next session anything.
    Turns are deduped API requests; spend is a per-model list-price estimate and, since 2026-09-22, the
