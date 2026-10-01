@@ -305,9 +305,9 @@ def clone_channel_report(r: Report) -> None:
 
     Also reads `.sync-status` for a state kit-health has no other way to learn: an `ok` sync whose detail names
     itself `unverified (reason)` means the last sync applied a release without being able to check its manifest
-    (e.g. offline or no `gh` — sync.sh writes that word, not this skill). Neither sync.sh nor sync-check.sh say anything
-    about verification, so this is kit-health's own WARN, naming the quoted reason and the `gh attestation
-    verify …` command (docs/contributing.md § Releases) to check by hand."""
+    (e.g. offline or no `gh` — sync.sh writes that word, not this skill). sync.sh says so once, in the output of the
+    run that applied it, and sync-check.sh does not warn on it, so this is kit-health's own WARN, naming the quoted
+    reason and the `gh attestation verify …` command (docs/contributing.md § Releases) to check by hand."""
     rc, out, _ = sh(["git", "-C", str(KIT), "config", "--get", "kit.channel"])
     channel = "`main` (tracks origin/main directly)" if rc == 0 and out.strip() == "main" else "release tags (default)"
     installed = installed_release_clone()
