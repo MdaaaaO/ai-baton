@@ -10,14 +10,36 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
 | `PR_WATCH_SYNC_COOLDOWN` | `3600` | minimum seconds between two syncs of the same PR |
 | `PR_WATCH_KNOWN_RED` | unset | extended regex; mutes a `CHECK NOT GREEN` whose failure annotations all match a cause you already know about |
 | `PR_WATCH_REPLAY` | unset | `1` re-emits the current bot verdict / `CHECK NOT GREEN` on start; by default a re-arm on a head the state dir already knows is silent about what it already reported |
+| `PR_WATCH_RETRY_DELAY` | `2` (seconds) | delay between the 3 attempts a `gh` read gets before it is reported as `LOOKUP FAILED` (tests set it near 0) |
+| `PR_WATCH_BACKOFF_MAX` | `86400` (seconds) | cap on the interval between two repeats of the same alarm — an unresolved `CHECK NOT GREEN` on an unchanged head, a `LOOKUP FAILED` that lasts |
+| `PR_WATCH_NOW` | unset | overrides "now" for the backoff clock and the auto-sync cooldown timer (tests only) |
 
-- **`CHECK NOT GREEN` fires at most once per head** (reset whenever the head moves) and only once the suite has
-  settled — no check run still `queued`/`in_progress` — listing every failing check at that moment.
-  Before 2026-09-22 it re-fired whenever the *set* of failing names changed, i.e. once per check that
-  finished red — ~10 wake-ups for one cause. The rollup mixes check runs with legacy commit statuses (a
-  required status context an external CI posts); both count toward pending and toward red — a status
-  context carries no `status`/`conclusion` field of its own, only a `state`, which the watcher maps to
-  the same tri-state a check run's `conclusion` uses.
+- **`CHECK NOT GREEN` is first announced at most once per head** (reset whenever the head moves) and only
+  once the suite has settled — no check run still `queued`/`in_progress` — listing every failing check at
+  that moment; see below for the backoff that repeats it on an unchanged head. Before
+  2026-09-22 it re-fired whenever the *set* of failing names changed, i.e. once per check that finished
+  red — ~10 wake-ups for one cause. The rollup mixes check runs with legacy commit statuses (a required
+  status context an external CI posts); both count toward pending and toward red — a status context
+  carries no `status`/`conclusion` field of its own, only a `state`, which the watcher maps to the same
+  tri-state a check run's `conclusion` uses.
+- **A failed lookup is never read as red or green.** Every `gh` read an event depends on — PR info,
+  behind-by, the reviews (read once per cycle for the sync's approval count, the bot verdict and the
+  review listing), the check-status rollup, and the two comment listings (review comments, issue
+  comments) — gets 3 attempts, `PR_WATCH_RETRY_DELAY` apart. A read still failing after
+  that prints one `PR N LOOKUP FAILED: <what> — <error>` line instead of deriving a `CHECK NOT GREEN`,
+  a BEHIND alarm or "nothing new" from data that was never read; the step that needed it is skipped for
+  the cycle and tried again on the next. One line per `<what>` per PR: a changed error, or a recovery
+  followed by a new failure, announces again; the same failure lasting announces again as
+  `… (still failing)` on the backoff below, so an outage is neither one line per cycle nor silent for good.
+- **A repeated alarm backs off additively.** A `CHECK NOT GREEN` on an unchanged head, and a
+  `LOOKUP FAILED` that lasts, repeat after 1h, then 3h, then 5h … +2h each time, capped by
+  `PR_WATCH_BACKOFF_MAX` (default 86400s — once a day; a value below 3600 shortens the first window
+  too); the first announcement is immediate. Before
+  this a red head was announced once and never again, and before 2026-09-22 on every 120s window.
+  A due `CHECK NOT GREEN` reads the checks again before it repeats: it lists what is red at that
+  moment, is dropped (a stderr note) when the checks went green, and waits while a re-run is still in
+  progress. `PR_WATCH_KNOWN_RED`'s mute is unchanged: a muted head never starts the clock, so it stays
+  silent (stderr only, once) for as long as it is muted.
 - **`PR_WATCH_KNOWN_RED=<extended-regex>`** — when the red is a known, external cause, pass a regex over
   the *failure annotations*. Before emitting, the watcher fetches `check-runs/<id>/annotations` for every
   failing check run; it suppresses the line (stderr note only) **only if** each failing run has at least
