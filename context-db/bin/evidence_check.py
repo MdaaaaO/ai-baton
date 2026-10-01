@@ -8,9 +8,12 @@ one of three shapes:
 
   - a command with its output line: `` `cmd` → `output` `` (backticked command, a `→`, then the output);
   - an http(s) URL;
-  - a PR / commit reference: `#<n>` / `<owner>/<repo>#<n>` not glued to more word text (`#1 priority` is bare,
-    `#12` and `#12.` are cited), or a 7-40 char hex commit that has at least one a-f letter (an all-digit run
-    like `1500000` is bare), or a PR URL.
+  - a PR / commit reference: `#<n>` / `<owner>/<repo>#<n>` not glued to more word text — the digits may be
+    followed by whitespace, punctuation, or nothing at all, just never another letter/digit/underscore
+    (`#12 merged`, `#12.`, `#1 priority` are cited; `#12abc` is bare, since the digits run straight into a
+    letter), or a 7-40 char hex commit with at least one digit AND at least one a-f letter (an all-digit run
+    like `1500000` is bare, and so is a hex-looking English word like `defaced`, which has no digit), or a PR
+    URL.
 
 It checks that an item of one of these shapes is present, never that the claim is true. A file with no
 `**Verified**` section passes (the section stays optional, as `ticket-update` has it today); a file whose
@@ -43,10 +46,12 @@ CLAIM_SEP = " · "  # evidence lives only in the tail after this — never in th
 # unless the author put it after the separator on purpose.
 CMD_OUTPUT = re.compile(r"`[^`\n]+`\s*→\s*\S")        # `cmd` → output
 URL = re.compile(r"https?://\S+")                     # URL (a PR URL is one too)
-# #<n> or owner/repo#<n> — not glued to more word text: end-of-tail, trailing whitespace, or punctuation only.
-ISSUE_REF = re.compile(r"(?:[\w.-]+/[\w.-]+)?#\d+(?=\s*\Z|[.,;:!?)\]])")
-HASH = re.compile(r"\b[0-9A-Fa-f]{7,40}\b")           # a commit hash — must contain a letter, checked below
+# #<n> or owner/repo#<n> — not glued to more word text: anything but another letter/digit/underscore after
+# the digits is fine (end-of-tail, whitespace, punctuation all count).
+ISSUE_REF = re.compile(r"(?:[\w.-]+/[\w.-]+)?#\d+(?!\w)")
+HASH = re.compile(r"\b[0-9A-Fa-f]{7,40}\b")           # a commit hash candidate — digit+letter mix checked below
 HASH_LETTER = re.compile(r"[A-Fa-f]")
+HASH_DIGIT = re.compile(r"\d")
 HEAD_LEN = 72
 
 
@@ -66,7 +71,10 @@ def has_evidence(claim: str) -> bool:
         return False
     if CMD_OUTPUT.search(tail) or URL.search(tail) or ISSUE_REF.search(tail):
         return True
-    return any(HASH_LETTER.search(m.group()) for m in HASH.finditer(tail))
+    return any(
+        HASH_LETTER.search(m.group()) and HASH_DIGIT.search(m.group())
+        for m in HASH.finditer(tail)
+    )
 
 
 def claim_lines(text: str) -> list[tuple[int, str]]:

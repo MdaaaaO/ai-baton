@@ -65,11 +65,35 @@ class EvidenceOnlyAfterSeparator(unittest.TestCase):
         self.assertEqual(ec.missing_evidence(text), [])
 
     def test_hash_sharp_glued_to_a_word_is_bare(self):
-        text = "**Verified** — ranking · #1 priority\n"
-        self.assertEqual([c for _, c in ec.missing_evidence(text)], ["ranking · #1 priority"])
+        # `#12abc` runs the digits straight into a letter — glued, so still bare.
+        text = "**Verified** — ranking · #12abc\n"
+        self.assertEqual([c for _, c in ec.missing_evidence(text)], ["ranking · #12abc"])
 
     def test_hash_sharp_at_end_is_cited(self):
         text = "**Verified** — ranking · #12\n"
+        self.assertEqual(ec.missing_evidence(text), [])
+
+    def test_hash_sharp_followed_by_a_space_and_more_text_is_cited(self):
+        # Flipped from an earlier version of this test: `#1 priority` is a ref followed by a space, not glued
+        # to word text, so the docstring's own rule ("not glued to more word text") makes it cited.
+        text = "**Verified** — ranking · #1 priority\n"
+        self.assertEqual(ec.missing_evidence(text), [])
+
+    def test_hash_sharp_followed_by_a_word_then_punctuation_is_cited(self):
+        text = "**Verified** — shipped · PR #12 merged\n"
+        self.assertEqual(ec.missing_evidence(text), [])
+
+    def test_hash_sharp_in_parens_is_cited(self):
+        text = "**Verified** — shipped · #12 (merged)\n"
+        self.assertEqual(ec.missing_evidence(text), [])
+
+    def test_hex_only_english_word_is_bare(self):
+        # 7+ hex-only letters with no digit reads as an English word, not a commit hash.
+        text = "**Verified** — looks ok · defaced\n"
+        self.assertEqual([c for _, c in ec.missing_evidence(text)], ["looks ok · defaced"])
+
+    def test_short_hash_with_digit_and_letter_is_cited(self):
+        text = "**Verified** — rollback · 1a2b3c4\n"
         self.assertEqual(ec.missing_evidence(text), [])
 
 
