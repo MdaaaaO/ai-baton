@@ -6,6 +6,11 @@ contract every surface follows. A skill links here and adds only its own step. T
 (`diagram-plan.py`, its facets, exit codes and block rules) lives in
 [`skills/pr-open/reference/diagrams.md`](../skills/pr-open/reference/diagrams.md), and this page does not repeat it.
 
+**Status.** The scripts and status lines this page specifies are planned: each lands with the child issue named
+against it in the zoom table's Owner column (#384 `sketch.py stamp`, #385 `sketch.py check`, #386
+`diagram-plan.py --sketch`, …). Until a child lands, the surface it covers keeps its current behaviour; a tool or
+line marked `(#<child>)` below does not exist on this head.
+
 ## The four questions
 
 | Question | Answers | Form |
@@ -35,7 +40,7 @@ except the PR, which keeps its own plan.
 | Pickup | `ticket-pickup` | reads only | the ticket has a sketch marker | nothing | `SKETCH OK` / `MOVED <path>` | #385 |
 | Pivot | `ticket-update` | before → after of the sketch | a marker exists **and** the pivot moved a placement or a shape | the redrawn Sketch with a new marker | the new marker supersedes the old | #385 |
 | Close | `ticket-close` | as-built | the ticket has a sketch marker | nothing: names the PR's diagrams | `As-built: #<pr> — Sketch: matches \| differs (…)` | #385 |
-| PR | `pr-open` | delta | the plan from `diagram-plan.py`, its SKIP included; WHY on feature PRs only | the planned blocks + WHY table | plan marker, `Sketch:` line, `LINT` warnings | #386 |
+| PR | `pr-open` | delta | the plan from `diagram-plan.py`, its SKIP included; WHY on feature PRs only | the planned blocks + WHY table | plan marker, `Sketch:` line (#386), `LINT` warnings | #386 |
 | Watch | `pr-event-brief` | reads only | a HEAD MOVED event on the session's PR | nothing | `DIAGRAMS: OK \| DRIFT \| NO MARKER` | #388 |
 | Review | `pr-review` | the PR's delta, read | a finding only above `deep_lines` or on a contract change | a ≤ 10-step `sequenceDiagram` in a flow STOP whose prose would need > 3 sentences | `WBD: covered \| gap <question>` | #387 |
 | Epic doc | `_templates/epic.md` | living map | optional `## Architecture` section, absent from the store type's required list | WHERE map + model lineage, plain rendering | — | #389 |
@@ -50,11 +55,11 @@ Where a script emits a line, the model adds only the text after `—`; it never 
 | Line | Where | Emitted by |
 |---|---|---|
 | `Sketch: SKIP (<reason>)` | ticket, in place of the Sketch; the reason is the Sizing model plus a few words, e.g. `sonnet-sized, specified fix` | the model |
-| `SKETCH OK` | pickup report: every placed path is still on the default branch | `sketch.py check` |
+| `SKETCH OK` | pickup report: every placed path is still on the default branch | `sketch.py check` (#385) |
 | `MOVED <path>` | pickup report, one line per entry gone from the default branch (sorted) | `sketch.py check` |
 | `STALE SKETCH <old>→<new>` | pickup report: the drawing was edited after stamping (hash mismatch); restamp | `sketch.py check` |
 | `MALFORMED SKETCH <line>` | pickup report: a `<!-- sketch:`-shaped line that does not parse | `sketch.py check` |
-| `Sketch: matches` | PR body, directly under `## Diagrams`; repeated in the close comment | `diagram-plan.py --sketch` |
+| `Sketch: matches` | PR body, directly under `## Diagrams`; repeated in the close comment | `diagram-plan.py --sketch` (#386) |
 | `Sketch: differs (+a, −b) — <reason>` | same place; `+` = changed but not sketched, `−` (U+2212) = sketched but not changed | `diagram-plan.py --sketch` |
 | `As-built: #<pr> — Sketch: matches` (or `differs (…)`) | the close comment; the PR's `## Diagrams` is the as-built picture | the model, copying the PR's `Sketch:` line |
 | `Architecture unchanged: <reason>` | the epic doc's session log, when a landed PR had WHERE but the map did not move | the model |
@@ -62,8 +67,9 @@ Where a script emits a line, the model adds only the text after `—`; it never 
 | `DIAGRAMS: OK \| DRIFT \| NO MARKER` | HEAD MOVED brief; `MALFORMED MARKER` maps to `DRIFT`; on `DRIFT` the brief's ACTION is `REDRAW` | `pr-event-brief` from `--check` |
 | `WBD: covered \| gap <question>[, <question>]` | the review overview, every review | `review-runner` from `diagram-plan.py --pr` |
 
-`sketch.py check` prints nothing on a ticket that has no marker (`NO SKETCH`, exit 0, dropped by the skill). Exit
-codes follow `diagram-plan.py`: `0` OK, `1` a `git`/tracker read failed, `2` bad usage, `3` MOVED, STALE or MALFORMED.
+`sketch.py check` prints `NO SKETCH` with exit 0 on a ticket that has no marker; the skill writes nothing for it
+(#384). Exit codes follow `diagram-plan.py`: `0` OK, `1` a `git`/tracker read failed, `2` bad usage, `3` MOVED,
+STALE or MALFORMED.
 
 ## The sketch marker
 
