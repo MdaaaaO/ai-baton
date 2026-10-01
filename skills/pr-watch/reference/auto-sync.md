@@ -18,8 +18,14 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
   seeded from the head commit when it is a GitHub `web-flow` merge commit, so a re-armed watcher
   (every 30-min Monitor expiry) does not restart the clock at zero. `PR_WATCH_SYNC=0` turns it off (e.g. a PR
   someone is mid-review on, or a branch the user is about to force-push).
-- A failure (403 workflow scope, 422 conflict) is reported once per head and not retried — act per
-  `reference/events.md`. `mergeable_state=dirty` is reported as `CONFLICTS` and never touched.
+- A failure (403 workflow scope, 422 conflict) on the `update-branch` write itself is reported once per
+  head and not retried — act per `reference/events.md`. `mergeable_state=dirty` is reported as
+  `CONFLICTS` and never touched. The two reads that decide whether to even attempt a sync — the
+  behind-by fetch and the cycle's reviews read, which the approvals are counted from — go through the
+  same retry as every other read an event depends on: a failure there, or approvals that cannot be
+  counted, is never "not behind" or "0 approvals" (either would silently
+  skip a real sync, or sync and dismiss an actually-approved PR); it prints `LOOKUP FAILED` instead and
+  the sync attempt is skipped for that cycle, retried on the next one.
 - The merge commit it lands is not reported again: the next poll recognises it (a two-parent `web-flow`
   commit whose first parent is the head it synced from) and tracks it silently — no `HEAD MOVED` after
   `SYNCED`. In bot mode the watcher then removes and re-adds `github.review_bot` as a requested reviewer
