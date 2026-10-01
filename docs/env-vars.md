@@ -61,7 +61,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 
 | Name | Default | Read by | Purpose | Scope |
 |---|---|---|---|---|
-| `SIGN_QUEUE_BY` | `WORKSPACE_USER`, else `?` | `skills/sign-queue/enqueue.sh` | who a queued commit job is attributed to | user-facing |
+| `SIGN_QUEUE_BY` | none — required (or pass `--by`) | `skills/sign-queue/enqueue.sh` | who a queued commit job is attributed to; neither this nor `--by` set exits 2 with a usage message | user-facing |
 | `SIGN_QUEUE_SKIP_STYLE` | `0` | `skills/sign-queue/enqueue.sh` | `1` skips the commit-style check for one deliberate one-off enqueue | user-facing |
 | `SIGN_QUEUE_JOB_TIMEOUT` | `300` (seconds) | `skills/sign-queue/signq.py` | how long `run_job` lets one job's `git`/`gh` chain run before killing its whole process group | user-facing |
 | `SIGN_QUEUE_ROOT` | unset | `skills/sign-queue/signq.py` | override the workspace root the queue resolves everything else from (a plugin install's own workaround) | internal |

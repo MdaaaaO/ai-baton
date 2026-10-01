@@ -15,6 +15,6 @@ and the skill is never invoked. The host-side `make sign*` targets carry the sam
 **Example:**
 
 > **claude:** stages exactly the intended files in the worktree, writes the message to a file and runs
-> `sh $BATON/skills/sign-queue/enqueue.sh … --files "path/one path/two"` → `queued topic: KEY-123 · epic ? · repo #4 · <subject>`.
+> `sh $BATON/skills/sign-queue/enqueue.sh … --by <session> --files "path/one" --files "path/two"` → `queued topic: KEY-123 · epic ? · repo #4 · <subject>`.
 >
 > **user (on the host):** `make sign` → the job is signed, pushed and removed from the queue.

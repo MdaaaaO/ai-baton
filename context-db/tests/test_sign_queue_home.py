@@ -169,7 +169,7 @@ class HostileValues(unittest.TestCase):
     def test_newline_in_a_value_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / ".context").mkdir()
-            r = subprocess.run(["sh", str(ENQUEUE), "t", tmp, "fix/a\nb", "/nonexistent"],
+            r = subprocess.run(["sh", str(ENQUEUE), "t", tmp, "fix/a\nb", "/nonexistent", "--by", "t"],
                                env=_env(tmp, Path(tmp) / ".context"), capture_output=True, text=True)
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn("contains a newline", r.stderr)
