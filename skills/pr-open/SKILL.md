@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "20"
+  version: "21"
   updated: "2026-09-30"
   reviewed: "2026-09-25"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
@@ -40,7 +40,8 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    directly.
 1. **Create** with a body file (`gh pr create --body-file …`): Overview with the tracker link (§ Links),
    Changes, **Diagrams** (§ Diagrams below — the set `diagram-plan.py` derives from the diff, plus its marker),
-   Rollout/Test plan. Detail lives here, not in chat. Where `tracker.kind` is `github`, add
+   `## Verified` (§ Verified below — real command output, never a claim; replaces the free-prose test plan).
+   Detail lives here, not in chat. Where `tracker.kind` is `github`, add
    `Closes #<n>` (or `Refs #<n>` for a partial step) so the issue links itself. The body's last line is the
    footer from the resolved-profile block already in your SessionStart context — the session self-identifier,
    `session `<name>`` (`session-register` records the name); once a compaction drops that block, or it never
@@ -138,11 +139,31 @@ without reading the diff — and nothing that the PR does not raise.
 5. **On every later push** run `diagram-plan.py --pr <o/r> <n> --check` — `OK` / `DRIFT <old> → <new>` / `NO
    MARKER` / `MALFORMED MARKER <line>` (a hand-edited marker that no longer parses — fix the line, don't
    just redraw), each of the last three exit 3. On drift, redraw in the same turn as the code (a new route
-   file, a dropped RPC, a model added to the PR). The `pr-watch` head-move event is the reminder.
+   file, a dropped RPC, a model added to the PR). The `pr-watch` head-move event is the reminder — the same
+   event is `verified.py check`'s STALE reminder too (§ Verified step 4).
 
 Exit codes, the facet → question matrix (and its intent overlays / composition rules), and the rules
 that hold for every block (native Mermaid rendering, validate-before-publishing, honest labels,
 right-sizing, keeping them current): `reference/diagrams.md`.
+
+## Verified — real command output, never a claim (owner decision, 2026-09-30)
+
+`WORKSPACE.md` § Verification: done is an observation, not a claim. `## Verified` replaces step 1's
+free-prose test plan.
+
+1. Read `verify.repos.<owner/repo>.cmd` / `.timeout` (default 300). Declared → in the worktree, on the
+   pushed head, `python3 $BATON/skills/pr-open/verified.py run --repo-dir <worktree> --cmd "<cmd>" --timeout
+   <s>` prints the block to paste under `## Verified` as-is. A non-zero exit (or a timeout) → `gh pr create
+   --draft`, keep the failing tail, say so in your one-line report — never hide or retry it.
+2. No declared command → cite the commands you actually ran, one `` `cmd` → `output` `` line each
+   (evidence_check.py's own shape); ran none → `Not verified locally: <reason>`. A section that only
+   claims ("tests pass") is refused.
+3. `## Not in this PR` and `## One honest limit` are optional, ≤ 3 lines each.
+4. Before `gh pr create`, and on every later push: `python3 $BATON/skills/pr-open/verified.py check <file>
+   [--pr <o>/<r> <n>]` — refuses a bare claim, and with `--pr` prints `STALE <old> → <new>` (exit 3) when
+   the recorded head has moved; rerun it in the same turn as the push. The pasted tail still passes
+   `public-text-check` before posting (already step 1's rule). Grammar, worked examples, the three
+   accepted shapes: `reference/verified.md`.
 
 ## Commit style — Conventional Commits by default, the repo may override
 
