@@ -190,18 +190,30 @@ class FetchContextStub(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("no login", r.stderr)
 
-    # --- incomplete review-thread pagination (a `gh api graphql` call that never comes back with data)
-    #     used to break the pagination loop silently, exit 0 and report 0 unresolved threads: indistinguishable
-    #     from a PR that genuinely has none. It must now be a recorded, non-zero-exit failure. ---
+    # --- incomplete review-thread pagination (a `gh api graphql` call that never comes back with data):
+    #     the snapshot is still written, flagged in the manifest AND named in errors.txt, so a reader of
+    #     either sees that the thread counts are not the whole list. ---
 
-    def test_incomplete_thread_pagination_is_a_failure_not_a_silent_success(self):
+    def test_incomplete_thread_pagination_is_flagged_and_named(self):
         files = [{"filename": "a.txt", "status": "added", "changes": 1, "additions": 1, "deletions": 0}]
         r, out = self.run_fetch(files, extra_env={"STUB_GRAPHQL_JSON": ""})
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertTrue((out / "manifest.json").exists())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         manifest = json.loads((out / "manifest.json").read_text())
         self.assertFalse(manifest["threads_complete"])
+        self.assertIn("review threads incomplete", (out / "errors.txt").read_text())
         self.assertIn("errors:", r.stdout)
+
+    def test_missing_config_names_the_file_not_the_login(self):
+        self.state_dir.joinpath("config.json").unlink()
+        r, out = self.run_fetch([])
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("no readable config.json", r.stderr)
+
+    def test_unparsable_config_says_so(self):
+        self.state_dir.joinpath("config.json").write_text("{not json")
+        r, out = self.run_fetch([])
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("cannot be parsed", r.stderr)
 
 
 @unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")

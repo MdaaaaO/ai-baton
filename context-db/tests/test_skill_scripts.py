@@ -241,6 +241,20 @@ class TrivialCheck(unittest.TestCase):
             self.assertEqual((out["eligible"], out["error"]), (False, True))
             self.assertIn("unreadable", out["reasons"][0])
 
+    def test_config_that_is_not_utf8_prints_the_error_shape_and_exits_3(self):
+        script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            home = str(Path(tmp, "home"))
+            os.makedirs(home)
+            Path(home, "config.json").write_bytes(b'{"login": "\xff\xfe"}')
+            env = hermetic_env(tmp)
+            env["PR_REVIEW_HOME"] = home
+            r = subprocess.run([sys.executable, str(script), "acme/widgets", "1"],
+                                capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 3, (r.stdout, r.stderr))
+            out = json.loads(r.stdout)
+            self.assertEqual((out["eligible"], out["error"]), (False, True))
+
     def test_config_without_a_login_prints_the_error_shape_and_exits_3(self):
         script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
         for body in ('{"auto_approve": {}}', '{"login": ""}', '[]'):
@@ -269,18 +283,26 @@ class TrivialCheck(unittest.TestCase):
             raise AssertionError(f"unexpected command in this test: {cmd}")
         return run
 
-    def test_required_checks_prefers_rulesets_over_protection(self):
+    def test_required_checks_are_the_union_of_rulesets_and_protection(self):
         rules = json.dumps([{"type": "required_status_checks",
                               "parameters": {"required_status_checks": [{"context": "ci"}, {"context": "lint"}]}}])
         responses = {
             "rules/branches/main": (0, rules),
-            "protection/required_status_checks": (0, json.dumps({"contexts": ["should-not-be-used"]})),
+            "protection/required_status_checks": (0, json.dumps({"contexts": ["legacy"], "checks": []})),
         }
         with mock.patch.object(self.tc.subprocess, "run", side_effect=self._fake_run(responses)):
             required, source, readable = self.tc.required_checks("acme/widgets", "main")
-        self.assertEqual(required, ["ci", "lint"])
-        self.assertEqual(source, "rulesets")
+        self.assertEqual(required, ["ci", "legacy", "lint"])
+        self.assertEqual(source, "rulesets+protection")
         self.assertTrue(readable)
+
+    def test_required_checks_from_rulesets_alone(self):
+        rules = json.dumps([{"type": "required_status_checks",
+                              "parameters": {"required_status_checks": [{"context": "ci"}]}}])
+        responses = {"rules/branches/main": (0, rules), "protection/required_status_checks": (1, "")}
+        with mock.patch.object(self.tc.subprocess, "run", side_effect=self._fake_run(responses)):
+            required, source, readable = self.tc.required_checks("acme/widgets", "main")
+        self.assertEqual((required, source, readable), (["ci"], "rulesets", True))
 
     def test_required_checks_falls_back_to_protection_when_ruleset_names_none(self):
         responses = {
@@ -315,7 +337,7 @@ class TrivialCheck(unittest.TestCase):
         with mock.patch.object(self.tc.subprocess, "run", side_effect=self._fake_run(responses)):
             required, source, readable = self.tc.required_checks("acme/widgets", "main")
         self.assertEqual(required, [])
-        self.assertEqual(source, "rulesets")
+        self.assertIsNone(source)
         self.assertTrue(readable)
 
     def test_combined_status_none_is_a_documented_error_not_a_crash(self):

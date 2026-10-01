@@ -23,8 +23,8 @@ Never posts anything. A PR is eligible only if EVERY gate passes:
     its manifest's ecosystem (DEP_SHAPES — a changed date, IP or section number is not a bump); every
     bump is patch (x.y.Z), or minor when the package is in dev_tooling; major never; lockfiles must
     accompany at least one manifest; a patch that does not parse as unified-diff hunks is refused
-  - CI: required contexts come from the rulesets endpoint first, classic branch protection as the fallback
-    (a ruleset-governed repo must not pass vacuously); every required context must be present and green.
+  - CI: required contexts are the union of the rulesets endpoint and classic branch protection (a
+    ruleset-governed repo must not pass vacuously); every required context must be present and green.
     With no required context — none configured, or neither source readable (`"protection": "unreadable"`
     in the output) — every check-run on head must have concluded success/skipped/neutral (>=1 run,
     paginated); the combined status must not be failure either way
@@ -59,7 +59,7 @@ def load_config():
         msg = f"config.json at {path} has no login"
     except FileNotFoundError:
         msg = f"no config.json at {path}"
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, ValueError) as e:  # ValueError: bad JSON, or bytes that are not UTF-8
         msg = f"config.json at {path} is unreadable: {e}"
     print(f"error: {msg}", file=sys.stderr)
     print(json.dumps({"eligible": False, "error": True, "reasons": [msg]}))
@@ -205,30 +205,26 @@ def is_docs_path(path, aa):
             and not glob_any(path, aa.get("manifest_globs", [])) and not glob_any(path, aa.get("lock_globs", [])))
 
 def required_checks(repo, base_ref):
-    """The required status-check contexts for base_ref: the rulesets endpoint first, classic branch
-    protection as the fallback — a repo governed by a ruleset (not classic protection) must not look
-    the same as a repo with no required checks at all. Returns (required, source, readable):
-    `readable` is False only when NEITHER source could be read (a real API failure, not "no rule
-    configured" — the rulesets endpoint returns 200 with an empty list when a repo has none, so an
-    empty result there is a successful read, not a fallback trigger on its own)."""
+    """The required status-check contexts for base_ref, from both places a repo can name them: the
+    rulesets endpoint and classic branch protection. GitHub enforces the two together, so the result is
+    their union — a check only one of them requires is still required. Returns (required, source,
+    readable): `source` is "rulesets", "protection" or "rulesets+protection" (None when no check is
+    required); `readable` is False only when NEITHER source could be read (the rulesets endpoint
+    answers 200 with an empty list for a repo without rules, so an empty list is a successful read)."""
     rules = gh(f"repos/{repo}/rules/branches/{base_ref}", allow_fail=True)
-    rules_ok = isinstance(rules, list)
-    required = set()
-    if rules_ok:
+    from_rules = set()
+    if isinstance(rules, list):
         for rule in rules:
             if not isinstance(rule, dict) or rule.get("type") != "required_status_checks": continue
             for c in (rule.get("parameters") or {}).get("required_status_checks") or []:
                 name = (c or {}).get("context")
-                if name: required.add(name)
-    if required:
-        return sorted(required), "rulesets", True
+                if name: from_rules.add(name)
     prot = gh(f"repos/{repo}/branches/{base_ref}/protection/required_status_checks", allow_fail=True)
+    from_prot = set()
     if isinstance(prot, dict):
-        required = set(prot.get("contexts") or []) | {c["context"] for c in prot.get("checks") or []}
-        return sorted(required), "protection", True
-    if rules_ok:
-        return [], "rulesets", True  # rules read fine and named no required check; protection unreadable (likely "not configured")
-    return [], None, False
+        from_prot = set(prot.get("contexts") or []) | {c["context"] for c in prot.get("checks") or []}
+    source = "+".join(n for n, found in (("rulesets", from_rules), ("protection", from_prot)) if found) or None
+    return sorted(from_rules | from_prot), source, isinstance(rules, list) or isinstance(prot, dict)
 
 def parse_args(argv):
     """Return (positional, head). `--head SHA` and `--head=SHA` both need the full 40-hex sha; an empty,
