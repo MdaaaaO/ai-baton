@@ -14,9 +14,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const req = createRequire(path.join(process.cwd(), '/'));
 const load = async (name) => (await import(pathToFileURL(req.resolve(name)).href)).default;
 
-let JSDOM, DOMPurifyFactory, mermaid;
+let JSDOM, DOMPurifyFactory, mermaid, dom;
 try {
   ({ JSDOM } = await load('jsdom'));
+  // dompurify and mermaid each read globalThis.window at import time to decide which build to use;
+  // the window must exist before they load, or mermaid's own DOMPurify instance comes up without one
+  // (e.g. `DOMPurify.addHook is not a function`) and every diagram with a labelled node fails to parse.
+  dom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
   DOMPurifyFactory = await load('dompurify');
   mermaid = await load('mermaid');
 } catch (e) {
@@ -26,9 +32,6 @@ try {
     `\`npm ci --no-audit --no-fund\` there, then run this script with that dir as your CWD.`);
   process.exit(2);
 }
-const dom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true });
-globalThis.window = dom.window;
-globalThis.document = dom.window.document;
 globalThis.DOMPurify = DOMPurifyFactory(dom.window);
 mermaid.initialize({ startOnLoad: false });
 

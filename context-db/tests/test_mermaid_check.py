@@ -103,5 +103,52 @@ class MermaidCheckTest(unittest.TestCase):
             shutil.rmtree(bare, ignore_errors=True)
 
 
+class MermaidCheckRealDepsTest(unittest.TestCase):
+    """The real jsdom/dompurify/mermaid (#441), not the stubs above: MermaidCheckTest's stub `mermaid` never
+    touches DOMPurify, so it could not catch the bug where mermaid's own DOMPurify instance came up without a
+    window and `DOMPurify.addHook is not a function` failed every flowchart with a labelled node. Installs the
+    pinned deps with `npm ci --offline` into a scratch dir (no network call either way); skips cleanly, with a
+    stated reason, when node/npm are missing or the gate's npm cache lacks them."""
+
+    scratch: Path | None = None
+
+    @classmethod
+    def setUpClass(cls):
+        npm = shutil.which("npm")
+        if not NODE or not npm:
+            raise unittest.SkipTest("node and npm needed")
+        tmp = Path(tempfile.mkdtemp())
+        shutil.copy(SCRIPT.parent / "package.json", tmp / "package.json")
+        shutil.copy(SCRIPT.parent / "package-lock.json", tmp / "package-lock.json")
+        r = subprocess.run([npm, "ci", "--no-audit", "--no-fund", "--offline"], cwd=tmp,
+                            capture_output=True, text=True)
+        if r.returncode != 0:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise unittest.SkipTest("jsdom/dompurify/mermaid not installable offline on this machine")
+        cls.scratch = tmp
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.scratch:
+            shutil.rmtree(cls.scratch, ignore_errors=True)
+
+    def run_check(self, filename: str, content: str):
+        f = self.scratch / filename
+        f.write_text(content, encoding="utf-8")
+        return subprocess.run([NODE, str(SCRIPT), str(f)], cwd=self.scratch, capture_output=True, text=True)
+
+    def test_labelled_flowchart_node_parses_ok(self):
+        body = '```mermaid\nflowchart LR\n  a["label (x)"] --> b\n```\n'
+        r = self.run_check("labelled.md", body)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("OK (flowchart", r.stdout)
+
+    def test_real_syntax_error_still_fails(self):
+        body = '```mermaid\nflowchart LR\n  a --> --> --> not a diagram\n```\n'
+        r = self.run_check("broken.md", body)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("FAIL", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
