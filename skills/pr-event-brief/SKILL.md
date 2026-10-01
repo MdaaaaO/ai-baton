@@ -1,8 +1,8 @@
 ---
 name: pr-event-brief
-description: "Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN line a pr-watch Monitor emits; the main session then performs the action."
+description: "Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN / HEAD MOVED(drift) line a pr-watch Monitor emits; the main session then performs the action."
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "github.review_bot"
@@ -96,7 +96,11 @@ WHY: <one sentence, the single decisive fact>
 ```
 
 `DIAGRAMS:` is the brief's one optional line: include it only for a real `HEAD MOVED to <sha>` event
-(Gather step 7) and omit it entirely for every other event, `SYNCED with <base>` included.
+(Gather step 7) and omit it entirely for every other event, `SYNCED with <base>` included. `pr-watch`
+forks this skill for a `HEAD MOVED` line only once its own check already found `DRIFT`, so in practice
+this slot normally reads `DIAGRAMS: DRIFT` with `ACTION: REDRAW`; Gather step 7 still runs the check
+itself rather than trust the caller, so a `HEAD MOVED` passed in with an `OK` check (a direct call, not
+`pr-watch`'s) gets `DIAGRAMS: OK` and the normal ACTION rules below apply instead.
 
 The main session performs `ACTION` directly only when standing go already covers it; otherwise the
 `ACTION` becomes the recommended option of the carousel question it asks the user (`docs/carousel.md`).

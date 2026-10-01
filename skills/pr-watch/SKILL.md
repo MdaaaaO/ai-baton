@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "22"
+  version: "23"
   updated: "2026-09-30"
   reviewed: "2026-09-27"
 ---
@@ -106,12 +106,12 @@ Don't read the PR yourself at full prefix when a line lands. Invoke the forked s
 `pr-event-brief <owner/repo> <n> "<event line>"` (Skill tool; it runs on the `triage` agent — Sonnet,
 low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line brief ending in one
 `ACTION:` (`REPLY+RESOLVE` / `FIX+PUSH` / `RE-REQUEST-BOT` / `UPDATE-BRANCH` / `MERGE` / `WAIT(<who>)` /
-`INVESTIGATE-CHECK` / `REDRAW`, the last one alongside one `DIAGRAMS: OK | DRIFT | NO MARKER` line on a
-real `HEAD MOVED` event). **You perform the action** — replies, resolves, re-requests, merges post to
-GitHub and stay on the main model. For `HEAD MOVED` do not fork: re-request the bot and run
+`INVESTIGATE-CHECK` / `REDRAW`). **You perform the action** — replies, resolves, re-requests, merges post
+to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot and run
 `python3 $BATON/skills/pr-open/diagram-plan.py --pr <o/r> <n> --check` yourself (one script call) —
-`DRIFT` (or a malformed marker) → redraw per `docs/diagrams.md`, `OK` / `NO MARKER` → nothing; the
-watcher's own sync emits no head move and gets no check. Skip the fork for
+`OK` / `NO MARKER` → nothing; `DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD
+MOVED line and the check's own output, and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
+own sync emits no head move and gets no check. Skip the fork for
 `MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork
 `pr-event-brief` for it — it is not a PR event, there is nothing on the PR to triage). A brief slot
 marked `unverified` means fetch it yourself.
