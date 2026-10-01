@@ -122,6 +122,18 @@ class SessionEnvUpdateCli(unittest.TestCase):
             self.assertEqual(out.count(BEGIN), 1)
             self.assertIn(f"export WORKSPACE_GITHUB_LOGIN={LOGIN_A}", out)
 
+    def test_the_block_exports_the_absolute_path_of_the_file_it_sits_in(self):
+        """The Bash tool does not get `CLAUDE_ENV_FILE`; the block's own `BATON_ENV_FILE` line is how a later
+        Bash command finds the file. A second update keeps exactly one such line."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "env file"
+            kit_profile.update_session_env_file(str(target), {})
+            kit_profile.update_session_env_file(str(target), {})
+            lines = target.read_text(encoding="utf-8").splitlines()
+            self.assertEqual([ln for ln in lines if ln.startswith("export BATON_ENV_FILE=")],
+                             [f"export BATON_ENV_FILE='{target.resolve()}'"])
+            self.assertEqual(lines[-1], END)
+
     def test_an_unreadable_path_raises_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "env"

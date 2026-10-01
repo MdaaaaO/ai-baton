@@ -1024,10 +1024,12 @@ def env_file_wiring(r: Report) -> None:
     SessionStart hook replaces: a `BATON`/`CLAUDE_PROJECT_DIR` line whose path no longer exists (a workspace or
     install that moved or was removed since the hook last wrote it) — the next session start repairs it. Outside
     the block, which the hook never touches: any `export BATON=` line, and a `CLAUDE_PROJECT_DIR` line whose path
-    is gone — only deleting the line repairs those, so each gets that advice and no other. Unset, missing or
-    unreadable: no finding, and a harness that does not hand the variable to this process leaves nothing to
-    read. Never the file's other content, which may hold secrets."""
-    path = os.environ.get("CLAUDE_ENV_FILE", "").strip()
+    is gone — only deleting the line repairs those, so each gets that advice and no other. The file is
+    `$CLAUDE_ENV_FILE`, else `$BATON_ENV_FILE` — the path the block itself exports
+    (`kit_profile.SESSION_ENV_FILE_VAR`), because the Bash tool does not get the harness variable. Neither set,
+    or the file missing or unreadable: no finding. Never the file's other content, which may hold secrets."""
+    path = (os.environ.get("CLAUDE_ENV_FILE", "").strip()
+            or os.environ.get("BATON_ENV_FILE", "").strip())
     if not path:
         return
     try:
@@ -1054,12 +1056,12 @@ def env_file_wiring(r: Report) -> None:
         gone = bool(value) and not Path(value).exists()
         if not inside:
             if var == "BATON" or gone:
-                r.add(WARN, "machine", f"`$CLAUDE_ENV_FILE` carries `export {var}={value}` outside the "
-                      "session-env block" + (", and the path does not exist" if gone else "")
+                r.add(WARN, "machine", f"the session env file `{path}` carries `export {var}={value}` outside "
+                      "the session-env block" + (", and the path does not exist" if gone else "")
                       + " — delete the stray line, the hook only replaces the block")
         elif gone:
-            r.add(WARN, "machine", f"`$CLAUDE_ENV_FILE` exports `{var}={value}`, which does not exist — stale "
-                  "session env file, start a new session to let the SessionStart hook refresh it")
+            r.add(WARN, "machine", f"the session env file `{path}` exports `{var}={value}`, which does not exist "
+                  "— start a new session to let the SessionStart hook refresh it")
 
 
 def sec_machine(r: Report) -> str:

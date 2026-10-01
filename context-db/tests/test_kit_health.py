@@ -367,6 +367,25 @@ class EnvFileCheck(unittest.TestCase):
             kh, r = self.run_check({"CLAUDE_ENV_FILE": str(Path(td) / "nope")})
         self.assertEqual(r.lines, [])
 
+    def test_the_file_is_found_through_the_path_the_block_exports(self):
+        """The Bash tool gets no `CLAUDE_ENV_FILE`; the block's own `BATON_ENV_FILE` is the fallback."""
+        with tempfile.TemporaryDirectory() as td:
+            envfile = Path(td) / "env"
+            envfile.write_text(f"export BATON={td}/gone\n", encoding="utf-8")
+            kh, r = self.run_check({"BATON_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("outside the session-env block", text)
+        self.assertIn(f"`{envfile}`", text, "the finding names the file, the variable is unset in a Bash call")
+
+    def test_the_harness_variable_wins_over_the_exported_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            stale, clean = Path(td) / "stale", Path(td) / "clean"
+            stale.write_text(f"export BATON={td}/gone\n", encoding="utf-8")
+            clean.write_text("", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(clean), "BATON_ENV_FILE": str(stale)})
+        self.assertEqual(r.lines, [])
+
     def test_unreadable_file_is_silent_not_a_crash(self):
         if os.geteuid() == 0:
             self.skipTest("root bypasses permission bits")

@@ -38,7 +38,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-SESSION_VARS = ("CLAUDE_PROJECT_DIR", "BATON", "CLAUDE_PLUGIN_ROOT", "CLAUDE_ENV_FILE")
+SESSION_VARS = ("CLAUDE_PROJECT_DIR", "BATON", "CLAUDE_PLUGIN_ROOT", "CLAUDE_ENV_FILE", "BATON_ENV_FILE")
 SESSION_PREFIXES = ("WORKSPACE_", "CLAUDE_PLUGIN_OPTION_")
 GIT_PREFIX = "GIT_"
 TEST_ENVIRONMENT = "ci"  # the only environment name a store the suite runs on may carry
