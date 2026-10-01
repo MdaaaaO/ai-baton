@@ -110,7 +110,7 @@ low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line 
 to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot and run
 `python3 $BATON/skills/pr-open/diagram-plan.py --pr <o/r> <n> --check` yourself (one script call) —
 `OK` / `NO MARKER` → nothing; `DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD
-MOVED line and the check's own output, and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
+MOVED line only (the brief reruns the check itself), and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
 own sync emits no head move and gets no check. Skip the fork for
 `MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork
 `pr-event-brief` for it — it is not a PR event, there is nothing on the PR to triage). A brief slot
