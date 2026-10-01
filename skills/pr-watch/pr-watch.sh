@@ -100,15 +100,15 @@ base_dir="${TMPDIR:-/tmp}/pr-watch-$(printf %s "$repo" | tr / -)"
 getv() { cat "$D/$1" 2>/dev/null; }                      # per-PR state: $D is set per round-robin step
 putv() { printf '%s\n' "$2" >"$D/$1"; }
 now_epoch() { if [ -n "${PR_WATCH_NOW:-}" ]; then printf '%s' "$PR_WATCH_NOW"; else date +%s; fi; }  # PR_WATCH_NOW: tests only
-# gh_retry <gh ...>: one `gh` read, up to 3 attempts. The output is left in $GHR_OUT; after a failed last
-# attempt $GHR_ERR holds the first line of its stderr. Call it as a plain command, never inside $( ): a
+# gh_retry <gh ...>: one `gh` read, up to 3 attempts. The output is left in $ghr_out; after a failed last
+# attempt $ghr_err holds the first line of its stderr. Call it as a plain command, never inside $( ): a
 # subshell would lose both variables.
 gh_retry() {
   ghr_n=1; ghr_e=$(mktemp)
   while :; do
-    GHR_OUT=$("$@" 2>"$ghr_e"); ghr_rc=$?
-    if [ "$ghr_rc" -eq 0 ]; then GHR_ERR=""; rm -f "$ghr_e"; return 0; fi
-    GHR_ERR=$(head -1 "$ghr_e" | tr -d '\r')
+    ghr_out=$("$@" 2>"$ghr_e"); ghr_rc=$?
+    if [ "$ghr_rc" -eq 0 ]; then ghr_err=""; rm -f "$ghr_e"; return 0; fi
+    ghr_err=$(head -1 "$ghr_e" | tr -d '\r')
     [ "$ghr_n" -ge 3 ] && { rm -f "$ghr_e"; return "$ghr_rc"; }
     ghr_n=$((ghr_n + 1)); sleep "${PR_WATCH_RETRY_DELAY:-2}"
   done
@@ -174,10 +174,10 @@ while true; do
   alive=""
   for pr in $prs; do
     D="$base_dir-$pr"; head=$(getv head); init=$(getv init)
-    gh_retry gh api "repos/$repo/pulls/$pr" --jq '"\(.head.sha) \(.base.ref) \(.mergeable_state)"'; irc=$?; info=$GHR_OUT
+    gh_retry gh api "repos/$repo/pulls/$pr" --jq '"\(.head.sha) \(.base.ref) \(.mergeable_state)"'; irc=$?; info=$ghr_out
     if [ $irc -ne 0 ] || [ -z "$info" ]; then
       # a failed fetch is never "no change": say so and keep watching next cycle instead of going silent
-      lookup_failed "$pr" "PR info" "${GHR_ERR:-empty response}"; alive="$alive $pr"; continue
+      lookup_failed "$pr" "PR info" "${ghr_err:-empty response}"; alive="$alive $pr"; continue
     fi
     lookup_ok "PR info"
     cur=${info%% *}; rest=${info#* }; base=${rest%% *}; mstate=${rest##* }
@@ -229,20 +229,20 @@ while true; do
       if [ "$mstate" = dirty ]; then
         if [ "$(getv dirty_seen)" != "$cur" ]; then echo "PR $pr CONFLICTS with $base — rebase the worktree and enqueue sign-queue --rebase; auto-sync skipped"; putv dirty_seen "$cur"; fi
       else
-        gh_retry gh api "repos/$repo/compare/$base...$cur" --jq .behind_by; behindrc=$?; behind=$GHR_OUT
+        gh_retry gh api "repos/$repo/compare/$base...$cur" --jq .behind_by; behindrc=$?; behind=$ghr_out
         if [ $behindrc -ne 0 ]; then
           # a failed fetch is never "not behind": that would skip a sync the branch needs
-          lookup_failed "$pr" "behind-by check" "$GHR_ERR"
+          lookup_failed "$pr" "behind-by check" "$ghr_err"
         else
           lookup_ok "behind-by check"
           if [ "${behind:-0}" -gt 0 ] 2>/dev/null; then
             now=$(now_epoch); last_sync=$(getv last_sync)
             if [ $((now - ${last_sync:-0})) -ge "$sync_cool" ]; then
-              gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100"; arc=$?; araw=$GHR_OUT
+              gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100"; arc=$?; araw=$ghr_out
               if [ $arc -ne 0 ]; then
                 # a failed fetch is never "0 approvals" — that would sync (and dismiss) an actually-approved PR;
                 # skip the sync attempt this cycle, retry next cycle instead
-                lookup_failed "$pr" "approvals (sync check)" "$GHR_ERR"
+                lookup_failed "$pr" "approvals (sync check)" "$ghr_err"
               else
                 lookup_ok "approvals (sync check)"
                 # Neither the configured review bot's own approval nor a login in the configured `github.bots`
@@ -313,10 +313,10 @@ while true; do
           "\($status)\t\($concl)\t\(.context // "")"
         else
           "\(.status // "")\t\(.conclusion // "")\t\(.name // "")"
-        end'; rollrc=$?; roll=$GHR_OUT
+        end'; rollrc=$?; roll=$ghr_out
       if [ $rollrc -ne 0 ]; then
         # a failed rollup fetch is never "nothing pending, nothing bad": that would read as green
-        lookup_failed "$pr" "check status" "$GHR_ERR"
+        lookup_failed "$pr" "check status" "$ghr_err"
       else
         lookup_ok "check status"
         pend=$(printf '%s\n' "$roll" | awk -F'\t' '$1=="QUEUED"||$1=="IN_PROGRESS"||$1=="PENDING"||$1=="WAITING"||$1=="REQUESTED"' | grep -c . )
@@ -355,8 +355,8 @@ while true; do
     # never read the same as "no new comments" — that silently drops whatever page failed, possibly for good
     # (the ids on it are never retried once the state dir has moved past them); report it and skip this listing
     # for the cycle instead.
-    gh_retry gh api --paginate "repos/$repo/pulls/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(if .in_reply_to_id then "reply" else "top" end)"'; crc=$?; craw=$GHR_OUT
-    if [ $crc -ne 0 ]; then lookup_failed "$pr" "review comments" "$GHR_ERR"
+    gh_retry gh api --paginate "repos/$repo/pulls/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(if .in_reply_to_id then "reply" else "top" end)"'; crc=$?; craw=$ghr_out
+    if [ $crc -ne 0 ]; then lookup_failed "$pr" "review comments" "$ghr_err"
     else
       lookup_ok "review comments"
       for rec in $craw; do
@@ -368,8 +368,8 @@ while true; do
         new="$new; review comment $id by $login ($kind)"
       done
     fi
-    gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state):\(.commit_id)"'; rrc=$?; rraw=$GHR_OUT
-    if [ $rrc -ne 0 ]; then lookup_failed "$pr" "reviews" "$GHR_ERR"
+    gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state):\(.commit_id)"'; rrc=$?; rraw=$ghr_out
+    if [ $rrc -ne 0 ]; then lookup_failed "$pr" "reviews" "$ghr_err"
     else
       lookup_ok "reviews"
       for rec in $rraw; do
@@ -396,8 +396,8 @@ while true; do
         new="$new; review $state by $login"
       done
     fi
-    gh_retry gh api --paginate "repos/$repo/issues/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login)"'; icrc=$?; iraw=$GHR_OUT
-    if [ $icrc -ne 0 ]; then lookup_failed "$pr" "issue comments" "$GHR_ERR"
+    gh_retry gh api --paginate "repos/$repo/issues/$pr/comments?per_page=100" --jq '.[] | "\(.id):\(.user.login)"'; icrc=$?; iraw=$ghr_out
+    if [ $icrc -ne 0 ]; then lookup_failed "$pr" "issue comments" "$ghr_err"
     else
       lookup_ok "issue comments"
       for rec in $iraw; do
