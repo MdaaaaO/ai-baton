@@ -25,6 +25,7 @@ import sketch  # noqa: E402
 from tests import hermetic_env  # noqa: E402
 
 REPO_SLUG = "acme/widgets"  # the kit's own placeholder (CONTRIBUTING.md § Placeholders only)
+REPO_SLUG_B = "acme/gadgets"  # a second placeholder repo, for a ticket that touches two repos
 
 
 def run(argv: list[str]) -> tuple[int, str]:
@@ -119,6 +120,11 @@ class CheckAgainstARepo(unittest.TestCase):
         subprocess.run(["git", "clone", "-q", str(bare_origin), str(cls.clone)], check=True, capture_output=True,
                         env=hermetic_env(base))
         git(cls.clone, "remote", "set-url", "origin", f"https://example.test/{REPO_SLUG}.git")
+        # a second repo's clone, for the two-repo-ticket tests — same tree, a different origin slug
+        cls.clone_b = base / "clone_b"
+        subprocess.run(["git", "clone", "-q", str(bare_origin), str(cls.clone_b)], check=True, capture_output=True,
+                        env=hermetic_env(base))
+        git(cls.clone_b, "remote", "set-url", "origin", f"https://example.test/{REPO_SLUG_B}.git")
 
     @classmethod
     def tearDownClass(cls):
@@ -129,11 +135,19 @@ class CheckAgainstARepo(unittest.TestCase):
         p.write_text(text, encoding="utf-8")
         return p
 
-    def _stamped(self, body: str, paths: str, components: str = "-") -> str:
+    def _stamped(self, body: str, paths: str, components: str = "-", repo_slug: str = REPO_SLUG) -> str:
         src = self._write(body)
-        rc, stamped = run(["stamp", str(src), "--repo-slug", REPO_SLUG, "--paths", paths, "--components", components])
+        rc, stamped = run(["stamp", str(src), "--repo-slug", repo_slug, "--paths", paths, "--components", components])
         self.assertEqual(rc, 0)
         return stamped
+
+    def _restamped(self, text: str, paths: str, components: str = "-", repo_slug: str = REPO_SLUG) -> str:
+        """Stamps `text` (already carrying one or more markers) for another repo, or re-stamps the
+        same repo — same CLI call `_stamped` makes, just fed existing stamped text instead of a fresh body."""
+        rc, out = run(["stamp", str(self._write(text)), "--repo-slug", repo_slug, "--paths", paths,
+                        "--components", components])
+        self.assertEqual(rc, 0)
+        return out
 
     def test_sketch_ok_when_every_path_is_still_on_the_default_branch(self):
         stamped = self._stamped("**Sketch**\nWHERE: keep.py talks to a/mod.py\n", "keep.py,a/mod.py")
@@ -185,6 +199,25 @@ class CheckAgainstARepo(unittest.TestCase):
         rc, out = run(["check", str(self._write(other)), "--repo-dir", str(self.clone), "--base", "main"])
         self.assertEqual(rc, 0)
         self.assertEqual(out.strip(), "NO SKETCH")
+
+    def test_two_repo_ticket_checks_ok_from_both_clones_even_after_restamping_one(self):
+        # a ticket that touches two repos: stamp for repo A, then stamp that result for repo B —
+        # `check` from either clone must hash the same boundary `stamp` used, not drag in the other
+        # repo's marker line (the STALE SKETCH regression this test guards against).
+        stamped_a = self._stamped("**Sketch**\nWHERE: keep.py talks to a/mod.py\n", "keep.py")
+        stamped_ab = self._restamped(stamped_a, "keep.py", repo_slug=REPO_SLUG_B)
+
+        rc, out = run(["check", str(self._write(stamped_ab)), "--repo-dir", str(self.clone), "--base", "main"])
+        self.assertEqual((rc, out.strip()), (0, "SKETCH OK"))
+        rc, out = run(["check", str(self._write(stamped_ab)), "--repo-dir", str(self.clone_b), "--base", "main"])
+        self.assertEqual((rc, out.strip()), (0, "SKETCH OK"))
+
+        # re-stamping repo A (unchanged content) after B must not disturb either repo's check
+        restamped = self._restamped(stamped_ab, "keep.py", repo_slug=REPO_SLUG)
+        rc, out = run(["check", str(self._write(restamped)), "--repo-dir", str(self.clone), "--base", "main"])
+        self.assertEqual((rc, out.strip()), (0, "SKETCH OK"))
+        rc, out = run(["check", str(self._write(restamped)), "--repo-dir", str(self.clone_b), "--base", "main"])
+        self.assertEqual((rc, out.strip()), (0, "SKETCH OK"))
 
 
 class StampValidation(unittest.TestCase):

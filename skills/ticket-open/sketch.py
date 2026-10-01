@@ -109,6 +109,15 @@ def find_heading(lines: list[str], before: int) -> int | None:
     return None
 
 
+def marker_boundary(lines: list[str]) -> int:
+    """The index of the first marker line (any repo) — the start of the trailing run `stamp` writes
+    them as — or `len(lines)` when none are present yet. The hashed slice always ends here, for both
+    `stamp` and `check`, so a marker's hash never depends on which other repos' markers sit beside it
+    or in what order."""
+    marker_idxs = [i for i, ln in enumerate(lines) if MARKER_RE.match(ln)]
+    return min(marker_idxs) if marker_idxs else len(lines)
+
+
 def malformed_line(text: str) -> str | None:
     """The first `<!-- sketch:`-shaped line present that `MARKER_RE` cannot parse — a hand edit that
     dropped a field or the closing `-->`. Distinguishes that from no marker at all."""
@@ -149,7 +158,7 @@ def read_file_or_text(arg: str) -> str:
 def stamp_text(raw: str, repo_slug: str, paths: list[str], components: list[str]) -> str:
     lines = raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     marker_idxs = [i for i, ln in enumerate(lines) if MARKER_RE.match(ln)]
-    content_end = min(marker_idxs) if marker_idxs else len(lines)
+    content_end = marker_boundary(lines)
     heading_idx = find_heading(lines, content_end)
     start = heading_idx + 1 if heading_idx is not None else 0
     h = content_hash(normalize_lines(lines[start:content_end]))
@@ -229,9 +238,10 @@ def cmd_check(a: argparse.Namespace) -> int:
         print("NO SKETCH")
         return 0
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    heading_idx = find_heading(lines, entry["idx"])
+    content_end = marker_boundary(lines)
+    heading_idx = find_heading(lines, content_end)
     start = heading_idx + 1 if heading_idx is not None else 0
-    fresh_hash = content_hash(normalize_lines(lines[start:entry["idx"]]))
+    fresh_hash = content_hash(normalize_lines(lines[start:content_end]))
     if fresh_hash != entry["hash"]:
         print(f"STALE SKETCH {entry['hash']}→{fresh_hash}")
         return 3
