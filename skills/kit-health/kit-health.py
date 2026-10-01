@@ -835,29 +835,47 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
 
 
 def autocompact_wiring(r: Report) -> None:
-    """The auto-compact backstop: the user setting `autoCompactWindow` in `~/.claude/settings.json`,
-    or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for a cloud session — never the plugin's own `settings.json` (a
-    no-op there). `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` caps the session at the 200K boundary, so nothing is
-    missing then. Read-only: a missing/unparseable settings.json reads as unset, never an error. Unset is a
-    WARN, not an ERR — the harness's own default still applies (about 967K on a 1M-window model)."""
+    """The auto-compact backstop: env `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, env `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`,
+    or a top-level `autoCompactWindow` (or an `env` block carrying either variable) in any settings file this
+    install reads — `~/.claude/settings.json`, the workspace's `.claude/settings.json` (a clone's own copy of
+    the kit's `settings.json` — already set there), or the workspace's `.claude/settings.local.json`. A plugin
+    install ships no settings.json, so there only the user setting or the env var backstops it. Read-only: a
+    missing/unreadable/non-UTF-8/non-JSON file, or one whose top level is not an object, reads as unset, never
+    an error. Unset is a WARN, not an ERR — the harness's own default still applies (about 967K on a 1M-window
+    model)."""
     if os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "").strip():
         r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set in the environment")
         return
     if os.environ.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "").strip() == "1":
         r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` — the session compacts at 200K")
         return
-    p = Path.home() / ".claude" / "settings.json"
-    try:
-        cfg = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
-    except (OSError, json.JSONDecodeError):
-        cfg = {}
-    if cfg.get("autoCompactWindow"):
-        r.add(OK, "machine", "auto-compact backstop: `autoCompactWindow` set in `~/.claude/settings.json`")
-    else:
-        r.add(WARN, "machine", "auto-compact backstop unset — no `autoCompactWindow` in `~/.claude/settings.json` "
-              "and no `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the environment, so a 1M-window model compacts only "
-              "at about 967K; `/autocompact 200k` sets the user setting (cloud: export "
-              "`CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`)")
+    candidates = [
+        (Path.home() / ".claude" / "settings.json", "`~/.claude/settings.json`"),
+        (root() / ".claude" / "settings.json", "the workspace's `.claude/settings.json`"),
+        (root() / ".claude" / "settings.local.json", "the workspace's `.claude/settings.local.json`"),
+    ]
+    for p, label in candidates:
+        try:
+            cfg = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+        except (OSError, ValueError):
+            cfg = None
+        if not isinstance(cfg, dict):
+            continue
+        window = cfg.get("autoCompactWindow")
+        if isinstance(window, (int, float)) and not isinstance(window, bool) and window > 0:
+            r.add(OK, "machine", f"auto-compact backstop: `autoCompactWindow` set in {label}")
+            return
+        env = cfg.get("env")
+        if isinstance(env, dict):
+            if str(env.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "")).strip():
+                r.add(OK, "machine", f"auto-compact backstop: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set in {label}'s `env` block")
+                return
+            if str(env.get("CLAUDE_CODE_DISABLE_1M_CONTEXT", "")).strip() == "1":
+                r.add(OK, "machine", f"auto-compact backstop: `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` in {label}'s `env` block")
+                return
+    r.add(WARN, "machine", "auto-compact backstop unset — nothing in the environment or a settings file sets it, "
+          "so a 1M-window model compacts only at about 967K; plugin install: `/autocompact 200k` sets the user "
+          "setting (cloud: `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`)")
 
 
 def seed_pairs() -> list[tuple[Path, Path]]:

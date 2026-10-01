@@ -58,7 +58,10 @@ A worker starts cold. The brief carries everything it needs, and the rules the m
 
 1. **Setup:** the exact `git worktree add ../.worktrees/<name> -b <branch> origin/main` line; work only there.
    A worker resumed with `SendMessage` on a branch it already pushed first brings it up to date with `origin/main`
-   and resolves the conflicts itself — the main session does not.
+   and resolves the conflicts itself — the main session does not. That means a **merge**, never a rebase and never
+   a force-push: the branch may already carry a draft PR under review, and rewriting its history would orphan that
+   review. Where `systems.signed_commits` is true, the merge commit and its push go through the sign-queue like any
+   other commit on that branch.
 2. **Task:** the issue number (`gh issue view <n>`) and what "done" means.
 3. **Tests:** new tests must **fail on `origin/main`** and pass with the fix — prove it by restoring the main copy of
    the changed file, running them, and putting the fix back. The full suite and `kit-verify` pass before the commit.
@@ -74,7 +77,10 @@ A worker starts cold. The brief carries everything it needs, and the rules the m
 
 ## The main session's loop
 
-One scope per session: this loop is the session's one job — a new ticket wave starts a new session.
+One scope per session: this loop is the session's one job — a new ticket wave starts a new session. Watch the
+session-stats line for its `split hint: …` suffix (it appears once the average prefix over the last window
+crosses the threshold — see `session-register` § 2b); treat it the same as a scope boundary, not something to
+push past.
 
 1. Plan the queue: which tickets are independent, and the model for each.
 2. Launch the workers in **one message** (they run in parallel, in the background).
@@ -84,3 +90,9 @@ One scope per session: this loop is the session's one job — a new ticket wave 
    re-arm `pr-watch`.
 5. Review events, findings and conflicts with `main` go back out to the worker that wrote the branch (`SendMessage`);
    merges, posts and flushes stay here.
+
+**Reviewing your own worker's draft PR is not `pr-review`** — that skill is for someone else's PR. Here the main
+session spawns the `review-runner` agent directly on the draft PR and tells it to post nothing; it returns only
+the ≤3K overview. The main session reads that overview and acts on every STOP/WARN finding (a fix goes back to
+the worker that owns the branch, via `SendMessage`), then marks the PR ready once they're clear. The overview's
+RECOMMEND line is advice to the main session, not a verdict — no review is posted on the worker's own PR.

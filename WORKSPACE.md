@@ -118,19 +118,20 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
 
 ## Cost & context hygiene
 
-Caching: a stable prefix re-reads each turn at ~0.1× input; editing `CLAUDE.md`, an import, a skill
-description or the tool list invalidates it, re-billing every open session in full next turn —
-**batch always-on edits into one PR**. Auto-compact backstop = user setting `autoCompactWindow`
-(cloud: `CLAUDE_CODE_AUTO_COMPACT_WINDOW`), never the plugin's `settings.json` (a no-op).
+Caching: a stable prefix re-reads each turn at ~0.1× input; editing `CLAUDE.md`, an import, skill
+description or tool list invalidates it, re-billing every open session next turn —
+**batch always-on edits into one PR**. Auto-compact backstop: a clone gets it from the kit's
+`settings.json`; a plugin install doesn't (ships none) — set `/autocompact 200k` (cloud:
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`).
 
-- **Load by task:** `INDEX.md` first, then only the leaf docs needed. **Read slices** (`grep`,
+- **Load by task:** `INDEX.md` first, then only needed leaf docs. **Read slices** (`grep`,
   `Read` with offset+limit) and pipe big output to a count or scratch file.
 - **Delegate by cost — reads and code.** The main model costs most: wide reads go to a
-  subagent (keep its conclusion); a queue of ≥ 2 independent tickets goes to one background worker each
-  (own worktree; pushes a branch, no PR; merge conflicts go back to it via `SendMessage`).
+  subagent (keep its conclusion); a queue of ≥ 2 tickets goes to one background worker each
+  (own worktree; pushes a branch, no PR; merge conflicts routed via `SendMessage`).
   **Set `model` on every `Agent` call** by size: Haiku to read/classify, Sonnet for a specified fix,
   Opus for judgment/security. The main model opens the draft PR, reviews it via `review-runner`'s ≤3K
-  overview, not the raw diff, and owns every post, merge and flush. Brief: `docs/delegation.md`. Heartbeats:
+  overview, not the diff, and owns every post, merge and flush. Brief: `docs/delegation.md`. Heartbeats:
   shell, no `/loop`.
 - **Flush at every step.** When a ticket/PR/epic step lands: context doc (Session log + section), tick
   `.context/reference/priorities.md` where it exists; the `MEMORY.md` index if a memory note changed.

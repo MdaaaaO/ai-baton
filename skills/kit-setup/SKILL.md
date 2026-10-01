@@ -2,7 +2,7 @@
 name: kit-setup
 description: "Scaffold this workspace for the kit from inside a session: runs the kit's setup.sh --personal here, reports the result, hands over to /kit-health. Use once, right after plugin install."
 metadata:
-  version: "2"
+  version: "3"
   updated: "2026-10-01"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -39,12 +39,15 @@ tracker, chat or warehouse, run it without `--personal` and continue with `env-i
 - The next step, always: restart Claude Code in the workspace root (the hook loads the always-on rules only once the
   env store exists), then run `/kit-health` in the first session.
 
-## 4. Offer the auto-compact backstop
+## 4. Offer the auto-compact backstop (only if it is not already in effect)
 
-Ask, in one line, whether to set the auto-compact backstop now (`/autocompact 200k`, which writes the
-user's own `autoCompactWindow` setting in `~/.claude/settings.json`) — a cloud session sets
-`CLAUDE_CODE_AUTO_COMPACT_WINDOW` instead, which this skill cannot export for them. Never write either one
-unasked; `kit-health` § 4 keeps warning while it is unset, so declining here is not a dead end.
+On a clone install the backstop is already live: the kit's own `settings.json` is
+`<workspace>/.claude/settings.json`, and its `autoCompactWindow` backstops every session here — nothing to
+offer. Only on a plugin install (the plugin ships no `settings.json`, so nothing is set) ask, in one line,
+whether to set it now (`/autocompact 200k`, which writes the user's own `autoCompactWindow` setting in
+`~/.claude/settings.json`) — a cloud session sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` instead, which this
+skill cannot export for them. Never write either one unasked; `kit-health` § 4 keeps warning while it is
+unset, so declining here is not a dead end.
 
 ## Related
 

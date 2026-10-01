@@ -504,8 +504,9 @@ is the number to quote. Discounts/batch are ignored.
 
 Split hint: when the avg context over the last SESSION_STATS_SPLIT_WINDOW turns (default 20)
 is >= SESSION_STATS_SPLIT_THRESHOLD tokens (default 150_000), `fmt_block`/`fmt_line` append one line
-nudging a fresh session — a sustained fat prefix, not one busy turn. Silent below a full window or
-below threshold. Stdlib only.
+nudging a fresh session — a sustained fat prefix, not one busy turn. The window resets at every
+auto-compact (a shrunk prefix starts counting from zero, not from stale pre-compaction turns). Silent
+below a full window or below threshold. Stdlib only.
 
 options:
   -h, --help            show this help message and exit

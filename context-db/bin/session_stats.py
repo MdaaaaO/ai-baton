@@ -31,8 +31,9 @@ is the number to quote. Discounts/batch are ignored.
 
 Split hint: when the avg context over the last SESSION_STATS_SPLIT_WINDOW turns (default 20)
 is >= SESSION_STATS_SPLIT_THRESHOLD tokens (default 150_000), `fmt_block`/`fmt_line` append one line
-nudging a fresh session — a sustained fat prefix, not one busy turn. Silent below a full window or
-below threshold. Stdlib only.
+nudging a fresh session — a sustained fat prefix, not one busy turn. The window resets at every
+auto-compact (a shrunk prefix starts counting from zero, not from stale pre-compaction turns). Silent
+below a full window or below threshold. Stdlib only.
 """
 from __future__ import annotations
 import argparse
@@ -394,6 +395,7 @@ def collect(path: str) -> dict:
     contrib: dict[str, tuple[int, int, int, int, int, float, int]] = {}  # rid -> (i, cw, cr, out, think, cost, ctx) last added to the running totals
     ctx_series: list[int] = []  # per-turn context size, in turn order, deduped like contrib (a streamed chunk overwrites in place)
     rid_pos: dict[str, int] = {}  # rid -> its index in ctx_series
+    compact_at: int | None = None  # ctx_series index of the most recent compaction — the split-hint window never reaches past it
     n_turns = 0
     tok_in = tok_cw = tok_cr = tok_out = tok_think = 0
     peak_ctx = 0
@@ -428,6 +430,7 @@ def collect(path: str) -> dict:
                 last_ts = ts
             if o.get("isCompactSummary"):
                 compactions += 1
+                compact_at = len(ctx_series)  # an auto-compact shrank the real prefix — turns before this stop counting toward the hint
             if o.get("isApiErrorMessage"):
                 api_errors += 1
             if t == "pr-link":
@@ -512,7 +515,8 @@ def collect(path: str) -> dict:
     sub = collect_subagents(path)
     hours = ((last_ts - first_ts).total_seconds() / 3600.0) if first_ts and last_ts else 0.0
     window = split_window()
-    recent = ctx_series[-window:] if ctx_series else []
+    post_compact = ctx_series[compact_at:] if compact_at is not None else ctx_series  # turns since the last auto-compact
+    recent = post_compact[-window:] if post_compact else []
     return {
         "session_id": os.path.splitext(os.path.basename(path))[0],
         "transcript": path,
@@ -527,7 +531,7 @@ def collect(path: str) -> dict:
         # not nested in "context": a split hint needs the last-N-turns average, window and turn count
         # together, and "context" above is asserted as an exact 2-key dict elsewhere (test_collect)
         "recent_prefix": {"avg": int(sum(recent) / len(recent)) if recent else 0, "window": window,
-                           "turns": len(ctx_series), "threshold": split_threshold()},
+                           "turns": len(post_compact), "threshold": split_threshold()},
         "spend_usd_est": round(spend, 2),
         "subagents_cost": sub,
         "spend_total_usd_est": round(spend + sub["spend_usd_est"], 2),
@@ -560,8 +564,11 @@ def _k(n: int) -> str:
 def split_hint(s: dict) -> str | None:
     """A one-line nudge when the prefix has stayed fat over the last `split_window()` turns — the
     session's own context, not what it has spent. `None` below a full window of turns (a single busy
-    turn should never trigger this, only a sustained prefix) or below `split_threshold()`."""
-    rp = s.get("recent_prefix") or {}
+    turn should never trigger this, only a sustained prefix), below `split_threshold()`, or when `s`
+    carries no usable `recent_prefix` (missing, not a dict, or zero turns)."""
+    rp = s.get("recent_prefix")
+    if not isinstance(rp, dict) or not rp.get("turns"):
+        return None
     window, turns, avg, threshold = rp.get("window", 0), rp.get("turns", 0), rp.get("avg", 0), rp.get("threshold", 0)
     if turns < window or avg < threshold:
         return None

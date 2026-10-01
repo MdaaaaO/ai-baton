@@ -238,6 +238,38 @@ class Transcript(unittest.TestCase):
                 self.assertEqual(s["recent_prefix"]["turns"], 2)
                 self.assertIsNone(ss.split_hint(s))
 
+    def test_split_hint_none_on_missing_or_malformed_recent_prefix(self):
+        """A stats dict with no `recent_prefix` (or a malformed one) must never read as a zero-turn,
+        zero-threshold match — `split_hint({})` used to return a hint string for "0 turns ≥ 0"."""
+        self.assertIsNone(ss.split_hint({}))
+        self.assertIsNone(ss.split_hint({"recent_prefix": None}))
+        self.assertIsNone(ss.split_hint({"recent_prefix": "nope"}))
+        self.assertIsNone(ss.split_hint({"recent_prefix": {"avg": 0, "window": 0, "turns": 0, "threshold": 0}}))
+
+    def test_split_hint_resets_after_a_compaction(self):
+        """An auto-compact shrinks the real prefix; turns from before it must drop out of the window so
+        the hint doesn't keep firing on a stale average, then fire again once a fresh full window refills."""
+        fat = [assistant(f"f{i}", f"2026-09-26T09:0{i}:00Z", u=usage(i=1_000_000, out=10)) for i in range(3)]
+        compaction = [{"type": "assistant", "isCompactSummary": True, "timestamp": "2026-09-26T09:10:00Z", "message": {}}]
+        small = [assistant("s0", "2026-09-26T09:11:00Z", u=usage(i=1, out=10))]
+        env = {"SESSION_STATS_SPLIT_WINDOW": "3", "SESSION_STATS_SPLIT_THRESHOLD": "100000"}
+        with tempfile.TemporaryDirectory() as d:
+            path = write_transcript(Path(d), "split-reset", fat + compaction + small)
+            with unittest.mock.patch.dict(os.environ, env):
+                s = ss.collect(str(path))
+                # only the one post-compaction turn counts, not the 3 stale fat turns before it
+                self.assertEqual(s["recent_prefix"]["turns"], 1)
+                self.assertIsNone(ss.split_hint(s))
+
+        refill = [assistant(f"g{i}", f"2026-09-26T09:2{i}:00Z", u=usage(i=1_000_000, out=10)) for i in range(3)]
+        with tempfile.TemporaryDirectory() as d:
+            path = write_transcript(Path(d), "split-reset-refill", fat + compaction + small + refill)
+            with unittest.mock.patch.dict(os.environ, env):
+                s = ss.collect(str(path))
+                hint = ss.split_hint(s)
+                self.assertIsNotNone(hint)
+                self.assertIn("split hint", hint)
+
     def test_split_threshold_and_window_env_overrides(self):
         with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_THRESHOLD": "9000", "SESSION_STATS_SPLIT_WINDOW": "7"}):
             self.assertEqual(ss.split_threshold(), 9000)

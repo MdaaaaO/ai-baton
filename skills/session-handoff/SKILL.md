@@ -156,6 +156,6 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 The next session could pick up cold from `.context/` alone — no reliance on this transcript. Either its
 start prompt is in the registry **and** in your final chat message (step 10), or there genuinely is no
 follow-on work and your final message says so instead of inventing one.
-Then end the session (don't let it sprawl past its ticket; the backstop is the user's `autoCompactWindow`
-setting in `~/.claude/settings.json`, or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for cloud — not a reason to
-keep a session alive).
+Then end the session (don't let it sprawl past its ticket; the backstop is a clone install's own
+`settings.json`, or on a plugin install the user's `autoCompactWindow` setting in `~/.claude/settings.json`
+(`/autocompact 200k`), or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for cloud — not a reason to keep a session alive).
