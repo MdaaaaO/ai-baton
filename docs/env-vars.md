@@ -88,6 +88,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `PR_WATCH_SYNC_COOLDOWN` | `3600` (seconds) | `skills/pr-watch/pr-watch.sh` | how often a fast-moving base may re-trigger CI on the PR | user-facing |
 | `PR_WATCH_KNOWN_RED` | empty | `skills/pr-watch/pr-watch.sh` | extended regex of failing-check names to mute as already-known-red | user-facing |
 | `PR_WATCH_REPLAY` | `0` | `skills/pr-watch/pr-watch.sh` | `1` re-emits the current bot verdict / CHECK NOT GREEN on start even when already reported | user-facing |
+| `PR_WATCH_WORKTREE` | empty | `skills/pr-watch/pr-watch.sh` | path to this session's local checkout; a head move is tracked silently (not `HEAD MOVED`) when its committer is the configured login AND the sha is already a git object there — unset it and every push reads as a real move | user-facing |
 
 ## Identity (`WORKSPACE_*`)
 

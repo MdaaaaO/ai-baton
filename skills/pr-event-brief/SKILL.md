@@ -2,9 +2,9 @@
 name: pr-event-brief
 description: "Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN / HEAD MOVED(drift) line a pr-watch Monitor emits; the main session then performs the action."
 metadata:
-  version: "13"
-  updated: "2026-09-30"
-  reviewed: "2026-09-24"
+  version: "14"
+  updated: "2026-10-01"
+  reviewed: "2026-10-01"
   facts: "github.review_bot"
 argument-hint: <owner/repo> <pr_number> "<event line>"
 arguments: [repo, pr, event]
@@ -72,9 +72,9 @@ re-request or merge anything — the main session does that.
 5. `repos/$repo/commits/<head.sha>/check-runs` → not-green completed runs by name (a check
    cancelled right after a draft toggle is normal; say so).
 6. Read the `pr-watch` skill § "Rules this encodes" only if you need the merge gates.
-7. **Only when `$event` is a real `HEAD MOVED to <sha>` line** — never for `SYNCED with <base>` (the
-   watcher's own branch sync, which prints no `HEAD MOVED` line at all, so this step never applies to it;
-   do not run the check or invent a verdict just because a sync moved the head): run
+7. **Only when `$event` is a real `HEAD MOVED to <sha>` line** (the watcher's own auto-sync merge head is
+   tracked silently and emits no event at all, so `$event` is never that case — do not run the check or
+   invent a verdict for it): run
    `python3 $BATON/skills/pr-open/diagram-plan.py --pr $repo $pr --check` and read its one stdout line —
    `OK <plan>` → `DIAGRAMS: OK`; `NO MARKER — …` → `DIAGRAMS: NO MARKER`; `DRIFT <old> → <new>` →
    `DIAGRAMS: DRIFT` (keep `<old> → <new>` for the `WHY` slot); `MALFORMED MARKER — <bad>; fresh plan:
@@ -96,8 +96,9 @@ WHY: <one sentence, the single decisive fact>
 ```
 
 `DIAGRAMS:` is the brief's one optional line: include it only for a real `HEAD MOVED to <sha>` event
-(Gather step 7) and omit it entirely for every other event, `SYNCED with <base>` included. `pr-watch`
-forks this skill for a `HEAD MOVED` line only once its own check already found `DRIFT`, so in practice
+(Gather step 7) and omit it entirely for every other event — the watcher's own auto-sync merge head is
+never one of those: it is tracked silently and produces no event to fork this skill on in the first
+place. `pr-watch` forks this skill for a `HEAD MOVED` line only once its own check already found `DRIFT`, so in practice
 this slot normally reads `DIAGRAMS: DRIFT` with `ACTION: REDRAW`; Gather step 7 still runs the check
 itself rather than trust the caller, so a `HEAD MOVED` passed in with an `OK` check (a direct call, not
 `pr-watch`'s) gets `DIAGRAMS: OK` and the normal ACTION rules below apply instead.
