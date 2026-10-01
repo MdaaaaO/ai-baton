@@ -46,10 +46,10 @@ ever leaves the machine, and `.github/workflows/main-guard.yml` is the server-si
 to `main` it checks the commit against a squash-merged PR, retrying a few times a few seconds apart before
 it decides there's no match, and when the two still don't match, opens (or comments on) a tracking issue
 — it cannot block the push, only flag it after the fact. Then, with `.claude/` on `main` and clean,
-it fetches and fast-forwards. It refuses — `.sync-status` says `error …` and it pulls nothing — when
-`.claude/` is on another branch, has uncommitted changes, or carries local commits on `main`: each
-is work that belongs on a branch + PR, and the message says how to move it there. It never
-resets, stashes or discards anything.
+it fetches and moves `.claude/` to the right target (below). It refuses — `.sync-status` says `error …`
+and it pulls nothing — when `.claude/` is on another branch, has uncommitted changes, or carries local
+commits on `main`: each is work that belongs on a branch + PR, and the message says how to move it there.
+It never resets, stashes or discards anything.
 
 It takes a lock so two sessions never run the pull at once, exits 0 unless that lock is busy, logs to
 `sync.log` (ignored, trimmed to its last 200 lines; the `main at <sha>` line only when `HEAD` moved) and
@@ -59,9 +59,33 @@ refused pull is seen by the next session instead of staying silent:
 | `.sync-status` | means | `sync-check` warns |
 |---|---|---|
 | `pending <epoch>` | written just before the fetch (bounded by `timeout 60`, or a shell watchdog where `timeout` is missing); still there = the run was killed | when older than 5 minutes |
-| `ok <kit@sha>` | fetched; fast-forwarded or already in step | never |
+| `ok <kit@sha>` | fetched; fast-forwarded, already in step, or already past the held tag | never |
+| `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | not from the status line — its kit check names the waiting tag for as long as `HEAD` lacks it |
 | `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
 | `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed | always |
+
+## Channel: release tags or `main`
+
+By default `.claude/` follows the highest `v[0-9]*` release tag that `origin/main` contains, not
+`origin/main` itself — a clone install never runs code an unattended `SessionEnd` sync pulled straight
+off `main`. Before the first release tag exists it tracks `main` directly, same as the opt-out below.
+
+A newer release tag is never applied by a bare run. Instead `sync.sh` writes the ignored
+`.sync-preview` (the commits between `HEAD` and the tag, the changed `skills/`, `agents/` and `hooks/`,
+and the other files a clone runs unattended — git hooks, `settings.json`, `setup.sh`, `sync.sh` itself,
+`context-db/bin/`) and leaves `.sync-status` at `held <tag>`. Only `sh .claude/sync.sh --accept` (what
+`make claude_sync` passes) fast-forwards to the held tag; the `SessionEnd` hook never passes `--accept`,
+so an unattended run can only hold, never apply.
+
+A contributor who wants the old behaviour — always track `origin/main`, no hold — opts out with:
+
+```
+git -C .claude config kit.channel main
+```
+
+That config lives in the clone's own `.git/config` (never committed): it is a per-machine choice, not a
+kit setting. `make claude_sync` applies the held tag the same way on the release channel; on `kit.channel
+main` the flag is a no-op (there is nothing to hold).
 
 A run that finds the lock busy logs `skipped` with the holder (`held by pid N since T`), says so on stderr,
 exits 3 and leaves `.sync-status` alone: the holder writes the newer state. The lock is `flock` on

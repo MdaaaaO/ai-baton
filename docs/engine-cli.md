@@ -362,7 +362,7 @@ options:
 
 ```text
 usage: ctx_adapter.py [-h]
-                      {version,where,install,adopt,mcp,mcp-json,ctx,hook} ...
+                      {version,where,install,pin,adopt,mcp,mcp-json,ctx,hook} ...
 
 ctx_adapter.py — the kit's one adapter to ctx-store, the context-store CLI `ctx`.
 
@@ -372,7 +372,14 @@ store exists is ctx's answer (`NO_STORE`), not a file test here. The one excepti
 
 Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against. It is
 fetched, not vendored: `install` clones exactly that tag (`git clone --depth 1 --branch <tag>`) into a per-user
-cache directory whose path carries the tag, so a bumped pin never picks up an older copy.
+cache directory whose path carries the tag, so a bumped pin never picks up an older copy. `CTX_SHA` beside it
+names the commit that tag resolves to right now: `install` reads the clone's detached HEAD and refuses to apply
+a clone whose commit disagrees (naming both shas) — a tag repointed at another commit after the kit was pinned
+to it is exactly what this catches, not a network failure. When the clone's own commit cannot be read at all
+(no git on PATH mid-clone, a corrupted checkout), the fetch is applied anyway and recorded unverified rather than
+blocked — a verify that cannot run is not the same as one that ran and disagreed. `install` writes what it found
+next to the pinned `ctx` (`pin status`, below); `kit-health`'s ctx pin line reads it back, offline, so a moved tag
+or a cache installed before a pin bump is reported without a second clone.
 
 Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
@@ -442,9 +449,11 @@ or found, or when anything in the adapter itself fails, so a machine that has no
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
-  python3 ctx_adapter.py version          # the pinned tag, then `api <CTX_API>` on a second line
+  python3 ctx_adapter.py version          # the pinned tag, `api <CTX_API>` on a second line, `sha <CTX_SHA>` on a third
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
+  python3 ctx_adapter.py pin              # the sha `install` found at the pinned location, and whether it verified;
+                                           # exit 1 when nothing is installed or the copy predates this check
   python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
   python3 ctx_adapter.py mcp              # the ctx MCP server on the store; each write tool call names its own `actor`
                                            # (the caller's registered session name) — MCP_ACTOR (or CTX_ACTOR) is
@@ -461,10 +470,12 @@ the kit's settings/types is missing or stale (`adopt --check` only — a plain `
 precedence over 6 the same way). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
 
 positional arguments:
-  {version,where,install,adopt,mcp,mcp-json,ctx,hook}
+  {version,where,install,pin,adopt,mcp,mcp-json,ctx,hook}
     version             print the pinned ctx-store tag
     where               print the ctx executable; exit 1 when not installed
     install             fetch the pinned tag into the pinned location
+    pin                 report the sha `install` found at the pinned location,
+                        and whether it verified
     adopt               make the content root a ctx store with the kit's
                         settings (ctx init)
     mcp                 run the ctx MCP server on the store (stdio)

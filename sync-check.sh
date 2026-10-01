@@ -4,7 +4,8 @@
 # Non-fatal, a few lines on stderr. Run by `make -C .claude/context-db session-register` (and
 # `sync-check`), so every session sees at registration whether the previous session's background
 # sync silently failed, whether local commits on main can never leave this machine (main is
-# PR-only), or whether origin has moved on (a PR merged). Exit 0 always; the WARN lines are the signal —
+# PR-only), or whether origin has moved on (a release tag is waiting; on `kit.channel main`, a PR
+# merged). Exit 0 always; the WARN lines are the signal —
 # silence means "in step". So every state that is NOT "in step" says so: not a git checkout (outside a plugin install,
 # which kit-health reports itself), no origin/main to compare with, or a git call that failed.
 #
@@ -36,7 +37,9 @@ if [ -f "$HERE/.sync-status" ]; then
 fi
 
 # check_kit — the kit's main is never pushed from here: warn on local commits, on being behind
-# origin/main, on a non-main checkout, a missing pre-push guard, and uncommitted changes.
+# (the release channel: the highest release tag origin/main contains is not in HEAD yet — commits
+# nobody released are not "behind"; `kit.channel main`, or no release tag yet: origin/main itself),
+# on a non-main checkout, a missing pre-push guard, and uncommitted changes.
 check_kit() {
   local dir=$1 label=kit
   cd "$dir" || { warn "$label: cannot enter $dir — sync state unknown"; return 0; }
@@ -62,7 +65,17 @@ check_kit() {
     warn "$label: could not compare HEAD with origin/main (git: $behind) — sync state unknown"
   else
     [ "$ahead" -gt 0 ] && warn "$label: $ahead local commit(s) on main that will never be pushed — main is PR-only: \`git branch <topic> && git reset --hard origin/main\`, open a PR from <topic>"
-    [ "$behind" -gt 0 ] && warn "$label: origin/main is $behind commit(s) ahead (a PR merged) — \`make claude_sync\` fast-forwards"
+    # the same channel and tag choice as sync.sh
+    tag=""
+    if [ "$(git config --get kit.channel 2>/dev/null || true)" != main ]; then
+      tag="$(git for-each-ref --merged origin/main --sort=-version:refname --format='%(refname:short)' 'refs/tags/v[0-9]*' 2>/dev/null | head -n 1)"
+    fi
+    if [ -n "$tag" ]; then
+      git merge-base --is-ancestor "refs/tags/$tag" HEAD 2>/dev/null \
+        || warn "$label: release $tag is waiting (what it changes: .sync-preview) — \`make claude_sync\` applies it"
+    elif [ "$behind" -gt 0 ]; then
+      warn "$label: origin/main is $behind commit(s) ahead (a PR merged) — \`make claude_sync\` fast-forwards"
+    fi
   fi
   branch="$(git symbolic-ref -q --short HEAD 2>/dev/null || echo DETACHED)"
   [ "$branch" != main ] && warn "$label: checked out on '$branch' — .claude/ must stay on main; branch work lives in a worktree under .worktrees/"
