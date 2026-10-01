@@ -29,9 +29,10 @@
 #   commit this session pushed itself (committer = the configured login, and the sha is already a local git
 #   object in PR_WATCH_WORKTREE, when set) is tracked silently the same way — unset PR_WATCH_WORKTREE and every
 #   push reads as a real HEAD MOVED (the conservative default; deciding this without a worktree hint is a later step).
-#   CHECK NOT GREEN (owner decision 2026-09-22): at most ONE line per head (reset on HEAD MOVED), and only once the suite
-#   has settled (no check run queued/in_progress), listing every failing check at that moment — previously one line
-#   per newly-finished failing check (~10 wake-ups for one known cause).
+#   CHECK NOT GREEN (owner decision 2026-09-22): first announced at most ONCE per head (reset on HEAD MOVED), and only
+#   once the suite has settled (no check run queued/in_progress), listing every failing check at that moment —
+#   previously one line per newly-finished failing check (~10 wake-ups for one known cause). A head that stays red
+#   repeats the line on the backoff described below.
 #   PR_WATCH_KNOWN_RED=<extended-regex>: before emitting, fetch the failure-level annotations of the failing check
 #   runs; if every failing check run has at least one failure annotation and ALL of them match the regex, the line
 #   is suppressed (logged to stderr only). A failing check run with zero annotations is unexplained → line emitted.
@@ -39,11 +40,12 @@
 #   holds this head (default: a re-arm on a known head is silent about what it already reported; the state dir is
 #   ${TMPDIR:-/tmp}/pr-watch-<owner>-<repo>-<pr>/ and is shared by every session on the same machine).
 # A failed lookup is UNKNOWN, never red and never green (WORKSPACE.md § Verification: a swallowed error must
-# never read as a negative result). Every read an event depends on (PR info, behind-by, approvals for the sync,
-# the check rollup, the three comment/review listings) goes through `gh_retry`: 3 attempts, PR_WATCH_RETRY_DELAY
-# seconds apart (default 2). A read that still fails prints one `PR <n> LOOKUP FAILED: <what> — <error text>`
-# line and the step that needed it is skipped for the cycle: no CHECK NOT GREEN, no BEHIND line and no sync is
-# derived from data that was never read.
+# never read as a negative result). Every read an event depends on (PR info, behind-by, the reviews, the check
+# rollup, the two comment listings) goes through `gh_retry`: 3 attempts, PR_WATCH_RETRY_DELAY seconds apart
+# (default 2). The reviews are read once per cycle and feed the sync's approval count, the bot verdict and the
+# review listing. A read that still fails prints one `PR <n> LOOKUP FAILED: <what> — <error text>` line and
+# every step that needed it is skipped for the cycle: no CHECK NOT GREEN, no BEHIND line, no bot verdict and
+# no sync is derived from data that was never read.
 #   An alarm that persists backs off additively: after its first line it is silent for 1h, then 3h, then 5h …
 #   (+2h each time), capped by PR_WATCH_BACKOFF_MAX seconds (default 86400). Two alarms use it: a CHECK NOT
 #   GREEN on an unchanged head (the rollup is read again first: checks that went green end the alarm, and the
@@ -114,16 +116,16 @@ gh_retry() {
   done
 }
 # Additive backoff of one persisting alarm, per PR: $D/<name>_last is when its last line went out,
-# $D/<name>_step how long it stays silent after that (3600, then +7200 per line, capped).
-backoff_start() { putv "$1_last" "$(now_epoch)"; putv "$1_step" 3600; }
+# $D/<name>_step how long it stays silent after that (3600, then +7200 per line; the cap bounds every window).
+backoff_cap() { bo_max=${PR_WATCH_BACKOFF_MAX:-86400}; if [ "$1" -gt "$bo_max" ]; then printf '%s' "$bo_max"; else printf '%s' "$1"; fi; }
+backoff_start() { putv "$1_last" "$(now_epoch)"; putv "$1_step" "$(backoff_cap 3600)"; }
 backoff_due() {
   bo_last=$(getv "$1_last"); bo_step=$(getv "$1_step")
   [ -n "$bo_last" ] && [ $(( $(now_epoch) - bo_last )) -ge "${bo_step:-3600}" ]
 }
 backoff_widen() {
-  bo_step=$(getv "$1_step"); bo_step=$(( ${bo_step:-3600} + 7200 )); bo_max=${PR_WATCH_BACKOFF_MAX:-86400}
-  [ "$bo_step" -gt "$bo_max" ] && bo_step=$bo_max
-  putv "$1_last" "$(now_epoch)"; putv "$1_step" "$bo_step"
+  bo_step=$(getv "$1_step")
+  putv "$1_last" "$(now_epoch)"; putv "$1_step" "$(backoff_cap $(( ${bo_step:-3600} + 7200 )))"
 }
 # lookup_failed <pr> <what> <err>: the UNKNOWN event. One line when <what> starts failing or its error text
 # changes; the same error on later cycles is silent until the backoff window has passed. The caller skips
@@ -157,6 +159,7 @@ while [ $# -gt 0 ]; do
     echo "pr-watch: PR $pr re-armed on known head $prev — silent about already-reported state (PR_WATCH_REPLAY=1 to replay)" >&2
   else
     rm -f "$D/seen_bot" "$D/seen_c" "$D/seen_r" "$D/seen_i" "$D/init" "$D/notgreen" "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step" "$D/sync_stuck" "$D/appr_seen" "$D/dirty_seen" "$D/sync_from"
+    rm -f "$D"/lookup_fail_*                             # a lookup failure announced before the reset is said again
     : >"$D/seen_c"; : >"$D/seen_r"; : >"$D/seen_i"; putv head "$h"; putv seen_bot 0
   fi
   # Seed the cooldown from the current head: if it is a GitHub-made merge commit (update-branch), its
@@ -224,6 +227,13 @@ while true; do
         rm -f "$D/.rrerr"
       fi;;
     esac
+    # One reviews read per cycle feeds three steps: the sync's approval count, the bot verdict and the review
+    # listing. A read that failed is announced once, here; each of the three then skips itself this cycle.
+    gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100"; revrc=$?; revs=""
+    if [ $revrc -eq 0 ]; then
+      revs=$(printf '%s' "$ghr_out" | jq -sce 'add // [] | select(type == "array")' 2>/dev/null) || { revrc=1; ghr_err="the reviews listing is not a JSON list"; }
+    fi
+    if [ $revrc -ne 0 ]; then lookup_failed "$pr" "reviews" "$ghr_err"; else lookup_ok "reviews"; fi
     # keep the branch merged with its base while we wait for reviews (we cannot merge anyway, so a stale branch only delays the merge)
     if [ "$sync" = 1 ] && [ -n "$cur" ] && [ -n "$base" ] && [ "$(getv sync_stuck)" != "$cur" ]; then
       if [ "$mstate" = dirty ]; then
@@ -238,13 +248,11 @@ while true; do
           if [ "${behind:-0}" -gt 0 ] 2>/dev/null; then
             now=$(now_epoch); last_sync=$(getv last_sync)
             if [ $((now - ${last_sync:-0})) -ge "$sync_cool" ]; then
-              gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100"; arc=$?; araw=$ghr_out
-              if [ $arc -ne 0 ]; then
-                # a failed fetch is never "0 approvals" — that would sync (and dismiss) an actually-approved PR;
-                # skip the sync attempt this cycle, retry next cycle instead
-                lookup_failed "$pr" "approvals (sync check)" "$ghr_err"
+              if [ $revrc -ne 0 ]; then
+                # a failed reviews read (announced above) is never "0 approvals" — that would sync (and dismiss)
+                # an actually-approved PR; skip the sync attempt this cycle, retry next cycle instead
+                :
               else
-                lookup_ok "approvals (sync check)"
                 # Neither the configured review bot's own approval nor a login in the configured `github.bots`
                 # list (which auto-merge.yml's REVIEWER — the identity its own approval carries, a different
                 # login than github.review_bot when the bot posts its Assessment under its own account —
@@ -252,10 +260,15 @@ while true; do
                 # that would make a push dismiss something worth keeping: without this exclusion a PR approved
                 # only by one of those never gets synced while it sits BEHIND, and auto-merge — which requires a
                 # clean, non-BEHIND head — never runs.
-                appr=$(printf '%s' "$araw" | jq -s --arg bot "$bot" --argjson bots "$bots" '[.[] | .[] | select(.state=="APPROVED" and .user.login!=$bot and ((.user.login as $l | ($bots | index($l))) == null))] | length')  # gh api --jq has no --arg (gh-cli skill)
-                if [ "${appr:-0}" -gt 0 ] 2>/dev/null; then
+                appr=$(printf '%s' "$revs" | jq --arg bot "$bot" --argjson bots "$bots" '[.[] | select(.state=="APPROVED" and .user.login!=$bot and ((.user.login as $l | ($bots | index($l))) == null))] | length' 2>/dev/null) || appr=""  # gh api --jq has no --arg (gh-cli skill)
+                if [ -z "$appr" ]; then
+                  # a count that could not be computed is not "0 approvals" either
+                  lookup_failed "$pr" "approval count" "the approvals in the reviews listing could not be counted"
+                elif [ "$appr" -gt 0 ] 2>/dev/null; then
+                  lookup_ok "approval count"
                   if [ "$(getv appr_seen)" != "$cur" ]; then echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing (a push would dismiss the approval where dismiss_stale_reviews is on): merge now, or update-branch and ask for re-approval"; putv appr_seen "$cur"; fi
                 else
+                  lookup_ok "approval count"
                   out=$(gh api -X PUT "repos/$repo/pulls/$pr/update-branch" -f expected_head_sha="$cur" 2>&1); rc=$?
                   if [ "$rc" = 0 ]; then
                     if [ -n "$bot" ]; then rr="the watcher re-requests $bot itself once it lands"; else rr="nothing to re-request"; fi
@@ -286,17 +299,18 @@ while true; do
         fi
       fi
     fi
-    if [ -n "$bot" ] && [ "$(getv seen_bot)" = 0 ]; then
-      verr=$(mktemp)
-      v=$(PR_WATCH_BOT_LOGIN=$bot bash "$KIT/skills/pr-watch/bot-verdict.sh" "$repo" "$pr" "$head" 2>"$verr"); vrc=$?
+    # The verdict is taken from this cycle's reviews (no second read); without them it stays unknown.
+    if [ -n "$bot" ] && [ "$(getv seen_bot)" = 0 ] && [ $revrc -eq 0 ]; then
+      printf '%s' "$revs" >"$D/.reviews.json"
+      v=$(PR_WATCH_BOT_LOGIN=$bot bash "$KIT/skills/pr-watch/bot-verdict.sh" "$repo" "$pr" "$head" "$D/.reviews.json" 2>"$D/.verr"); vrc=$?
       case $vrc in
-        0) [ "$v" = none ] || { putv seen_bot 1; echo "PR $pr BOT REVIEW on $head: $v"; } ;;
-        2) : ;;                                            # bot became unconfigured mid-run — nothing to report
-        *) echo "ERROR $repo#$pr $(head -1 "$verr" | tr -d '\r')" ;;
+        0) lookup_ok "bot verdict"; [ "$v" = none ] || { putv seen_bot 1; echo "PR $pr BOT REVIEW on $head: $v"; } ;;
+        2) lookup_ok "bot verdict" ;;                      # bot became unconfigured mid-run — nothing to report
+        *) verr=$(head -1 "$D/.verr" | tr -d '\r'); lookup_failed "$pr" "bot verdict" "${verr:-bot-verdict.sh exited $vrc}" ;;
       esac
-      rm -f "$verr"
+      rm -f "$D/.verr" "$D/.reviews.json"
     fi
-    # Checks: one line per head, only once nothing is still running, listing every failing check.
+    # Checks: first one line per head, only once nothing is still running, listing every failing check.
     # statusCheckRollup mixes two node shapes: a CheckRun (status/conclusion/name) and a legacy commit status,
     # a StatusContext (state/context only — no status or conclusion field at all). Reading status/conclusion off
     # every node without telling them apart drops every StatusContext silently: it never counts as pending and
@@ -344,9 +358,10 @@ while true; do
           fi
           putv notgreen "$cur"
         elif [ "$pend" = 0 ] && [ "$ng" = "$cur" ]; then
-          # the red this head was announced with is gone (a re-run went green): nothing left to repeat
+          # the red this head was announced with is gone (a re-run went green): nothing left to repeat. The
+          # head is forgotten, so a check that goes red on it later is announced like a first red.
           echo "pr-watch: PR $pr checks on $(printf %s "$cur" | cut -c1-9) are no longer red — CHECK NOT GREEN is not repeated" >&2
-          rm -f "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step"
+          rm -f "$D/notgreen" "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step"
         fi
       fi
     fi
@@ -368,10 +383,8 @@ while true; do
         new="$new; review comment $id by $login ($kind)"
       done
     fi
-    gh_retry gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" --jq '.[] | "\(.id):\(.user.login):\(.state):\(.commit_id)"'; rrc=$?; rraw=$ghr_out
-    if [ $rrc -ne 0 ]; then lookup_failed "$pr" "reviews" "$ghr_err"
-    else
-      lookup_ok "reviews"
+    if [ $revrc -eq 0 ]; then
+      rraw=$(printf '%s' "$revs" | jq -r '.[] | "\(.id):\(.user.login):\(.state):\(.commit_id)"')
       for rec in $rraw; do
         id=${rec%%:*}; rest=${rec#*:}; login=${rest%%:*}; rest2=${rest#*:}; state=${rest2%%:*}; cid=${rest2#*:}
         grep -qxF "$id" "$D/seen_r" && continue; echo "$id" >>"$D/seen_r"

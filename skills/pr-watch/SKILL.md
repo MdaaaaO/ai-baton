@@ -68,7 +68,8 @@ after a push. Also filtered out on purpose: your own comments/reviews, the bot's
 non-green states. The full per-line table: `reference/events.md`.
 
 **A failed lookup is UNKNOWN, never red or green.** Every `gh` read an event depends on (PR info,
-behind-by, approvals, the check-status rollup, the comment and review listings) gets 3 attempts,
+behind-by, the reviews — read once per cycle for the approval count, the bot verdict and the review
+listing — the check-status rollup, the comment listings) gets 3 attempts,
 `PR_WATCH_RETRY_DELAY` apart, and a failure that survives them never falls back to "nothing pending"
 (a silent GREEN), "not behind" (a silent no-op) or "nothing new" — it prints one
 `PR N LOOKUP FAILED: <what> — <error>` line instead; a changed error, or a recovery in between,
@@ -132,7 +133,7 @@ to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot
 `OK` / `NO MARKER` → nothing; `DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD
 MOVED line only (the brief reruns the check itself), and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
 own sync emits no head move and gets no check. Skip the fork for
-`MERGED`/`CLOSED` (close out per `reference/events.md`), and `LOOKUP FAILED` / `ERROR …` (never fork
+`MERGED`/`CLOSED` (close out per `reference/events.md`), and `LOOKUP FAILED` / `ERROR … startup:` (never fork
 `pr-event-brief` for either — a failed read is not a PR event, there is nothing on the PR to triage). A brief slot
 marked `unverified` means fetch it yourself.
 

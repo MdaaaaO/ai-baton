@@ -23,8 +23,9 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
   carries no `status`/`conclusion` field of its own, only a `state`, which the watcher maps to the same
   tri-state a check run's `conclusion` uses.
 - **A failed lookup is never read as red or green.** Every `gh` read an event depends on — PR info,
-  behind-by, approvals (sync check), the check-status rollup, and the three listings (review comments,
-  reviews, issue comments) — gets 3 attempts, `PR_WATCH_RETRY_DELAY` apart. A read still failing after
+  behind-by, the reviews (read once per cycle for the sync's approval count, the bot verdict and the
+  review listing), the check-status rollup, and the two comment listings (review comments, issue
+  comments) — gets 3 attempts, `PR_WATCH_RETRY_DELAY` apart. A read still failing after
   that prints one `PR N LOOKUP FAILED: <what> — <error>` line instead of deriving a `CHECK NOT GREEN`,
   a BEHIND alarm or "nothing new" from data that was never read; the step that needed it is skipped for
   the cycle and tried again on the next. One line per `<what>` per PR: a changed error, or a recovery
@@ -32,7 +33,8 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
   `… (still failing)` on the backoff below, so an outage is neither one line per cycle nor silent for good.
 - **A repeated alarm backs off additively.** A `CHECK NOT GREEN` on an unchanged head, and a
   `LOOKUP FAILED` that lasts, repeat after 1h, then 3h, then 5h … +2h each time, capped by
-  `PR_WATCH_BACKOFF_MAX` (default 86400s — once a day); the first announcement is immediate. Before
+  `PR_WATCH_BACKOFF_MAX` (default 86400s — once a day; a value below 3600 shortens the first window
+  too); the first announcement is immediate. Before
   this a red head was announced once and never again, and before 2026-09-22 on every 120s window.
   A due `CHECK NOT GREEN` reads the checks again before it repeats: it lists what is red at that
   moment, is dropped (a stderr note) when the checks went green, and waits while a re-run is still in

@@ -110,6 +110,11 @@ if [ "$1" = pr ] && [ "$2" = view ]; then
   case "$json" in
     statusCheckRollup)
       [ -n "${STUB_ROLLUP_FAIL:-}" ] && { echo "stub gh: simulated rollup failure" >&2; exit 1; }
+      if [ -n "${STUB_ROLLUP_FAIL_COUNT:-}" ]; then
+        rf="${STUB_LOG}.rollup_calls"
+        rn=$(( $(cat "$rf" 2>/dev/null || echo 0) + 1 )); printf '%s' "$rn" >"$rf"
+        if [ "$rn" -le "$STUB_ROLLUP_FAIL_COUNT" ]; then echo "stub gh: simulated transient rollup failure" >&2; exit 1; fi
+      fi
       body="{\"statusCheckRollup\": $STUB_ROLLUP_JSON}" ;;
     state) body="{\"state\": \"$STUB_STATE\"}" ;;
     *) echo "stub gh: unhandled pr view --json $json" >&2; exit 9 ;;
@@ -260,6 +265,7 @@ class PrWatchStub(unittest.TestCase):
     def test_a_persisting_lookup_failure_is_announced_once_across_cycles(self):
         # dedup: the SAME failure persisting across cycles (two separate invocations against the same,
         # surviving state dir — like a real re-arm) announces once, not on every cycle.
+        self.seed_state(head=HEAD9)
         kwargs = dict(extra_env={"STUB_COMPARE_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
         r1 = self.run_watch(**kwargs)
         self.assertIn("LOOKUP FAILED", r1.stdout)
@@ -268,6 +274,7 @@ class PrWatchStub(unittest.TestCase):
         self.assertNotIn("LOOKUP FAILED", r2.stdout)
 
     def test_a_recovered_lookup_then_a_new_failure_is_announced_again(self):
+        self.seed_state(head=HEAD9)
         fail = dict(extra_env={"STUB_COMPARE_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
         ok = dict(identity_env={"PR_WATCH_SELF": "tester"})
         r1 = self.run_watch(**fail)
@@ -333,6 +340,34 @@ class PrWatchStub(unittest.TestCase):
         self.assertNotIn("CHECK NOT GREEN", r.stdout)
         self.assertIn("no longer red", r.stderr)
         self.assertFalse((self.state_dir() / "notgreen_bad").exists())
+        self.assertFalse((self.state_dir() / "notgreen").exists())
+
+    def test_a_head_that_went_green_and_then_red_again_is_announced_again(self):
+        last = 1_700_000_000
+        self.seed_state(head=HEAD9, notgreen=FULL, notgreen_bad="unit-tests: FAILURE;",
+                         notgreen_last=str(last), notgreen_step="3600")
+        green = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "SUCCESS")]),
+                                identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_NOW": str(last + 3601)})
+        self.assertNotIn("CHECK NOT GREEN", green.stdout)
+        # red again a minute later, well inside what would have been the next window
+        red = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "FAILURE")]),
+                              identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_NOW": str(last + 3661)})
+        self.assertEqual(red.returncode, 0, red.stdout + red.stderr)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;", red.stdout)
+        self.assertEqual((self.state_dir() / "notgreen_step").read_text().strip(), "3600")
+
+    def test_a_backoff_max_below_one_hour_bounds_the_first_window_too(self):
+        now0 = 1_700_000_000
+        rollup = json.dumps([self.check_run("unit-tests", "FAILURE")])
+        self.seed_state(head=HEAD9)
+        env = {"PR_WATCH_BACKOFF_MAX": "600"}
+        r1 = self.run_watch(rollup=rollup, identity_env={"PR_WATCH_SELF": "tester"},
+                             extra_env={**env, "PR_WATCH_NOW": str(now0)})
+        self.assertIn("CHECK NOT GREEN", r1.stdout)
+        self.assertEqual((self.state_dir() / "notgreen_step").read_text().strip(), "600")
+        r2 = self.run_watch(rollup=rollup, identity_env={"PR_WATCH_SELF": "tester"},
+                             extra_env={**env, "PR_WATCH_NOW": str(now0 + 601)})
+        self.assertIn("CHECK NOT GREEN", r2.stdout)
 
     def test_a_due_check_not_green_with_a_rerun_in_progress_waits(self):
         last = 1_700_000_000
@@ -346,6 +381,7 @@ class PrWatchStub(unittest.TestCase):
         self.assertEqual((self.state_dir() / "notgreen_step").read_text().strip(), "3600")
 
     def test_a_lookup_failure_that_persists_is_announced_again_after_the_backoff_window(self):
+        self.seed_state(head=HEAD9)
         now0 = 1_700_000_000
         fail = {"STUB_COMPARE_FAIL": "1"}
         r1 = self.run_watch(extra_env={**fail, "PR_WATCH_NOW": str(now0)}, identity_env={"PR_WATCH_SELF": "tester"})
@@ -364,6 +400,73 @@ class PrWatchStub(unittest.TestCase):
                 r = self.run_watch(identity_env={"PR_WATCH_SELF": "tester"}, extra_env={var: "1", "PR_WATCH_SYNC": "0"})
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                 self.assertIn(f"PR {PR} LOOKUP FAILED: {what}", r.stdout)
+
+    def test_a_check_status_read_that_fails_twice_is_read_a_third_time(self):
+        r = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "FAILURE")]),
+                            identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"STUB_ROLLUP_FAIL_COUNT": "2"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;", r.stdout)
+        self.assertNotIn("LOOKUP FAILED", r.stdout)
+
+    def test_a_read_that_keeps_failing_is_tried_three_times_and_no_more(self):
+        r = self.run_watch(extra_env={"STUB_COMPARE_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(sum("/compare/" in c for c in self.calls().splitlines()), 3, self.calls())
+
+    def test_a_replay_says_a_lookup_failure_again(self):
+        self.seed_state(head=HEAD9)
+        kwargs = dict(identity_env={"PR_WATCH_SELF": "tester"})
+        r1 = self.run_watch(extra_env={"STUB_COMPARE_FAIL": "1"}, **kwargs)
+        self.assertIn("LOOKUP FAILED", r1.stdout)
+        r2 = self.run_watch(extra_env={"STUB_COMPARE_FAIL": "1"}, **kwargs)
+        self.assertNotIn("LOOKUP FAILED", r2.stdout)
+        r3 = self.run_watch(extra_env={"STUB_COMPARE_FAIL": "1", "PR_WATCH_REPLAY": "1"}, **kwargs)
+        self.assertEqual(r3.stdout.count("LOOKUP FAILED"), 1, r3.stdout)
+        self.assertNotIn("(still failing)", r3.stdout)
+
+    def test_a_failed_reviews_read_is_one_line_and_never_a_sync(self):
+        # the branch is behind and the sync is on: the read that would count the approvals fails
+        r = self.run_watch(compare_behind=3, identity_env={"PR_WATCH_SELF": "tester"},
+                            extra_env={"STUB_REVIEWS_FAIL": "1"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.count("LOOKUP FAILED"), 1, r.stdout)
+        self.assertIn(f"PR {PR} LOOKUP FAILED: reviews — stub gh: simulated reviews failure", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("SYNCED", r.stderr)
+
+    def test_the_reviews_are_read_once_per_cycle(self):
+        self.write_config(review_bot="rev-bot[bot]")
+        r = self.run_watch(compare_behind=3, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(sum("/reviews?per_page=100" in c for c in self.calls().splitlines()), 1, self.calls())
+        self.assertIn("update-branch", self.calls())
+
+    def test_a_reviews_listing_that_is_not_a_list_is_a_lookup_failure(self):
+        r = self.run_watch(reviews=json.dumps({"message": "not a list"}), compare_behind=3,
+                            identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} LOOKUP FAILED: reviews — the reviews listing is not a JSON list", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+
+    def test_approvals_that_cannot_be_counted_are_unknown_never_zero(self):
+        # an entry the approval filter cannot read: the count is unknown, so the branch is not synced
+        reviews = [{"id": 1, "user": "carol", "state": "APPROVED", "commit_id": FULL}]
+        r = self.run_watch(reviews=json.dumps(reviews), compare_behind=3, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} LOOKUP FAILED: approval count", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+
+    def test_a_bot_verdict_that_cannot_be_read_is_a_lookup_failure_not_an_error_line(self):
+        self.write_config(review_bot="rev-bot[bot]")
+        # a bot review without a commit id: the verdict lookup cannot match it against the head
+        reviews = [{"id": 1, "user": {"login": "rev-bot[bot]"}, "state": "COMMENTED", "commit_id": None,
+                    "body": "### Assessment: good"}]
+        r = self.run_watch(reviews=json.dumps(reviews), identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.count("LOOKUP FAILED"), 1, r.stdout)
+        self.assertIn(f"PR {PR} LOOKUP FAILED: bot verdict", r.stdout)
+        self.assertNotIn("ERROR", r.stdout)
+        self.assertNotIn("BOT REVIEW", r.stdout)
 
     def test_no_temp_file_is_left_behind(self):
         self.run_watch(extra_env={"STUB_COMPARE_FAIL": "1"}, identity_env={"PR_WATCH_SELF": "tester"})
