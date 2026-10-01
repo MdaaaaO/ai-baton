@@ -409,7 +409,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        catalogs INDEX.md (gen_index.py) and SESSION_INDEX.md (gen_sessions.py --no-archive) are
                        regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
-  brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and
+  brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and epic
                        <epic key>", the session row's own `epic:` frontmatter value verbatim, or "and no
                        context doc" when the row carries no `epic:` field at all), then `ctx brief --session
                        <session_id>` re-budgeted by this adapter — its frontmatter cut to

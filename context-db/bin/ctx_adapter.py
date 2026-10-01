@@ -48,7 +48,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        catalogs INDEX.md (gen_index.py) and SESSION_INDEX.md (gen_sessions.py --no-archive) are
                        regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
   brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
-  brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and
+  brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and epic
                        <epic key>", the session row's own `epic:` frontmatter value verbatim, or "and no
                        context doc" when the row carries no `epic:` field at all), then `ctx brief --session
                        <session_id>` re-budgeted by this adapter — its frontmatter cut to
@@ -714,8 +714,8 @@ def _epic_remaining_head(ctx: Path, store: list[str], doc_key: str, remaining: C
 
 
 def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
-    """The `brief-session` hook's work: one owner line (`compacted — re-grounded from sessions/<name> and
-    <epic key>`, the session row's own `epic:` frontmatter value verbatim, or `and no context doc` when the
+    """The `brief-session` hook's work: one owner line (`compacted — re-grounded from sessions/<name> and epic
+    <key>`, the session row's own `epic:` frontmatter value verbatim, or `and no context doc` when the
     row carries no `epic:` field at all), then this session's brief with `BRIEF_BUDGET` spent on the body
     rather than on frontmatter the owner cannot act on — `ctx brief`'s own `--budget` has no way to drop
     frontmatter keys or reorder sections (ctx-store's own `brief` would need a field allow-list for that), so
@@ -754,7 +754,7 @@ def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
         return
     doc_key = header.split(" (", 1)[0].strip()
     epic_key = fm.get("epic", "")
-    owner = f"compacted — re-grounded from {doc_key} and " + (epic_key or "no context doc")
+    owner = f"compacted — re-grounded from {doc_key} and " + (f"epic {epic_key}" if epic_key else "no context doc")
     brief_lines = [header, *_filtered_frontmatter(fm)]
     reordered = _reorder_sections(body)
     if reordered.strip():

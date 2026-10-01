@@ -876,7 +876,7 @@ class CompactBrief(Base):
         # the owner line is first, naming this session's own doc and its own `epic:` field verbatim — the
         # resolved context doc (below, `ctx resolve` fell back to `ctx find --type epic` for it, since its own
         # `epic:` field always wins a plain `ctx resolve`, naming itself) only ever shows up in the trailing block
-        self.assertEqual(lines[0], "compacted — re-grounded from sessions/lane-topic and acme/widgets#42")
+        self.assertEqual(lines[0], "compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42")
         # dropped bookkeeping
         for field in ("stats:", "heartbeat:", "session_id:", "ref:", "updated:", "sections:"):
             self.assertNotIn(field, out)
@@ -923,7 +923,7 @@ class CompactBrief(Base):
         r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), **env)
         self.assertEqual((r.returncode, r.stderr), (0, ""))
         # the owner line names the session row's own `epic:` value regardless of whether it resolves to a doc
-        self.assertEqual(r.stdout.splitlines()[0], "compacted — re-grounded from sessions/lane-topic and acme/widgets#99")
+        self.assertEqual(r.stdout.splitlines()[0], "compacted — re-grounded from sessions/lane-topic and epic acme/widgets#99")
         self.assertNotIn(":\n", r.stdout.split("\n\n")[-1])  # no trailing context-doc block appended
         self.assertNotIn("skipped (hook deadline)", r.stdout)  # a plain no-match, not a timeout
 
@@ -952,7 +952,7 @@ class CompactBriefDeadline(Base):
     a resolved doc) and the session brief are written and flushed before any context-doc lookup is even
     attempted (#420) — not merely before the slowest of them — and each lookup's timeout is recomputed from
     `remaining()` right before that call, never one value computed once and handed to two calls in a row
-    (ctx-store#56 review). A slow or timed-out context-doc lookup is replaced with one line rather than
+    (the review on this change). A slow or timed-out context-doc lookup is replaced with one line rather than
     risking the rest. A stubbed `_ctx` (not a real sleep, no real `ctx` needed) stands in for a slow
     `resolve`."""
 
@@ -979,7 +979,7 @@ class CompactBriefDeadline(Base):
         self.mod._ctx = slow_ctx
         out = self.run_hook(self.payload(source="compact"))
         # the owner line names the session row's own `epic:` value, not a resolved doc — it never waits on resolve
-        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and acme/widgets#42\n"), out)
+        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42\n"), out)
         self.assertIn("session: lane-topic", out)
         self.assertIn("context doc: skipped (hook deadline)", out)
 
@@ -994,7 +994,7 @@ class CompactBriefDeadline(Base):
             return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
         self.mod._ctx = fast_ctx
         out = self.run_hook(self.payload(source="compact"))
-        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and acme/widgets#42\n"), out)
+        self.assertTrue(out.startswith("compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42\n"), out)
         self.assertNotIn("skipped (hook deadline)", out)
         self.assertIn("widgets/rollout:", out)
         self.assertIn("- step 1", out)
@@ -1053,7 +1053,7 @@ class CompactBriefDeadline(Base):
         self.assertEqual(owner_and_brief_clock, 0.0)  # written before either lookup ran
         self.assertTrue(all(c > owner_and_brief_clock for c in later_clocks), writes)
         full = "".join(s for _, s in writes)
-        self.assertTrue(full.startswith("compacted — re-grounded from sessions/lane-topic and acme/widgets#42\n"))
+        self.assertTrue(full.startswith("compacted — re-grounded from sessions/lane-topic and epic acme/widgets#42\n"))
         self.assertIn("context doc: skipped (hook deadline)", full)
         # find got its own timeout (remaining after resolve's 2.9s), not resolve's: it did not also wait ~3s
         # of a reused value plus whatever resolve already spent — the two lookups together stayed well under
