@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 BIN = Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(BIN))
@@ -177,6 +178,22 @@ class ExitCodes(BlankStore):
     def test_style_violation_is_exit_1(self):
         p = self.cs("check", "--style", "conventional", "-", stdin="Fixed things\n")
         self.assertEqual(p.returncode, 1, p.stderr)
+
+    def test_a_crash_is_exit_2_never_the_style_code(self):
+        with mock.patch.object(cs, "_main", side_effect=KeyError("boom")), mock.patch("sys.stderr"):
+            self.assertEqual(cs.main(["check", "-"]), 2)
+
+    def test_ticket_key_style_without_a_usable_key_shape_is_exit_2(self):
+        # no message can satisfy a key shape that is missing or does not compile: a config error, not a style one
+        p = self.cs("check", "--style", "ticket-key", "-", stdin="KEY-123: x\n")
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("no tracker.key_regex", p.stderr)
+        self.assertNotIn("does not follow", p.stderr)
+        kb.save_config({**kb.load_config(), "tracker": {"kind": "jira", "key_regex": "(KEY-"}})
+        p = self.cs("title", "--style", "ticket-key", "KEY-123: x")
+        self.assertEqual(p.returncode, 2, p.stderr)
+        self.assertIn("not a valid regex", p.stderr)
+        self.assertNotIn("does not follow", p.stderr)
 
 
 class Resolve(BlankStore):

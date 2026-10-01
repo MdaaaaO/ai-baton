@@ -9,7 +9,8 @@ under the kit, so a plugin update or kit re-clone never deletes it. Nothing ship
 first `enqueue.sh` call creates it.
 
 **Without it:** inert — where `systems.signed_commits` is false a commit is made and pushed the ordinary way,
-and the skill is never invoked.
+and the skill is never invoked. The host-side `make sign*` targets carry the same gate: they print one
+"not applicable here" line and exit 0 instead of touching the queue.
 
 **Example:**
 

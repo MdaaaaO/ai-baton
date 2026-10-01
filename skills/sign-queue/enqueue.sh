@@ -81,13 +81,38 @@ no_nl worktree "$wt"; no_nl branch "$br"; no_nl "message path" "$msg"; no_nl --f
 # commit style (WORKSPACE.md § Rules): Conventional Commits unless the repo overrides it — resolved by
 # commit_style.py from the worktree's repo marker / commitlint / env config. SIGN_QUEUE_SKIP_STYLE=1 = deliberate one-off.
 if [ "${SIGN_QUEUE_SKIP_STYLE:-0}" != "1" ]; then
-  python3 "$(cd "$(dirname "$0")/../.." && pwd)/context-db/bin/commit_style.py" check --quiet --dir "$wt" "$msg" \
-    || { echo "message file $msg does not follow the repo's commit style — fix the message (or SIGN_QUEUE_SKIP_STYLE=1 for a deliberate one-off)" >&2; exit 2; }
+  # commit_style.py check exit codes are not uniform: 1 = the message doesn't follow the repo's style
+  # (fix the message), anything else = the tool itself failed (bad config, I/O, a crash) — fix the tool,
+  # not the message. Treating both the same used to hide a broken commit_style.py behind a wrong hint.
+  if python3 "$(cd "$(dirname "$0")/../.." && pwd)/context-db/bin/commit_style.py" check --quiet --dir "$wt" "$msg"; then
+    :
+  else
+    style_rc=$?
+    if [ "$style_rc" -eq 1 ]; then
+      echo "message file $msg does not follow the repo's commit style — fix the message (or SIGN_QUEUE_SKIP_STYLE=1 for a deliberate one-off)" >&2
+    else
+      echo "enqueue.sh: commit_style.py check failed to run (exit $style_rc) — fix the tool or its config, not the message" >&2
+    fi
+    exit 2
+  fi
 fi
 if [ -z "$(git -C "$wt" status --short)" ]; then
   # clean worktree: allow a push-only retry (commit already made on a previous drain, push failed)
   # origin/<branch> may not exist (single-branch clone) — compare against the remote tip via ls-remote.
-  remote_tip=$(git -C "$wt" ls-remote --heads origin "$br" 2>/dev/null | cut -f1)
+  # ls-remote piped straight into cut (the old shape) hides a real network/auth failure behind cut's own
+  # (near-always-zero) exit status: capture ls-remote's own output and exit code first, so a lookup that
+  # actually failed is never read as "branch doesn't exist yet" (empty output, exit 0, is the real "none").
+  # stderr goes to its own file: git and ssh also write there on success (a redirect warning, a new
+  # known-hosts line), and that text must never end up in the tip.
+  ls_remote_err=$(mktemp)
+  if ls_remote_out=$(git -C "$wt" ls-remote --heads origin "$br" 2>"$ls_remote_err"); then
+    rm -f "$ls_remote_err"
+    remote_tip=$(printf '%s' "$ls_remote_out" | cut -f1)
+  else
+    echo "enqueue.sh: git ls-remote origin $br failed: $(cat "$ls_remote_err")" >&2
+    rm -f "$ls_remote_err"
+    exit 2
+  fi
   if [ -n "$remote_tip" ] && git -C "$wt" cat-file -e "$remote_tip^{commit}" 2>/dev/null; then
     ahead=$(git -C "$wt" rev-list --count "$remote_tip..HEAD" 2>/dev/null || echo 0)
   else
@@ -140,11 +165,14 @@ if [ -n "$files" ]; then
   # such paths are in neither worktree nor index. They are already part of the commit, so drop them
   # from the add line; anything else that is neither present nor tracked is a typo -> refuse.
   kept=""
+  # read once, with its own exit status: inside a pipe a failed git would read as "not a staged deletion"
+  staged_del=$(git -C "$wt" diff --cached --name-only --diff-filter=D) \
+    || { echo "enqueue.sh: git diff --cached failed in $wt — cannot tell which paths are staged deletions" >&2; exit 2; }
   set -f  # a path is a word, never a glob
   for f in $files; do
     # sq(): a route dir with \$param or a name with ' stays one literal path in the job script
     if [ -e "$wt/$f" ] || git -C "$wt" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then kept="$kept $(sq "$f")"
-    elif git -C "$wt" diff --cached --name-only --diff-filter=D | grep -qx "$f"; then echo "note: $f is an already-staged deletion, included via the index" >&2
+    elif printf '%s\n' "$staged_del" | grep -qxF -- "$f"; then echo "note: $f is an already-staged deletion, included via the index" >&2
     else echo "--files: $f is neither in the worktree nor tracked" >&2; exit 2; fi
   done
   set +f
@@ -171,8 +199,39 @@ meta=$(python3 "$(dirname "$0")/signq.py" meta "$wt" "$br" "$msg" --topic "$topi
          --epic "$epic" --pr "$pr" --summary "$summary" --flags "${flags#,}" --files "$nfiles") \
   || { echo "enqueue.sh: signq.py meta failed (see above) — fix the flag it rejected and re-run" >&2; exit 2; }
 mkdir -p "$Q"  # the workspace queue dir is created on first use (#7) — nothing ships or seeds it
-job="$Q/$(date -u +%Y%m%dT%H%M%SZ)-$topic.sh"
-tmp="$job.tmp"
+# Unique, order-preserving job names: a second-resolution timestamp alone collides when two sessions (or
+# one session, twice) enqueue in the same second — the older one's job file is silently overwritten. A
+# zero-padded sequence number after the timestamp keeps the name lexically sortable (so `load_jobs`' plain
+# glob-sort still drains in enqueue order) while making it unique. The sequence number is claimed with a
+# `set -C` (noclobber) marker file — atomic across concurrent enqueue.sh processes, unlike "list the dir and
+# pick the next free number" — and never globbed by signq.py (which only looks at `*.sh`/`*.sh.failed`).
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+seq=0
+while :; do
+  seqf=$(printf '%03d' "$seq")
+  try="$Q/${ts}-${seqf}-$topic.sh"
+  claim="$try.claim"
+  # both checks matter: the claim file alone only protects against a concurrent enqueue.sh racing for the
+  # same name (the actual atomic point, via noclobber); an enqueue run after the claimant already exited
+  # (and its EXIT trap already removed the claim) would otherwise reclaim the same sequence number and
+  # silently overwrite the still-pending job file from the earlier run.
+  if ( set -C; : > "$claim" ) 2>/dev/null; then
+    # checked while holding the claim: nobody else can create this name now. A parked `.failed` twin counts
+    # as taken too — `sign_retry` renames it back to this very name.
+    if [ ! -e "$try" ] && [ ! -e "$try.failed" ]; then
+      job=$try
+      # EXIT alone is not enough: a shell killed by a signal skips it, so INT/TERM/HUP exit through it
+      tmp=""
+      trap 'rm -f "$claim" ${tmp:+"$tmp"}' EXIT
+      trap 'exit 130' INT TERM HUP
+      break
+    fi
+    rm -f "$claim"
+  fi
+  seq=$((seq + 1))
+  [ "$seq" -lt 1000 ] || { echo "enqueue.sh: could not claim a unique job name under $Q for $ts-$topic" >&2; exit 2; }
+done
+tmp="$job.tmp.$$"
 {
   echo '#!/bin/sh'
   echo "# sign-queue job: $topic  (enqueued $(date -u +%FT%TZ) by session $by)"
@@ -240,9 +299,19 @@ if [ -n "${cand:-}" ]; then
   echo "enqueue.sh: --supersede dropped $cbase" >&2
 fi
 mv "$tmp" "$job"
+# three outcomes, not two: a failed PR lookup (gh errored or timed out) must read differently from a clean
+# "no PR yet" (new branch, nothing to find) and from "no gh on PATH" (lookup never ran) — mirrors
+# signq.py's own Job.pr_label(), the table this same metadata feeds on the owner's `make sign`.
 [ -n "$meta" ] && printf '%s' "$meta" | python3 -c '
 import json,sys; m=json.load(sys.stdin)
-pr=("#%s" % m["pr"]) if m.get("pr") else "no PR yet"
+if m.get("pr"):
+    pr = "#%s" % m["pr"]
+elif m.get("pr_lookup_error"):
+    pr = "PR lookup failed (%s)" % m["pr_lookup_error"]
+elif m.get("pr_lookup_skipped"):
+    pr = "no gh -> pass --pr"
+else:
+    pr = "no PR yet"
 print("queued %s: %s · epic %s · %s %s · %s" % (m.get("topic"), m.get("ticket") or "?", m.get("epic") or "?",
       (m.get("repo") or "?").split("/")[-1], pr, m.get("subject") or ""))' >&2
 echo "$job"
