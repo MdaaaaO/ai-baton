@@ -60,7 +60,7 @@ refused pull is seen by the next session instead of staying silent:
 |---|---|---|
 | `pending <epoch>` | written just before the fetch (bounded by `timeout 60`, or a shell watchdog where `timeout` is missing); still there = the run was killed | when older than 5 minutes |
 | `ok <kit@sha>` | fetched; fast-forwarded, already in step, or already past the held tag | never |
-| `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | never (`#59` step 4 teaches `kit-health` to show it) |
+| `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | not from the status line — its kit check names the waiting tag for as long as `HEAD` lacks it |
 | `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
 | `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed | always |
 

@@ -508,6 +508,33 @@ class SyncSh(unittest.TestCase):
         self.assertFalse(self.preview_file.exists())
         self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tip_sha, "kit.channel main tracks origin/main, tags aside")
 
+    def test_sync_check_names_a_waiting_release_not_a_commit_count(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        self.assertEqual(self.status()[1], "held")
+        out = self.check()
+        self.assertIn("release v0.1.0 is waiting", out)
+        self.assertNotIn("commit(s) ahead", out)
+
+    def test_sync_check_is_silent_at_the_tag_with_unreleased_commits_on_origin(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync(args=["--accept"])
+        self.origin_commit("b")  # unreleased: the release channel is not behind because of it
+        self.sync()
+        self.assertEqual(self.status()[1], "ok")
+        out = self.check()
+        self.assertNotIn("is waiting", out)
+        self.assertNotIn("commit(s) ahead", out)
+
+    def test_sync_check_on_the_main_channel_still_counts_commits(self):
+        self.git("config", "kit.channel", "main", cwd=self.kit)
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.git("fetch", "-q", "--tags", "origin", cwd=self.kit)
+        self.assertIn("origin/main is 1 commit(s) ahead", self.check())
+
 
 if __name__ == "__main__":
     unittest.main()
