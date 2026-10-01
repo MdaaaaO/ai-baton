@@ -104,7 +104,7 @@ class MermaidCheckTest(unittest.TestCase):
 
 
 class MermaidCheckRealDepsTest(unittest.TestCase):
-    """The real jsdom/dompurify/mermaid (#441), not the stubs above: MermaidCheckTest's stub `mermaid` never
+    """The real jsdom/dompurify/mermaid, not the stubs above: MermaidCheckTest's stub `mermaid` never
     touches DOMPurify, so it could not catch the bug where mermaid's own DOMPurify instance came up without a
     window and `DOMPurify.addHook is not a function` failed every flowchart with a labelled node. Installs the
     pinned deps with `npm ci --offline` into a scratch dir (no network call either way); skips cleanly, with a
