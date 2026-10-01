@@ -671,8 +671,10 @@ usage: evidence_check.py [-h] file
 
 evidence_check.py — every Verified claim in a ticket comment or PR body cites an evidence item
 (`ticket-update` § Comment grammar): `**Verified** — <claim> · <evidence>`, one line, or a bulleted list of
-claims — `**Verified**` followed by one `- <claim> · <evidence>` line per claim. `<evidence>` is one of three
-shapes:
+claims — `**Verified**` followed by one `- <claim> · <evidence>` line per claim. The evidence is only
+recognised in the tail AFTER the ` · ` separator — a number or word in the claim itself never counts, however
+hash- or issue-ref-shaped it looks (`row count 1500000 matches` is bare, same as `· 1500000`). `<evidence>` is
+one of three shapes:
 
 positional arguments:
   file        comment/body file, or - for stdin

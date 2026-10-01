@@ -48,6 +48,31 @@ class ClaimWithoutEvidence(unittest.TestCase):
         self.assertEqual([c for _, c in missing], ["checkout still feels slow", "payments unaffected"])
 
 
+class EvidenceOnlyAfterSeparator(unittest.TestCase):
+    """A number or word shaped like evidence doesn't count unless it's in the tail after ` · ` —
+    the grammar is `<claim> · <evidence>`, not "evidence anywhere in the claim"."""
+
+    def test_no_separator_is_bare_even_with_a_hash_shaped_number(self):
+        text = "**Verified** — row count 1500000 matches\n"
+        self.assertEqual([c for _, c in ec.missing_evidence(text)], ["row count 1500000 matches"])
+
+    def test_plain_number_after_separator_is_still_bare(self):
+        text = "**Verified** — row count · 1500000\n"
+        self.assertEqual([c for _, c in ec.missing_evidence(text)], ["row count · 1500000"])
+
+    def test_hex_hash_with_a_letter_is_cited(self):
+        text = "**Verified** — row count · deadbeef1\n"
+        self.assertEqual(ec.missing_evidence(text), [])
+
+    def test_hash_sharp_glued_to_a_word_is_bare(self):
+        text = "**Verified** — ranking · #1 priority\n"
+        self.assertEqual([c for _, c in ec.missing_evidence(text)], ["ranking · #1 priority"])
+
+    def test_hash_sharp_at_end_is_cited(self):
+        text = "**Verified** — ranking · #12\n"
+        self.assertEqual(ec.missing_evidence(text), [])
+
+
 class MixedMultiClaim(unittest.TestCase):
     def test_lists_only_the_bare_claims(self):
         text = (

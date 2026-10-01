@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """evidence_check.py — every Verified claim in a ticket comment or PR body cites an evidence item
 (`ticket-update` § Comment grammar): `**Verified** — <claim> · <evidence>`, one line, or a bulleted list of
-claims — `**Verified**` followed by one `- <claim> · <evidence>` line per claim. `<evidence>` is one of three
-shapes:
+claims — `**Verified**` followed by one `- <claim> · <evidence>` line per claim. The evidence is only
+recognised in the tail AFTER the ` · ` separator — a number or word in the claim itself never counts, however
+hash- or issue-ref-shaped it looks (`row count 1500000 matches` is bare, same as `· 1500000`). `<evidence>` is
+one of three shapes:
 
   - a command with its output line: `` `cmd` → `output` `` (backticked command, a `→`, then the output);
   - an http(s) URL;
-  - a PR / commit reference: `#<n>`, `<owner>/<repo>#<n>`, a 7-40 char hex commit, or a PR URL.
+  - a PR / commit reference: `#<n>` / `<owner>/<repo>#<n>` not glued to more word text (`#1 priority` is bare,
+    `#12` and `#12.` are cited), or a 7-40 char hex commit that has at least one a-f letter (an all-digit run
+    like `1500000` is bare), or a PR URL.
 
 It checks that an item of one of these shapes is present, never that the claim is true. A file with no
 `**Verified**` section passes (the section stays optional, as `ticket-update` has it today); a file whose
@@ -32,17 +36,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fsutil  # noqa: E402 — the one `<file | ->` reader
 
 VERIFIED_HEAD = "**Verified**"
-# The three evidence shapes, by shape only — never whether the claim is true.
-#   1. a backtick command followed by `→` and some output (itself backticked or not);
-#   2. an http(s) URL;
-#   3. a bare issue/PR reference (`#123`, `owner/repo#123`) or a PR URL (already caught by #2) or a commit hash.
-EVIDENCE = re.compile(
-    r"`[^`\n]+`\s*→\s*\S"          # `cmd` → output
-    r"|https?://\S+"                    # URL (a PR URL is one too)
-    r"|(?:[\w.-]+/[\w.-]+)?#\d+\b"       # #<n>  or  owner/repo#<n>
-    r"|\b[0-9A-Fa-f]{7,40}\b"            # a commit hash
-)
+CLAIM_SEP = " · "  # evidence lives only in the tail after this — never in the claim text itself
+
+# The three evidence shapes, by shape only — never whether the claim is true. Matched against the tail only
+# (see `evidence_tail`), so a number or word that merely happens to be hash- or issue-ref-shaped never counts
+# unless the author put it after the separator on purpose.
+CMD_OUTPUT = re.compile(r"`[^`\n]+`\s*→\s*\S")        # `cmd` → output
+URL = re.compile(r"https?://\S+")                     # URL (a PR URL is one too)
+# #<n> or owner/repo#<n> — not glued to more word text: end-of-tail, trailing whitespace, or punctuation only.
+ISSUE_REF = re.compile(r"(?:[\w.-]+/[\w.-]+)?#\d+(?=\s*\Z|[.,;:!?)\]])")
+HASH = re.compile(r"\b[0-9A-Fa-f]{7,40}\b")           # a commit hash — must contain a letter, checked below
+HASH_LETTER = re.compile(r"[A-Fa-f]")
 HEAD_LEN = 72
+
+
+def evidence_tail(claim: str) -> str | None:
+    """The text after the ` · ` separator, or None when the claim carries no separator at all — evidence is
+    recognised only there, never earlier in the claim (`row count 1500000 matches`, with no separator, is
+    bare; so is `· 1500000`, which has one but no letter in the run of digits)."""
+    if CLAIM_SEP not in claim:
+        return None
+    return claim.split(CLAIM_SEP, 1)[1]
+
+
+def has_evidence(claim: str) -> bool:
+    """Whether `claim` cites an evidence item of one of the three shapes, in its tail after ` · `."""
+    tail = evidence_tail(claim)
+    if tail is None:
+        return False
+    if CMD_OUTPUT.search(tail) or URL.search(tail) or ISSUE_REF.search(tail):
+        return True
+    return any(HASH_LETTER.search(m.group()) for m in HASH.finditer(tail))
 
 
 def claim_lines(text: str) -> list[tuple[int, str]]:
@@ -76,7 +100,7 @@ def claim_lines(text: str) -> list[tuple[int, str]]:
 
 def missing_evidence(text: str) -> list[tuple[int, str]]:
     """Claims with no evidence item, in file order."""
-    return [(n, c) for n, c in claim_lines(text) if not EVIDENCE.search(c)]
+    return [(n, c) for n, c in claim_lines(text) if not has_evidence(c)]
 
 
 def head(claim: str) -> str:

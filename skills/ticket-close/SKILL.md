@@ -2,7 +2,7 @@
 name: ticket-close
 description: "Checklist for closing a ticket in the environment's tracker (Jira or GitHub issues): a final outcome comment (Delivered / Verified / Out-of-scope), the right transition or close reason (Done / Won't Do / Cancelled), the delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
@@ -24,22 +24,34 @@ kind X in this environment" and stop.
    ✅ 2026-09-14 — Closing: <outcome in one line>
 
    **Delivered** — what shipped under this ticket (PRs + sub-tasks, all clickable)
-   **Verified** — the final check against the system of record (numbers table if applicable)
+   **Verified** — the final check against the system of record · <evidence> (a numbers table, if
+     used, is illustration only — the citation itself stays on the claim line)
    **Out of scope / left as is** — anything deliberately not done, so it doesn't read as missed
    ```
    Evidence-dense, not narrative. Links rendered from `tracker.url_template`. Each Verified claim
    carries an evidence item, the grammar `ticket-update` § Comment grammar defines.
-2. **Confirm delivering PRs are linked** and merged; don't resolve a PR review thread that's waiting
+2. **Post via a file — both adapters run this, not just GitHub's.** Write the comment to a file, then run,
+   in order: `python3 $BATON/context-db/bin/evidence_check.py <file>` — exit 0 → continue; exit 3 → fix the
+   comment (add the missing evidence item(s), named on stderr) and re-check, never post as is; exit 2 → the
+   file couldn't be read — fix the call or the file, never post. On GitHub, also run
+   `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file> --repo <repo>` — exit 0 → post;
+   exit 1 → rewrite the hits generically (never post the file as is) and re-check; exit 2 → fix the call or
+   the file, never post; exit 3 → do not post — the env store could not be loaded, so the check did not
+   run; fix the store or check the file by hand before posting; a no-op when `<repo>` is one of
+   `tracker.repos` or not public. Then post from that file, never by pasting the text: GitHub —
+   `gh issue comment <n> -R <repo> --body-file <file>`; Jira — the file's text as the body of
+   `tracker.mcp_tools.comment`.
+3. **Confirm delivering PRs are linked** and merged; don't resolve a PR review thread that's waiting
    on a third party (`WORKSPACE.md` § Rules — the open thread is the gate).
-3. **Close with the right outcome** — one of three, each a key under the adapter's config:
+4. **Close with the right outcome** — one of three, each a key under the adapter's config:
    shipped → `done`; decided-not-to-do on merit → `wont_do`; abandoned / superseded → `cancelled`.
-4. **Flush + close out** — run `session-handoff` (through its ctx tools): context-doc Session log +
+5. **Flush + close out** — run `session-handoff` (through its ctx tools): context-doc Session log +
    relevant section, tick `.context/reference/priorities.md`, archive the context doc if the initiative
    is fully done, update `MEMORY.md` if a note changed.
 
 ## Adapter — Jira (tracker.kind = jira)
 
-- Final comment via `tracker.mcp_tools.comment`.
+- **Final comment** per Core § 2 (`tracker.mcp_tools.comment`).
 - **Transition + resolution** via `tracker.mcp_tools.transition` (check the transitions actually
   available first via `tracker.mcp_tools.transitions_list` — ids drift):
   - Shipped → **Done** (`tracker.transitions.done`).
@@ -51,14 +63,7 @@ kind X in this environment" and stop.
 
 `gh` with the token per skill `gh-cli` (`github.sandbox_token_prefix`), in one of `tracker.repos`.
 
-- Final comment: before posting, `python3 $BATON/context-db/bin/evidence_check.py <file>` — exit 0 →
-  continue; exit 3 → fix the comment (add the missing evidence item(s), named on stderr) and re-check, never
-  post as is. Then `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file>
-  --repo <repo>` — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
-  re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run; fix the
-  store or check the file by hand before posting; a no-op when `<repo>` is one of `tracker.repos` or not
-  public. Then `gh issue comment <n> -R
-  <repo> --body-file <file>`.
+- **Final comment** per Core § 2 (`--body-file`).
 - **Close reason replaces the transition.** Resolve the value for the outcome key with `get --nonempty`
   and **stop if the lookup fails** — a plain `get` would let a configured-but-blank reason (`""`) through,
   and an empty `--reason` would close the issue as `completed` with no error:
