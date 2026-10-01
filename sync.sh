@@ -6,7 +6,8 @@
 # setup.sh) refuses any push to the kit's `main`. Nothing else is synced: an environment's facts
 # live in the local env store (.context/reference/env/, never in git), its prose in
 # .context/reference/environment.md. Idempotent, lock-guarded; exits 0 except 3 when another run holds
-# the lock (it is also run from a SessionEnd hook, which ignores the exit).
+# the lock, or 1 when --accept's manifest verification ran and failed (see below — it is also run from
+# a SessionEnd hook, which ignores the exit; --accept itself never comes from that hook).
 #
 # Channel: by default the kit follows the highest `v[0-9]*` release tag that `origin/main` contains
 # (it tracks `main` directly before the first release tag exists). `git config kit.channel main`
@@ -17,6 +18,39 @@
 # The one optional argument, --accept, applies the held tag — passed by `make claude_sync`, never by
 # the SessionEnd hook.
 #
+# Before --accept fast-forwards to a release tag, it verifies the tag's attested manifest
+# (`docs/contributing.md` § Releases, `context-db/bin/release_manifest.py`): download the tag's
+# `manifest.txt` release asset, `gh attestation verify` it against `.github/workflows/release.yml`
+# (owner/repo parsed from the checkout's own `origin` URL, never hardcoded), and check the
+# manifest's `commit <sha>` line against the tag's own commit. `kit.channel main` never verifies —
+# it has no tag to check. Three outcomes:
+#   the check ran and passed    → applies as before, status `ok …`
+#   the check ran and FAILED    → applies nothing: `gh attestation verify` rejected the manifest
+#                                  (any failure of that call other than "no answer from GitHub" —
+#                                  see below — rejects, an HTTP 404 included), or the manifest names
+#                                  a different commit than the tag; status `error <reason>`, the
+#                                  reason also on stderr, and (unlike every other FAIL cause) this
+#                                  one exits 1 instead of 0 — `--accept` only ever runs in the
+#                                  foreground, so the failure must be loud. The tag and reason are
+#                                  also remembered in the ignored `.sync-rejected` (one line: `<tag>
+#                                  <reason>`), so the next unattended run reports the same rejection
+#                                  as `error` again instead of `held <tag>`; re-running `--accept` on
+#                                  that tag verifies from scratch (a fixed release goes through), and
+#                                  the file is removed once a release applies or a later tag is held
+#   the check CANNOT run        → applies anyway: no `gh` on PATH or one too old for `gh
+#                                  attestation`, `gh` not authenticated, an origin off github.com (an
+#                                  ssh host alias such as `github.com-work` counts — it is left
+#                                  unparsed, never guessed at), a `manifest.txt` that could not be
+#                                  downloaded for any reason at all (no asset, network, timeout,
+#                                  anything else — a release cut before the manifest existed never
+#                                  has one), or the verify call itself got no answer from GitHub
+#                                  (network, timeout, a rate limit, a server error, bad credentials —
+#                                  gh's own rejection of the manifest is never read as this, even
+#                                  when its wording overlaps); status `ok …` with the standalone word
+#                                  `unverified` in the detail — the word and the reason live in
+#                                  `.sync-status` and in `make claude_sync`'s output; `sync-check.sh`
+#                                  does not warn on it
+#
 #   sh .claude/sync.sh [--accept]       (from the workspace root, or via `make claude_sync`)
 #
 # Outcome is recorded in .sync-status (ignored; one line: `<utc-ts> <state> <detail>`) so a later
@@ -24,12 +58,24 @@
 # `sync-check.sh` (run by `make -C .claude/context-db session-register`) reads it. States:
 #   pending <epoch> …           written just before the fetch; still there later = the run was killed
 #   ok <what>                   fetched; fast-forwarded, already in step, or already past the held tag
-#   held <tag>                  a newer release tag is waiting in .sync-preview; `make claude_sync` applies it
+#                                (" unverified (<reason>)" appended when --accept applied a release
+#                                tag whose manifest attestation could not be checked)
+#   held <tag>                  a newer release tag is waiting in .sync-preview; `make claude_sync`
+#                                applies it (unless .sync-rejected still names this exact tag — then
+#                                the run reports `error` instead, below, rather than holding again
+#                                what --accept already refused)
 #   offline <epoch> since <ts>  the fetch could not resolve/reach origin; <epoch> = first run of the streak
-#   error <reason>              needs the user: off main, dirty, ahead, fetch failed or timed out, ff failed
+#   error <reason>              needs the user: off main, dirty, ahead, fetch failed or timed out, ff
+#                                failed, an accepted release tag failed manifest verification, or a
+#                                previously rejected tag is still waiting (.sync-rejected)
 # A run that finds the lock busy logs `skipped`, exits 3 and leaves .sync-status alone (the holder writes it).
 # The sync reports `error` — and pulls nothing — when .claude/ is not on main, has uncommitted
 # changes, or carries local commits on main: each of those is work that must move to a branch + PR.
+#
+# .sync-rejected (ignored; one line: `<tag> <reason>`) remembers a release tag `--accept` rejected,
+# so a later unattended run (no --accept) reports `error` for that tag instead of writing `held
+# <tag>` over the rejection — see the verify_release outcomes above. Removed once a release applies
+# (verified or unverified) or the held tag moves past the one it names.
 set -u
 FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-60}"  # seconds; Claude Code does not enforce an async hook's `timeout` (docs/sync.md)
 LOCK_WAIT="${SYNC_LOCK_WAIT:-30}"          # seconds to wait for another sync.sh's flock
@@ -42,7 +88,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 LOG="$HERE/sync.log"
 STATUS="$HERE/.sync-status"
 PREVIEW="$HERE/.sync-preview"
-FAIL=""; PULLED=""; OFFLINE=""; HELD=""; ERRF=""
+REJECTED="$HERE/.sync-rejected"
+FAIL=""; PULLED=""; OFFLINE=""; HELD=""; ERRF=""; VERIFY_SUFFIX=""; VERIFY_FAIL=""
+VERIFY_ERRF=""; VERIFY_DIR=""; REJECT_REASON=""
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }
 status() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >"$STATUS"; }
@@ -72,6 +120,13 @@ with_timeout() {
 # fetch_offline <stderr-file> — did the fetch fail because origin could not be resolved or reached?
 fetch_offline() {
   grep -Eqi 'could not resolve (host|hostname)|temporary failure in name resolution|name or service not known|nodename nor servname|failed to connect|couldn.t connect to server|network is unreachable|no route to host|connection (refused|timed out)|operation timed out' "$1"
+}
+
+# gh_unreachable <stderr-file> — did a `gh` call fail without an answer to its question: the network
+# (`gh` words these its own way, Go's net errors, so fetch_offline's git wording alone would miss
+# them), a rate limit, a server error, or credentials github refused? A 404 is an answer.
+gh_unreachable() {
+  fetch_offline "$1" || grep -Eqi 'no such host|dial tcp|i/o timeout|tls handshake timeout|error connecting to|rate limit|bad credentials|HTTP (401|403|429|5[0-9][0-9])' "$1"
 }
 
 # release_tag — the highest `v[0-9]*` tag reachable from origin/main (the pattern kit_version()
@@ -110,11 +165,137 @@ write_preview() {
   log "kit: held $tag — wrote $(basename "$PREVIEW")"
 }
 
+# origin_owner_repo — "<owner>/<repo>" parsed from the checkout's own configured `remote.origin.url`
+# (ssh, https, or ssh:// form, including an explicit port on the ssh:// form, e.g.
+# `ssh://git@github.com:22/o/r` or `ssh://git@ssh.github.com:443/o/r`; a trailing ".git" is
+# stripped); empty when there is no origin, or it is not a github.com (or ssh.github.com) remote.
+# The host must be exactly `github.com` or `ssh.github.com`, in the host position: after an optional
+# `<scheme>://` and an optional `<user>@`, nothing else — `notgithub.com/o/r` does not match just
+# because the substring is there, and neither does another host with `github.com` in its path
+# (`https://host.example/github.com/o/r`). An ssh host alias such as `git@github.com-work:o/r` (an SSH config
+# `Host` entry some people point at github.com, with `-work` not part of any real github.com
+# hostname) stays unparsed on purpose — it is never guessed at, so it reads as "not github.com" and
+# verify_release leaves it unverified rather than trusting a hostname that is not actually
+# github.com's. Never hardcode a slug: this is the one place that reads it. The literal config
+# value (`git config --get`), not `git remote get-url` — the latter expands any
+# `url.<base>.insteadOf` rewrite, which would hand back whatever the rewrite target is, not the
+# github.com slug the rest of this function depends on.
+origin_owner_repo() {
+  local url
+  url="$(git config --get remote.origin.url 2>/dev/null)" || return 0
+  printf '%s\n' "$url" \
+    | sed -E -n 's#^([A-Za-z][A-Za-z0-9+.-]*://)?([^@/]+@)?(github\.com|ssh\.github\.com)(:[0-9]+)?[:/]+([^/]+/[^/]+)/?$#\5#p' \
+    | sed -E 's#\.git$##'
+}
+
+# verify_release <tag> <commit> — before an accepted release tag is applied, check it against its
+# attested manifest the way docs/contributing.md § Releases documents: download the tag's
+# `manifest.txt` release asset, `gh attestation verify` it against release.yml, then check the
+# manifest's own `commit <sha>` line against <commit> (release_manifest.py's tree-hash check needs a
+# checkout already at that commit, which this is about to become — not yet, so it is not run here).
+# Sets $VERIFY_SUFFIX and returns 0 when the update may still be applied: "" when fully verified, or
+# "unverified (<reason>)" when the check could not run at all — no `gh` on PATH, `gh` not
+# authenticated or too old to know `gh attestation`, a manifest.txt that could not be downloaded for
+# any reason at all (no asset, network, timeout, anything else — a release cut before the manifest
+# existed never has one), or the verify call itself got no answer (network, timeout, a rate limit, a
+# server error, bad credentials). Sets $FAIL and $REJECT_REASON (the same failure, without the
+# "nothing applied" wrapper, for the caller to remember in .sync-rejected) and returns 1 only when
+# the check RAN and FAILED: `gh attestation verify` rejected the manifest — any failure of that call
+# that is not "no answer" counts, an HTTP 404 included — or the manifest names a different commit
+# than the tag; either way nothing is applied.
+verify_release() {
+  local tag=$1 commit=$2 owner_repo manifest line rc
+  VERIFY_SUFFIX=""
+  if ! command -v gh >/dev/null 2>&1; then
+    VERIFY_SUFFIX="unverified (no gh on PATH)"; return 0
+  fi
+  # the origin first: a checkout whose origin is no github.com remote never calls `gh` at all
+  owner_repo="$(origin_owner_repo)"
+  if [ -z "$owner_repo" ]; then
+    VERIFY_SUFFIX="unverified (could not derive owner/repo from origin)"; return 0
+  fi
+  # a gh from before `gh attestation` existed cannot run the check; its help is local, no network
+  if ! gh attestation verify --help >/dev/null 2>&1; then
+    VERIFY_SUFFIX="unverified (this gh has no attestation command — update gh)"; return 0
+  fi
+  # mktemp only — no guessable fallback name; cleanup() removes these two (global names) on exit too
+  VERIFY_ERRF="$(mktemp 2>/dev/null)" || { VERIFY_SUFFIX="unverified (mktemp failed)"; return 0; }
+  if ! with_timeout "$FETCH_TIMEOUT" gh auth status --hostname github.com >"$VERIFY_ERRF" 2>&1; then
+    rm -f "$VERIFY_ERRF"; VERIFY_ERRF=""
+    VERIFY_SUFFIX="unverified (gh not authenticated or unreachable)"; return 0
+  fi
+  VERIFY_DIR="$(mktemp -d 2>/dev/null)" || {
+    rm -f "$VERIFY_ERRF"; VERIFY_ERRF=""
+    VERIFY_SUFFIX="unverified (mktemp failed)"; return 0
+  }
+  rc=0
+  with_timeout "$FETCH_TIMEOUT" gh release download "$tag" --repo "$owner_repo" \
+    --pattern manifest.txt --dir "$VERIFY_DIR" >"$VERIFY_ERRF" 2>&1 || rc=$?
+  if [ "$rc" -eq 124 ]; then
+    log "kit: manifest download for $tag timed out after ${FETCH_TIMEOUT}s"
+    VERIFY_SUFFIX="unverified (manifest download timed out)"
+    rm -rf "$VERIFY_DIR"; VERIFY_DIR=""; rm -f "$VERIFY_ERRF"; VERIFY_ERRF=""; return 0
+  elif [ "$rc" -ne 0 ]; then
+    # whatever the reason — no asset, a network blip, a timeout somewhere upstream, anything else —
+    # a manifest that cannot be downloaded only ever means "unverified", never a rejection
+    if grep -Eqi 'no asset|not found|404' "$VERIFY_ERRF"; then
+      VERIFY_SUFFIX="unverified (release $tag has no manifest.txt asset)"
+    elif fetch_offline "$VERIFY_ERRF"; then
+      VERIFY_SUFFIX="unverified (offline — could not reach github)"
+    else
+      VERIFY_SUFFIX="unverified (manifest download failed: $(head -n1 "$VERIFY_ERRF"))"
+    fi
+    log "kit: manifest download for $tag failed (exit $rc): $(head -n1 "$VERIFY_ERRF")"
+    rm -rf "$VERIFY_DIR"; VERIFY_DIR=""; rm -f "$VERIFY_ERRF"; VERIFY_ERRF=""; return 0
+  fi
+  manifest="$VERIFY_DIR/manifest.txt"
+  if [ ! -f "$manifest" ]; then
+    VERIFY_SUFFIX="unverified (release $tag has no manifest.txt asset)"
+    rm -rf "$VERIFY_DIR"; VERIFY_DIR=""; rm -f "$VERIFY_ERRF"; VERIFY_ERRF=""; return 0
+  fi
+  rc=0
+  with_timeout "$FETCH_TIMEOUT" gh attestation verify "$manifest" --repo "$owner_repo" \
+    --signer-workflow "$owner_repo/.github/workflows/release.yml" >"$VERIFY_ERRF" 2>&1 || rc=$?
+  # a verify that never got an answer (timed out, github went away after the download, a rate limit
+  # or a server error) is "could not run", not a verdict — but a real verdict always wins first: gh
+  # prints "Sigstore verification failed" / "Policy verification failed" on a genuine rejection, and
+  # that must never be read as "no answer" just because the same output also carries network-ish
+  # wording. Only gh's own rejection of the manifest fails the check: that wording, or any other
+  # failure once "no answer" is ruled out — an HTTP 404 included.
+  if [ "$rc" -eq 124 ] || { [ "$rc" -ne 0 ] && ! grep -Eqi 'verification failed' "$VERIFY_ERRF" \
+       && gh_unreachable "$VERIFY_ERRF"; }; then
+    log "kit: attestation verify for $tag got no answer (exit $rc): $(head -n1 "$VERIFY_ERRF")"
+    VERIFY_SUFFIX="unverified (attestation verify got no answer from github)"
+    rm -rf "$VERIFY_DIR"; VERIFY_DIR=""; rm -f "$VERIFY_ERRF"; VERIFY_ERRF=""; return 0
+  elif [ "$rc" -ne 0 ]; then
+    log "kit: ERROR attestation verify failed for $tag: $(head -n1 "$VERIFY_ERRF")"
+    FAIL="kit: release $tag failed manifest attestation verify ($(head -n1 "$VERIFY_ERRF")) — nothing applied"
+    REJECT_REASON="attestation verify rejected it: $(head -n1 "$VERIFY_ERRF")"
+    VERIFY_FAIL=1
+    rm -rf "$VERIFY_DIR"; VERIFY_DIR=""; rm -f "$VERIFY_ERRF"; VERIFY_ERRF=""; return 1
+  fi
+  line="$(head -n1 "$manifest")"
+  rm -f "$VERIFY_ERRF"; VERIFY_ERRF=""
+  if [ "$line" != "commit $commit" ]; then
+    log "kit: ERROR manifest commit mismatch for $tag: '$line' vs 'commit $commit'"
+    FAIL="kit: release $tag manifest names a different commit ('$line', expected commit $commit) — nothing applied"
+    REJECT_REASON="manifest names a different commit ('$line', expected commit $commit)"
+    VERIFY_FAIL=1
+    rm -rf "$VERIFY_DIR"; VERIFY_DIR=""; return 1
+  fi
+  rm -rf "$VERIFY_DIR"; VERIFY_DIR=""
+  return 0
+}
+
 # sync_release <tag> — the default (release) channel: nothing to do when HEAD is already at <tag> or
 # already past it (e.g. a channel switch back from `main`); without --accept, holds (preview + status
-# `held <tag>`, applies nothing); with --accept, fast-forwards to it.
+# `held <tag>`, applies nothing) — unless .sync-rejected already names this exact tag, in which case
+# the run reports `error` instead of holding again what --accept already refused (a later tag is
+# held as usual, and the stale rejection is cleared); with --accept, verifies the tag's manifest
+# (verify_release above) and fast-forwards to it — unless the check ran and failed, in which case
+# nothing is applied and the rejection is remembered in .sync-rejected for the next unattended run.
 sync_release() {
-  local tag=$1 target before
+  local tag=$1 target before verify_suffix rej_line rej_tag
   target="$(git rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)"
   before="$(git rev-parse HEAD 2>/dev/null)"
   # an unreadable tag must not look like "already there": the ancestor test below fails on an empty target too
@@ -125,11 +306,29 @@ sync_release() {
     return 0
   fi
   if [ -z "$ACCEPT" ]; then
+    rej_tag=""; rej_line=""   # an unreadable file leaves `read` unrun: rej_line must still be set under `set -u`
+    if [ -f "$REJECTED" ]; then
+      IFS= read -r rej_line <"$REJECTED" 2>/dev/null || true
+      rej_tag="${rej_line%% *}"
+    fi
+    if [ -n "$rej_tag" ] && [ "$rej_tag" = "$tag" ]; then
+      FAIL="kit: release $tag failed verification: ${rej_line#* } — not applied"
+      return 1
+    fi
+    [ -n "$rej_tag" ] && rm -f "$REJECTED"
     write_preview "$tag" "$before" "$target"
     HELD="$tag"
     return 0
   fi
-  ff_to "refs/tags/$tag" " ($tag)"
+  if ! verify_release "$tag" "$target"; then
+    printf '%s %s\n' "$tag" "$REJECT_REASON" >"$REJECTED"
+    return 1
+  fi
+  verify_suffix="$VERIFY_SUFFIX"
+  ff_to "refs/tags/$tag" " ($tag)" || return 1
+  rm -f "$REJECTED"
+  [ -n "$verify_suffix" ] && PULLED="$PULLED $verify_suffix"
+  return 0
 }
 
 # sync_kit — PR-only: install the pre-push guard, then move main to the right target when the
@@ -208,6 +407,8 @@ LOCKDIR="$HERE/.sync.lock.d"; LOCKBRK="$HERE/.sync.lock.break"; HAVE_LOCKDIR="";
 OWNER_PID=""; OWNER_TS=""; OWNER_START=""; STALE_WHY=""
 cleanup() {
   [ -n "$ERRF" ] && rm -f "$ERRF"
+  [ -n "$VERIFY_ERRF" ] && rm -f "$VERIFY_ERRF"
+  [ -n "$VERIFY_DIR" ] && rm -rf "$VERIFY_DIR"
   [ -n "$HAVE_LOCKBRK" ] && rmdir "$LOCKBRK" 2>/dev/null
   [ -n "$HAVE_LOCKDIR" ] && rm -f "$LOCKDIR/owner" && rmdir "$LOCKDIR" 2>/dev/null
   return 0
@@ -310,7 +511,13 @@ fi
 
 sync_kit
 
-if [ -n "$FAIL" ]; then status "error $FAIL"
+if [ -n "$FAIL" ]; then
+  status "error $FAIL"
+  # a failed manifest verification is the one FAIL that must be loud and non-zero: it is only ever
+  # reached from `--accept` (a foreground `make claude_sync`, never the SessionEnd hook), and
+  # workspace.mk's `claude_sync` target already treats any exit other than 0 or 3 as a real failure.
+  # Every other FAIL cause keeps today's exit 0 (the SessionEnd hook ignores it either way).
+  [ -n "$VERIFY_FAIL" ] && printf 'sync.sh: %s\n' "$FAIL" >&2
 elif [ -n "$OFFLINE" ]; then
   since="${since:-$(date -u +%s)}"
   # BSD date takes -r <epoch>, GNU date -d @<epoch>
@@ -318,4 +525,5 @@ elif [ -n "$OFFLINE" ]; then
   status "offline $since since $since_ts — origin unreachable, nothing pulled"
 elif [ -n "$HELD" ]; then status "held $HELD"
 else status "ok ${PULLED:-kit no-origin}"; fi
+[ -n "$VERIFY_FAIL" ] && exit 1
 exit 0
