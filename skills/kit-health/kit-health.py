@@ -24,7 +24,8 @@ Sections:
                   2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
                   scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
-                  and the pinned `ctx --version` answers the API the adapter expects
+                  and the pinned `ctx --version` answers the API the adapter expects; an environment's
+                  `_templates/<type>.md` override dropping a section its type declares
   6. stamp      — last green run of THIS environment: `.context/kit-health/HEALTH-<env>.md` (local; each
                   machine keeps its own; records kit_commit, kit_version and install_mode)
 --stamp writes that HEALTH file (kit_commit) when there are no errors and no un-accepted leak hit (other
@@ -52,6 +53,7 @@ import kit_profile  # noqa: E402
 import kb  # noqa: E402
 import frontmatter as fmt  # noqa: E402
 import leak_shapes  # noqa: E402
+import type_template  # noqa: E402
 
 CTX: Path | None = None   # overrides for a caller (a test) that names the workspace outright; None = resolve per call
 ROOT: Path | None = None
@@ -1158,6 +1160,7 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
     r.add(OK if rc == 0 else ERR, "engine", "`kb.py list` " + ("reads the env store" if rc == 0 else f"failed: {both(out, err)[-300:]}"))
     ctx_store(r)
     ctx_pin_check(r)
+    template_override_check(r)
 
 
 def ctx_pin_check(r: Report) -> None:
@@ -1216,6 +1219,28 @@ def ctx_store(r: Report) -> None:
                               + "\n".join(found[:10]) + "\n```")
     else:
         r.add(ERR, "engine", f"`ctx_adapter.py adopt --check` failed: {both(out, err)[-300:]}")
+
+
+def template_override_check(r: Report) -> None:
+    """§5: an environment's `_templates/<type>.md` override (`kit_profile.template`, which `new.sh` prefers
+    over the engine template) must not drop a `## ` heading its type declares in `sections` — the engine
+    template guarantees every one; a hand-edited override can silently lose one. No override at all, or one
+    that keeps every declared section: no line (nothing worth reporting on the common machine, which ships
+    none)."""
+    for type_path in sorted(type_template.TYPES_DIR.glob("*.json")):
+        kind = type_path.stem
+        sections, _log_section = type_template.type_sections(type_path)
+        if not sections:
+            continue
+        override = kit_profile.template(kind)
+        if override is None:
+            continue
+        missing = type_template.missing_sections(sections, override.read_text(encoding="utf-8"))
+        if missing:
+            r.add(WARN, "engine", f"`{rel(override)}` drops {', '.join(missing)} that `{kind}` requires — "
+                  "restore the heading(s), or delete the override to fall back to the engine template")
+        else:
+            r.add(OK, "engine", f"`{rel(override)}` keeps every section `{kind}` requires")
 
 
 # ── 6. stamp ────────────────────────────────────────────────────────────────────────────────
