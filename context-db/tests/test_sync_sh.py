@@ -909,6 +909,37 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
         self.assertFalse(self.rejected_file.exists())
 
+    def test_sync_check_names_a_rejected_tag_once_the_status_line_moved_on(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {'0' * 40}\n")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(self.status()[1], "error")
+        # while the status line still says `error`, that line is the one report
+        out = self.check()
+        self.assertIn("last sync at", out)
+        self.assertNotIn("is waiting", out)
+        self.assertNotIn("is not applied", out)
+        # a later run that could not reach origin replaces the status line: the rejection is still said
+        self.status_file.write_text(f"2026-01-01T00:00:00Z offline {int(time.time())} since 2026-01-01T00:00:00Z\n")
+        out = self.check()
+        self.assertIn("release v0.1.0 failed verification and is not applied", out)
+        self.assertNotIn("is waiting", out)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-0 file")
+    def test_an_unreadable_rejected_file_does_not_stop_the_sync(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.rejected_file.write_text("v0.1.0 some reason\n")
+        self.rejected_file.chmod(0)
+        r = self.sync()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "held")
+        self.assertEqual(self.status()[2], "v0.1.0")
+
     def test_rerunning_accept_on_a_rejected_tag_reverifies_from_scratch(self):
         # the whole point of remembering the rejection is to stop an unattended run from re-holding
         # it — an explicit --accept must still re-run the check every time, so a fixed release (a

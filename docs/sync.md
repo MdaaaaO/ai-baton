@@ -106,9 +106,10 @@ to verify against.
 line, `<tag> <reason>`) remembers the tag the check last **failed** — not one it could merely not check —
 so that the next unattended run (no `--accept`) does not overwrite the rejection with `held <tag>` as if
 nothing had happened: when the tag `sync.sh` would otherwise hold is the one named in `.sync-rejected`, it
-reports `error` again instead, with the same reason. A later release tag than the rejected one is held as
-usual (and the stale `.sync-rejected` is cleared). The file is removed once a release applies, verified or
-unverified. Re-running `sh .claude/sync.sh --accept` on the rejected tag verifies it again from scratch —
+reports `error` again instead, with the same reason. When a later run replaced that status line (an
+`offline` or `pending` run), `sync-check.sh` names the rejected tag itself instead of calling it waiting.
+A later release tag than the rejected one is held as usual (and the stale `.sync-rejected` is cleared).
+The file is removed once a release applies, verified or unverified. Re-running `sh .claude/sync.sh --accept` on the rejected tag verifies it again from scratch —
 once the release is fixed (a new manifest, a corrected tag), the check can pass and the release goes
 through.
 

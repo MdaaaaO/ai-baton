@@ -306,7 +306,7 @@ sync_release() {
     return 0
   fi
   if [ -z "$ACCEPT" ]; then
-    rej_tag=""
+    rej_tag=""; rej_line=""   # an unreadable file leaves `read` unrun: rej_line must still be set under `set -u`
     if [ -f "$REJECTED" ]; then
       IFS= read -r rej_line <"$REJECTED" 2>/dev/null || true
       rej_tag="${rej_line%% *}"

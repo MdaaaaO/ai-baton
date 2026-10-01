@@ -18,6 +18,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 warn() { printf 'WARN kit sync: %s\n' "$*" >&2; }
 is_epoch() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
 
+state=""
 if [ -f "$HERE/.sync-status" ]; then
   # `<utc-ts> <state> <detail>` — states in sync.sh's header; `ok` and a fresh `pending` are silent
   read -r ts state detail <"$HERE/.sync-status"
@@ -73,13 +74,16 @@ check_kit() {
     fi
     if [ -n "$tag" ]; then
       if ! git merge-base --is-ancestor "refs/tags/$tag" HEAD 2>/dev/null; then
-        # a tag --accept already rejected is reported once, above, straight from .sync-status
-        # (`error …`) — sync.sh writes no .sync-preview for it, so this second warning would be
-        # both redundant and misleading about what `make claude_sync` will actually do
+        # a tag --accept already rejected has no .sync-preview and is not "waiting". While
+        # .sync-status still says `error …` the rejection was reported above; once a later run
+        # replaced that line (offline, pending) nothing else names it, so it is said here
         rejtag=""
         [ -f "$dir/.sync-rejected" ] && rejtag="$(cut -d' ' -f1 "$dir/.sync-rejected" 2>/dev/null)"
-        [ "$rejtag" = "$tag" ] \
-          || warn "$label: release $tag is waiting (what it changes: .sync-preview) — \`make claude_sync\` applies it"
+        if [ "$rejtag" != "$tag" ]; then
+          warn "$label: release $tag is waiting (what it changes: .sync-preview) — \`make claude_sync\` applies it"
+        elif [ "$state" != error ]; then
+          warn "$label: release $tag failed verification and is not applied (reason: .sync-rejected) — \`make claude_sync\` verifies it again"
+        fi
       fi
     elif [ "$behind" -gt 0 ]; then
       warn "$label: origin/main is $behind commit(s) ahead (a PR merged) — \`make claude_sync\` fast-forwards"
