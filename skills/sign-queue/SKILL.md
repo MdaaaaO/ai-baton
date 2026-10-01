@@ -3,7 +3,7 @@ name: sign-queue
 description: "Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains it with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners. Inert where `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "21"
+  version: "23"
   updated: "2026-10-01"
   reviewed: "2026-09-27"
   requires: "signed_commits"
@@ -131,9 +131,26 @@ fixes the worktree, and either re-enqueues (delete the `.failed` first) or asks 
 the job itself was fine (transient network, remote fixed meanwhile).
 
 Only one drain runs at a time: `make sign` holds an exclusive lock on the queue for the whole run, so a second
-`make sign` started while the first is still going prints one line ("another drain already holds the lock —
-exiting") and exits 0 immediately, never a half-drained overlap. A job file removed by hand while a drain is
-already in progress is skipped with one line; the rest of the drain and its summary still run.
+`make sign` started while the first is still going prints one line naming the holder — "another drain (pid
+1234, on key-123-p4) already holds the lock — exiting" — and exits 0 immediately, never a half-drained
+overlap. A job file removed by hand while a drain is already in progress is skipped with one line; the rest
+of the drain and its summary still run.
+
+`run` also moves jobs a pre-workspace-queue kit left under the kit dir (`migrate-legacy`) itself, once it
+holds that same lock, before loading any job — `make sign` calls `run` and nothing else. `make sign_list`
+only reads the queue: it never migrates, so an overview can never race that move against a drain holding
+the lock. (`signq.py migrate-legacy` still exists as its own subcommand for a manual one-off outside a
+drain.)
+
+Each job runs in its own session (detached from the drain's), so it keeps running even if the drain process
+itself is killed outright (a `kill -9`, a closed terminal) mid-job. The lock file carries the holder's pid
+and the job it is currently on, updated as the drain moves from job to job; a `run` that takes a just-freed
+lock and finds that recorded job's process still alive (guarded against pid reuse by comparing `ps -o
+lstart=`, the same check `sync.sh` uses for its own lock) prints that job's name and pid and exits 2
+*without starting a new job* — the queue is not drained and the still-running job needs a look. A recorded
+job pid that has exited is cleared and the drain proceeds normally. Not covered: two different machines (or
+containers) racing the same NFS-mounted queue with colliding pids, and a `ps` too old/minimal to print
+`lstart=` (then the check falls back to a plain liveness test, same as `sync.sh`).
 
 ## Why
 

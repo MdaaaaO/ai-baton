@@ -126,7 +126,7 @@ class DrainLock(unittest.TestCase):
                 held.close()
             out = buf.getvalue()
             self.assertEqual(rc, 0)
-            self.assertIn("another drain already holds the lock", out)
+            self.assertIn("already holds the lock", out)  # now also names the holder's pid and job (test_sign_queue_drain.py)
             # never got far enough to print the overview table or touch the pending job
             self.assertNotIn("nothing to sign", out)
             self.assertNotIn("pushed", out)
