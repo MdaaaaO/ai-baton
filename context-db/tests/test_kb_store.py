@@ -377,7 +377,9 @@ class MigrateConfig(StoreCase):
         cfg = {"systems": None}
         done = kb.migrate_config(cfg)
         self.assertEqual(set(cfg["systems"]), set(kb.SYSTEMS))
-        self.assertEqual(len(done), len(kb.SYSTEMS))
+        # `cfg` here is a bare `{"systems": None}`, so migrate also backfills every other top-level key
+        # blank_config() has (#429) — count only the systems.* lines this test is about
+        self.assertEqual(len([d for d in done if d.startswith("systems.")]), len(kb.SYSTEMS))
         self.assertTrue(kb.unmet_units({"systems": None}))  # every gated unit is off; no AttributeError
         kb.save_config({**kb.load_config(), "systems": None})
         rc, out, err = self.cli("migrate", "--check")
@@ -469,6 +471,40 @@ class MigrateConfig(StoreCase):
         self.cli("config-set", "systems.notion", "true")
         rc, out, _ = self.cli("migrate", "--off")
         self.assertNotIn("notion-page-review", out)
+
+    def test_release_added_keys_migrate_and_clear_kit_verify(self):
+        # a release that adds a required top-level key (template + blank_config()) must never leave an older
+        # store RED with no fix named: migrate --check sees it pending, migrate applies it, kit-verify clears (#429)
+        cfg = kb.load_config()
+        del cfg["verify"]
+        del cfg["length"]
+        kb.save_config(cfg)
+        errors: list[str] = []
+        kit_verify.check_env_store(errors)
+        missing = [e for e in errors if "missing top-level key" in e]
+        self.assertEqual(len(missing), 2, errors)
+        self.assertTrue(all("kb.py migrate" in e for e in missing), missing)
+        rc, out, err = self.cli("migrate", "--check")
+        self.assertEqual(rc, 3, err)
+        self.assertIn("pending: verify added", out)
+        self.assertIn("pending: length added", out)
+        rc, out, err = self.cli("migrate")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(kb.load_config()["verify"], kb.blank_config()["verify"])
+        errors = []
+        kit_verify.check_env_store(errors)
+        self.assertEqual([e for e in errors if "missing top-level key" in e], [])
+        rc, out, err = self.cli("migrate", "--check")
+        self.assertEqual(rc, 0, err)  # idempotent
+
+    def test_migrate_adds_every_required_template_key_from_a_minimal_config(self):
+        # guard: a template key that is neither optional nor added by migrate_config reproduces #429 for whatever
+        # older store next lacks it — the gap this ticket closes must not regress silently
+        cfg = {"systems": {}}
+        kb.migrate_config(cfg)
+        required = kb.template_config_keys() - kb.OPTIONAL_CONFIG_KEYS - {"environment"}
+        missing = required - set(cfg)
+        self.assertEqual(missing, set(), missing)
 
 
 class Projection(StoreCase):

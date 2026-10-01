@@ -109,7 +109,13 @@ itself — settings.local.json env or a shell export); full spec `docs/packaging
 | `PR_TITLE` | empty | `.github/scripts/check-pr-issue.sh` | the PR title, passed in by the pr-issue CI check | internal |
 | `PR_BODY` | empty | `.github/scripts/check-pr-issue.sh` | the PR body, passed in by the pr-issue CI check | internal |
 | `PR_AUTHOR` | empty | `.github/scripts/check-pr-issue.sh` | the PR author's login, passed in by the pr-issue CI check | internal |
-| `GH_TOKEN` | unset (falls back to the local `gh` login) | `.github/scripts/check-pr-issue.sh`, `skills/kit-health/kit-health.py` | the token `gh` calls authenticate with; also how kit-health tells a sandbox proxy-token machine from a normal login | internal |
+| `GH_TOKEN` | unset (falls back to the local `gh` login) | `.github/scripts/check-pr-issue.sh`, `.github/scripts/main-guard.sh`, `skills/kit-health/kit-health.py` | the token `gh` calls authenticate with; also how kit-health tells a sandbox proxy-token machine from a normal login | internal |
+| `REPO` | empty | `.github/scripts/main-guard.sh` | the repo in `<owner>/<repo>` form, passed in by the main-guard workflow step | internal |
+| `SHA` | empty | `.github/scripts/main-guard.sh` | the pushed commit's full sha, passed in by the main-guard workflow step | internal |
+| `ACTOR` | empty | `.github/scripts/main-guard.sh` | the login that pushed, passed in by the main-guard workflow step | internal |
+| `FORCED` | `false` | `.github/scripts/main-guard.sh` | whether the push was forced, passed in by the main-guard workflow step | internal |
+| `MAIN_GUARD_ATTEMPTS` | `6` | `.github/scripts/main-guard.sh` | how many times the commit-to-PR lookup retries before an empty result is flagged as a direct push | internal |
+| `MAIN_GUARD_PAUSE_SECONDS` | `10` (seconds) | `.github/scripts/main-guard.sh` | how long main-guard.sh waits between retries | internal |
 | `HEARTBEAT_DETACHED` | unset | `skills/session-register/heartbeat.sh` | internal flag the script sets on its own detached re-exec, so the child knows not to fork again | internal |
 
 ## Third-party version pins — `.github/versions.env`

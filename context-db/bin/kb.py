@@ -39,9 +39,11 @@ Usage:
                                                  (N overrides every ttl); --check = exit 3 when any
   kb.py migrate [--check | --off]               → bring the store up to the kit's schema: renamed system
                                                  flags moved (value kept), missing flags added (seeded from
-                                                 their legacy flag, else false), rows under a renamed kind
-                                                 (`slack.channels` → `slack.channel`) moved; prints the
-                                                 skills now off here; --check = dry run, exit 3 when pending; --off = only that list
+                                                 their legacy flag, else false), missing top-level config keys
+                                                 added (a release's blank default, skipping OPTIONAL_CONFIG_KEYS),
+                                                 rows under a renamed kind (`slack.channels` → `slack.channel`)
+                                                 moved; prints the skills now off here; --check = dry run, exit 3
+                                                 when pending; --off = only that list
   kb.py init --blank                           → create an empty store (never overwrites anything)
   kb.py init --personal                        → blank store + the zero-config GitHub-only fill: identity
                                                  from `gh api user`, tracked repos from the workspace clones,
@@ -967,6 +969,12 @@ def migrate_config(cfg: dict) -> list[str]:
             sources[i] = RENAMED_SYSTEMS[s]
             done.append(f"self_assessment.sources: {s} → {sources[i]}")
     done += migrate_close_reasons(cfg)
+    for key, default in blank_config().items():
+        if key.startswith("_") or key == "environment" or key in OPTIONAL_CONFIG_KEYS:
+            continue
+        if key not in cfg:
+            cfg[key] = default
+            done.append(f"{key} added (default — see environment-template/config.json)")
     for name in SYSTEMS:
         if name not in systems:
             seed = SEEDED_SYSTEMS.get(name)
