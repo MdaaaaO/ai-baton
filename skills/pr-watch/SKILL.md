@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "25"
+  version: "26"
   updated: "2026-10-01"
   reviewed: "2026-10-01"
 ---
@@ -78,7 +78,8 @@ head, and a `LOOKUP FAILED` that lasts (`… (still failing)`), repeat after 1h,
 each time, capped by `PR_WATCH_BACKOFF_MAX` (default 86400s). A due `CHECK NOT GREEN` reads the checks
 again first — it lists what is red now and is dropped when they went green. The first announcement is
 immediate, and `PR_WATCH_KNOWN_RED`'s mute is unaffected — a muted head stays
-silent. Details: `reference/events.md`, `reference/cost-controls.md`.
+silent, until a mute that actually suppressed a line on that PR expires on the next green settle (one
+stderr note; a later red there is then reported like any other). Details: `reference/events.md`, `reference/cost-controls.md`.
 
 ## Auto-sync with the base branch (since 2026-09-21)
 

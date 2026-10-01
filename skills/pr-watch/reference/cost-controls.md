@@ -46,7 +46,14 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
   one `failure` annotation and *all* of them match. A failing check with zero annotations is unexplained →
   the line is emitted. So the regex must cover the generic wrappers too, e.g.
   `PR_WATCH_KNOWN_RED='<package-name>|Process completed with exit code'` mutes a known missing-export
-  failure while a PR failing for another reason still reports. Drop the variable once the cause is fixed.
+  failure while a PR failing for another reason still reports.
+  **A mute that actually suppressed a line on a PR expires on its own**: once that PR's checks are next
+  green and settled, the watcher writes an expiry record (the regex it belongs to) and logs one stderr
+  note naming the PR and head — from then on a red on that PR is reported even if its annotations still
+  match. A mute that never suppressed anything there is untouched by a green. The record lives in the
+  state dir, so a silent re-arm with the same call keeps the expiry; a changed regex mutes again from
+  scratch, and `PR_WATCH_REPLAY=1` (or any other reset of the state dir) clears it. Dropping the variable
+  once the cause is fixed is still the clean end — the expiry just covers the case where it is left set.
 - **Silent re-arm.** The per-PR state dir (`${TMPDIR:-/tmp}/pr-watch-<owner>-<repo>-<pr>/`) survives the
   process, so a watcher re-armed on a head it already reported emits nothing until something changes —
   before 2026-09-22 every re-arm replayed the `BOT REVIEW` line for an unchanged head (one wasted wake-up per

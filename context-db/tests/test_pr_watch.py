@@ -85,6 +85,8 @@ if [ "$1" = api ]; then
         if [ "$n" -le "$STUB_COMPARE_FAIL_COUNT" ]; then echo "stub gh: simulated transient compare failure" >&2; exit 1; fi
       fi
       body=$STUB_COMPARE_JSON ;;
+    */commits/*/check-runs\?per_page=100) body=$STUB_CHECKRUNS_JSON ;;
+    */check-runs/*/annotations\?per_page=100) body=$STUB_ANNOTATIONS_JSON ;;
     */commits/*) body=$STUB_COMMIT_JSON ;;
     */pulls/*) body=$STUB_PR_JSON ;;
     *) echo "stub gh: unhandled api path: $path" >&2; exit 9 ;;
@@ -154,7 +156,8 @@ class PrWatchStub(unittest.TestCase):
     def run_watch(self, *, state="MERGED", rollup="[]", reviews="[]", comments="[]", issue_comments="[]",
                   compare_behind=0, me_login="tester", identity_env: dict | None = None,
                   extra_env: dict | None = None, timeout=30, live_head: str = FULL, arg_head: str = HEAD9,
-                  commit: dict | None = None) -> subprocess.CompletedProcess:
+                  commit: dict | None = None, checkruns: str = '{"check_runs": []}',
+                  annotations: str = "[]") -> subprocess.CompletedProcess:
         drop = ("PR_WATCH_SELF", "WORKSPACE_GITHUB_LOGIN", "PR_WATCH_BOT_LOGIN", "GH_TOKEN", "PR_WATCH_SYNC_COOLDOWN")
         env = {k: v for k, v in os.environ.items() if k not in drop}
         env.update(
@@ -167,6 +170,8 @@ class PrWatchStub(unittest.TestCase):
             STUB_COMMENTS_JSON=comments,
             STUB_ISSUE_COMMENTS_JSON=issue_comments,
             STUB_COMPARE_JSON=json.dumps({"behind_by": compare_behind}),
+            STUB_CHECKRUNS_JSON=checkruns,
+            STUB_ANNOTATIONS_JSON=annotations,
             STUB_PR_JSON=json.dumps({"head": {"sha": live_head}, "base": {"ref": "main"}, "mergeable_state": "clean"}),
             STUB_COMMIT_JSON=json.dumps(commit if commit is not None else {
                 "parents": [{"sha": "b" * 40}], "committer": {"login": "someone"},
@@ -728,6 +733,122 @@ class PrWatchStub(unittest.TestCase):
         self.assertNotIn("HEAD MOVED", r.stdout)
         self.assertIn("own push", r.stderr)
         self.assertNotIn("dropping stale review", r.stderr)
+
+    # --- PR_WATCH_KNOWN_RED: a mute that actually suppressed something expires on the next green ---
+
+    FAILING_RUN = json.dumps({"check_runs": [{"id": 101, "status": "completed", "conclusion": "failure"}]})
+
+    @staticmethod
+    def failing_annotations(message: str) -> str:
+        return json.dumps([{"path": "x", "title": "y", "message": message, "annotation_level": "failure"}])
+
+    def test_a_used_mute_expires_on_the_next_green_and_a_later_matching_red_is_reported(self):
+        self.seed_state(head=HEAD9)
+        regex = "known flaky timeout"
+        bad = json.dumps([self.check_run("unit-tests", "FAILURE")])
+        green = json.dumps([self.check_run("unit-tests", "SUCCESS")])
+        anns = self.failing_annotations("a known flaky timeout on CI")
+        kwargs = dict(identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_KNOWN_RED": regex})
+
+        # cycle 1: red, annotations match the regex — muted, and the mute is recorded as used
+        r1 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns, **kwargs)
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r1.stdout)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED", r1.stderr)
+        self.assertEqual((self.state_dir() / "known_red_used").read_text().strip(), regex)
+
+        # cycle 2: checks settle green — the mute expires, one stderr note naming the PR and head
+        r2 = self.run_watch(rollup=green, **kwargs)
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertEqual(r2.stderr.count("PR_WATCH_KNOWN_RED mute expired"), 1, r2.stderr)
+        self.assertIn(f"PR {PR} PR_WATCH_KNOWN_RED mute expired — checks are green on {HEAD9}", r2.stderr)
+        self.assertEqual((self.state_dir() / "known_red_expired").read_text().strip(), regex)
+        self.assertFalse((self.state_dir() / "known_red_used").exists())
+
+        # cycle 2b: still green — the note is not repeated
+        r2b = self.run_watch(rollup=green, **kwargs)
+        self.assertNotIn("mute expired", r2b.stderr)
+
+        # cycle 3: red again, annotations still match the (unchanged) regex — but the mute already expired for
+        # this PR, so it is reported like any other red, and no annotation lookup is wasted on it
+        before = self.calls()
+        r3 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns, **kwargs)
+        self.assertEqual(r3.returncode, 0, r3.stdout + r3.stderr)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;", r3.stdout)
+        new_calls = self.calls()[len(before):]
+        self.assertNotIn("check-runs", new_calls)
+
+    def test_a_never_used_mute_survives_a_green_a_later_matching_red_is_still_muted(self):
+        self.seed_state(head=HEAD9)
+        regex = "known flaky timeout"
+        green = json.dumps([self.check_run("unit-tests", "SUCCESS")])
+        bad = json.dumps([self.check_run("unit-tests", "FAILURE")])
+        anns = self.failing_annotations("a known flaky timeout on CI")
+        kwargs = dict(identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_KNOWN_RED": regex})
+
+        # cycle 1: green from the start — the mute is configured but never suppresses anything on this PR
+        r1 = self.run_watch(rollup=green, **kwargs)
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        self.assertNotIn("mute expired", r1.stderr)
+        self.assertFalse((self.state_dir() / "known_red_used").exists())
+        self.assertFalse((self.state_dir() / "known_red_expired").exists())
+
+        # cycle 2: a red appears with matching annotations — it is muted (nothing expired it)
+        r2 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns, **kwargs)
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r2.stdout)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED", r2.stderr)
+
+    def test_a_changed_regex_mutes_again_after_a_previous_expiry(self):
+        self.seed_state(head=HEAD9)
+        regex_a, regex_b = "known flaky timeout", "a different known cause"
+        bad = json.dumps([self.check_run("unit-tests", "FAILURE")])
+        green = json.dumps([self.check_run("unit-tests", "SUCCESS")])
+        anns_a = self.failing_annotations("a known flaky timeout on CI")
+        anns_b = self.failing_annotations("a different known cause here")
+
+        r1 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns_a,
+                             identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_KNOWN_RED": regex_a})
+        self.assertIn("muted by PR_WATCH_KNOWN_RED", r1.stderr)
+
+        r2 = self.run_watch(rollup=green, identity_env={"PR_WATCH_SELF": "tester"},
+                             extra_env={"PR_WATCH_KNOWN_RED": regex_a})
+        self.assertIn("mute expired", r2.stderr)
+        self.assertEqual((self.state_dir() / "known_red_expired").read_text().strip(), regex_a)
+
+        # the regex changed to B: a red matching B is muted again, even though the state dir still holds A's expiry
+        r3 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns_b,
+                             identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_KNOWN_RED": regex_b})
+        self.assertEqual(r3.returncode, 0, r3.stdout + r3.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r3.stdout)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED", r3.stderr)
+        self.assertEqual((self.state_dir() / "known_red_used").read_text().strip(), regex_b)
+
+    def test_an_expired_mute_survives_a_silent_rearm(self):
+        # a re-arm on the same, already-initialised head keeps state (the registration reset is skipped) —
+        # the expiry record must be one of the things it keeps.
+        regex = "some already-known cause"
+        self.seed_state(head=HEAD9, known_red_expired=regex)
+        r = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "FAILURE")]),
+                            checkruns=self.FAILING_RUN, annotations=self.failing_annotations(regex),
+                            identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_KNOWN_RED": regex})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;", r.stdout)
+        self.assertEqual((self.state_dir() / "known_red_expired").read_text().strip(), regex)
+        # no annotation lookup wasted on an already-expired mute
+        self.assertNotIn("check-runs", self.calls())
+
+    def test_replay_clears_an_expired_mute_so_it_can_suppress_again(self):
+        regex = "some already-known cause"
+        self.seed_state(head=HEAD9, known_red_expired=regex)
+        r = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "FAILURE")]),
+                            checkruns=self.FAILING_RUN, annotations=self.failing_annotations(regex),
+                            identity_env={"PR_WATCH_SELF": "tester"},
+                            extra_env={"PR_WATCH_KNOWN_RED": regex, "PR_WATCH_REPLAY": "1"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r.stdout)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED", r.stderr)
+        self.assertFalse((self.state_dir() / "known_red_expired").exists())
 
 
 if __name__ == "__main__":
