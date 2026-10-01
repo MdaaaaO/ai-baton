@@ -247,7 +247,8 @@ says a self-hosted runner "should almost never be used for public repositories".
 runs the PR's code, which can come from anyone: a fork's PR runs with no secrets (GitHub's rule), so `ci` and
 `pr-title` still check it; the reviewer needs its token and does not run for a fork — the owner reviews outside PRs
 by hand. Workflow runs from outside contributors wait for the owner's approval (repository setting), and
-`.github/CODEOWNERS` puts every change to `.github/workflows/` under the owner's review. `release` and `main-guard`
+`.github/CODEOWNERS` puts every change to `.github/workflows/` and `.github/scripts/` (the scripts those workflows
+call) under the owner's review. `release` and `main-guard`
 (push to main) and `auto-merge` (`workflow_run`, always the copy on main) check out no pull request.
 `tests/test_ci_hygiene.py` fails when any workflow names a self-hosted runner. Each hosted job is a fresh VM, so
 parallel reviews never race on one shared Claude Code install.
