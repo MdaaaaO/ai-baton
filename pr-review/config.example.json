@@ -177,7 +177,9 @@
     "on_stop": "hold",
     "_on_stop_note": "hold (default) = a STOP finding posts nothing and leaves the PR as an ordinary queue row for the next interactive pr-review walk. comment = post a COMMENT review even with a STOP finding present (still never APPROVE/REQUEST_CHANGES — scope.md 'APPROVE is never inferred'). request_changes is accepted here as a config value but NOT implemented: no standing owner decision authorises an unattended REQUEST_CHANGES post, so the runner always falls back to hold behaviour and reports it as an owner question instead of guessing.",
     "max_per_tick": 3,
-    "_max_per_tick_note": "cost cap — at most this many review-runner spawns (one Opus runner per PR) per pr-scan tick; the rest stay ordinary queue rows"
+    "_max_per_tick_note": "cost cap — at most this many review-runner spawns (one Opus runner per PR) per pr-scan tick; the rest stay ordinary queue rows",
+    "include_re_review": false,
+    "_include_re_review_note": "false (default) = a direct re-request on a PR we already reviewed (kind=re_review) is never auto-COMMENT eligible, however its prio — a re-request needs a fresh look, not a repeat of the prior review's verdict. true opts re-requests back into the prios gate explicitly."
   },
   "bundle_max_files": 60,
   "bundle_max_kb": 200,
