@@ -41,7 +41,7 @@ class BlankStore(unittest.TestCase):
 
 class Subjects(BlankStore):
     def test_conventional_accepts_the_kit_shape(self):
-        for s in ("feat(dbt): KEY-123 add the fact table", "fix: release the lock", "refactor(kb)!: drop the profiles layer",
+        for s in ("feat(dbt): add the fact table (#123)", "fix: release the lock", "refactor(kb)!: drop the profiles layer",
                   "docs(kit): new-environment migration steps", "chore(release): 0.2.0", 'Revert "feat: x"', "Merge branch 'x'",
                   "fixup! feat: x"):
             self.assertEqual(cs.check_subject(s, "conventional"), [], s)
@@ -51,18 +51,27 @@ class Subjects(BlankStore):
         self.assertTrue(any("not `<type>(<scope>)!: <description>`" in p for p in cs.check_subject("Add the fact table", "conventional")))
         self.assertTrue(any("type `wip`" in p for p in cs.check_subject("wip(kb): x", "conventional")))
         self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): Add x", "conventional")))
-        # an acronym leading the description is refused like any other upper-case start; a tracker key may
-        # lead, and a digit or a backtick is not an upper-case letter
-        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): API keys", "conventional")))
-        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): WHY row in the body", "conventional")))
-        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): KEY add x", "conventional")))
-        self.assertEqual(cs.check_subject("feat(kb): KEY-1 add x", "conventional"), [])
+        # an acronym leading the description is refused like any other upper-case start, and with no key
+        # shape configured (the blank store) so is a key; a digit or a backtick is not an upper-case letter
+        for refused in ("API keys", "WHY row in the body", "KEY add x", "KEY-1 add x", "UTF-8 decode the body"):
+            self.assertTrue(any("should start lower-case" in p for p in cs.check_subject(f"feat(kb): {refused}", "conventional")), refused)
         self.assertEqual(cs.check_subject("feat(kb): key-1 add x", "conventional"), [])
         self.assertEqual(cs.check_subject("feat(kb): 3 keys rotated", "conventional"), [])
         self.assertEqual(cs.check_subject("feat(kb): `foo` bar baz", "conventional"), [])
         self.assertTrue(any("ends with a period" in p for p in cs.check_subject("feat(kb): add x.", "conventional")))
         self.assertTrue(any("73 chars" in p for p in cs.check_subject("feat(kb): " + "x" * 63, "conventional")))
         self.assertEqual(cs.check_subject("feat(kb): " + "x" * 62, "conventional"), [])
+
+    def test_only_a_configured_tracker_key_may_lead_a_conventional_description(self):
+        kb.save_config({**kb.load_config(), "tracker": {"kind": "jira", "key_regex": r"\b(PROJ-\d+)\b"}})
+        kit_profile.env_config.cache_clear(); kit_profile.load.cache_clear()
+        self.assertEqual(cs.check_subject("feat(dbt): PROJ-123 add the fact table", "conventional"), [])
+        # shaped like a key, but not this environment's key — and a key further in does not excuse the start
+        for refused in ("UTF-8 decode the body", "SHA-256 the tokens", "OTHER-1 add x", "PROJ add x", "Add x for PROJ-1"):
+            self.assertTrue(any("should start lower-case" in p for p in cs.check_subject(f"feat(kb): {refused}", "conventional")), refused)
+        kb.save_config({**kb.load_config(), "tracker": {"kind": "jira", "key_regex": "(PROJ-"}})  # not a regex: no exemption
+        kit_profile.env_config.cache_clear(); kit_profile.load.cache_clear()
+        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): PROJ-1 add x", "conventional")))
 
     def test_ticket_key_and_free(self):
         self.assertEqual(cs.check_subject("anything at all.", "free"), [])
