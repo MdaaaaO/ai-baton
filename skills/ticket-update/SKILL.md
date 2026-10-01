@@ -2,7 +2,7 @@
 name: ticket-update
 description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "14"
+  version: "16"
   updated: "2026-09-30"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
@@ -38,6 +38,13 @@ sections that have something new. Never restate a prior comment.
   only when comparing numbers (counts / diffs / days); `code` for identifiers.
 - **Pivot is the trace anchor** — every change of direction gets one, with the *why*, so a reader
   can scan *where* the work turned without reading every comment.
+- **Pivot redraws the sketch — only when a marker is there.** The ticket carries a sketch marker
+  (`docs/diagrams.md` § The sketch marker) **and** this Pivot moved WHERE it sits or WHAT its shape
+  is → the Pivot section adds the before → after rendering (`docs/diagrams.md` § Rendering: Mermaid
+  on GitHub, else a table/list) and re-stamps the Sketch with the pivot's NEW placements, same shape
+  `ticket-open` uses to stamp it the first time:
+  `python3 $BATON/skills/ticket-open/sketch.py stamp --repo-slug <owner/repo> --paths <entry>[,<entry>…]
+  --components <name>[,<name>…]`, posting the new marker. No marker on the ticket → nothing changes here.
 - **Verified is anchored to the system of record** — label it `(system of record)`: deploy
   imageTag/health, SQL result, CI check — never a proxy signal (`WORKSPACE.md` § Verification).
 - **Every Verified claim carries an evidence item** — one line, `**Verified** — <claim> · <evidence>`,
