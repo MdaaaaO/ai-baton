@@ -191,6 +191,61 @@ class Transcript(unittest.TestCase):
             self.assertEqual(s["tokens"], {"input": 200, "cache_write": 0, "cache_read": 0, "output": 40, "thinking": 0})
             self.assertEqual(s["context"], {"peak": 200, "avg": 200})  # not 400: the first chunk's ctx was backed out
 
+    def test_split_hint_fires_over_threshold_with_a_full_window(self):
+        """#398: the hint fires once the avg context over the configured window reaches the
+        configured threshold, with a full window of turns behind it."""
+        with tempfile.TemporaryDirectory() as d:
+            path = write_transcript(Path(d), "split-over", [
+                assistant("h1", "2026-09-26T09:00:00Z", u=usage(i=200_000, out=10)),
+                assistant("h2", "2026-09-26T09:05:00Z", u=usage(i=200_000, out=10)),
+            ])
+            with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_WINDOW": "2",
+                                                         "SESSION_STATS_SPLIT_THRESHOLD": "100000"}):
+                s = ss.collect(str(path))
+                self.assertEqual(s["recent_prefix"], {"avg": 200_000, "window": 2, "turns": 2, "threshold": 100_000})
+                hint = ss.split_hint(s)
+                self.assertIsNotNone(hint)
+                self.assertIn("split hint", hint)
+                self.assertIn("200k", hint)
+                self.assertIn(hint, ss.fmt_line(s))
+                self.assertIn(hint, ss.fmt_block(s))
+
+    def test_split_hint_absent_under_threshold(self):
+        """A light prefix over the same full window never gets the hint."""
+        with tempfile.TemporaryDirectory() as d:
+            path = write_transcript(Path(d), "split-under", [
+                assistant("l1", "2026-09-26T09:00:00Z", u=usage(i=1_000, out=10)),
+                assistant("l2", "2026-09-26T09:05:00Z", u=usage(i=1_000, out=10)),
+            ])
+            with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_WINDOW": "2",
+                                                         "SESSION_STATS_SPLIT_THRESHOLD": "100000"}):
+                s = ss.collect(str(path))
+                self.assertIsNone(ss.split_hint(s))
+                self.assertNotIn("split hint", ss.fmt_line(s))
+                self.assertNotIn("split hint", ss.fmt_block(s))
+
+    def test_split_hint_absent_before_a_full_window(self):
+        """A fat prefix that hasn't lasted a full window yet does not fire — one busy turn is not
+        a trend. Window 5, only 2 turns recorded, both already over threshold."""
+        with tempfile.TemporaryDirectory() as d:
+            path = write_transcript(Path(d), "split-short", [
+                assistant("w1", "2026-09-26T09:00:00Z", u=usage(i=200_000, out=10)),
+                assistant("w2", "2026-09-26T09:05:00Z", u=usage(i=200_000, out=10)),
+            ])
+            with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_WINDOW": "5",
+                                                         "SESSION_STATS_SPLIT_THRESHOLD": "100000"}):
+                s = ss.collect(str(path))
+                self.assertEqual(s["recent_prefix"]["turns"], 2)
+                self.assertIsNone(ss.split_hint(s))
+
+    def test_split_threshold_and_window_env_overrides(self):
+        with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_THRESHOLD": "9000", "SESSION_STATS_SPLIT_WINDOW": "7"}):
+            self.assertEqual(ss.split_threshold(), 9000)
+            self.assertEqual(ss.split_window(), 7)
+        with unittest.mock.patch.dict(os.environ, {"SESSION_STATS_SPLIT_THRESHOLD": "not-a-number"}):
+            self.assertEqual(ss.split_threshold(), ss.SPLIT_THRESHOLD_DEFAULT)
+        self.assertEqual(ss.split_window(), ss.SPLIT_WINDOW_DEFAULT)
+
     def test_collect_reads_transcript_in_one_pass(self):
         """collect() must open the transcript exactly once (#133 — the previous fix read it twice:
         `transcripts.usage_records(path)` up front to get each request's last usage line, then a

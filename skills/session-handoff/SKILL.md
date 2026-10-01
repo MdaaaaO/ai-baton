@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "24"
+  version: "25"
   updated: "2026-10-01"
   reviewed: "2026-09-27"
 user-invocable: true
@@ -156,5 +156,6 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 The next session could pick up cold from `.context/` alone — no reliance on this transcript. Either its
 start prompt is in the registry **and** in your final chat message (step 10), or there genuinely is no
 follow-on work and your final message says so instead of inventing one.
-Then end the session (don't let it sprawl past its ticket; `autoCompactWindow` is a backstop, not
-a reason to keep a session alive).
+Then end the session (don't let it sprawl past its ticket; the backstop is the user's `autoCompactWindow`
+setting in `~/.claude/settings.json`, or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for cloud — not a reason to
+keep a session alive).

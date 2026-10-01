@@ -19,6 +19,7 @@ Sections:
                   a retired capability key (`slack.enabled`, `github.signed_commits`) still in config.json
   4. machine    — this machine's wiring: environment name, CLAUDE.md imports, Makefile include, memory
                   symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell,
+                  the auto-compact backstop (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`),
                   free disk on `/`/`$HOME`/the scratch root with the usual build/package caches named above
                   DISK_WARN_PCT; one legacy line: a leftover `.claude/profiles/` clone (the layer retired
                   2026-09-25) → delete it
@@ -833,6 +834,27 @@ def zone_warning(r: Report, src: dict[str, str]) -> None:
           "set an IANA Region/City name (an abbreviation like `EST` or `EDT` is not one)")
 
 
+def autocompact_wiring(r: Report) -> None:
+    """The auto-compact backstop (#398): the user setting `autoCompactWindow` in `~/.claude/settings.json`,
+    or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for a cloud session — never the plugin's own `settings.json` (a
+    no-op there). Read-only: a missing/unparseable settings.json reads as unset, never an error. Unset is a
+    WARN, not an ERR — the harness's own default still applies."""
+    if os.environ.get("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "").strip():
+        r.add(OK, "machine", "auto-compact backstop: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set in the environment")
+        return
+    p = Path.home() / ".claude" / "settings.json"
+    try:
+        cfg = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        cfg = {}
+    if cfg.get("autoCompactWindow"):
+        r.add(OK, "machine", "auto-compact backstop: `autoCompactWindow` set in `~/.claude/settings.json`")
+    else:
+        r.add(WARN, "machine", "auto-compact backstop unset — no `autoCompactWindow` in `~/.claude/settings.json` "
+              "and no `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the environment; `/autocompact 200k` sets the user "
+              "setting (cloud: export `CLAUDE_CODE_AUTO_COMPACT_WINDOW`)")
+
+
 def seed_pairs() -> list[tuple[Path, Path]]:
     """(template in the kit, seeded copy on this machine) — what setup.sh seeds once and never overwrites."""
     return [(KIT / "context-db" / "context-README.template.md", ctx() / "README.md"),
@@ -969,6 +991,7 @@ def sec_machine(r: Report) -> str:
     envname = kit_profile.name()
     identity_wiring(r)
     seed_wiring(r)
+    autocompact_wiring(r)
     if not (ENV / "config.json").is_file():
         r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):

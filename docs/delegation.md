@@ -57,6 +57,7 @@ editing anyone's text.
 A worker starts cold. The brief carries everything it needs, and the rules the main session learned the hard way:
 
 1. **Setup:** the exact `git worktree add ../.worktrees/<name> -b <branch> origin/main` line; work only there.
+   A worker resumed with `SendMessage` after its branch already exists rebases it onto `origin/main` first.
 2. **Task:** the issue number (`gh issue view <n>`) and what "done" means.
 3. **Tests:** new tests must **fail on `origin/main`** and pass with the fix — prove it by restoring the main copy of
    the changed file, running them, and putting the fix back. The full suite and `kit-verify` pass before the commit.
@@ -72,9 +73,11 @@ A worker starts cold. The brief carries everything it needs, and the rules the m
 
 ## The main session's loop
 
+One scope per session: this loop is the session's one job — a new ticket wave starts a new session.
+
 1. Plan the queue: which tickets are independent, and the model for each.
 2. Launch the workers in **one message** (they run in parallel, in the background).
 3. While they run, do the work only the main session can: a judgment ticket, the registry, answering the user.
-4. For each return: read the diff (`git -C <worktree> show --stat`, then the parts that matter), check the proof,
+4. For each return: review the diff through `review-runner`'s ≤3K overview, not the raw diff, check the proof,
    open the PR with the worker's body file, arm or re-arm `pr-watch`.
 5. Review events and findings go back out to workers; merges, posts and flushes stay here.

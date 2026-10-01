@@ -224,6 +224,52 @@ class GitIgnoredScan(unittest.TestCase):
                 self.assertEqual(kh.git_ignored(root, ["SKILL.md"]), set())
 
 
+class AutoCompactCheck(unittest.TestCase):
+    """`autocompact_wiring()` (#398): the real backstop is the user's `autoCompactWindow` setting in
+    `~/.claude/settings.json`, or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for a cloud session — never the
+    plugin's own settings.json (a no-op there). Unset is a WARN, set (either way) is OK."""
+
+    def test_unset_everywhere_warns(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            with mock.patch.object(kh.Path, "home", return_value=home), \
+                 mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
+                kh.autocompact_wiring(r)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1)
+        self.assertIn("auto-compact backstop unset", text)
+
+    def test_user_settings_json_set_is_ok(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(json.dumps({"autoCompactWindow": 200000}), encoding="utf-8")
+            with mock.patch.object(kh.Path, "home", return_value=home), \
+                 mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
+                kh.autocompact_wiring(r)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0)
+        self.assertIn("autoCompactWindow", text)
+
+    def test_cloud_env_var_set_is_ok_without_reading_settings(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)  # no .claude/settings.json at all — the env var alone must suffice
+            with mock.patch.object(kh.Path, "home", return_value=home), \
+                 mock.patch.dict(os.environ, {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"}):
+                kh.autocompact_wiring(r)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0)
+        self.assertIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", text)
+
+
 class DiskCheck(unittest.TestCase):
     """`disk_wiring()` — free-disk on `/`, `$HOME` and the scratch root, plus the top-cache sizes above
     `DISK_WARN_PCT` (a sandbox root overlay filled silently from an untended build cache; the first symptom was

@@ -498,7 +498,12 @@ rate defaults to 2x the input price when the list has only 4 numbers. Subagents 
 own transcript under <project>/<session-id>/subagents/*.jsonl, and those are summed into
 `subagents_cost` and `spend_total_usd_est` (main + subagents). Before 2026-09-22 the figure was
 main-session only; this session's review-runners alone cost ~3.4x the main prefix, so the total
-is the number to quote. Discounts/batch are ignored. Stdlib only.
+is the number to quote. Discounts/batch are ignored.
+
+Split hint (#398): when the avg context over the last SESSION_STATS_SPLIT_WINDOW turns (default 20)
+is >= SESSION_STATS_SPLIT_THRESHOLD tokens (default 150_000), `fmt_block`/`fmt_line` append one line
+nudging a fresh session — a sustained fat prefix, not one busy turn. Silent below a full window or
+below threshold. Stdlib only.
 
 options:
   -h, --help            show this help message and exit

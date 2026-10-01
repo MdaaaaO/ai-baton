@@ -27,7 +27,12 @@ rate defaults to 2x the input price when the list has only 4 numbers. Subagents 
 own transcript under <project>/<session-id>/subagents/*.jsonl, and those are summed into
 `subagents_cost` and `spend_total_usd_est` (main + subagents). Before 2026-09-22 the figure was
 main-session only; this session's review-runners alone cost ~3.4x the main prefix, so the total
-is the number to quote. Discounts/batch are ignored. Stdlib only.
+is the number to quote. Discounts/batch are ignored.
+
+Split hint (#398): when the avg context over the last SESSION_STATS_SPLIT_WINDOW turns (default 20)
+is >= SESSION_STATS_SPLIT_THRESHOLD tokens (default 150_000), `fmt_block`/`fmt_line` append one line
+nudging a fresh session — a sustained fat prefix, not one busy turn. Silent below a full window or
+below threshold. Stdlib only.
 """
 from __future__ import annotations
 import argparse
@@ -72,6 +77,32 @@ def prices() -> tuple[float, float, float, float, float]:
         except ValueError:
             pass
     return DEFAULT_PRICES
+
+
+SPLIT_THRESHOLD_DEFAULT = 150_000  # tokens: an avg prefix at/above this over the window is "fat" (#398)
+SPLIT_WINDOW_DEFAULT = 20  # turns: require a full window before judging a trend, not one busy turn
+
+
+def split_threshold() -> int:
+    """`SESSION_STATS_SPLIT_THRESHOLD` (tokens), else `SPLIT_THRESHOLD_DEFAULT` — same override shape as `prices()`."""
+    raw = os.environ.get("SESSION_STATS_SPLIT_THRESHOLD", "")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return SPLIT_THRESHOLD_DEFAULT
+
+
+def split_window() -> int:
+    """`SESSION_STATS_SPLIT_WINDOW` (turns), else `SPLIT_WINDOW_DEFAULT`."""
+    raw = os.environ.get("SESSION_STATS_SPLIT_WINDOW", "")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return SPLIT_WINDOW_DEFAULT
 
 
 def price_for(model: str | None) -> tuple[float, float, float, float, float]:
@@ -362,6 +393,8 @@ def collect(path: str) -> dict:
     two reads would have its tool_use counted from the second but its usage missing from the
     first)."""
     contrib: dict[str, tuple[int, int, int, int, int, float, int]] = {}  # rid -> (i, cw, cr, out, think, cost, ctx) last added to the running totals
+    ctx_series: list[int] = []  # per-turn context size, in turn order, deduped like contrib (a streamed chunk overwrites in place)
+    rid_pos: dict[str, int] = {}  # rid -> its index in ctx_series
     n_turns = 0
     tok_in = tok_cw = tok_cr = tok_out = tok_think = 0
     peak_ctx = 0
@@ -436,6 +469,11 @@ def collect(path: str) -> dict:
                 tok_think += think; spend += cost
                 ctx_sum += ctx
                 peak_ctx = max(peak_ctx, ctx)
+                if rid in rid_pos:
+                    ctx_series[rid_pos[rid]] = ctx  # a later chunk of the same request replaces it, not a new turn
+                else:
+                    rid_pos[rid] = len(ctx_series)
+                    ctx_series.append(ctx)
             for b in m.get("content") or []:
                 if not isinstance(b, dict) or b.get("type") != "tool_use":
                     continue
@@ -474,6 +512,8 @@ def collect(path: str) -> dict:
     p_in, p_cw, p_cr, p_out, p_cw1h = prices()
     sub = collect_subagents(path)
     hours = ((last_ts - first_ts).total_seconds() / 3600.0) if first_ts and last_ts else 0.0
+    window = split_window()
+    recent = ctx_series[-window:] if ctx_series else []
     return {
         "session_id": os.path.splitext(os.path.basename(path))[0],
         "transcript": path,
@@ -485,6 +525,10 @@ def collect(path: str) -> dict:
         "tokens": {"input": tok_in, "cache_write": tok_cw, "cache_read": tok_cr,
                    "output": tok_out, "thinking": tok_think},
         "context": {"peak": peak_ctx, "avg": int(ctx_sum / n_turns) if n_turns else 0},
+        # not nested in "context": a split hint needs the last-N-turns average, window and turn count
+        # together, and "context" above is asserted as an exact 2-key dict elsewhere (test_collect)
+        "recent_prefix": {"avg": int(sum(recent) / len(recent)) if recent else 0, "window": window,
+                           "turns": len(ctx_series), "threshold": split_threshold()},
         "spend_usd_est": round(spend, 2),
         "subagents_cost": sub,
         "spend_total_usd_est": round(spend + sub["spend_usd_est"], 2),
@@ -514,16 +558,30 @@ def _k(n: int) -> str:
     return str(n)
 
 
+def split_hint(s: dict) -> str | None:
+    """A one-line nudge when the prefix has stayed fat over the last `split_window()` turns — the
+    session's own context, not what it has spent. `None` below a full window of turns (a single busy
+    turn should never trigger this, only a sustained prefix) or below `split_threshold()`."""
+    rp = s.get("recent_prefix") or {}
+    window, turns, avg, threshold = rp.get("window", 0), rp.get("turns", 0), rp.get("avg", 0), rp.get("threshold", 0)
+    if turns < window or avg < threshold:
+        return None
+    return (f"split hint: avg prefix {_k(avg)} over the last {window} turns ≥ {_k(threshold)} — "
+            f"consider a fresh session (WORKSPACE.md § Cost & context hygiene: one scope per session)")
+
+
 def fmt_line(s: dict) -> str:
     """One registry-cell line (no `|`, no newlines)."""
     tk = s["tokens"]
-    return (f"{s['turns']} turns · {s['wall_hours']}h · ctx peak {_k(s['context']['peak'])} avg {_k(s['context']['avg'])} · "
+    line = (f"{s['turns']} turns · {s['wall_hours']}h · ctx peak {_k(s['context']['peak'])} avg {_k(s['context']['avg'])} · "
             f"cache-read {_k(tk['cache_read'])} · out {_k(tk['output'])} · "
             f"~${s['spend_total_usd_est']:.0f} (main {s['spend_usd_est']:.0f} + {s['subagents_cost']['files']} subagents {s['subagents_cost']['spend_usd_est']:.0f}) · "
             f"{s['compactions']} compactions · {s['tool_calls']} tool calls · "
             f"{len(s['prs_touched'])} PRs ({s['prs_opened']} opened) · {len(s['tickets_touched'])} tickets "
             f"({s['jira']['created']} created, {s['jira']['comments']} comments, {s['jira']['transitions']} transitions) · "
             f"{s['sign_jobs']} sign jobs · {s['slack']['drafts']} Slack drafts")
+    hint = split_hint(s)
+    return f"{line} · {hint}" if hint else line
 
 
 def fmt_block(s: dict) -> str:
@@ -549,6 +607,10 @@ def fmt_block(s: dict) -> str:
     ]
     out = ["| Stat | Value |", "|---|---|"]
     out += [f"| {k} | {v.replace('|', '/')} |" for k, v in rows]
+    hint = split_hint(s)
+    if hint:
+        out.append("")
+        out.append(f"> {hint}")
     return "\n".join(out)
 
 
