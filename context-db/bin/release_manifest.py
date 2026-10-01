@@ -18,11 +18,14 @@ Format (stable: `git ls-files` output sorted again, so two builds of the same tr
     ...
 
 Usage:
-  release_manifest.py build [--root DIR] [--out FILE]   # write (default: stdout) the manifest for HEAD
-  release_manifest.py verify MANIFEST [--root DIR]       # every line still matches the tree; prints each
-                                                           # problem and exits 1, or "OK" and exits 0
+  release_manifest.py build [--root DIR] [--out FILE]        # write (default: stdout) the manifest for HEAD
+  release_manifest.py verify MANIFEST [--root DIR]            # every line still matches the tree; prints each
+                                                                # problem and exits 1, or "OK" and exits 0
+  release_manifest.py verify MANIFEST --root DIR --no-git     # same, for a tree with no git checkout (a
+                                                                # Claude Code plugin cache, a plain copy of a
+                                                                # release) — see `verify_no_git()`
 
-Stdlib only; `git` (ls-files, rev-parse) is the one external dependency.
+Stdlib only; `git` (ls-files, rev-parse) is the one external dependency, skipped entirely in `--no-git` mode.
 """
 from __future__ import annotations
 
@@ -104,6 +107,43 @@ def verify(manifest_text: str, root: Path) -> list[str]:
     return problems
 
 
+def verify_no_git(manifest_text: str, root: Path) -> tuple[list[str], list[str]]:
+    """(problems, notes) against a tree with no git checkout at all — a Claude Code plugin cache (a plain
+    copy of a release, `docs/packaging.md`), not a clone. `verify()` needs `git ls-files`/`rev-parse` for
+    two things this can't do without a checkout: knowing which extra files were ever tracked, and reading
+    the tree's own HEAD. So the two outcomes split differently here:
+
+    - `problems` (a real failure, same as `verify()`): a manifest-listed file missing from `root`, or
+      present with the wrong hash.
+    - `notes` (never a failure): a file under `root` the manifest doesn't list — this mode cannot tell a
+      hand edit from a file that was simply never tracked, so it is named, not failed on. Python's own
+      runtime noise (`__pycache__/`, `*.pyc`) is skipped outright rather than listed. The commit is never
+      checked (there is no `git rev-parse` to check it against) — the manifest's own `commit <sha>` line
+      is named in a note instead, so a caller never mistakes silence for a check that ran."""
+    commit, files = parse(manifest_text)
+    problems: list[str] = []
+    for rel in sorted(files):
+        p = root / rel
+        if not p.is_file():
+            problems.append(f"missing: {rel} (in the manifest, not in the tree)")
+            continue
+        if file_sha256(p) != files[rel]:
+            problems.append(f"hash mismatch: {rel}")
+    listed = set(files)
+    notes: list[str] = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        parts = p.relative_to(root).parts
+        if "__pycache__" in parts or parts[-1].endswith(".pyc"):
+            continue
+        rel = "/".join(parts)
+        if rel not in listed:
+            notes.append(f"untracked by the manifest: {rel}")
+    notes.append(f"commit not checked (no git checkout here): manifest says {commit}")
+    return problems, notes
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -115,6 +155,10 @@ def main(argv: list[str]) -> int:
     v = sub.add_parser("verify", help="check a manifest file against the working tree")
     v.add_argument("manifest", help="path to a manifest file")
     v.add_argument("--root", default=".", help="repo root (default: cwd)")
+    v.add_argument("--no-git", action="store_true",
+                    help="verify a tree with no git checkout (e.g. a Claude Code plugin cache): skip the "
+                         "commit check, and list files present but unlisted as notes instead of failures "
+                         "(verify_no_git())")
 
     a = ap.parse_args(argv)
     root = Path(a.root)
@@ -126,7 +170,13 @@ def main(argv: list[str]) -> int:
             else:
                 sys.stdout.write(text)
             return 0
-        problems = verify(Path(a.manifest).read_text(encoding="utf-8"), root)
+        manifest_text = Path(a.manifest).read_text(encoding="utf-8")
+        if a.no_git:
+            problems, notes = verify_no_git(manifest_text, root)
+            for n in notes:
+                print(f"release_manifest: note: {n}", file=sys.stderr)
+        else:
+            problems = verify(manifest_text, root)
         for p in problems:
             print(f"release_manifest: {p}", file=sys.stderr)
         if problems:

@@ -129,5 +129,75 @@ class Verify(unittest.TestCase):
             self.assertEqual(rm.main(["verify", str(manifest), "--root", str(repo.path)]), 1)
 
 
+class Tree:
+    """A plain directory (no git) standing in for a plugin cache — the fixture `verify_no_git` is for."""
+
+    def __init__(self, tmp: Path):
+        self.path = tmp
+        (self.path / "a.txt").write_text("alpha\n", encoding="utf-8")
+        (self.path / "sub").mkdir()
+        (self.path / "sub" / "b.txt").write_text("bravo\n", encoding="utf-8")
+
+    def manifest(self, commit: str = "deadbeef") -> str:
+        lines = [f"commit {commit}"]
+        for rel in ("a.txt", "sub/b.txt"):
+            lines.append(f"{rm.file_sha256(self.path / rel)}  {rel}")
+        return "\n".join(lines) + "\n"
+
+
+class VerifyNoGit(unittest.TestCase):
+    def test_matching_tree_has_no_problems_and_a_commit_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(Path(tmp))
+            problems, notes = rm.verify_no_git(tree.manifest("cafef00d"), tree.path)
+            self.assertEqual(problems, [])
+            self.assertIn("commit not checked (no git checkout here): manifest says cafef00d", notes)
+
+    def test_catches_a_hash_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(Path(tmp))
+            text = tree.manifest()
+            (tree.path / "a.txt").write_text("tampered\n", encoding="utf-8")
+            problems, _ = rm.verify_no_git(text, tree.path)
+            self.assertEqual(problems, ["hash mismatch: a.txt"])
+
+    def test_catches_a_missing_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(Path(tmp))
+            text = tree.manifest()
+            (tree.path / "a.txt").unlink()
+            problems, _ = rm.verify_no_git(text, tree.path)
+            self.assertEqual(problems, ["missing: a.txt (in the manifest, not in the tree)"])
+
+    def test_an_unlisted_file_is_a_note_not_a_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(Path(tmp))
+            text = tree.manifest()
+            (tree.path / "extra.txt").write_text("extra\n", encoding="utf-8")
+            problems, notes = rm.verify_no_git(text, tree.path)
+            self.assertEqual(problems, [])
+            self.assertIn("untracked by the manifest: extra.txt", notes)
+
+    def test_pycache_and_pyc_are_skipped_outright(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(Path(tmp))
+            text = tree.manifest()
+            (tree.path / "__pycache__").mkdir()
+            (tree.path / "__pycache__" / "a.cpython-312.pyc").write_text("x", encoding="utf-8")
+            (tree.path / "mod.pyc").write_text("x", encoding="utf-8")
+            problems, notes = rm.verify_no_git(text, tree.path)
+            self.assertEqual(problems, [])
+            self.assertEqual([n for n in notes if "pyc" in n or "__pycache__" in n], [])
+
+    def test_cli_no_git_flag_reports_problems_as_notes_go_to_stderr(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(Path(tmp))
+            manifest = tree.path / "manifest.txt"
+            manifest.write_text(tree.manifest(), encoding="utf-8")
+            self.assertEqual(rm.main(["verify", str(manifest), "--root", str(tree.path), "--no-git"]), 0)
+            (tree.path / "a.txt").write_text("tampered\n", encoding="utf-8")
+            self.assertEqual(rm.main(["verify", str(manifest), "--root", str(tree.path), "--no-git"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
