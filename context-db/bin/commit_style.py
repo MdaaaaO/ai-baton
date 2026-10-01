@@ -159,8 +159,12 @@ def check_subject(subject: str, style: str) -> list[str]:
             if m.group("type") not in TYPES:
                 problems.append(f"type `{m.group('type')}` is not one of {', '.join(TYPES)}")
             desc = m.group("desc")
-            if desc[:1].isupper() and not re.match(r"^[A-Z][A-Z0-9]*-\d+\b|^[A-Z]{2,}\b", desc):
-                problems.append("description starts with a capital letter (lowercase, imperative: `add …`, not `Add …`)")
+            # mirrors the pinned conventional-release tool's `check-title` exactly (no exemption for a ticket
+            # key or an acronym leading the description — it rejects those too; a digit or a backtick is not
+            # an upper-case letter, so those still pass): any upper-case first character is refused.
+            if desc[:1].isupper():
+                problems.append("description starts with an upper-case letter (should start lower-case, "
+                                 "imperative: `add …`, not `Add …`)")
             rx = key_regex()
             if rx:
                 try:

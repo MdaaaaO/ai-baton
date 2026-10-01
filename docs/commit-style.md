@@ -37,6 +37,11 @@ file to someone else's repo — propose it to the owner if the style there reall
 | `ticket-key` | `<KEY>: <description>` | key per the env config's `tracker.key_regex`; ≤ 72 chars, no trailing period |
 | `free` | anything non-empty | for repos that explicitly want no rule |
 
+A `conventional` description's first character must be lower-case — no exemption for a ticket key or an
+acronym leading it (`feat(kb): API keys` and `feat(kb): KEY-1 add x` are both refused); a digit or a
+backtick leading is fine. This mirrors the pinned release tool's `check-title`, which the `pr-title`
+workflow also runs (§ Gates), so a title that passes `commit_style.py title` never fails there.
+
 Always accepted: `Merge …`, `Revert "…"`, `fixup! …`, `squash! …` (git writes them). A message's
 second line must be blank; every line that starts with the comment char (`#`, or the repo's `core.commentChar`) is
 ignored, exactly as git's `cleanup=strip` removes it — so a `#123 …` subject needs `core.commentChar` set to another char.

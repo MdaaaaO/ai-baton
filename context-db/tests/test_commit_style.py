@@ -41,7 +41,7 @@ class BlankStore(unittest.TestCase):
 
 class Subjects(BlankStore):
     def test_conventional_accepts_the_kit_shape(self):
-        for s in ("feat(dbt): KEY-123 add the fact table", "fix: release the lock", "refactor(kb)!: drop the profiles layer",
+        for s in ("feat(dbt): add the fact table for KEY-123", "fix: release the lock", "refactor(kb)!: drop the profiles layer",
                   "docs(kit): new-environment migration steps", "chore(release): 0.2.0", 'Revert "feat: x"', "Merge branch 'x'",
                   "fixup! feat: x"):
             self.assertEqual(cs.check_subject(s, "conventional"), [], s)
@@ -50,9 +50,14 @@ class Subjects(BlankStore):
         self.assertIn("empty subject", cs.check_subject("   ", "conventional"))
         self.assertTrue(any("not `<type>(<scope>)!: <description>`" in p for p in cs.check_subject("Add the fact table", "conventional")))
         self.assertTrue(any("type `wip`" in p for p in cs.check_subject("wip(kb): x", "conventional")))
-        self.assertTrue(any("starts with a capital" in p for p in cs.check_subject("feat(kb): Add x", "conventional")))
-        self.assertEqual(cs.check_subject("feat(kb): KEY-1 add x", "conventional"), [])  # a key or an acronym may lead
-        self.assertEqual(cs.check_subject("feat(kb): API keys", "conventional"), [])
+        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): Add x", "conventional")))
+        # no exemption for a ticket key or an acronym leading the description — the pinned release tool
+        # rejects those too; only a digit or a backtick (not an upper-case letter) may lead
+        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): KEY-1 add x", "conventional")))
+        self.assertTrue(any("should start lower-case" in p for p in cs.check_subject("feat(kb): API keys", "conventional")))
+        self.assertEqual(cs.check_subject("feat(kb): key-1 add x", "conventional"), [])
+        self.assertEqual(cs.check_subject("feat(kb): 3 keys rotated", "conventional"), [])
+        self.assertEqual(cs.check_subject("feat(kb): `foo` bar baz", "conventional"), [])
         self.assertTrue(any("ends with a period" in p for p in cs.check_subject("feat(kb): add x.", "conventional")))
         self.assertTrue(any("73 chars" in p for p in cs.check_subject("feat(kb): " + "x" * 63, "conventional")))
         self.assertEqual(cs.check_subject("feat(kb): " + "x" * 62, "conventional"), [])
@@ -64,6 +69,9 @@ class Subjects(BlankStore):
         kit_profile.env_config.cache_clear(); kit_profile.load.cache_clear()
         self.assertEqual(cs.check_subject("PROJ-1: add x", "ticket-key"), [])
         self.assertTrue(any("not `<KEY>: <description>`" in p for p in cs.check_subject("add x", "ticket-key")))
+        # the lower-case-start rule is a conventional-style rule only — ticket-key and free are unchanged
+        self.assertEqual(cs.check_subject("PROJ-1: Add x", "ticket-key"), [])
+        self.assertEqual(cs.check_subject("Anything at all.", "free"), [])
 
     def test_message_second_line_must_be_blank_and_comments_are_ignored(self):
         self.assertEqual(cs.check_message("# editor hint\nfeat(kb): add x\n\nbody\n", "conventional"), [])
@@ -207,6 +215,15 @@ class Resolve(BlankStore):
         bad = subprocess.run([*py, "title", "--style", "conventional", "Add x"], capture_output=True, text=True, env=self.env)
         self.assertEqual(bad.returncode, 1)
         self.assertIn("PR title does not follow the conventional style", bad.stderr)
+        # the pr-title workflow's pinned release tool rejects this title with "the subject should start
+        # lower-case" — the local gate must refuse it too, with matching wording, not just pass it through
+        why = subprocess.run([*py, "title", "--style", "conventional", "feat(pr-open): WHY row in the PR body (#1)"],
+                              capture_output=True, text=True, env=self.env)
+        self.assertEqual(why.returncode, 1)
+        self.assertIn("should start lower-case", why.stderr)
+        why_ok = subprocess.run([*py, "title", "--style", "conventional", "feat(pr-open): why row in the PR body (#1)"],
+                                 capture_output=True, text=True, env=self.env)
+        self.assertEqual((why_ok.returncode, why_ok.stdout.strip()), (0, "ok · conventional (--style)"))
         msg = self.repo / "msg.txt"
         msg.write_text("fix(sync): keep the lock\n\nbody\n", encoding="utf-8")
         chk = subprocess.run([*py, "check", "--dir", str(self.repo), str(msg)], capture_output=True, text=True, env=self.env)
