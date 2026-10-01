@@ -2,8 +2,9 @@
 """release_manifest.py — build and check a release manifest: `commit <sha>` plus one sha256 line
 per git-tracked file, so a release tag is a checkable trust point (docs/contributing.md § Releases).
 
-`release.yml` calls `build` right after checking out the tagged commit, uploads the manifest as a
-release asset, then attests it (`actions/attest-build-provenance`). A user verifies the attestation
+`release.yml` calls `build` right after checking out the tagged commit, attests the manifest
+(`actions/attest-build-provenance`), then uploads it as a release asset in the step that publishes the
+Release — so a published Release never exists without its attestation. A user verifies the attestation
 with `gh attestation verify <manifest> --repo <owner>/<repo> --signer-workflow
 <owner>/<repo>/.github/workflows/release.yml`, which proves the manifest came from that workflow run;
 `verify` here checks the manifest's own claims — that every hash still matches a checkout — a separate
