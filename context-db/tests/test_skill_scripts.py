@@ -209,6 +209,135 @@ class TrivialCheck(unittest.TestCase):
                                 side_effect=self.tc.subprocess.TimeoutExpired(cmd=["gh"], timeout=60)):
             self.assertIsNone(self.tc.gh("repos/acme/widgets/pulls/1", allow_fail=True))
 
+    def test_missing_config_prints_ok_false_and_exits_3(self):
+        # a missing config.json used to traceback (FileNotFoundError at import time); it must now fail
+        # closed with the documented setup-problem shape — distinct from both the eligible=false and
+        # the error=true shapes a PR-level or API-level failure prints.
+        script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            home = str(Path(tmp, "home"))
+            env = hermetic_env(tmp)
+            env["PR_REVIEW_HOME"] = home
+            r = subprocess.run([sys.executable, str(script), "acme/widgets", "1"],
+                                capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 3, (r.stdout, r.stderr))
+            out = json.loads(r.stdout)
+            self.assertEqual(out["ok"], False)
+            self.assertIn("no config.json", out["reasons"][0])
+            self.assertIn(home, out["reasons"][0])
+            self.assertIn(home, r.stderr)
+
+    def test_unparsable_config_prints_ok_false_and_exits_3(self):
+        script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            home = str(Path(tmp, "home"))
+            os.makedirs(home)
+            Path(home, "config.json").write_text("{not json", encoding="utf-8")
+            env = hermetic_env(tmp)
+            env["PR_REVIEW_HOME"] = home
+            r = subprocess.run([sys.executable, str(script), "acme/widgets", "1"],
+                                capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 3, (r.stdout, r.stderr))
+            out = json.loads(r.stdout)
+            self.assertEqual(out["ok"], False)
+            self.assertIn("unreadable", out["reasons"][0])
+
+    @staticmethod
+    def _fake_run(responses):
+        """`responses`: {needle-in-the-"gh api ..."-command: (returncode, stdout)}; the first matching
+        needle wins. Mirrors a real `gh` failure (non-zero exit, empty stdout) or success (0, JSON)."""
+        def run(cmd, **kwargs):
+            joined = " ".join(cmd)
+            for needle, (rc, out) in responses.items():
+                if needle in joined:
+                    return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="" if rc == 0 else "boom")
+            raise AssertionError(f"unexpected command in this test: {cmd}")
+        return run
+
+    def test_required_checks_prefers_rulesets_over_protection(self):
+        rules = json.dumps([{"type": "required_status_checks",
+                              "parameters": {"required_status_checks": [{"context": "ci"}, {"context": "lint"}]}}])
+        responses = {
+            "rules/branches/main": (0, rules),
+            "protection/required_status_checks": (0, json.dumps({"contexts": ["should-not-be-used"]})),
+        }
+        with mock.patch.object(self.tc.subprocess, "run", side_effect=self._fake_run(responses)):
+            required, source, readable = self.tc.required_checks("acme/widgets", "main")
+        self.assertEqual(required, ["ci", "lint"])
+        self.assertEqual(source, "rulesets")
+        self.assertTrue(readable)
+
+    def test_required_checks_falls_back_to_protection_when_ruleset_names_none(self):
+        responses = {
+            "rules/branches/main": (0, "[]"),
+            "protection/required_status_checks": (0, json.dumps({"contexts": ["ci"], "checks": []})),
+        }
+        with mock.patch.object(self.tc.subprocess, "run", side_effect=self._fake_run(responses)):
+            required, source, readable = self.tc.required_checks("acme/widgets", "main")
+        self.assertEqual(required, ["ci"])
+        self.assertEqual(source, "protection")
+        self.assertTrue(readable)
+
+    def test_required_checks_unreadable_when_neither_source_reachable(self):
+        # neither endpoint could be read (both calls fail) — a reason on its own, never a vacuous pass.
+        responses = {
+            "rules/branches/main": (1, ""),
+            "protection/required_status_checks": (1, ""),
+        }
+        with mock.patch.object(self.tc.subprocess, "run", side_effect=self._fake_run(responses)):
+            required, source, readable = self.tc.required_checks("acme/widgets", "main")
+        self.assertEqual(required, [])
+        self.assertIsNone(source)
+        self.assertFalse(readable)
+
+    def test_required_checks_readable_with_no_required_checks_when_protection_unreadable(self):
+        # rulesets read fine and named no required check (a ruleset-governed repo with none configured);
+        # protection is unreadable (404, likely "not configured") — still a successful, readable result.
+        responses = {
+            "rules/branches/main": (0, "[]"),
+            "protection/required_status_checks": (1, ""),
+        }
+        with mock.patch.object(self.tc.subprocess, "run", side_effect=self._fake_run(responses)):
+            required, source, readable = self.tc.required_checks("acme/widgets", "main")
+        self.assertEqual(required, [])
+        self.assertEqual(source, "rulesets")
+        self.assertTrue(readable)
+
+    def test_combined_status_none_is_a_documented_error_not_a_crash(self):
+        # a 200 with an empty body from the combined-status endpoint used to be indexed blind
+        # (st["state"]) — a traceback waiting to happen. It must print the documented error=true shape.
+        pr_json = {
+            "head": {"sha": "a" * 40}, "user": {"login": "someone-else"}, "title": "t",
+            "html_url": "https://example.test/pr/1", "state": "open", "draft": False,
+            "base": {"ref": "main", "repo": {"default_branch": "main"}},
+            "requested_reviewers": [{"login": "someone"}], "requested_teams": [], "changed_files": 0,
+        }
+        threads_empty = {"data": {"repository": {"pullRequest": {"reviewThreads": {
+            "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []}}}}}
+
+        def fake_gh(*args, paginate=False, allow_fail=False):
+            path = args[0]
+            if path.endswith("/pulls/1"): return pr_json
+            if "/pulls/1/files" in path: return []
+            if "/pulls/1/reviews" in path: return []
+            if path == "graphql": return threads_empty
+            if "/check-runs" in path: return []
+            if path.endswith("/status"): return None  # the empty-body edge case under test
+            raise AssertionError(f"unexpected gh call in this test: {args}")
+
+        buf = io.StringIO()
+        with mock.patch.object(self.tc, "gh", side_effect=fake_gh), \
+             mock.patch.object(self.tc, "AA", {"mode": "live", "classes": []}), \
+             mock.patch.object(sys, "argv", ["trivial-check.py", "acme/widgets", "1"]):
+            with contextlib.redirect_stdout(buf):
+                with self.assertRaises(SystemExit) as cm:
+                    self.tc.main()
+        self.assertEqual(cm.exception.code, 1)
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["error"])
+        self.assertIn("commits/", out["reasons"][0])
+        self.assertIn("/status", out["reasons"][0])
+
 
 class DiagramPlan(unittest.TestCase):
     @classmethod

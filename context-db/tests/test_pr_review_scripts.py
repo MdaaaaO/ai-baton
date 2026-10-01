@@ -172,6 +172,37 @@ class FetchContextStub(unittest.TestCase):
         self.assertGreaterEqual(bundle["bundle"]["skipped"], 1)
         self.assertIn("skipped", r.stdout)
 
+    # --- an empty/missing login in config.json must fail fast, not run with ME="" (every "mine"/"own PR"
+    #     comparison in the script would then silently match an empty author field) ---
+
+    def test_empty_login_in_config_fails_fast(self):
+        self.state_dir.joinpath("config.json").write_text(json.dumps(
+            {"login": "", "bots": [], "bundle_max_files": 60, "bundle_max_kb": 200}))
+        r, out = self.run_fetch([])
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("no login", r.stderr)
+        self.assertFalse(out.exists())
+
+    def test_missing_login_key_in_config_fails_fast(self):
+        self.state_dir.joinpath("config.json").write_text(json.dumps(
+            {"bots": [], "bundle_max_files": 60, "bundle_max_kb": 200}))
+        r, out = self.run_fetch([])
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("no login", r.stderr)
+
+    # --- incomplete review-thread pagination (a `gh api graphql` call that never comes back with data)
+    #     used to break the pagination loop silently, exit 0 and report 0 unresolved threads: indistinguishable
+    #     from a PR that genuinely has none. It must now be a recorded, non-zero-exit failure. ---
+
+    def test_incomplete_thread_pagination_is_a_failure_not_a_silent_success(self):
+        files = [{"filename": "a.txt", "status": "added", "changes": 1, "additions": 1, "deletions": 0}]
+        r, out = self.run_fetch(files, extra_env={"STUB_GRAPHQL_JSON": ""})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertTrue((out / "manifest.json").exists())
+        manifest = json.loads((out / "manifest.json").read_text())
+        self.assertFalse(manifest["threads_complete"])
+        self.assertIn("errors:", r.stdout)
+
 
 @unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
 class TrackerKeyLint(unittest.TestCase):

@@ -14,7 +14,8 @@ CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
 [ -n "${PR_REVIEW_HOME:-}" ] || [ -d "$CTX" ] || { echo "fetch-context.sh: no workspace .context/ found ($CTX) — run from the workspace, or set PR_REVIEW_HOME" >&2; exit 2; }
 export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_HOME
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
-ME=$(jq -r .login "$ROOT/config.json"); BOTS=$(jq -c .bots "$ROOT/config.json")
+ME=$(jq -r .login "$ROOT/config.json"); [ -n "$ME" ] && [ "$ME" != "null" ] || { echo "fetch-context.sh: config.json at $ROOT has no login" >&2; exit 2; }
+BOTS=$(jq -c .bots "$ROOT/config.json")
 BMAXF=$(jq -r '.bundle_max_files // 60' "$ROOT/config.json"); BMAXKB=$(jq -r '.bundle_max_kb // 200' "$ROOT/config.json")
 repo=${1:?usage: fetch-context.sh <owner/repo> <pr> [--out DIR] [--no-bundle]}; pr=${2:?pr number}; shift 2; out=""; bundle=1
 while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --no-bundle) bundle=0; shift;; *) echo "unknown arg $1" >&2; exit 2;; esac; done
@@ -29,6 +30,7 @@ get "repos/$repo/pulls/$pr" > "$out/pr.json" || fail "cannot fetch repos/$repo/p
 jq -e .head.sha "$out/pr.json" >/dev/null || fail "pr.json has no head.sha"
 head=$(jq -r .head.sha "$out/pr.json"); base=$(jq -r .base.sha "$out/pr.json"); o=${repo%/*}; r=${repo#*/}
 pages "repos/$repo/pulls/$pr/files?per_page=100" > "$out/files.json" || fail "cannot fetch the file list"
+had_fetch_failure=0
 get "repos/$repo/pulls/$pr" -H 'Accept: application/vnd.github.diff' > "$out/diff.patch" || { echo "diff fetch failed (huge PR?) — per-file patches in files.json/diffs/ still apply" >> "$ERR"; : > "$out/diff.patch"; }
 pages "repos/$repo/pulls/$pr/reviews?per_page=100" > "$out/reviews.json" || fail "cannot fetch reviews — mode would be wrong"
 pages "repos/$repo/pulls/$pr/comments?per_page=100" > "$out/review_comments.json" || fail "cannot fetch review comments"
@@ -44,7 +46,7 @@ q='query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){p
 cursor=""; : > "$out/threads.raw"; complete=true
 while :; do
   if [ -n "$cursor" ]; then resp=$(get graphql -f query="$q" -F o="$o" -F r="$r" -F n="$pr" -F c="$cursor"); else resp=$(get graphql -f query="$q" -F o="$o" -F r="$r" -F n="$pr"); fi
-  [ -z "$resp" ] && { complete=false; break; }
+  [ -z "$resp" ] && { complete=false; had_fetch_failure=1; break; }
   jq -c '.data.repository.pullRequest.reviewThreads.nodes[]?' <<<"$resp" >> "$out/threads.raw"
   if [ "$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage' <<<"$resp")" = "true" ]; then cursor=$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor' <<<"$resp"); else break; fi
 done
@@ -109,11 +111,13 @@ if [ "$bundle" = 1 ]; then
         if grep -qiE '(^|[^0-9])(403|429)([^0-9]|$)|rate limit|retry.?after' "$err"; then sleep $((attempt * RDELAY)); else sleep "$RDELAY"; fi
       fi
     done
-    echo "blob $1:$2 failed after 3 attempts: $(tr '\n' ' ' < "$err" | cut -c1-160)" >> "$ERR.blob"; rm -f "$err"; return 1
+    # one file per failure (never a shared append target): concurrent background fetches writing their own
+    # file each, created atomically by mktemp, cannot interleave or clobber one another's line.
+    echo "blob $1:$2 failed after 3 attempts: $(tr '\n' ' ' < "$err" | cut -c1-160)" > "$(mktemp "$BLOBERR/XXXXXX")"; rm -f "$err"; return 1
   }
   # bounded concurrency: PR_REVIEW_FETCH_CONCURRENCY background fetches at a time (default 6), never one per file —
   # a 300-file PR must not fire 300 parallel requests and trip GitHub's secondary rate limit.
-  : > "$ERR.blob"; i=0; n=0; CONC=${PR_REVIEW_FETCH_CONCURRENCY:-6}
+  BLOBERR=$(mktemp -d "${TMPDIR:-/tmp}/fetch-blob-errors.XXXXXX"); i=0; n=0; CONC=${PR_REVIEW_FETCH_CONCURRENCY:-6}
   spawn(){ "$@" & n=$((n+1)); [ $((n % CONC)) -eq 0 ] && wait; }
   while IFS=$'\t' read -r status path prev size; do
     i=$((i+1))
@@ -132,14 +136,18 @@ if [ "$bundle" = 1 ]; then
   done < <(jq -r '.[] | [.status, .filename, (.previous_filename // ""), ((.changes // 0)|tostring)] | @tsv' "$out/files.json")
   wait
   bundled_head=$(find "$out/head" -type f | wc -l); bundled_base=$(find "$out/base" -type f | wc -l)
-  if [ -s "$ERR.blob" ]; then
-    while IFS= read -r ln; do
+  # a blob fetch exhausting its retries is a recorded, visible skip (skipped.tsv + errors.txt) — not
+  # folded into had_fetch_failure's non-zero exit: the bundle still degrades gracefully, same as the
+  # file-count/size caps above, and callers already see it in the printed "skipped" summary.
+  if find "$BLOBERR" -mindepth 1 -print -quit | grep -q .; then
+    for f in "$BLOBERR"/*; do
+      ln=$(cat "$f")
       p=$(printf '%s\n' "$ln" | sed -E 's/^blob [^:]+:(.*) failed after [0-9]+ attempts:.*/\1/')
       [ "$p" != "$ln" ] && [ -n "$p" ] && { printf '%s\tfetch-failed: after retries, see errors.txt\n' "$p" >> "$out/skipped.tsv"; skipped=$((skipped+1)); }
-    done < "$ERR.blob"
-    cat "$ERR.blob" >> "$ERR"
+      echo "$ln" >> "$ERR"
+    done
   fi
-  rm -f "$ERR.blob"
+  rm -rf "$BLOBERR"
   # KB traps pre-grepped: § Known traps + every section whose heading shares a word with a touched path.
   # Matched as a plain substring (index(), never a regex): a word taken from a filename may carry parentheses,
   # brackets or other regex metacharacters, and building a live pattern from it used to break the match (or the
@@ -178,4 +186,5 @@ if [ "$bundle" = 1 ]; then
   echo "bundle: $bundled_head files at head · $bundled_base at base · $skip_summary · diffs/ kb-traps.md bundle.json skipped.tsv"
 fi
 [ -s "$ERR" ] && echo "errors: $(wc -l < "$ERR") lines in $ERR"
+[ "$had_fetch_failure" -eq 0 ] || exit 1
 exit 0

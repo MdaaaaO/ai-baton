@@ -9,6 +9,8 @@ Reads .context/state/pr-review/config.json `auto_approve` (PR_REVIEW_HOME overri
 `--head SHA` refuses (reason "head moved") when the live head differs — submit-review.sh --auto passes the reviewed head.
 `--head SHA` / `--head=SHA` with an empty or non-40-hex value (an unset shell variable in the caller), a
 repeated --head, or any other `--` flag exits 2: nothing disarms the check or is dropped silently.
+A missing or unparsable config.json is a setup problem, not a PR verdict: prints {"ok": false,
+"reasons": [...]} (the message also goes to stderr) and exits 3 — never a traceback.
 Never posts anything. A PR is eligible only if EVERY gate passes:
   - the user is a requested reviewer (login in requested_reviewers, or a requested team in auto_approve.owner_teams) — repo-sweep PRs never qualify
   - open, not draft, base == default branch (no stacked PRs), author != login, no human CHANGES_REQUESTED, 0 unresolved review threads
@@ -21,8 +23,11 @@ Never posts anything. A PR is eligible only if EVERY gate passes:
     its manifest's ecosystem (DEP_SHAPES — a changed date, IP or section number is not a bump); every
     bump is patch (x.y.Z), or minor when the package is in dev_tooling; major never; lockfiles must
     accompany at least one manifest; a patch that does not parse as unified-diff hunks is refused
-  - CI: if branch protection `required_status_checks` is readable, every required context is present and green;
-    otherwise every check-run on head concluded success/skipped/neutral (>=1 run, paginated) and combined status is not failure
+  - CI: required contexts come from the rulesets endpoint first, classic branch protection as the fallback
+    (a ruleset-governed repo must not pass vacuously); when readable, every required context must be present
+    and green. When neither source is readable that is a reason on its own (never a silent pass); with no
+    required contexts at all, every check-run on head must have concluded success/skipped/neutral (>=1 run,
+    paginated) and the combined status must not be failure
   - docs class excludes `docs_exclude_globs` (dbt model docs, packages/constraints txt are not "docs")
   - repos in require_bot_review: a review by the environment's review bot (`github.review_bot`, override
     `PR_WATCH_BOT_LOGIN`) on head with a green Assessment
@@ -40,7 +45,24 @@ try:
     REVIEW_BOT = os.environ.get("PR_WATCH_BOT_LOGIN") or kit_profile.get("github.review_bot") or ""
 except Exception:  # env store missing — no bot gate
     REVIEW_BOT = os.environ.get("PR_WATCH_BOT_LOGIN", "")
-CFG = json.load(open(os.path.join(ROOT, "config.json")))
+
+def load_config():
+    """Read config.json under ROOT, or print the documented {"ok": false, "reasons": [...]} shape and
+    exit 3 — never a traceback. Distinct from a single PR's ineligibility ({"eligible": false, ...}) or
+    a failed gh call ({"eligible": false, "error": true, ...}): this is a setup problem, not a verdict."""
+    path = os.path.join(ROOT, "config.json")
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        msg = f"no config.json at {path}"
+    except (OSError, json.JSONDecodeError) as e:
+        msg = f"config.json at {path} is unreadable: {e}"
+    print(f"error: {msg}", file=sys.stderr)
+    print(json.dumps({"ok": False, "reasons": [msg]}))
+    sys.exit(3)
+
+CFG = load_config()
 AA = CFG.get("auto_approve", {})
 ME = CFG["login"]
 
@@ -179,6 +201,32 @@ def is_docs_path(path, aa):
     return (glob_any(path, aa.get("docs_globs", [])) and not glob_any(path, aa.get("docs_exclude_globs", []) + AGENT_DOCS)
             and not glob_any(path, aa.get("manifest_globs", [])) and not glob_any(path, aa.get("lock_globs", [])))
 
+def required_checks(repo, base_ref):
+    """The required status-check contexts for base_ref: the rulesets endpoint first, classic branch
+    protection as the fallback — a repo governed by a ruleset (not classic protection) must not look
+    the same as a repo with no required checks at all. Returns (required, source, readable):
+    `readable` is False only when NEITHER source could be read (a real API failure, not "no rule
+    configured" — the rulesets endpoint returns 200 with an empty list when a repo has none, so an
+    empty result there is a successful read, not a fallback trigger on its own)."""
+    rules = gh(f"repos/{repo}/rules/branches/{base_ref}", allow_fail=True)
+    rules_ok = isinstance(rules, list)
+    required = set()
+    if rules_ok:
+        for rule in rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks": continue
+            for c in (rule.get("parameters") or {}).get("required_status_checks") or []:
+                name = (c or {}).get("context")
+                if name: required.add(name)
+    if required:
+        return sorted(required), "rulesets", True
+    prot = gh(f"repos/{repo}/branches/{base_ref}/protection/required_status_checks", allow_fail=True)
+    if isinstance(prot, dict):
+        required = set(prot.get("contexts") or []) | {c["context"] for c in prot.get("checks") or []}
+        return sorted(required), "protection", True
+    if rules_ok:
+        return [], "rulesets", True  # rules read fine and named no required check; protection unreadable (likely "not configured")
+    return [], None, False
+
 def parse_args(argv):
     """Return (positional, head). `--head SHA` and `--head=SHA` both need the full 40-hex sha; an empty,
     short or repeated --head, or any other `--` flag, exits 2 — nothing is dropped silently."""
@@ -309,19 +357,24 @@ def main():
     cr = [c for pg in (pages if isinstance(pages, list) else [pages]) for c in (pg.get("check_runs", []) if isinstance(pg, dict) else [])]
     bad_runs = [c["name"] for c in cr if c["status"] != "completed" or c["conclusion"] not in ("success", "skipped", "neutral")]
     st = gh(f"repos/{repo}/commits/{head}/status")
+    if st is None:  # a 200 with an empty body (rare, but indexing it blind is a traceback waiting to happen)
+        print(json.dumps({"eligible": False, "error": True, "reasons": [f"gh api returned no data for repos/{repo}/commits/{head}/status"]}))
+        sys.exit(1)
     st_map = {x["context"]: x["state"] for x in st.get("statuses", [])}
     res["ci"] = f"check-runs {len(cr)} ({len(bad_runs)} not green) · status {st['state']}/{st['total_count']}"
-    # branch protection: when readable, the REQUIRED contexts decide; a missing required check is a hard fail
-    prot = gh(f"repos/{repo}/branches/{base_ref}/protection/required_status_checks", allow_fail=True)
-    if isinstance(prot, dict) and (prot.get("contexts") or prot.get("checks")):
-        required = sorted(set(prot.get("contexts") or []) | {c["context"] for c in prot.get("checks") or []})
+    required, prot_source, readable = required_checks(repo, base_ref)
+    if not readable:
+        # neither the rulesets endpoint nor classic branch protection could be read: a reason to fall
+        # back, never a vacuous "all required checks green" pass (a ruleset-governed repo with no
+        # readable source must not look the same as a repo that genuinely has no required checks).
+        res["protection"] = "unreadable"
+        res["reasons"].append("required checks unreadable: neither rulesets nor branch protection could be read")
+    else:
         green = {c["name"] for c in cr if c["status"] == "completed" and c["conclusion"] in ("success", "skipped", "neutral")} | {k for k, v in st_map.items() if v == "success"}
         missing = [x for x in required if x not in green]
-        res["protection"] = {"required": required, "missing": missing}
+        res["protection"] = {"required": required, "missing": missing, "source": prot_source}
         if missing: res["reasons"].append("required checks not green/present: " + ", ".join(missing[:4]))
-    else:
-        res["protection"] = "unreadable" if prot is None else "none"
-        if not cr: res["reasons"].append("no check-runs on head")
+        elif not required and not cr: res["reasons"].append("no check-runs on head")
     if bad_runs: res["reasons"].append("check-runs not green: " + ", ".join(bad_runs[:4]))
     if st["total_count"] and st["state"] != "success": res["reasons"].append(f"combined status {st['state']}")
     res["eligible"] = not res["reasons"] and res["class"] is not None
