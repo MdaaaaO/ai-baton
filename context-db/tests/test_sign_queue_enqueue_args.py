@@ -87,6 +87,35 @@ class RepeatedFiles(unittest.TestCase):
             # never split into "a" and "b.txt"
             self.assertEqual(self._staged(job), ["a b.txt", "c.txt"])
 
+    def test_a_glob_character_in_a_repeated_flag_is_never_expanded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            (wt / "a1.txt").write_text("a\n")
+            (wt / "c.txt").write_text("c\n")
+            msg = tmp / "glob-msg.txt"
+            msg.write_text("fix: change things\n")
+            # run from inside the worktree: an expanded pattern would match a1.txt there
+            r = subprocess.run(["sh", str(ENQUEUE), "glob", str(wt), "main", str(msg), "--ticket", "none",
+                                "--epic", "none", "--pr", "1", "--summary", "s", "--by", "t",
+                                "--files", "a*.txt", "--files", "c.txt"],
+                               env=_env(tmp, ctx), cwd=wt, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("a*.txt is neither in the worktree nor tracked", r.stderr)
+
+    def test_an_empty_files_value_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            (wt / "a.txt").write_text("a\n")
+            r = _enqueue(tmp, wt, ctx, "empty-files", "--files", "", "--by", "t")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("--files needs a path", r.stderr)
+
     @staticmethod
     def _add_line(job: Path) -> str:
         lines = [ln for ln in job.read_text().splitlines() if ln.startswith('git -C "$WT" add --')]

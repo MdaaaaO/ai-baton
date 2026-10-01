@@ -14,6 +14,7 @@
 #                  split on whitespace into several paths (the old behaviour). So a lone path containing a
 #                  space is staged as one path either way (one --files, or repeated --files); a *list* of
 #                  paths that happen to contain a space must use one --files per path.
+#                  A path is never expanded as a glob; an empty value is refused.
 #   --all          stage with `git add -A` on purpose. Exclusive with --files. Neither flag given falls back
 #                  to `git add -A` too, but prints a warning either way — `-A` should never be a silent default.
 #   --by <name>    REQUIRED — your session name (as shown by ListAgents) so a failure can be routed back to
@@ -76,6 +77,7 @@ while [ $# -gt 0 ]; do
     --rebase) rebase=1;; --new-branch) newbr=1;;
     --files)
       no_nl --files "$2"
+      [ -n "$2" ] || { echo "--files needs a path" >&2; exit 2; }
       files_list="${files_list}${files_list:+$NL}$2"; files_count=$((files_count + 1)); explicit_files=1; shift;;
     --all) all=1;;
     --by) by=$2; by_given=1; shift;;
@@ -203,6 +205,7 @@ if [ "$files_count" -gt 0 ]; then
     # --files passed more than once: each occurrence is one literal path, never split on whitespace —
     # this is the only way to stage two paths where either one contains a space.
     oldIFS=$IFS
+    set -f  # a path is taken as given, never a glob
     IFS=$NL
     for f in $files_list; do
       IFS=$oldIFS
@@ -210,6 +213,7 @@ if [ "$files_count" -gt 0 ]; then
       IFS=$NL
     done
     IFS=$oldIFS
+    set +f
   else
     # exactly one --files: the legacy space-separated-string shape. Keep it whole when it is already a
     # real path (so a single path with a space still works); otherwise split on whitespace, same as before.
