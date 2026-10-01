@@ -252,7 +252,7 @@ endif
 # Free text (WORKING="…", RESP="…") reaches session.py verbatim (#132): `$(call sq,VAR)` is the variable's
 # UNEXPANDED value as one single-quoted sh word, and `unexport` keeps make from expanding it into the recipe
 # environment (a `$(shell …)` inside the text would otherwise run). So quotes, `$(…)` and backticks are data.
-SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING RESP NOTE NEXT SESSION_ID NOSTATS FROM TO
+SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING WORKING_IF_EMPTY RESP NOTE NEXT SESSION_ID NOSTATS FROM TO
 unexport $(SESSION_VARS)
 override sq = '$(subst ','\'',$(value $(1)))'
 SESSION_ARGS = --ref $(call sq,REF) --status $(call sq,STATUS) --epic $(call sq,EPIC) --repos $(call sq,REPOS) \
@@ -264,7 +264,7 @@ session-register:
 
 session-touch:
 	@test -n $(call sq,NAME) || { echo "usage: make session-touch NAME=<session> [WORKING=] [STATUS=]"; exit 2; }
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py touch --name $(call sq,NAME) --status $(call sq,STATUS) --working $(call sq,WORKING) --next $(call sq,NEXT) $(STATSFLAGS)
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py touch --name $(call sq,NAME) --status $(call sq,STATUS) --working $(call sq,WORKING) --working-if-empty $(call sq,WORKING_IF_EMPTY) --next $(call sq,NEXT) $(STATSFLAGS)
 
 session-end:
 	@test -n $(call sq,NAME) || { echo "usage: make session-end NAME=<session> [NEXT=<file with the next-session prompt>|none] [WORKING=]"; exit 2; }

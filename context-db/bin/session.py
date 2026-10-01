@@ -67,7 +67,7 @@ LEDGER_HEADER = """# Session ledger — one row per ended session (stats for gee
 
 > Appended by `session.py end`; figures come from each session's transcript via
 > `session_stats.py` (list-price estimate per model; `~$` = total (main+subagents) since
-> 2026-09-22 — earlier rows are main-session only). Cross-session cost analysis: `.context/reference/claude-cost-tracking.md`.
+> 2026-09-22 — earlier rows are main-session only).
 
 | Ended | Session | Epic | Turns | Hours | Ctx peak | Cache-read | Out | ~$ | Compactions | PRs | Tickets | Sign jobs | Drafts |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -400,7 +400,12 @@ def cmd_touch(a) -> None:
                  f"`make -C $BATON/context-db session-register NAME={a.name} …` first")
     meta["session"] = meta.get("session") or a.name  # a field-less doc must not be written back with a blank one
     if a.status:              meta["status"] = a.status
-    if a.working is not None: meta["working_on"] = a.working
+    if a.working is not None:
+        meta["working_on"] = a.working
+    elif a.working_if_empty and not meta.get("working_on"):
+        # heartbeat.sh's own first touch: its short positional focus argument fills a blank
+        # working_on, never overwrites one already on file.
+        meta["working_on"] = a.working_if_empty
     nxt = _next_prompt(a)
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
@@ -600,6 +605,10 @@ def main() -> int:
         sp.add_argument("--epic", default="")
         sp.add_argument("--repos", default="")
         sp.add_argument("--working", default=None)   # None = unchanged; "" allowed to clear
+        sp.add_argument("--working-if-empty", default="",
+                        help="set working_on to this only when the registered value is still blank "
+                             "(heartbeat.sh's own first touch, so its short focus argument never clobbers a "
+                             "detailed one already on file)")
         sp.add_argument("--resp", default="")
         sp.add_argument("--note", default="", help="text for the body's `## Notes` section (replaces that section only)")
         sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session "

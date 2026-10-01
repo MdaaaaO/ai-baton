@@ -278,6 +278,25 @@ class NoSilentLoss(unittest.TestCase):
         # this test (an empty --working leaves the stored focus alone) is unaffected
         self.assertIn('working_on: "on #1"\n', (self.root / "sessions" / "t-w.md").read_text(encoding="utf-8"))
 
+    def test_working_if_empty_never_overwrites_an_existing_focus(self):
+        # heartbeat.sh's own first touch hands its short positional focus argument through this flag —
+        # it must never clobber a detailed working_on someone already registered.
+        run("session.py", "register", "--name", "t-wie", "--no-stats", "--working", "on something detailed",
+            root=self.root)
+        r = run("session.py", "touch", "--name", "t-wie", "--no-stats", "--working-if-empty", "short focus",
+                root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = (self.root / "sessions" / "t-wie.md").read_text(encoding="utf-8")
+        self.assertIn("working_on: on something detailed\n", text)
+        self.assertNotIn("short focus", text)
+
+    def test_working_if_empty_fills_a_blank_focus(self):
+        run("session.py", "register", "--name", "t-wie2", "--no-stats", root=self.root)
+        run("session.py", "touch", "--name", "t-wie2", "--no-stats", "--working-if-empty", "short focus",
+            root=self.root)
+        text = (self.root / "sessions" / "t-wie2.md").read_text(encoding="utf-8")
+        self.assertIn("working_on: short focus\n", text)
+
     def test_a_fenced_heading_is_not_a_section(self):
         spec = importlib.util.spec_from_file_location("session_fence", BIN / "session.py")
         sys.path.insert(0, str(BIN))

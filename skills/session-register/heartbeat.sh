@@ -16,9 +16,13 @@
 # environment and hands to the detached copy explicitly. The final `session-end` on session death
 # writes the `## Session stats` block into the session file and a row into sessions/_ledger.md,
 # so even a session that never ran session-handoff leaves its numbers behind.
-# Log: $TMPDIR/ai-baton-<uid>/heartbeat-<name>.log · pidfile: same dir, heartbeat-<name>.pid (second
-# start = no-op). Namespaced under TMPDIR (a per-user dir on macOS already; `ai-baton-<uid>` makes it
-# one on Linux too, where TMPDIR is usually unset and bare /tmp is shared between users).
+# Log/pidfile: $TMPDIR/ai-baton-<uid>/heartbeat-<key>.{log,pid} where <key> is $CLAUDE_CODE_SESSION_ID
+# when the harness set one, else the session NAME (second start for the SAME key = no-op). Keying on
+# the session id — not the name alone — means two live sessions that end up registered under the same
+# NAME (a naming accident, not something this script enforces) still get independent heartbeats instead
+# of one treating the other's pidfile as its own. Namespaced under TMPDIR (a per-user dir on macOS
+# already; `ai-baton-<uid>` makes it one on Linux too, where TMPDIR is usually unset and bare /tmp is
+# shared between users).
 TZ_DEFAULT=$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" tz 2>/dev/null || echo UTC)  # identity-aware: plugin option, else WORKSPACE_TZ, else the store
 set -u
 NAME=${1:?usage: heartbeat.sh <session-name> ["<working on>"] [interval-seconds]}
@@ -27,45 +31,50 @@ INTERVAL=${3:-21600}
 KITDIR=$(cd "$(dirname "$0")/../.." && pwd)  # the kit itself: a .claude/ clone or the plugin root (#3)
 # shellcheck source=../_lib/portable.sh
 . "$KITDIR/skills/_lib/portable.sh"  # detach — GNU/Linux and macOS/BSD (no setsid) alike
-MK="make -s -C $KITDIR/context-db"
-BATON_TMP=${TMPDIR:-/tmp}/ai-baton-$(id -u 2>/dev/null || echo 0)
+mk() { make -s -C "$KITDIR/context-db" "$@"; }
+BATON_TMP="${TMPDIR:-/tmp}/ai-baton-$(id -u 2>/dev/null || echo 0)"
 mkdir -p "$BATON_TMP" 2>/dev/null
-LOG=$BATON_TMP/heartbeat-$NAME.log
-PIDFILE=$BATON_TMP/heartbeat-$NAME.pid
 SESSION_ID=${CLAUDE_CODE_SESSION_ID:-}
+KEY=${SESSION_ID:-$NAME}
+LOG="$BATON_TMP/heartbeat-$KEY.log"
+PIDFILE="$BATON_TMP/heartbeat-$KEY.pid"
 
 if [ -z "${HEARTBEAT_DETACHED:-}" ]; then
   if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "heartbeat for $NAME already running (pid $(cat "$PIDFILE"))"; exit 0
   fi
-  # Walk up from this shell to the claude process that owns the session.
+  # Walk up from this shell to the claude process that owns the session — the desktop app's binary
+  # reports a bare version string (e.g. 2.1.281) as its own comm, the same shape kit_profile.py's own
+  # owner walk already accepts.
   p=$$; CLAUDE_PID=""
   while [ -n "$p" ] && [ "$p" != "0" ] && [ "$p" != "1" ]; do
     c=$(ps -o comm= -p "$p" 2>/dev/null | tr -d ' ')   # comm only — never cmd/aux (argv leaks tokens)
-    case "$c" in claude|node) CLAUDE_PID=$p; break;; esac
+    case "$c" in claude|node|[0-9]*.[0-9]*.[0-9]*) CLAUDE_PID=$p; break;; esac
     p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
   done
   [ -n "$CLAUDE_PID" ] || { echo "heartbeat: could not find the owning claude process" >&2; exit 1; }
   [ -n "$SESSION_ID" ] || echo "heartbeat: CLAUDE_CODE_SESSION_ID unset — the row will carry no stats" >&2
-  export HEARTBEAT_DETACHED=1 CLAUDE_PID CLAUDE_CODE_SESSION_ID=$SESSION_ID
+  export HEARTBEAT_DETACHED=1 CLAUDE_PID CLAUDE_CODE_SESSION_ID="$SESSION_ID"
   detach "$LOG" bash "$0" "$NAME" "$WORKING" "$INTERVAL"
   echo "heartbeat for $NAME started (owner claude pid $CLAUDE_PID, every ${INTERVAL}s, stats ${SESSION_ID:+on}${SESSION_ID:-off}, log $LOG)"
   exit 0
 fi
 
-echo $$ > "$PIDFILE"
-echo "$(TZ=$TZ_DEFAULT date +'%Y-%m-%d %I:%M %p %Z') start name=$NAME owner=$CLAUDE_PID interval=$INTERVAL session=${SESSION_ID:-none}"
+echo "$$" > "$PIDFILE"
+echo "$(TZ="$TZ_DEFAULT" date +'%Y-%m-%d %I:%M %p %Z') start name=$NAME owner=$CLAUDE_PID interval=$INTERVAL session=${SESSION_ID:-none}"
 first=1
 while kill -0 "$CLAUDE_PID" 2>/dev/null; do
-  if [ $first = 1 ] && [ -n "$WORKING" ]; then
-    $MK session-touch NAME="$NAME" WORKING="$WORKING"
+  if [ "$first" = 1 ] && [ -n "$WORKING" ]; then
+    # Never clobber an already-registered focus with this short positional argument — only fill it
+    # in when the row's working_on is still blank.
+    mk session-touch NAME="$NAME" WORKING_IF_EMPTY="$WORKING"
   else
-    $MK session-touch NAME="$NAME"
+    mk session-touch NAME="$NAME"
   fi
   first=0
   slept=0
   while [ "$slept" -lt "$INTERVAL" ] && kill -0 "$CLAUDE_PID" 2>/dev/null; do sleep 60; slept=$((slept+60)); done
 done
-echo "$(TZ=$TZ_DEFAULT date +'%Y-%m-%d %I:%M %p %Z') owner $CLAUDE_PID gone — ending $NAME"
-$MK session-end NAME="$NAME"
+echo "$(TZ="$TZ_DEFAULT" date +'%Y-%m-%d %I:%M %p %Z') owner $CLAUDE_PID gone — ending $NAME"
+mk session-end NAME="$NAME"
 rm -f "$PIDFILE"
