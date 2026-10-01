@@ -26,6 +26,10 @@ current state.
 
 ## Key decisions & gotchas
 
+## Architecture
+<!-- Optional — the living container/component map and model lineage, as a plain nested list
+     (docs/diagrams.md's epic-doc rendering); most docs never need this section. -->
+
 ## Infra / secrets locations
 <!-- Where things live; never paste secret values. -->
 

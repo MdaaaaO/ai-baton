@@ -429,6 +429,11 @@ def real_ctx() -> Path | None:
 REAL_CTX = real_ctx()
 EPIC = ("---\ntitle: A\ntype: epic\ndomain: d\nstatus: active\nupdated: 2026-01-05\n---\n# A\n\n## Goal\n\ng\n\n"
         "## Key decisions & gotchas\n\n## Remaining work\n\n## Session log\n\n- 2026-01-05 — first\n")
+# the optional section (#389): not in the epic type's required list, so a doc either carries it or not
+EPIC_WITH_ARCHITECTURE = EPIC.replace(
+    "## Remaining work",
+    "## Architecture\n\n- `widget` [service] (existing)\n  - → `queue` [service] (existing): enqueues a job\n\n"
+    "## Remaining work")
 
 
 class StoreData(unittest.TestCase):
@@ -455,6 +460,7 @@ class StoreData(unittest.TestCase):
         self.assertEqual(epic["log"], {"section": "Session log", "order": "oldest-first"})
         self.assertEqual(epic["version"], 1)
         self.assertEqual(epic["migrations"][0]["log_order_from"], "newest-first")
+        self.assertNotIn("Architecture", epic["sections"])  # optional (#389): the template has it, the type does not
         log = json.loads((data / "types" / "log.json").read_text(encoding="utf-8"))
         # no section: `ctx log`/`maintain`'s archive moves work the body-level dated list, newest entry first
         self.assertEqual(log["log"], {"order": "newest-first"})
@@ -696,6 +702,19 @@ class Adopt(Base):
         self.assertRegex(r.stdout, r"(?m)^finding: migrate: SCHEMA_VIOLATION d/bad status")  # ctx-store v0.6.0
         # names the doc that blocks the step (ctx-store#63/#65), not just the field
         self.assertTrue((self.root / "ctx-store.json").exists())
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_the_optional_architecture_section_is_not_required_either_way(self):
+        """`## Architecture` lives in the template but not in the epic type's required `sections` list
+        (#389) — an epic doc without it, and one with it, both validate clean."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        (self.root / "d" / "bare.md").write_text(EPIC, encoding="utf-8")
+        (self.root / "d" / "drawn.md").write_text(EPIC_WITH_ARCHITECTURE, encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("finding:", r.stdout)
+        self.assertIn("2 adopted", r.stdout)
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_nested_templates_and_a_session_ledger_validate_clean(self):

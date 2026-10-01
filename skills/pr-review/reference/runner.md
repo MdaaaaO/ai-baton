@@ -60,6 +60,7 @@ Extra context from the queue: <pr-scan row: prio, why-now, size, human reviews, 
 | `NEEDS fetch failed — …` / `<other>` | Resolve it (usually a `gh` failure — a failed call is not an empty PR; a bundle gap → fix `fetch-context.sh`), re-spawn |
 | `NEEDS <system>.<kind> <name>` (the fact-shaped form — a dotted `<system>.<kind>`, never free text: the kit-wide forked-worker hand-back) | `/env-init <system>.<kind> <name>` in this session (the user round happens here), then re-spawn |
 | `IMPACT:` | Print with the overview; an undisclosed consumer change is walked like any finding, and the consumer map goes into the KB at step 8 |
+| `WBD:` | Print with the overview; a `gap` the user wants settled now is a deep dive (5b) like any other line, re-presented the same way — the gate in `scope.md` § Explainability's own gate already decided whether the gap also sits in `triage.json` as a numbered finding |
 | `NOTE:` | Carry into the 5c body draft (human approval present → lighter touch; stacked base → say so) |
 
 ## Deep lenses (step 3, `--deep`)
