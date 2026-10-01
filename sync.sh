@@ -30,9 +30,11 @@
 #                                  the reason also on stderr, and (unlike every other FAIL cause)
 #                                  this one exits 1 instead of 0 — `--accept` only ever runs in the
 #                                  foreground, so the failure must be loud
-#   the check CANNOT run        → applies anyway: no `gh` on PATH, `gh` not authenticated, the
-#                                  download failed for a network/timeout reason, or the release
-#                                  predates the manifest and carries no `manifest.txt` asset; status
+#   the check CANNOT run        → applies anyway: no `gh` on PATH or one too old for `gh
+#                                  attestation`, `gh` not authenticated, an origin off github.com,
+#                                  the download or the verify call failed for a network/timeout
+#                                  reason, or the release predates the manifest and carries no
+#                                  `manifest.txt` asset; status
 #                                  `ok …` with the standalone word `unverified` in the detail (that
 #                                  contract is kit-health's to warn on — never this script's)
 #
@@ -96,6 +98,12 @@ fetch_offline() {
   grep -Eqi 'could not resolve (host|hostname)|temporary failure in name resolution|name or service not known|nodename nor servname|failed to connect|couldn.t connect to server|network is unreachable|no route to host|connection (refused|timed out)|operation timed out' "$1"
 }
 
+# gh_unreachable <stderr-file> — did a `gh` call fail on the network rather than on its answer? `gh`
+# words these its own way (Go's net errors), so fetch_offline's git wording alone would miss them.
+gh_unreachable() {
+  fetch_offline "$1" || grep -Eqi 'no such host|dial tcp|i/o timeout|tls handshake timeout|error connecting to' "$1"
+}
+
 # release_tag — the highest `v[0-9]*` tag reachable from origin/main (the pattern kit_version()
 # already matches), or empty before the first release tag.
 release_tag() {
@@ -151,8 +159,9 @@ origin_owner_repo() {
 # checkout already at that commit, which this is about to become — not yet, so it is not run here).
 # Sets $VERIFY_SUFFIX and returns 0 when the update may still be applied: "" when fully verified, or
 # "unverified (<reason>)" when the check could not run at all — no `gh` on PATH, `gh` not
-# authenticated, the download timed out or failed for a network reason, or the release has no
-# manifest.txt asset (a release cut before the manifest existed never has one). Sets $FAIL and
+# authenticated or too old to know `gh attestation`, the download or the verify call timed out or
+# failed for a network reason, or the release has no manifest.txt asset (a release cut before the
+# manifest existed never has one). Sets $FAIL and
 # returns 1 only when the check RAN and FAILED: `gh attestation verify` rejected the manifest, or
 # the manifest names a different commit than the tag — either way nothing is applied.
 verify_release() {
@@ -165,6 +174,10 @@ verify_release() {
   owner_repo="$(origin_owner_repo)"
   if [ -z "$owner_repo" ]; then
     VERIFY_SUFFIX="unverified (could not derive owner/repo from origin)"; return 0
+  fi
+  # a gh from before `gh attestation` existed cannot run the check; its help is local, no network
+  if ! gh attestation verify --help >/dev/null 2>&1; then
+    VERIFY_SUFFIX="unverified (this gh has no attestation command — update gh)"; return 0
   fi
   err="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/kit-verify-release.$$")"
   if ! with_timeout "$FETCH_TIMEOUT" gh auth status >"$err" 2>&1; then
@@ -195,8 +208,16 @@ verify_release() {
     VERIFY_SUFFIX="unverified (release $tag has no manifest.txt asset)"
     rm -rf "$dir"; rm -f "$err"; return 0
   fi
-  if ! with_timeout "$FETCH_TIMEOUT" gh attestation verify "$manifest" --repo "$owner_repo" \
-      --signer-workflow "$owner_repo/.github/workflows/release.yml" >"$err" 2>&1; then
+  rc=0
+  with_timeout "$FETCH_TIMEOUT" gh attestation verify "$manifest" --repo "$owner_repo" \
+    --signer-workflow "$owner_repo/.github/workflows/release.yml" >"$err" 2>&1 || rc=$?
+  # a verify that never got an answer (timed out, or github went away after the download) is "could
+  # not run", not a verdict: only gh's own rejection of the manifest fails the check
+  if [ "$rc" -eq 124 ] || { [ "$rc" -ne 0 ] && gh_unreachable "$err"; }; then
+    log "kit: attestation verify for $tag got no answer (exit $rc): $(head -n1 "$err")"
+    VERIFY_SUFFIX="unverified (attestation verify could not reach github)"
+    rm -rf "$dir"; rm -f "$err"; return 0
+  elif [ "$rc" -ne 0 ]; then
     log "kit: ERROR attestation verify failed for $tag: $(head -n1 "$err")"
     FAIL="kit: release $tag failed manifest attestation verify ($(head -n1 "$err")) — nothing applied"
     VERIFY_FAIL=1

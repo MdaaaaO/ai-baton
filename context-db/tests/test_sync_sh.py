@@ -34,7 +34,7 @@ def _env(home: Path, path: str | None = None) -> dict:
 
 
 # A stub `gh` for verify_release (sync.sh): every call is logged (one line per invocation) to
-# $GH_STUB_LOG, and GH_AUTH_RC / GH_DOWNLOAD_RC / GH_DOWNLOAD_ERR / GH_ATTEST_RC / GH_ATTEST_ERR /
+# $GH_STUB_LOG, and GH_AUTH_RC / GH_DOWNLOAD_RC / GH_DOWNLOAD_ERR / GH_ATTEST_HELP_RC / GH_ATTEST_RC / GH_ATTEST_ERR /
 # GH_MANIFEST_CONTENT (all optional; unset reads as success) choose what each subcommand does. A
 # successful "release download" writes $GH_MANIFEST_CONTENT to <the --dir value>/manifest.txt, same
 # as the real `gh` would land the asset. Never the real `gh`, never the network.
@@ -63,6 +63,8 @@ case "$*" in
     mkdir -p "$dir"
     printf '%s' "$GH_MANIFEST_CONTENT" > "$dir/manifest.txt"
     exit 0 ;;
+  "attestation verify --help"*)
+    exit "${GH_ATTEST_HELP_RC:-0}" ;;
   "attestation verify "*)
     rc="${GH_ATTEST_RC:-0}"
     if [ "$rc" != 0 ]; then
@@ -718,6 +720,40 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.status()[1], "ok")
         self.assertIn("unverified", self.status_file.read_text())
         self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha, "no asset still applies the update")
+
+    def test_accept_gh_without_attestation_command_applies_unverified(self):
+        """A gh too old to know `gh attestation` cannot run the check: that is not a failed check."""
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        r = self.sync(env=self.gh_env(GH_ATTEST_HELP_RC="1"), args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("unverified (this gh has no attestation command", self.status_file.read_text())
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha, "cannot-run still applies the update")
+        self.assertNotIn("release download", (self.tmp / "gh.log").read_text())
+
+    def test_accept_attestation_verify_without_an_answer_applies_unverified(self):
+        """The network going away between the download and the verify call is no verdict on the
+        manifest; gh's own rejection (the failed-attestation test above) still applies nothing."""
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        before = self.rev_parse("HEAD", cwd=self.kit)
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_RC="1")
+        for err in ("dial tcp: lookup api.github.com: no such host", "error connecting to api.github.com"):
+            with self.subTest(err=err):
+                self.git("reset", "-q", "--hard", before, cwd=self.kit)
+                r = self.sync(env=dict(env, GH_ATTEST_ERR=err), args=["--accept"])
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(self.status()[1], "ok")
+                self.assertIn("unverified (attestation verify could not reach github)",
+                              self.status_file.read_text())
+                self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
 
     def test_accept_kit_channel_main_skips_verification(self):
         self.git("config", "kit.channel", "main", cwd=self.kit)
