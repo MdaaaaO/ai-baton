@@ -172,7 +172,7 @@ It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `contex
 |---|---|
 | [layout](docs/layout.md) | What every file and directory is |
 | [conventions](docs/conventions.md) | The six rules that keep the kit portable |
-| [carousel](docs/carousel.md) | The `AskUserQuestion` shape for every open decision a session hands back |
+| [carousel](docs/carousel.md) · [assumptions](docs/assumptions.md) | The `AskUserQuestion` shape for every open decision a session returns |
 | [diagrams](docs/diagrams.md) · [cold-reader](docs/cold-reader.md) | Whiteboard-defence diagram contract |
 | [architecture](docs/architecture.md) | One diagram: session → imports → skills → engine → context DB |
 | [env-facts](docs/env-facts.md) | The env fact store, `kb.py`, and how a skill resolves a fact |

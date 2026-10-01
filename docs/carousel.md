@@ -11,6 +11,13 @@ A choice only the owner can make, that changes what happens next, and that nothi
 settles — not the request, not the code, not a default, not the standing-go rule (`WORKSPACE.md` §
 Rules → Workflow & scope). Anything else is decided and reported, not asked.
 
+## Assumptions — a decision the session took itself
+
+An assumption is one of the decisions above, taken by the session itself under standing-go
+(`WORKSPACE.md` § Rules → Workflow & scope) rather than asked first — it still owes the owner a look.
+Grammar, storage, the checkpoints that render a due line, and the bound on what qualifies:
+`docs/assumptions.md`.
+
 ## Collection
 
 Every decision still open since the user's last answer, not just the one that just came up: a session

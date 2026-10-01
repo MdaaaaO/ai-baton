@@ -2,8 +2,8 @@
 name: ticket-update
 description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "17"
-  updated: "2026-09-30"
+  version: "18"
+  updated: "2026-10-01"
   reviewed: "2026-09-24"
   facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
 user-invocable: true
@@ -34,6 +34,8 @@ sections that have something new. Never restate a prior comment.
 ```
 
 - **Omit empty sections.** A quiet update may be just `🟢 … — **Next** …`. Don't scaffold blanks.
+- **A due `Assumed:` line renders as its own line** — `Assumed: <call> (revisit: ticket-update)` — in
+  this DELTA, asked in the carousel the same turn as the post (`docs/assumptions.md`).
 - **One line per section**; a bullet list only when there is genuinely >1 item; a Markdown table
   only when comparing numbers (counts / diffs / days); `code` for identifiers.
 - **Pivot is a delta, not prose — `**Was** — … / **Now** — … / **Why** — …`,** on every ticket, sketch

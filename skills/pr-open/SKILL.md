@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "26"
+  version: "27"
   updated: "2026-10-01"
   reviewed: "2026-09-25"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
@@ -161,7 +161,7 @@ free-prose test plan.
 2. No declared command → cite the commands you actually ran, one `` `cmd` → `output` `` line each
    (evidence_check.py's own shape); ran none → `Not verified locally: <reason>`. A section that only
    claims ("tests pass") is refused.
-3. `## Not in this PR` and `## One honest limit` are optional, ≤ 3 lines each.
+3. `## Not in this PR` and `## One honest limit` are optional, ≤ 3 lines each — `## One honest limit` also carries every due `Assumed:` line (revisit: pr-open) still open on the session (`docs/assumptions.md`), asked in the carousel before `gh pr create`.
 4. Before `gh pr create`, and on every later push: `python3 $BATON/skills/pr-open/verified.py check <file>
    [--pr <o>/<r> <n>]` — refuses a bare claim, and with `--pr` prints `STALE <old> → <new>` (exit 3) when
    the recorded head has moved; rerun it in the same turn as the push. The pasted tail still passes
