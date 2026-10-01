@@ -2,8 +2,8 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats (context doc, session file, cross-session ledger), and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "22"
-  updated: "2026-09-30"
+  version: "23"
+  updated: "2026-10-01"
   reviewed: "2026-09-27"
 user-invocable: true
 ---
@@ -129,7 +129,9 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       only the newest ones that do and point at the context doc's *Key decisions & gotchas* section for the
       rest — never a paraphrase, only verbatim lines or that pointer. Before `session-end`, run the
       cold-reader gate on the drafted prompt (`docs/cold-reader.md`) and fix it on a miss before handing
-      it off. Run `python3
+      it off, and `python3 $BATON/context-db/bin/length_check.py <file> --surface handoff` on the same
+      draft — fold its `LENGTH:` line into this step's close-out, never a reason to withhold the handoff;
+      trim or point at the context doc instead when it's over. Run `python3
       $BATON/context-db/bin/kit_profile.py scratch` once and use the **printed path** (a per-session dir
       that exists on every machine — never a bare `/tmp` path, which sessions overwrite; shell variables do
       not survive between tool calls, so the Write call takes the literal path) for `<dir>/next.md`, then

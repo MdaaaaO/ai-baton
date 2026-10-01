@@ -83,7 +83,7 @@ Layout (all under `.context/reference/env/`, created by `kb.py init`):
   config.json          the few STRUCTURAL switches scripts branch on: `environment` (this machine's
                        environment name), tracker.kind / key_regex / url_template / mcp_tools,
                        github.org / review_bot / bots / owner_teams, slack.domain, systems.*,
-                       tz_default, domains, labels, self_assessment, diagrams, verify, kit.install_mode
+                       tz_default, domains, labels, self_assessment, diagrams, verify, length, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
   _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
   <system>.md          one doc per system (slack, tracker, github, aws, notion, …); one `## <kind>`
@@ -690,6 +690,25 @@ positional arguments:
 
 options:
   -h, --help  show this help message and exit
+```
+
+## `length_check.py`
+
+```text
+usage: length_check.py [-h] --surface {ticket,pr,handoff} [--repo REPO] file
+
+length_check.py — a reading-time budget for a ticket, PR or handoff body: words in prose only, one
+per-surface default, printed as a warning that never blocks. Sits beside `evidence_check.py` (#60) — the
+other body check `pr-open`, `ticket-open` and `session-handoff` run before posting or handing off.
+
+positional arguments:
+  file                  the drafted body, or - for stdin
+
+options:
+  -h, --help            show this help message and exit
+  --surface {ticket,pr,handoff}
+                        ticket | pr | handoff
+  --repo REPO           owner/repo — looks up a per-repo PR budget override
 ```
 
 ## `migrate_frontmatter.py`

@@ -10,7 +10,7 @@ Layout (all under `.context/reference/env/`, created by `kb.py init`):
   config.json          the few STRUCTURAL switches scripts branch on: `environment` (this machine's
                        environment name), tracker.kind / key_regex / url_template / mcp_tools,
                        github.org / review_bot / bots / owner_teams, slack.domain, systems.*,
-                       tz_default, domains, labels, self_assessment, diagrams, verify, kit.install_mode
+                       tz_default, domains, labels, self_assessment, diagrams, verify, length, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
   _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
   <system>.md          one doc per system (slack, tracker, github, aws, notion, …); one `## <kind>`
@@ -1127,6 +1127,7 @@ def blank_config() -> dict:
         "self_assessment": {"sources": ["github", "meetings", "1on1"], "report": "week-file", "scope": ""},
         "diagrams": {"repos": {}},
         "verify": {"repos": {}},
+        "length": {"repos": {}},
         "commits": {"default": "conventional", "repos": {}},
     }
 
