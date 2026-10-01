@@ -113,7 +113,7 @@ sync-check:
 # name each step on its own when it is the one behind.
 migrate:
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/kb.py migrate
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/ctx_adapter.py adopt
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/ctx_adapter.py adopt; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ] || exit $$rc
 
 # make kit-health [STALE=90] [CONTEXT=<store>] [KIT_HEALTH_ARGS="--quiet …"]  — the audit reads the store CONTEXT names
 # (CONTEXT_ROOT for the script and every child it runs) and writes nothing to it unless KIT_HEALTH_ARGS carries --stamp.

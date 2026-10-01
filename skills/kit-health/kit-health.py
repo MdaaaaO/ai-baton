@@ -221,8 +221,11 @@ def sec_kit(r: Report, stale: int) -> None:
     install_mode_check(r, mode)
     rc, out, err = sh(["sh", str(KIT / "sync-check.sh")])
     out = both(out, err)  # sync-check warns on stderr
-    if out.strip():
-        for line in out.splitlines():
+    # the content-store-behind line is § 5's own WARN below (ctx_store, exit 6) — forwarding it here too would
+    # be the same finding twice; sync-check.sh's own output (session registration reads it directly) is untouched
+    lines = [ln for ln in out.splitlines() if "content store predates the kit's settings/types" not in ln]
+    if lines:
+        for line in lines:
             r.add(WARN, "kit", line.replace("WARN kit sync: ", "sync: "))
     elif plugin is not None:  # sync-check skips the git half without a checkout: never claim "in step with origin" (#3)
         r.add(OK, "kit", "sync: plugin install — no checkout to sync (updates come from the marketplace, see the release "
@@ -1244,6 +1247,11 @@ def ctx_store(r: Report) -> None:
     elif rc == 6:
         r.add(WARN, "engine", f"store behind: `.context/`'s settings or types predate the kit's — `{adapter} adopt` "
                               f"(records a fresh digest, brings the store's settings/types forward)")
+    elif rc == 5:
+        kept = [ln[len("differs: "):].split(" — ", 1)[0] for ln in out.splitlines() if ln.startswith("differs: ")]
+        named = ", ".join(f"`{f}`" for f in kept) if kept else "a store file"
+        r.add(OK, "engine", f"ctx-store: `.context/` is an adopted store; {named} was edited here and kept — "
+                            f"`{adapter} adopt --replace` would take the kit's copy instead")
     elif rc == 3:
         found = [ln[len("finding: "):] for ln in out.splitlines() if ln.startswith("finding: ")]
         r.add(WARN, "engine", f"ctx validate: {len(found)} finding(s) in the store — fix each with the ctx tools:\n```\n"

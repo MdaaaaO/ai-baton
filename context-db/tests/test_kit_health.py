@@ -353,6 +353,78 @@ class CtxStoreCheck(unittest.TestCase):
         self.assertIn("behind", line)
         self.assertIn("ctx_adapter.py adopt`", line)
 
+    def test_a_kept_file_is_ok_naming_it_not_a_warn(self):
+        # exit 5: adopted, every doc validates, the recorded digest matches — but `ctx init --upgrade` kept a
+        # locally edited store file at the last full adopt; that is a deliberate local edit, not drift to warn on
+        level, line = self.check(5, "store /x: ok: 3 docs checked\ndiffers: .ctx/types/epic.json — kept (edited "
+                                    "here); `ctx_adapter.py adopt --replace` takes the kit's")
+        self.assertEqual(level, "OK")
+        self.assertIn("`.ctx/types/epic.json`", line)
+        self.assertIn("edited here and kept", line)
+        self.assertIn("adopt --replace", line)
+
+    def test_a_kept_file_with_no_differs_line_still_names_something(self):
+        # belt and braces: an exit 5 whose stdout the adapter did not shape as expected still reads as OK,
+        # never crashes, falling back to a generic "a store file" rather than an empty name
+        level, line = self.check(5, "store /x: ok: 3 docs checked")
+        self.assertEqual(level, "OK")
+        self.assertIn("a store file was edited here and kept", line)
+
+
+class SecKitSyncDedup(unittest.TestCase):
+    """§ 1 (`sec_kit`) forwards every `sync-check.sh` line as a WARN — except the content-store-behind one, which
+    § 5's `ctx_store` (`adopt --check` exit 6) already reports under its own fix; forwarding it from both sections
+    would read as two findings for the one behind store. `sync-check.sh` itself is untouched: its own line still
+    goes out exactly as before, so session registration (which reads that script directly) sees it unchanged."""
+
+    CONTENT_STORE_LINE = ("WARN kit sync: content store predates the kit's settings/types — `python3 "
+                           "$BATON/context-db/bin/ctx_adapter.py adopt` (records a fresh digest, brings the "
+                           "store's settings/types forward)")
+    OTHER_LINE = "WARN kit sync: 2 local commit(s) on main that will never be pushed — main is PR-only"
+
+    def run_sec_kit(self, sync_err: str, adopt_check: tuple[int, str, str] | None = None) -> "Report":
+        kh = load_kit_health()
+
+        def fake_sh(cmd, **kw):
+            if len(cmd) > 1 and str(cmd[1]).endswith("kit_verify.py"):
+                return 0, "OK\n", ""
+            if cmd[0] == "sh" and str(cmd[-1]).endswith("sync-check.sh"):
+                return 0, "", sync_err
+            if adopt_check is not None and cmd[-2:] == ["adopt", "--check"]:
+                return adopt_check
+            return 0, "", ""
+
+        r = kh.Report()
+        with mock.patch.object(kh, "sh", fake_sh), \
+             mock.patch.object(kh.kit_profile, "plugin_install", lambda *a, **k: None), \
+             mock.patch.object(kh, "install_mode_check", lambda *a, **k: None), \
+             mock.patch.object(kh, "release_check", lambda *a, **k: None), \
+             mock.patch.object(kh, "review_ratio", lambda *a, **k: None):
+            kh.sec_kit(r, 90)
+            if adopt_check is not None:
+                kh.ctx_store(r)
+        return r
+
+    def test_the_content_store_line_alone_adds_no_warn(self):
+        r = self.run_sec_kit(self.CONTENT_STORE_LINE)
+        self.assertEqual(r.counts["WARN"], 0)
+        self.assertTrue(any("in step with origin" in ln for ln in r.lines))
+
+    def test_another_sync_warning_still_forwards(self):
+        r = self.run_sec_kit(self.CONTENT_STORE_LINE + "\n" + self.OTHER_LINE)
+        self.assertEqual(r.counts["WARN"], 1)
+        self.assertTrue(any("local commit(s) on main" in ln for ln in r.lines))
+        self.assertFalse(any("content store predates" in ln for ln in r.lines))
+
+    def test_a_behind_store_yields_exactly_one_warn_in_the_report(self):
+        r = self.run_sec_kit(self.CONTENT_STORE_LINE, adopt_check=(
+            6, "store /x: ok: 3 docs checked\nbehind: the store's settings or types predate the kit's — "
+               "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`", ""))
+        self.assertEqual(r.counts["WARN"], 1)
+        warn_lines = [ln for ln in r.lines if ln.startswith("- ⚠️")]
+        self.assertEqual(len(warn_lines), 1)
+        self.assertIn("store behind", warn_lines[0])
+
 
 GOOD_SHA = "ab" * 20  # a made-up 40-hex commit sha, not a real ctx-store commit — only its shape matters here
 OTHER_SHA = "cd" * 20

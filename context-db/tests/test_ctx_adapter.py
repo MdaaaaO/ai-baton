@@ -993,6 +993,161 @@ class AdoptBehind(Base):
             self.assertEqual(mod.adopt(), 0)  # a plain adopt (still against `changed`) records a fresh digest
             self.assertEqual(mod.adopt(check=True), 0)  # … so --check against the same `changed` data is clean
 
+    def test_a_kept_file_still_differs_in_check_even_though_the_digest_matches(self):
+        """A digest match alone used to read as clean — but a file `ctx init --upgrade` kept (edited here) at the
+        last full adopt is still a local edit `--check` must keep naming, not hide behind an unmoved digest."""
+        r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="kept: .ctx/types/epic.json\nok: 1 adopted\n")
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("differs: .ctx/types/epic.json — kept (edited here); `ctx_adapter.py adopt --replace` "
+                      "takes the kit's", r.stdout)
+        recorded = json.loads(self.digest_path().read_text(encoding="utf-8"))
+        self.assertEqual(recorded["kept"], [".ctx/types/epic.json"])
+        r = self.adapter("adopt", "--check", KIT_CTX=str(self.fake))  # the digest did not move: still 0 by itself
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)  # but the recorded kept file still differs
+        self.assertIn("differs: .ctx/types/epic.json — kept (edited here); `ctx_adapter.py adopt --replace` "
+                      "takes the kit's", r.stdout)
+        self.assertEqual(json.loads(self.digest_path().read_text(encoding="utf-8")), recorded)  # --check wrote nothing
+
+    def test_a_newer_recorded_kit_version_reads_as_ahead_not_behind(self):
+        """Version skew must not point `adopt` the wrong way: a store last adopted by a NEWER kit than this one is
+        not `behind` — this kit is the one out of date, so `--check` says `ahead` and exits 0, never `adopt`'s
+        own advice (which would hand the store older types)."""
+        mod = load_adapter()
+        env = {**self.env, "KIT_CTX": str(self.fake), "FAKE_CTX_OUT": "ok: 0 docs checked\n"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(mod.adopt(), 0)
+            state = json.loads(self.digest_path().read_text(encoding="utf-8"))
+            state["digest"] = "0" * 64  # also stale, so this is a genuine mismatch, not just a version bump
+            state["version"] = "99.0.0"  # newer than any real kit release
+            self.digest_path().write_text(json.dumps(state), encoding="utf-8")
+            import contextlib
+            import io
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = mod.adopt(check=True)
+            self.assertEqual(rc, 0, out.getvalue())
+            self.assertIn("ahead: the store was adopted by kit 99.0.0", out.getvalue())
+            self.assertNotIn("behind", out.getvalue())
+
+    def test_version_skew_compares_numerically_not_lexically(self):
+        """`0.10.0` sorts before `0.9.0` as a string — the comparison must be numeric or this reads backwards."""
+        mod = load_adapter()
+        mod._kit_version = lambda: "0.9.0"  # this test's own stand-in for "this kit's release"
+        env = {**self.env, "KIT_CTX": str(self.fake), "FAKE_CTX_OUT": "ok: 0 docs checked\n"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(mod.adopt(), 0)
+            state = json.loads(self.digest_path().read_text(encoding="utf-8"))
+            self.assertEqual(state["version"], "0.9.0")
+            state["digest"] = "0" * 64
+            state["version"] = "0.10.0"
+            self.digest_path().write_text(json.dumps(state), encoding="utf-8")
+            import contextlib
+            import io
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = mod.adopt(check=True)
+            self.assertEqual(rc, 0, out.getvalue())  # numerically 0.10.0 > 0.9.0: ahead, not behind
+            self.assertIn("ahead: the store was adopted by kit 0.10.0", out.getvalue())
+
+    def test_an_older_recorded_version_still_reads_as_behind(self):
+        mod = load_adapter()
+        env = {**self.env, "KIT_CTX": str(self.fake), "FAKE_CTX_OUT": "ok: 0 docs checked\n"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(mod.adopt(), 0)
+            state = json.loads(self.digest_path().read_text(encoding="utf-8"))
+            state["digest"] = "0" * 64
+            state["version"] = "0.1.0"  # older than this kit's own real version
+            self.digest_path().write_text(json.dumps(state), encoding="utf-8")
+            import contextlib
+            import io
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = mod.adopt(check=True)
+            self.assertEqual(rc, 6, out.getvalue())
+            self.assertIn("behind:", out.getvalue())
+
+    def test_a_newer_recorded_version_refuses_a_plain_adopt_until_replace(self):
+        """Plain `adopt` must not silently hand an older kit's types to a store a newer kit already adopted —
+        ctx-store's own `init --upgrade` has no guard for that (see the module docstring's `Behind` paragraph)."""
+        mod = load_adapter()
+        env = {**self.env, "KIT_CTX": str(self.fake), "FAKE_CTX_OUT": "ok: 0 docs checked\n"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(mod.adopt(), 0)
+            state = json.loads(self.digest_path().read_text(encoding="utf-8"))
+            state["version"] = "99.0.0"
+            self.digest_path().write_text(json.dumps(state), encoding="utf-8")
+            import contextlib
+            import io
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = mod.adopt()
+            self.assertEqual(rc, 2, err.getvalue())
+            self.assertIn("newer than this kit", err.getvalue())
+            self.assertIn("99.0.0", err.getvalue())
+            self.assertEqual(mod.adopt(replace=True), 0)  # --replace overrides the refusal
+
+    def test_an_unwritable_state_dir_is_a_warning_not_a_failure(self):
+        """`init`/`migrate`/`validate` already ran and succeeded by the time `_write_adopt_digest` is called — an
+        `OSError` writing the record must not turn that into a failed adopt (`setup.sh` would then print an
+        untrue "adopt failed" line); it is a warning, and the normal exit code still applies."""
+        (self.root / "state").write_text("not a directory\n", encoding="utf-8")  # state/ctx-adapter/... cannot be made
+        r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("warn: could not record the adopted digest under state/", r.stdout)
+        self.assertIn("adopt --check will keep reading this store as behind", r.stdout)
+
+
+class MigrateTargetToleratesKeptExit(unittest.TestCase):
+    """`make migrate`'s second line must not fail the whole recipe when `ctx_adapter.py adopt` exits 5 (a store
+    file was kept, not an error) — only a genuine failure (e.g. 3: validation findings) should. Tested as the
+    POSIX `sh` idiom itself (a stub stands in for the adapter, its exit code controlled here), not a full `ctx` +
+    env-store `make migrate` run — `adopt`'s own exit codes are already covered elsewhere (`AdoptBehind`, `Adopt`)."""
+
+    def adopt_line(self) -> str:
+        """The `migrate:` target's second recipe line, read from the Makefile itself so this test fails the
+        moment the recipe's wording drifts from what it actually runs — never a copy of its own."""
+        mk = (KIT / "context-db" / "Makefile").read_text(encoding="utf-8")
+        m = re.search(r'\n\t(@CONTEXT_ROOT="\$\(CONTEXT\)" \$\(PY\) \$\(BIN\)/ctx_adapter\.py adopt;[^\n]*)\n', mk)
+        self.assertIsNotNone(m, "migrate: target's `ctx_adapter.py adopt` recipe line not found or reworded")
+        return m.group(1)
+
+    def run_with_stub_rc(self, rc: int) -> int:
+        # `make` hands the shell `$$` as a literal `$` (its own escaping) — do the same substitution here, then
+        # stand in for `$(PY) $(BIN)/ctx_adapter.py adopt` with a stub that only exits `rc`: the idiom after the
+        # `;` is what this test is about, not a real adopt run
+        line = self.adopt_line().lstrip("@").replace("$$", "$")
+        line = re.sub(r'CONTEXT_ROOT="\$\(CONTEXT\)" \$\(PY\) \$\(BIN\)/ctx_adapter\.py adopt', f"(exit {rc})", line)
+        r = subprocess.run(["sh", "-c", line], capture_output=True, text=True)
+        return r.returncode
+
+    def test_ok_and_kept_both_succeed(self):
+        self.assertEqual(self.run_with_stub_rc(0), 0)
+        self.assertEqual(self.run_with_stub_rc(5), 0)
+
+    def test_a_real_failure_still_fails_the_recipe(self):
+        self.assertEqual(self.run_with_stub_rc(3), 3)  # validation findings
+        self.assertEqual(self.run_with_stub_rc(2), 2)  # usage/I-O error
+        self.assertEqual(self.run_with_stub_rc(6), 6)  # behind — `adopt --check` only, never plain `adopt`, but
+                                                        # the idiom itself must still propagate any code but 0/5
+
+
+class SemverParsing(unittest.TestCase):
+    """`_parse_semver`: a tuple of ints, never a string comparison, and None for anything it cannot read as one."""
+
+    def test_parses_with_or_without_a_leading_v(self):
+        mod = load_adapter()
+        self.assertEqual(mod._parse_semver("0.7.0"), (0, 7, 0))
+        self.assertEqual(mod._parse_semver("v0.7.0"), (0, 7, 0))
+
+    def test_unparsable_text_is_none(self):
+        mod = load_adapter()
+        for text in ("", "not-a-version", "0.7", "0.7.0-rc1", "0.7.0+build3"):
+            self.assertIsNone(mod._parse_semver(text), text)
+
+    def test_compares_numerically(self):
+        mod = load_adapter()
+        self.assertGreater(mod._parse_semver("0.10.0"), mod._parse_semver("0.9.0"))
+
 
 class ResolveRule(Base):
     """The kit's `resolve.fields` names no field: a field match would outrank the context doc's own
