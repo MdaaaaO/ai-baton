@@ -264,6 +264,14 @@ class SameOwnerOrgPath(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("clean", r.stdout)
 
+    def test_a_closing_period_or_git_suffix_is_not_part_of_the_repo_name(self):
+        self.write_stub()
+        f = self.write(f"the store side is {self.ORG}/pubrepo.\nclone {self.ORG}/pubrepo.git\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = [ln for ln in self.call_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        self.assertEqual(calls, [f"repos/{self.ORG}/pubrepo"])
+
     def test_same_owner_private_repo_fails(self):
         self.write_stub()
         f = self.write(f"see {self.ORG}/privrepo for details\n")

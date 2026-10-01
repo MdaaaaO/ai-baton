@@ -896,7 +896,8 @@ def _resolve_same_owner_org_hits(hits: list[tuple[int, str, str]], org: str) -> 
     out: list[tuple[int, str, str]] = []
     for n, what, matched in hits:
         if what == leak_shapes.ORG_PATH_WHAT and "/" in matched:
-            repo = matched.split("/", 1)[1]
+            repo = matched.split("/", 1)[1].rstrip(".-")  # the path shape takes a sentence's closing period along
+            repo = repo[:-len(".git")] if repo.endswith(".git") else repo
             if repo not in cache:
                 cache[repo] = repo_is_public(org, repo)
             public = cache[repo]
