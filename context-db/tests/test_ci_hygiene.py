@@ -116,6 +116,24 @@ class VersionsSinglePlace(unittest.TestCase):
                          f"{name}: not pinned to the exact version sourced from versions.env")
 
 
+class ReleaseManifestHygiene(unittest.TestCase):
+    def test_the_manifest_is_attested_before_the_release_is_published(self):
+        # a published Release without its attestation is the state a verifier cannot tell from a forged one
+        text = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+        build = text.index("release_manifest.py build")
+        attest = text.index("uses: actions/attest-build-provenance@")
+        publish = text.index("gh release edit")
+        self.assertTrue(build < attest < publish, "order must be build, attest, publish")
+        for perm in ("attestations: write", "id-token: write"):
+            self.assertIn(perm, text)
+
+    def test_only_a_missing_release_is_created(self):
+        # any other gh failure (auth, network) must fail the step, not be read as "no release yet"
+        text = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+        self.assertIn('"release not found"', text)
+        self.assertNotIn("|| echo missing", text)
+
+
 class PrTitleHygiene(unittest.TestCase):
     def test_has_a_concurrency_group(self):
         # pushes in quick succession (repeated `synchronize`) otherwise queue redundant runs
