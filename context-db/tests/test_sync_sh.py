@@ -670,15 +670,16 @@ class SyncSh(unittest.TestCase):
         self.sync()
         before = self.rev_parse("HEAD", cwd=self.kit)
         tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
-        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_RC="1",
-                           GH_ATTEST_ERR="gh: attestation verification failed (stub)")
-        r = self.sync(env=env, args=["--accept"])
-        self.assertEqual(r.returncode, 1, r.stderr)
-        self.assertIn("nothing", r.stderr.lower())
-        self.assertIn("applied", r.stderr.lower())
-        self.assertEqual(self.status()[1], "error")
-        self.assertIn("v0.1.0", self.status_file.read_text())
-        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), before, "a failed check applies nothing")
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_RC="1")
+        for err in ("gh: attestation verification failed (stub)", "HTTP 404: Not Found (https://api.github.com/x)"):
+            with self.subTest(err=err):
+                r = self.sync(env=dict(env, GH_ATTEST_ERR=err), args=["--accept"])
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("nothing", r.stderr.lower())
+                self.assertIn("applied", r.stderr.lower())
+                self.assertEqual(self.status()[1], "error")
+                self.assertIn("v0.1.0", self.status_file.read_text())
+                self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), before, "a failed check applies nothing")
 
     def test_accept_manifest_commit_mismatch_applies_nothing(self):
         self.fake_github_remote()
@@ -745,13 +746,14 @@ class SyncSh(unittest.TestCase):
         before = self.rev_parse("HEAD", cwd=self.kit)
         tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
         env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_RC="1")
-        for err in ("dial tcp: lookup api.github.com: no such host", "error connecting to api.github.com"):
+        for err in ("dial tcp: lookup api.github.com: no such host", "error connecting to api.github.com",
+                    "HTTP 403: API rate limit exceeded (https://api.github.com/x)", "HTTP 502: Bad Gateway"):
             with self.subTest(err=err):
                 self.git("reset", "-q", "--hard", before, cwd=self.kit)
                 r = self.sync(env=dict(env, GH_ATTEST_ERR=err), args=["--accept"])
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertEqual(self.status()[1], "ok")
-                self.assertIn("unverified (attestation verify could not reach github)",
+                self.assertIn("unverified (attestation verify got no answer from github)",
                               self.status_file.read_text())
                 self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
 

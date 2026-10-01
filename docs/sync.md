@@ -86,7 +86,8 @@ the tag's own commit. Verified → applies as above. The check ran and **failed*
 manifest naming a different commit) → applies nothing, `.sync-status` is `error <reason>` and the run
 exits 1 with the reason on stderr — the one error that does, since `--accept` only ever runs in the
 foreground. The check **cannot run at all** — no `gh` on `PATH`, a `gh` from before `gh attestation`
-existed, `gh` not authenticated, offline (also when the verify call itself gets no answer), an `origin`
+existed, `gh` not authenticated, offline (also when the verify call itself gets no answer: no network, a
+rate limit, a server error), an `origin`
 that is not on github.com, or a release that predates the manifest and carries no `manifest.txt` asset
 — → applies anyway: a clone must still be able to catch up with no network or an unauthenticated
 `gh`, so `.sync-status` is `ok …` with the standalone word `unverified` and a short reason appended

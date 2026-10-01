@@ -98,10 +98,11 @@ fetch_offline() {
   grep -Eqi 'could not resolve (host|hostname)|temporary failure in name resolution|name or service not known|nodename nor servname|failed to connect|couldn.t connect to server|network is unreachable|no route to host|connection (refused|timed out)|operation timed out' "$1"
 }
 
-# gh_unreachable <stderr-file> — did a `gh` call fail on the network rather than on its answer? `gh`
-# words these its own way (Go's net errors), so fetch_offline's git wording alone would miss them.
+# gh_unreachable <stderr-file> — did a `gh` call fail without an answer to its question: the network
+# (`gh` words these its own way, Go's net errors, so fetch_offline's git wording alone would miss
+# them), a rate limit, a server error, or credentials github refused? A 404 is an answer.
 gh_unreachable() {
-  fetch_offline "$1" || grep -Eqi 'no such host|dial tcp|i/o timeout|tls handshake timeout|error connecting to' "$1"
+  fetch_offline "$1" || grep -Eqi 'no such host|dial tcp|i/o timeout|tls handshake timeout|error connecting to|rate limit|bad credentials|HTTP (401|403|429|5[0-9][0-9])' "$1"
 }
 
 # release_tag — the highest `v[0-9]*` tag reachable from origin/main (the pattern kit_version()
@@ -211,11 +212,12 @@ verify_release() {
   rc=0
   with_timeout "$FETCH_TIMEOUT" gh attestation verify "$manifest" --repo "$owner_repo" \
     --signer-workflow "$owner_repo/.github/workflows/release.yml" >"$err" 2>&1 || rc=$?
-  # a verify that never got an answer (timed out, or github went away after the download) is "could
-  # not run", not a verdict: only gh's own rejection of the manifest fails the check
+  # a verify that never got an answer (timed out, github went away after the download, a rate limit
+  # or a server error) is "could not run", not a verdict: only gh's own rejection of the manifest
+  # fails the check
   if [ "$rc" -eq 124 ] || { [ "$rc" -ne 0 ] && gh_unreachable "$err"; }; then
     log "kit: attestation verify for $tag got no answer (exit $rc): $(head -n1 "$err")"
-    VERIFY_SUFFIX="unverified (attestation verify could not reach github)"
+    VERIFY_SUFFIX="unverified (attestation verify got no answer from github)"
     rm -rf "$dir"; rm -f "$err"; return 0
   elif [ "$rc" -ne 0 ]; then
     log "kit: ERROR attestation verify failed for $tag: $(head -n1 "$err")"
