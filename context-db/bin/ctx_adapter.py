@@ -7,7 +7,14 @@ store exists is ctx's answer (`NO_STORE`), not a file test here. The one excepti
 
 Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against. It is
 fetched, not vendored: `install` clones exactly that tag (`git clone --depth 1 --branch <tag>`) into a per-user
-cache directory whose path carries the tag, so a bumped pin never picks up an older copy.
+cache directory whose path carries the tag, so a bumped pin never picks up an older copy. `CTX_SHA` beside it
+names the commit that tag resolves to right now: `install` reads the clone's detached HEAD and refuses to apply
+a clone whose commit disagrees (naming both shas) — a tag repointed at another commit after the kit was pinned
+to it is exactly what this catches, not a network failure. When the clone's own commit cannot be read at all
+(no git on PATH mid-clone, a corrupted checkout), the fetch is applied anyway and recorded unverified rather than
+blocked — a verify that cannot run is not the same as one that ran and disagreed. `install` writes what it found
+next to the pinned `ctx` (`pin status`, below); `kit-health`'s ctx pin line reads it back, offline, so a moved tag
+or a cache installed before a pin bump is reported without a second clone.
 
 Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
 pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
@@ -69,9 +76,11 @@ or found, or when anything in the adapter itself fails, so a machine that has no
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
-  python3 ctx_adapter.py version          # the pinned tag, then `api <CTX_API>` on a second line
+  python3 ctx_adapter.py version          # the pinned tag, `api <CTX_API>` on a second line, `sha <CTX_SHA>` on a third
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
+  python3 ctx_adapter.py pin              # the sha `install` found at the pinned location, and whether it verified;
+                                           # exit 1 when nothing is installed or the copy predates this check
   python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
   python3 ctx_adapter.py mcp              # the ctx MCP server on the store; each write tool call names its own `actor`
                                            # (the caller's registered session name) — MCP_ACTOR (or CTX_ACTOR) is
@@ -101,6 +110,9 @@ from pathlib import Path
 from typing import Callable
 
 CTX_VERSION = "v0.6.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
+CTX_SHA = "d706db379d4ae5814c01a6a31837f4eebff319c5"  # the commit CTX_VERSION's tag names right now — bump together
+                         # with CTX_VERSION, from the tag's own commit (`git rev-parse <tag>^{commit}`), never
+                         # from the tag object's own sha (an annotated tag's `git rev-parse <tag>` alone)
 CTX_API = 1             # the ctx API `ctx --version` must report (its `(api N)` suffix) — bump only alongside a
                          # verb/output change the adapter now relies on; `ctx_adapter.py version`'s second line
                          # exposes it so kit-health can catch a pinned install answering a different one
@@ -168,10 +180,55 @@ def resolve() -> tuple[Path | None, str]:
                   "or set KIT_CTX to a ctx executable")
 
 
-def install(url: str = CTX_REPO, version: str = CTX_VERSION, dest: Path | None = None) -> Path:
-    """Clone `version` of `url` into `dest` (default: the pinned location) and check it reports that version. The clone
-    lands in a temporary sibling first and is renamed into place, so an interrupted fetch never leaves a half copy
-    the resolver would take. Already present: returns it untouched."""
+PIN_STATUS_NAME = ".pin-status.json"  # beside the pinned `ctx`: what `install` found when it fetched this copy
+
+
+def _clone_commit_sha(src: Path) -> str | None:
+    """The commit the clone's detached HEAD sits at (`git rev-parse HEAD`) — read while `src/.git` still exists,
+    before `install` strips it. None when that cannot be read (no git on PATH mid-clone, a corrupted checkout):
+    the caller applies the fetch anyway and records it unverified rather than block on a check that could not
+    run (owner decision, 2026-10-01: a verify that cannot run applies, unverified; only one that runs and
+    disagrees refuses)."""
+    try:
+        r = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _write_pin_status(dest: Path, pinned_sha: str, cloned_sha: str | None, verified: bool) -> None:
+    """Record, next to the pinned `ctx`, the sha `install` pinned against and what the clone's own commit turned
+    out to be — atomically (temp file, then `os.replace`), so `pin_status` never reads a half-written file."""
+    data = {"pinned_sha": pinned_sha, "cloned_sha": cloned_sha, "verified": verified}
+    fd, tmp = tempfile.mkstemp(prefix=".pin-status-", suffix=".json.tmp", dir=str(dest))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, dest / PIN_STATUS_NAME)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def pin_status(dest: Path | None = None) -> dict | None:
+    """The sha-verification record `install` wrote for the copy at `dest` (default: the pinned location for
+    `CTX_VERSION`) — None when there is no copy there, or it predates this check (nothing to read)."""
+    dest = dest or pinned_dir()
+    try:
+        return json.loads((dest / PIN_STATUS_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def install(url: str = CTX_REPO, version: str = CTX_VERSION, sha: str = CTX_SHA, dest: Path | None = None) -> Path:
+    """Clone `version` of `url` into `dest` (default: the pinned location) and check it reports that version. When
+    `sha` is set, the clone's own commit (`_clone_commit_sha`) must match it — a mismatch means the tag now points
+    somewhere else and installs nothing, naming both shas; a commit that could not be read at all is not a
+    mismatch, it is applied and recorded unverified (`_write_pin_status`; see `_clone_commit_sha`). The clone lands
+    in a temporary sibling first and is renamed into place, so an interrupted fetch never leaves a half copy the
+    resolver would take. Already present: returns it untouched (no re-check; a stale cache is kit-health's `pin`
+    line to catch, see `ctx_pin_check` in kit-health.py)."""
     dest = dest or pinned_dir(version)
     if _usable(dest / "ctx"):
         return dest
@@ -196,12 +253,21 @@ def install(url: str = CTX_REPO, version: str = CTX_VERSION, dest: Path | None =
         want = version.lstrip("v")
         if v.returncode != 0 or want not in v.stdout.split():
             raise OSError(f"the fetched ctx reports {v.stdout.strip() or v.stderr.strip()!r}, not {want}")
+        cloned_sha = _clone_commit_sha(src)  # must run before .git is stripped, below
+        verified = False
+        if sha:
+            if cloned_sha and cloned_sha != sha:
+                raise OSError(f"{version} now resolves to {cloned_sha}, not the pinned {sha} — "
+                              "the tag may have moved; refusing to install")
+            verified = cloned_sha == sha
         shutil.rmtree(src / ".git", ignore_errors=True)  # a pinned copy, not a checkout anyone should commit in
         try:
             os.replace(src, dest)
         except OSError:
             if not _usable(dest / "ctx"):  # a concurrent install won the rename: theirs is as good as ours
                 raise
+            return dest  # theirs stands, pin status included: writing ours over it would race it needlessly
+        _write_pin_status(dest, pinned_sha=sha, cloned_sha=cloned_sha, verified=verified)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return dest
@@ -842,6 +908,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("version", help="print the pinned ctx-store tag")
     sub.add_parser("where", help="print the ctx executable; exit 1 when not installed")
     sub.add_parser("install", help="fetch the pinned tag into the pinned location")
+    sub.add_parser("pin", help="report the sha `install` found at the pinned location, and whether it verified")
     ap = sub.add_parser("adopt", help="make the content root a ctx store with the kit's settings (ctx init)")
     ap.add_argument("--check", action="store_true", help="report only: exit 4 when not adopted, 3 on findings")
     ap.add_argument("--replace", action="store_true", help="overwrite store files that differ from the kit's")
@@ -863,6 +930,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "version":
         print(CTX_VERSION)
         print(f"api {CTX_API}")
+        print(f"sha {CTX_SHA}")
         return 0
     if a.cmd == "where":
         ctx, why = resolve()
@@ -870,6 +938,16 @@ def main(argv: list[str] | None = None) -> int:
             print(why, file=sys.stderr)
             return 1
         print(ctx)
+        return 0
+    if a.cmd == "pin":
+        status = pin_status()
+        if status is None:
+            print(f"no sha record at the pinned location ({pinned_dir()}) — not installed, or installed before "
+                  "this check existed; `ctx_adapter.py install` (re-)writes it", file=sys.stderr)
+            return 1
+        print(f"pinned_sha {status.get('pinned_sha') or ''}")
+        print(f"cloned_sha {status.get('cloned_sha') or ''}")
+        print(f"verified {'true' if status.get('verified') else 'false'}")
         return 0
     if a.cmd == "mcp":
         return run_ctx(["mcp"], mcp=True)

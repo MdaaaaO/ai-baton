@@ -1165,11 +1165,19 @@ def ctx_pin_check(r: Report) -> None:
     second line names (`ctx_adapter.CTX_API`) — a machine whose cached install predates a pin bump, or whose
     `KIT_CTX` override points at an unrelated build, would otherwise drift from what the hooks (the PreToolUse
     deny, `validate --changed --adopt`) assume without kit-health ever saying so. Read-only: `where` finds the
-    pinned executable (never installs it), then `<ctx> --version` is run directly — no adopted store needed."""
+    pinned executable (never installs it), then `<ctx> --version` is run directly — no adopted store needed.
+
+    Once the api matches, the sha `install` pinned this copy against (`ctx_adapter.py pin`, read from the record
+    beside the pinned `ctx` — never a second clone, so this stays offline too): unverified at install time (no
+    network, or the clone's commit could not be read) warns rather than passing silently, and a copy whose
+    recorded sha no longer matches `version`'s third line (the pin was bumped — the tag moved, or just re-pinned
+    — since this was fetched) warns to reinstall. Skipped under `KIT_CTX`: that record describes the pinned
+    cache, not whatever override is actually in use."""
     adapter = "python3 $BATON/context-db/bin/ctx_adapter.py"
     fix = f"`{adapter} install && {adapter} adopt`"
     rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "version"])
     want = next((ln.split(" ", 1)[1] for ln in out.splitlines() if ln.startswith("api ")), "")
+    want_sha = next((ln.split(" ", 1)[1] for ln in out.splitlines() if ln.startswith("sha ")), "")
     if rc != 0 or not want:
         r.add(ERR, "engine", f"`{adapter} version` failed: {both(out, err)[-300:]}")
         return
@@ -1192,8 +1200,26 @@ def ctx_pin_check(r: Report) -> None:
             how = f"remove `{Path(ctx_path).parent}` (a stale copy at the pin), then {fix}"
         r.add(WARN, "engine", f"ctx pin: `{ctx_path} --version` reports api {got or 'none'}, the adapter expects "
                               f"api {want} — {how}")
+        return
+    base = f"ctx pin: `{ctx_path} --version` reports api {want}"
+    if os.environ.get("KIT_CTX", "").strip():
+        r.add(OK, "engine", base)
+        return
+    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "pin"])
+    if rc != 0:
+        r.add(WARN, "engine", f"{base}; sha not recorded for this install (older than this check) — {fix}")
+        return
+    info = dict(ln.split(" ", 1) for ln in out.splitlines() if " " in ln)
+    verified = info.get("verified") == "true"
+    pinned_sha = info.get("pinned_sha", "")
+    if not verified:
+        r.add(WARN, "engine", f"{base}; sha unverified at install (offline, or the clone's commit could not be "
+                              f"read) — {fix}")
+    elif want_sha and pinned_sha != want_sha:
+        r.add(WARN, "engine", f"{base}; this install verified sha {pinned_sha}, the adapter now expects "
+                              f"{want_sha} — {fix}")
     else:
-        r.add(OK, "engine", f"ctx pin: `{ctx_path} --version` reports api {want}")
+        r.add(OK, "engine", f"{base}, sha {pinned_sha} verified")
 
 
 def ctx_store(r: Report) -> None:

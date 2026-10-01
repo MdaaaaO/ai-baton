@@ -80,6 +80,23 @@ class Base(unittest.TestCase):
         return subprocess.run([sys.executable, str(ADAPTER), *args], input=stdin, env={**self.env, **env},
                               capture_output=True, text=True, cwd=self.t, timeout=60)
 
+    def repo(self, tag: str, reports: str) -> str:
+        """A throw-away git repo with one commit (a fake `ctx` reporting `reports`), tagged `tag` — the fixture
+        `install()` clones in these tests; never the network, never the real ctx-store."""
+        src = self.t / f"upstream-{uuid.uuid4().hex[:8]}"
+        src.mkdir()
+        (src / "ctx").write_text(f"#!{sys.executable}\nprint('ctx {reports} (api 1)')\n", encoding="utf-8")
+        (src / "ctx").chmod(0o755)
+        env = hermetic_env(self.t)
+        for cmd in (["init", "-q"], ["add", "ctx"], ["commit", "-q", "-m", "c"], ["tag", tag]):
+            subprocess.run(["git", "-C", str(src), *cmd], env=env, check=True, capture_output=True)
+        return str(src)
+
+    def commit_sha(self, url: str, ref: str = "HEAD") -> str:
+        r = subprocess.run(["git", "-C", url, "rev-parse", ref], capture_output=True, text=True, check=True,
+                            env=hermetic_env(self.t))
+        return r.stdout.strip()
+
     def calls(self) -> list[dict]:
         if not self.log.exists():
             return []
@@ -93,10 +110,12 @@ class Pin(Base):
     def test_version_prints_the_one_pinned_tag(self):
         mod = load_adapter()
         self.assertRegex(mod.CTX_VERSION, r"^v\d+\.\d+\.\d+$")
+        self.assertRegex(mod.CTX_SHA, r"^[0-9a-f]{40}$")
         r = self.adapter("version")
         lines = r.stdout.splitlines()
         self.assertEqual((r.returncode, lines[0]), (0, mod.CTX_VERSION))
         self.assertEqual(lines[1], f"api {mod.CTX_API}")
+        self.assertEqual(lines[2], f"sha {mod.CTX_SHA}")
 
     def test_the_tag_is_named_in_one_place(self):
         """No other kit file pins a ctx-store version of its own: a second copy would drift from CTX_VERSION."""
@@ -150,27 +169,17 @@ class Resolver(Base):
 class Install(Base):
     """The pinned fetch: a shallow clone of exactly the tag, checked against `ctx --version`, renamed into place."""
 
-    def repo(self, tag: str, reports: str) -> str:
-        src = self.t / "upstream"
-        src.mkdir()
-        (src / "ctx").write_text(f"#!{sys.executable}\nprint('ctx {reports} (api 1)')\n", encoding="utf-8")
-        (src / "ctx").chmod(0o755)
-        env = hermetic_env(self.t)
-        for cmd in (["init", "-q"], ["add", "ctx"], ["commit", "-q", "-m", "c"], ["tag", tag]):
-            subprocess.run(["git", "-C", str(src), *cmd], env=env, check=True, capture_output=True)
-        return str(src)
-
     def test_install_fetches_the_tag_and_is_idempotent(self):
         mod = load_adapter()
         url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
         dest = self.t / "cache" / "pinned"
         with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            got = mod.install(url=url, dest=dest)
+            got = mod.install(url=url, sha="", dest=dest)
             self.assertEqual(got, dest)
             self.assertTrue(os.access(dest / "ctx", os.X_OK))
             self.assertFalse((dest / ".git").exists())
-            self.assertEqual(mod.install(url="/nonexistent/repo", dest=dest), dest)  # present: no second fetch
-        self.assertEqual([p.name for p in dest.parent.iterdir()], ["pinned"])  # no temp dir left behind
+            self.assertEqual(mod.install(url="/nonexistent/repo", sha="", dest=dest), dest)  # present: no second fetch
+        self.assertEqual(sorted(p.name for p in dest.parent.iterdir()), ["pinned"])  # no temp dir left behind
 
     def test_a_copy_reporting_another_version_is_refused(self):
         mod = load_adapter()
@@ -208,6 +217,102 @@ class Install(Base):
                 mod.install(url="https://example.invalid/r", dest=dest)
         self.assertEqual(seen.read_text(encoding="utf-8").split(), ["prompt=0"])  # no prompt, stdin not a tty
         self.assertFalse(dest.exists())
+
+
+class InstallShaPin(Base):
+    """`install`'s sha check (#440): the clone's own commit must match the pin — a mismatch (the tag now resolves
+    elsewhere, whether retagged after the fact or simply pinned wrong) installs nothing and names both shas; a
+    commit that cannot be read at all is applied anyway, recorded unverified (owner decision, 2026-10-01: a
+    verify that cannot run is not the same as one that ran and disagreed)."""
+
+    def test_a_matching_sha_installs_and_is_recorded_verified(self):
+        mod = load_adapter()
+        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
+        sha = self.commit_sha(url, mod.CTX_VERSION)
+        dest = self.t / "cache" / "pinned"
+        with mock.patch.dict(os.environ, hermetic_env(self.t)):
+            got = mod.install(url=url, sha=sha, dest=dest)
+        self.assertEqual(got, dest)
+        status = mod.pin_status(dest)
+        self.assertEqual(status, {"pinned_sha": sha, "cloned_sha": sha, "verified": True})
+
+    def test_a_mismatched_sha_installs_nothing_and_names_both(self):
+        mod = load_adapter()
+        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
+        actual = self.commit_sha(url, mod.CTX_VERSION)
+        wrong = "f" * 40
+        dest = self.t / "cache" / "pinned"
+        with mock.patch.dict(os.environ, hermetic_env(self.t)):
+            with self.assertRaisesRegex(OSError, f"{actual}.*{wrong}|{wrong}.*{actual}") as cm:
+                mod.install(url=url, sha=wrong, dest=dest)
+        self.assertIn(actual, str(cm.exception))
+        self.assertIn(wrong, str(cm.exception))
+        self.assertFalse(dest.exists())
+        self.assertEqual(list(dest.parent.iterdir()), [])  # nothing left behind — not even the pinned dir
+
+    def test_a_tag_moved_after_the_pin_is_caught_as_a_mismatch(self):
+        """The pin recorded the tag's original commit; upstream then force-moved the tag to a second commit — the
+        same case the design calls out (#59): a release tag that can later point somewhere else."""
+        mod = load_adapter()
+        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
+        original = self.commit_sha(url, mod.CTX_VERSION)
+        (Path(url) / "extra").write_text("moved\n", encoding="utf-8")
+        env = hermetic_env(self.t)
+        subprocess.run(["git", "-C", url, "add", "extra"], env=env, check=True, capture_output=True)
+        subprocess.run(["git", "-C", url, "commit", "-q", "-m", "moved"], env=env, check=True, capture_output=True)
+        subprocess.run(["git", "-C", url, "tag", "-f", mod.CTX_VERSION], env=env, check=True, capture_output=True)
+        moved = self.commit_sha(url, mod.CTX_VERSION)
+        self.assertNotEqual(original, moved)
+        dest = self.t / "cache" / "pinned"
+        with mock.patch.dict(os.environ, hermetic_env(self.t)):
+            with self.assertRaises(OSError) as cm:
+                mod.install(url=url, sha=original, dest=dest)  # the pin still names the tag's old commit
+        self.assertIn(original, str(cm.exception))
+        self.assertIn(moved, str(cm.exception))
+        self.assertFalse(dest.exists())
+
+    def test_an_unreadable_clone_commit_installs_unverified_not_blocked(self):
+        mod = load_adapter()
+        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
+        mod._clone_commit_sha = lambda src: None  # the owner decision this encodes: never block on this alone
+        dest = self.t / "cache" / "pinned"
+        with mock.patch.dict(os.environ, hermetic_env(self.t)):
+            got = mod.install(url=url, sha="deadbeef" * 5, dest=dest)
+        self.assertEqual(got, dest)
+        self.assertTrue(os.access(dest / "ctx", os.X_OK))
+        status = mod.pin_status(dest)
+        self.assertEqual(status, {"pinned_sha": "deadbeef" * 5, "cloned_sha": None, "verified": False})
+
+    def test_no_sha_pin_set_is_unverified_not_an_error(self):
+        mod = load_adapter()
+        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
+        dest = self.t / "cache" / "pinned"
+        with mock.patch.dict(os.environ, hermetic_env(self.t)):
+            got = mod.install(url=url, sha="", dest=dest)
+        self.assertEqual(got, dest)
+        status = mod.pin_status(dest)
+        self.assertEqual(status["verified"], False)
+        self.assertEqual(status["pinned_sha"], "")
+
+    def test_pin_status_is_none_before_any_install(self):
+        mod = load_adapter()
+        self.assertIsNone(mod.pin_status(self.t / "cache" / "nowhere"))
+
+    def test_the_pin_cli_reports_the_record(self):
+        mod = load_adapter()
+        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
+        sha = self.commit_sha(url, mod.CTX_VERSION)
+        with mock.patch.dict(os.environ, dict(hermetic_env(self.t), XDG_CACHE_HOME=str(self.t / "cache"))):
+            mod.install(url=url, sha=sha, dest=mod.pinned_dir())
+        r = self.adapter("pin", XDG_CACHE_HOME=str(self.t / "cache"))
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout, f"pinned_sha {sha}\ncloned_sha {sha}\nverified true\n")
+
+    def test_the_pin_cli_is_exit_1_when_nothing_is_installed(self):
+        r = self.adapter("pin", XDG_CACHE_HOME=str(self.t / "cache"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("ctx_adapter.py install", r.stderr)
+
 
 class HooksAreSilentWithoutCtxOrStore(Base):
     """A machine that has not adopted ctx-store sees nothing: exit 0, no output, no call."""
