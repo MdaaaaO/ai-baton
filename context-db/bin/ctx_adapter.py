@@ -39,6 +39,30 @@ back once `init` is done, reporting the swap as above. The marker is written ato
 file in the same directory then `os.replace`) and, if it does not parse, `adopt` says so and stops before `init`
 runs rather than skip the problem.
 
+Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
+— `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes
+through a verb): a digest of the kit's store settings and type schemas (`ctx-store.json` plus every `types/*.json`,
+the same files `--settings`/`--types` hand `ctx init`), this kit's own release version (`.claude-plugin/plugin.json`'s
+`version` — the field `kit_profile.plugin_install`/`kit-health.py`'s `kit_version` already read, reused here rather
+than a second source), and, when `ctx init --upgrade` kept a locally edited store file (`differs`, exit 5, above),
+the list of what it kept. `adopt --check` recomputes the digest and compares it with what is on record: a mismatch
+is `behind`, exit 6 (`python3 $BATON/context-db/bin/ctx_adapter.py adopt` catches up) — unless the record names a
+kit version strictly newer than this kit's own, in which case the store was adopted by a newer kit and this one is
+the one out of date: one line `ahead: …` and exit 0, never `adopt`'s own advice, which would hand the store an
+older kit's types. No recorded version, or one that does not parse, compares as unknown and falls back to `behind`
+like any other mismatch. A digest match with a recorded `kept` list still reports it — one `differs:` line per
+file, exit 5 — a kept file does not stop being a local edit just because nothing else about the store moved. No
+record at all (a store adopted before any of this existed) is the least surprising case to treat as `behind`: one
+plain `adopt` run (no `--check`) brings the record current, kept list, version and all. `adopt --check --no-validate`
+answers the same `behind`/`ahead`/`differs` lines from the record alone, skipping `ctx validate` entirely — it needs
+no ctx executable at all, so it can never take long or time out; "is this an adopted store" is then a file test
+(the store's own `ctx-store.json` at the content root) rather than ctx's own answer, the one exception named above.
+The same version record
+also guards a plain `adopt`: one whose own kit is older than what the store last recorded refuses outright (exit
+2, naming both versions, `--replace` overrides) rather than hand the store an older release's types — ctx-store's
+own `init --upgrade` does not check a type's `version` against what is already installed (it diffs bytes and the
+last-init digest only, `ctxstore/bootstrap.py`'s `init`), so nothing else would catch a silent downgrade.
+
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
 or found, or when anything in the adapter itself fails, so a machine that has not adopted ctx-store sees nothing:
@@ -81,7 +105,9 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
   python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
   python3 ctx_adapter.py pin              # the sha `install` found at the pinned location, and whether it verified;
                                            # exit 1 when nothing is installed or the copy predates this check
-  python3 ctx_adapter.py adopt [--check] [--replace]  # ctx init with the kit's settings; --check only reports
+  python3 ctx_adapter.py adopt [--check [--no-validate]] [--replace]  # ctx init with the kit's settings; --check
+                                           # only reports; --check --no-validate skips the whole-store `ctx
+                                           # validate` and only compares the recorded digest — cheap, never touches ctx
   python3 ctx_adapter.py mcp              # the ctx MCP server on the store; each write tool call names its own `actor`
                                            # (the caller's registered session name) — MCP_ACTOR (or CTX_ACTOR) is
                                            # only the floor for a write that names none
@@ -90,14 +116,25 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
                                            # CTX_ACTOR defaults to the registered session name when one is on file
   python3 ctx_adapter.py hook <name>      # one of the hooks above; hook JSON on stdin
 
-Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
-4 not adopted (`adopt --check`) · 5 adopted, but a store file differs from the kit's (kept; `adopt --replace`) — 3
-takes precedence when both hold (the `differs:` lines still print). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
+Exit codes: 0 ok (one line `ahead: …` when `--check` finds the store last adopted by a newer kit than this one) ·
+1 not installed · 2 usage or I/O error, one stderr line (a plain `adopt` also refuses this way, leaving the store
+untouched, when the record names a kit version newer than this one's — `--replace` overrides it; `--no-validate`
+without `--check` is the same usage error) · 3 adopted, with validation findings — a store that is also behind
+still prints its own `behind:` line alongside the findings, same exit code · 4 not adopted (`adopt --check`;
+`--no-validate` answers this from a `ctx-store.json` file test at the content root rather than asking ctx) · 5
+adopted, but a store file differs from the kit's — kept, one `differs:` line per file (`adopt --replace` takes the
+kit's); `--check` reports the same files from its own record rather than re-running `ctx init` · 6 adopted, but the
+store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap
+(`adopt --check` only — a plain `adopt` records a fresh one; `--no-validate` skips `ctx validate` entirely and only
+compares the record, so findings cannot occur there — 0/5/6 still answer, and it never touches ctx). Precedence
+when more than one would apply: 3 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.
+A hook always exits 0. Stdlib only.
 """
 from __future__ import annotations
 import argparse
 import contextlib
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -147,6 +184,7 @@ LOCK_TIMEOUT = "3"      # CTX_LOCK_TIMEOUT for a hook's ctx call unless the user
 MESSAGE_MAX = 1000      # characters of validate findings returned as the systemMessage
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
 BIN = Path(__file__).resolve().parent
+KIT_ROOT = BIN.parent.parent  # context-db/bin -> context-db -> the kit root, where .claude-plugin/plugin.json lives
 STORE_DATA = BIN.parent / "ctx-store"  # the kit's store settings + type schemas, handed to `ctx init` by `adopt`
 ADOPT_TIMEOUT = 300     # seconds `adopt` gives one ctx call (a whole-store validate; not a hook)
 INSTALL_TIMEOUT = 120   # seconds `install` gives the pinned-tag clone (setup.sh runs it unattended)
@@ -378,17 +416,150 @@ def _apply_mcp_setting(root: Path, mcp: dict) -> None:
         _write_marker(root / "ctx-store.json", current)
 
 
-def adopt(check: bool = False, replace: bool = False) -> int:
-    ctx, why = resolve()
-    if ctx is None:
-        print(why, file=sys.stderr)
-        return 1
+ADOPT_DIGEST_REL = Path("state") / "ctx-adapter" / "adopted-kit.json"  # under the store's own ignored `state/**`
+    # (ctx-store.json's `ignore` list) — a record this adapter owns, never a file `ctx` tracks or writes through a verb
+
+
+def _kit_data_digest() -> str:
+    """sha256 over the kit's store settings (`ctx-store.json`) and every type schema under `STORE_DATA/types`,
+    one relative name then its bytes, types sorted by filename — the same files `adopt` hands `ctx init`
+    (`--settings`/`--types`, `_settings_for_init`), so a kit release that edits either changes this digest.
+    `adopt --check` compares it with what the last `adopt` on this store recorded (`_recorded_state`) to
+    report the store `behind`, without re-running `ctx init` or touching a store file itself."""
+    h = hashlib.sha256()
+    h.update(b"ctx-store.json\0")
+    h.update((STORE_DATA / "ctx-store.json").read_bytes())
+    for p in sorted((STORE_DATA / "types").glob("*.json")):
+        h.update(f"types/{p.name}\0".encode("utf-8"))
+        h.update(p.read_bytes())
+    return h.hexdigest()
+
+
+def _parse_semver(text: str) -> tuple[int, ...] | None:
+    """`'0.7.0'` / `'v0.7.0'` -> `(0, 7, 0)`; None for anything else (blank, a pre-release, a `+N` suffix) — a
+    version that cannot be parsed compares as unknown, never numerically, both for this kit's own version and a
+    recorded one (`adopt`'s version-skew check, below, falls back to `behind` rather than guess an ordering)."""
+    m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", text.strip())
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def _kit_version() -> str:
+    """This kit's own release version, `.claude-plugin/plugin.json`'s `version` field verbatim (e.g. `"0.7.0"`) —
+    the same file `kit_profile.plugin_install`/`kit-health.py`'s `kit_version()` read for the same purpose,
+    reused here rather than a second source; present on every install mode (plugin, clone, dev checkout), since
+    the manifest ships in the kit itself. "" when the file is missing or does not parse — `_parse_semver("")` is
+    None, so that compares as unknown, same as a store's own missing or unparseable record."""
+    try:
+        data = json.loads((KIT_ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(data.get("version") or "")
+
+
+def _adopt_state_path(root: Path) -> Path:
+    return root / ADOPT_DIGEST_REL
+
+
+def _write_adopt_digest(root: Path, kept: list[str] | None = None) -> None:
+    """Record `_kit_data_digest()`, this kit's own version (`_kit_version`) and, when `ctx init --upgrade` kept a
+    locally edited store file this run (`kept`, the same list `adopt` already prints `differs:` lines for), that
+    list too — under the store's ignored `state/` dir, atomically (temp file in the same directory, then
+    `os.replace` — the same pattern as `_write_marker`). Called once a full `adopt` has actually run `ctx
+    init`/`migrate --apply` (never on an early-return error), so the record always reflects settings and types
+    `ctx` was just handed, whatever `ctx validate` finds in the docs afterwards — `kept` is recorded right
+    alongside the digest, not hidden behind it, so a `--check` that finds the digest clean still sees a kept
+    file: a kept file must not read as clean just because nothing else about the store moved since."""
+    path = _adopt_state_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data: dict = {"digest": _kit_data_digest(), "version": _kit_version()}
+    if kept:
+        data["kept"] = list(kept)
+    fd, tmp = tempfile.mkstemp(prefix=".adopted-kit-", suffix=".json.tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def _recorded_state(root: Path) -> dict | None:
+    """The `{digest, version, kept}` the last `adopt` on this store recorded (`kept` only when it kept a file;
+    older records carry no `version`), or None — no record at all (a store adopted before this existed, or whose
+    file does not parse). Either way `adopt --check` reports the store `behind` unless the record names a newer
+    kit (see `adopt`): a missing record is the least surprising case to treat as behind, since one plain `adopt`
+    run is all it takes to write a fresh one, and staying silent would mean a store that drifted from the kit
+    right after this feature shipped goes unreported until something else happens to touch it."""
+    try:
+        data = json.loads(_adopt_state_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _check_record(root: Path) -> tuple[bool, bool]:
+    """Compare the store's recorded adopted-kit state (`_recorded_state`) with this kit's own
+    (`_kit_data_digest`/`_kit_version`), printing the same `behind:`/`ahead:`/`differs:` line(s) either
+    `adopt --check` or its cheap `--no-validate` sibling answers with, and returning `(behind, differs)` for the
+    caller's exit code. One implementation so the two readers can never disagree on wording."""
+    rec = _recorded_state(root)
+    if (rec or {}).get("digest") != _kit_data_digest():
+        # the digest alone cannot tell "the kit moved on" from "a newer kit already adopted this store" — only
+        # the recorded version can: strictly newer than this kit's own means this kit is the one behind, not the
+        # store, so say that instead of pointing `adopt` at it (that would downgrade it)
+        rec_version = str((rec or {}).get("version") or "")
+        rec_v, own_v = _parse_semver(rec_version), _parse_semver(_kit_version())
+        if rec_v is not None and own_v is not None and rec_v > own_v:
+            print(f"ahead: the store was adopted by kit {rec_version} — this kit is {_kit_version() or 'unknown'}; "
+                  "update the kit")
+            return False, False
+        print("behind: the store's settings or types predate the kit's — "
+              "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
+        return True, False
+    # the digest matches, but a store file `ctx init --upgrade` kept (edited here) at the last full `adopt`
+    # still differs from the kit's own copy — a kept file does not stop being a local edit just because nothing
+    # else about the store moved since
+    kept = (rec or {}).get("kept") or []
+    for f in kept:
+        print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
+    return False, bool(kept)
+
+
+def adopt(check: bool = False, replace: bool = False, no_validate: bool = False) -> int:
     root = _context_root()
     if not root.is_dir():
         print(f"ctx_adapter.py adopt: no content root at {root} — run setup.sh first", file=sys.stderr)
         return 2
+    if no_validate:
+        # the cheap mode (--check only, enforced by the CLI): a record comparison alone, never ctx — so it can
+        # never take long or time out. "Is this an adopted store" is then a file test (the store's own
+        # `ctx-store.json` at the content root), the one exception to the module header's own rule, instead of
+        # asking ctx for `NO_STORE`
+        if not (root / "ctx-store.json").is_file():
+            print(f"not adopted: {root} is not a ctx store — run `python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
+            return 4
+        behind, differs = _check_record(root)
+        return 6 if behind else 5 if differs else 0
+    ctx, why = resolve()
+    if ctx is None:
+        print(why, file=sys.stderr)
+        return 1
     store = ["--store", str(root)]
     differs, blocked = False, []
+    if not check and not replace:
+        # a kit older than the one the store last recorded would hand it older types — ctx-store's own
+        # `init --upgrade` does not guard against that (it diffs bytes and the last-init digest only, never a
+        # type's own `version`; see `ctxstore/bootstrap.py`'s `init`), so this adapter refuses before `init`
+        # ever runs rather than silently downgrade the store
+        rec_version = str((_recorded_state(root) or {}).get("version") or "")
+        own_version = _kit_version()
+        rec_v, own_v = _parse_semver(rec_version), _parse_semver(own_version)
+        if rec_v is not None and own_v is not None and rec_v > own_v:
+            print(f"ctx_adapter.py adopt: the store was last adopted by kit {rec_version}, newer than this kit "
+                  f"({own_version or 'unknown'}) — `adopt --replace` to take the kit's types anyway", file=sys.stderr)
+            return 2
     if check:
         r = _ctx(ctx, store, "validate", timeout=ADOPT_TIMEOUT)
         if _code(r) == "NO_STORE":
@@ -446,13 +617,24 @@ def adopt(check: bool = False, replace: bool = False) -> int:
     for f in [] if check else blocked:
         print(f"finding: migrate: {f} (fix the doc, then re-run adopt)")
     findings = findings + ([] if check else blocked)
-    if not check:
+    behind = False
+    if check:
+        # a mismatch (including no record at all — see `_recorded_state`) usually says the store's settings or
+        # types predate the kit's — `findings` (exit 3) still wins, same as `differs` (exit 5, below), the
+        # existing precedence stays intact
+        behind, differs = _check_record(root)
+    else:
         a = _ctx(ctx, store, "validate", "--changed", "--adopt", timeout=ADOPT_TIMEOUT)
         print("adopt: " + ((_lines(a.stdout) or ["ok"])[0] if a.returncode in (0, 3) else
                            (_lines(a.stderr) or [f"exit {a.returncode}"])[0]))
         if a.returncode not in (0, 3):
             return 2
-    return 3 if findings else 5 if differs else 0
+        try:
+            _write_adopt_digest(root, kept)  # the init/migrate/validate flow above actually ran: the record is current
+        except OSError as e:
+            print(f"warn: could not record the adopted digest under state/ ({e}) — adopt --check will keep "
+                  "reading this store as behind")
+    return 3 if findings else 6 if behind else 5 if differs else 0
 
 
 # ── the MCP server and the Bash route ──────────────────────────────────────────────────────────────────────────
@@ -910,7 +1092,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("install", help="fetch the pinned tag into the pinned location")
     sub.add_parser("pin", help="report the sha `install` found at the pinned location, and whether it verified")
     ap = sub.add_parser("adopt", help="make the content root a ctx store with the kit's settings (ctx init)")
-    ap.add_argument("--check", action="store_true", help="report only: exit 4 when not adopted, 3 on findings")
+    ap.add_argument("--check", action="store_true",
+                     help="report only: exit 4 when not adopted, 3 on findings, 6 when the store's recorded "
+                          "settings/types digest is stale or missing (behind)")
+    ap.add_argument("--no-validate", action="store_true",
+                     help="with --check: skip the whole-store `ctx validate` and only compare the recorded "
+                          "digest — cheap, never touches ctx; invalid without --check")
     ap.add_argument("--replace", action="store_true", help="overwrite store files that differ from the kit's")
     sub.add_parser("mcp", help="run the ctx MCP server on the store (stdio)")
     mp = sub.add_parser("mcp-json", help="add the ctx MCP server to a project .mcp.json")
@@ -919,6 +1106,8 @@ def main(argv: list[str] | None = None) -> int:
     hp = sub.add_parser("hook", help="run one Claude Code hook (hook JSON on stdin); always exit 0")
     hp.add_argument("name", choices=HOOKS)
     a = p.parse_args(argv)
+    if a.cmd == "adopt" and a.no_validate and not a.check:
+        ap.error("--no-validate requires --check")
     if a.cmd == "hook":
         try:
             out = hook(a.name)
@@ -956,7 +1145,7 @@ def main(argv: list[str] | None = None) -> int:
         return mcp_json(a.file)
     try:
         if a.cmd == "adopt":
-            return adopt(a.check, a.replace)
+            return adopt(a.check, a.replace, a.no_validate)
         print(install())
     except (OSError, subprocess.SubprocessError) as e:
         print(f"ctx_adapter.py {a.cmd}: {e}", file=sys.stderr)
