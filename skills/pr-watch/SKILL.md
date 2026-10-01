@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "24"
+  version: "25"
   updated: "2026-10-01"
   reviewed: "2026-10-01"
 ---
@@ -67,6 +67,19 @@ is still emitted, in every state, marked `(on older head <sha>)`: humans do not 
 after a push. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
 non-green states. The full per-line table: `reference/events.md`.
 
+**A failed lookup is UNKNOWN, never red or green.** Every `gh` read an event depends on (PR info,
+behind-by, the reviews — read once per cycle for the approval count, the bot verdict and the review
+listing — the check-status rollup, the comment listings) gets 3 attempts,
+`PR_WATCH_RETRY_DELAY` apart, and a failure that survives them never falls back to "nothing pending"
+(a silent GREEN), "not behind" (a silent no-op) or "nothing new" — it prints one
+`PR N LOOKUP FAILED: <what> — <error>` line instead; a changed error, or a recovery in between,
+announces again. **A repeated alarm backs off additively**: the same `CHECK NOT GREEN` on an unchanged
+head, and a `LOOKUP FAILED` that lasts (`… (still failing)`), repeat after 1h, then 3h, then 5h … +2h
+each time, capped by `PR_WATCH_BACKOFF_MAX` (default 86400s). A due `CHECK NOT GREEN` reads the checks
+again first — it lists what is red now and is dropped when they went green. The first announcement is
+immediate, and `PR_WATCH_KNOWN_RED`'s mute is unaffected — a muted head stays
+silent. Details: `reference/events.md`, `reference/cost-controls.md`.
+
 ## Auto-sync with the base branch (since 2026-09-21)
 
 While a PR waits for review it cannot merge anyway, so the watcher keeps the branch merged with its base:
@@ -120,8 +133,8 @@ to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot
 `OK` / `NO MARKER` → nothing; `DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD
 MOVED line only (the brief reruns the check itself), and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
 own sync emits no head move and gets no check. Skip the fork for
-`MERGED`/`CLOSED` (close out per `reference/events.md`), and `ERROR …` (never fork
-`pr-event-brief` for it — it is not a PR event, there is nothing on the PR to triage). A brief slot
+`MERGED`/`CLOSED` (close out per `reference/events.md`), and `LOOKUP FAILED` / `ERROR … startup:` (never fork
+`pr-event-brief` for either — a failed read is not a PR event, there is nothing on the PR to triage). A brief slot
 marked `unverified` means fetch it yourself.
 
 Whether to merge past a settled red check (a known-flaky test, an annotation you already judged
