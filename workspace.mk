@@ -40,15 +40,17 @@ sign_show sign_log sign_retry sign_drop:
 
 # ── .claude workspace repo sync ──────────────────────────────────────────────────────────
 # .claude/ is its own git repo (see .claude/docs/sync.md) and its main is PR-only: sync.sh
-# installs the hooks/pre-push guard and fast-forwards .claude/ to origin/main (refuses, with an
-# `error` in .sync-status, when .claude/ is dirty, off main or ahead — move that work to a branch
-# + PR). Nothing is committed or pushed by it. Lock-guarded (a busy lock exits 3 and names the
-# holder), logs to $(KIT)/sync.log; the target prints the log's tail and .sync-status
-# (pending/ok/offline/error, .claude/docs/sync.md).
-# A SessionEnd hook in .claude/settings.json runs it too.
-#   make claude_sync                    # kit: pull (ff-only)
+# installs the hooks/pre-push guard and fast-forwards .claude/ to the highest release tag
+# origin/main contains (refuses, with an `error` in .sync-status, when .claude/ is dirty, off main
+# or ahead — move that work to a branch + PR). Nothing is committed or pushed by it. `--accept`
+# applies a held release tag (a bare run only previews it, docs/sync.md) — the SessionEnd hook
+# below never passes it, so an unattended sync can only hold, never apply. Lock-guarded (a busy
+# lock exits 3 and names the holder), logs to $(KIT)/sync.log; the target prints the log's tail
+# and .sync-status (pending/ok/held/offline/error, .claude/docs/sync.md).
+# A SessionEnd hook in .claude/settings.json runs sync.sh too, without --accept.
+#   make claude_sync                    # kit: pull (ff-only) and apply a held release tag
 claude_sync:
-	@sh "$(KIT)/sync.sh" || [ $$? -eq 3 ]  # 3 = another sync holds the lock (it said who): not a failure here
+	@sh "$(KIT)/sync.sh" --accept || [ $$? -eq 3 ]  # 3 = another sync holds the lock (it said who): not a failure here
 	@tail -n 3 "$(KIT)/sync.log" 2>/dev/null || true
 	@cat "$(KIT)/.sync-status" 2>/dev/null || true
 
