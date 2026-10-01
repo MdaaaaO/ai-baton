@@ -97,7 +97,7 @@ kb.py stale [--days N] [--check]                      # tool/import/derived rows
 kb.py config [<dotted.key>] · kb.py config-set <dotted.key> <json-or-string> [--force]
                                                       # config-set checks the key and the value's shape against
                                                       # environment-template/config.json (exit 2); --force writes anyway
-kb.py migrate [--check|--off]                         # schema catch-up: renamed flags/kinds, missing flags (--check: exit 3 when pending; --off: just the not-applicable units)
+kb.py migrate [--check|--off]                         # schema catch-up: renamed flags/kinds, missing flags/config keys (--check: exit 3 when pending; --off: just the not-applicable units)
 kb.py init --blank                                    # create an empty store (setup.sh does this)
 kb.py init --personal                                 # blank store + the zero-config GitHub-only fill: identity from gh,
                                                       # repos from the workspace clones, tz from the OS (setup.sh --personal)

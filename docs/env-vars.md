@@ -90,6 +90,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `PR_WATCH_SYNC_COOLDOWN` | `3600` (seconds) | `skills/pr-watch/pr-watch.sh` | how often a fast-moving base may re-trigger CI on the PR | user-facing |
 | `PR_WATCH_KNOWN_RED` | empty | `skills/pr-watch/pr-watch.sh` | extended regex of failing-check names to mute as already-known-red | user-facing |
 | `PR_WATCH_REPLAY` | `0` | `skills/pr-watch/pr-watch.sh` | `1` re-emits the current bot verdict / CHECK NOT GREEN on start even when already reported | user-facing |
+| `PR_WATCH_WORKTREE` | empty | `skills/pr-watch/pr-watch.sh` | path to this session's local checkout; a head move is tracked silently (not `HEAD MOVED`) when its committer is the configured login AND the sha is already a git object there — unset it and every push reads as a real move | user-facing |
 
 ## Identity (`WORKSPACE_*`)
 
@@ -111,7 +112,13 @@ itself — settings.local.json env or a shell export); full spec `docs/packaging
 | `PR_TITLE` | empty | `.github/scripts/check-pr-issue.sh` | the PR title, passed in by the pr-issue CI check | internal |
 | `PR_BODY` | empty | `.github/scripts/check-pr-issue.sh` | the PR body, passed in by the pr-issue CI check | internal |
 | `PR_AUTHOR` | empty | `.github/scripts/check-pr-issue.sh` | the PR author's login, passed in by the pr-issue CI check | internal |
-| `GH_TOKEN` | unset (falls back to the local `gh` login) | `.github/scripts/check-pr-issue.sh`, `skills/kit-health/kit-health.py` | the token `gh` calls authenticate with; also how kit-health tells a sandbox proxy-token machine from a normal login | internal |
+| `GH_TOKEN` | unset (falls back to the local `gh` login) | `.github/scripts/check-pr-issue.sh`, `.github/scripts/main-guard.sh`, `skills/kit-health/kit-health.py` | the token `gh` calls authenticate with; also how kit-health tells a sandbox proxy-token machine from a normal login | internal |
+| `REPO` | empty | `.github/scripts/main-guard.sh` | the repo in `<owner>/<repo>` form, passed in by the main-guard workflow step | internal |
+| `SHA` | empty | `.github/scripts/main-guard.sh` | the pushed commit's full sha, passed in by the main-guard workflow step | internal |
+| `ACTOR` | empty | `.github/scripts/main-guard.sh` | the login that pushed, passed in by the main-guard workflow step | internal |
+| `FORCED` | `false` | `.github/scripts/main-guard.sh` | whether the push was forced, passed in by the main-guard workflow step | internal |
+| `MAIN_GUARD_ATTEMPTS` | `6` | `.github/scripts/main-guard.sh` | how many times the commit-to-PR lookup retries before an empty result is flagged as a direct push | internal |
+| `MAIN_GUARD_PAUSE_SECONDS` | `10` (seconds) | `.github/scripts/main-guard.sh` | how long main-guard.sh waits between retries | internal |
 | `HEARTBEAT_DETACHED` | unset | `skills/session-register/heartbeat.sh` | internal flag the script sets on its own detached re-exec, so the child knows not to fork again | internal |
 
 ## Third-party version pins — `.github/versions.env`

@@ -112,9 +112,11 @@ Usage:
                                                  (N overrides every ttl); --check = exit 3 when any
   kb.py migrate [--check | --off]               → bring the store up to the kit's schema: renamed system
                                                  flags moved (value kept), missing flags added (seeded from
-                                                 their legacy flag, else false), rows under a renamed kind
-                                                 (`slack.channels` → `slack.channel`) moved; prints the
-                                                 skills now off here; --check = dry run, exit 3 when pending; --off = only that list
+                                                 their legacy flag, else false), missing top-level config keys
+                                                 added (a release's blank default, skipping OPTIONAL_CONFIG_KEYS),
+                                                 rows under a renamed kind (`slack.channels` → `slack.channel`)
+                                                 moved; prints the skills now off here; --check = dry run, exit 3
+                                                 when pending; --off = only that list
   kb.py init --blank                           → create an empty store (never overwrites anything)
   kb.py init --personal                        → blank store + the zero-config GitHub-only fill: identity
                                                  from `gh api user`, tracked repos from the workspace clones,
@@ -422,7 +424,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        own `resolve` rule, then — when one resolved — fetch its key and the head of its
                        *Remaining work*, within a separate `EPIC_BUDGET`. The whole hook has `COMPACT_DEADLINE`
                        seconds (under the hooks' own 10s `timeout`); the context-doc lookups (`resolve`/
-                       `find`/`get`) run only while more than 1.5s of it remain before each one starts, every
+                       `get`) run only while more than 1.5s of it remain before each one starts, every
                        one of them capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` recomputed right before
                        that call, never a single value reused across more than one — skipped or timed out, one
                        line `context doc: skipped (hook deadline)` stands in for that tail

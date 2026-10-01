@@ -1,9 +1,9 @@
 ---
 name: pr-scan
-description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row table (review state, threads, bot verdict, trivial PRs flagged `A`, `AUTO:` line) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
+description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row brief in 5 ordered sections by per-row State (Needs you, New, Handled this tick, Follow-up, Watching) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
 metadata:
-  version: "17"
-  updated: "2026-09-30"
+  version: "18"
+  updated: "2026-10-01"
   reviewed: "2026-09-27"
   facts: "github.display_names"
 argument-hint: "[--days N] [--limit N] [--repo owner/name]"
@@ -38,56 +38,85 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
    Exit 3 = another sweep holds the lock; answer `NO-OP` and say so in one line.
 2. Read the table. Column meanings: `PRIO` 1 = direct request to the user, 2 = follow-up on a PR they
    already reviewed (new head or author replied), 3 = team request with no human review yet,
-   4 = swept PR with no human review, 5 = the rest. `*` = first time surfaced. `!` = over the deep
+   4 = swept PR with no human review, 5 = the rest, 6 = the user's own review already sits on this head and
+   nothing waits on them (`kind=done`: kept while their APPROVE / REQUEST_CHANGES stands on an open PR, and
+   once for a review the kit posted; it never counts as new). `*` = first time surfaced. `!` = over the deep
    threshold (600 lines) — a `pr-review --deep` candidate. `A` = passed the trivial-PR auto-approve gate
    (`.auto.eligible` in `queue.json`; the summary line carries `auto=<n> auto_mode=<mode>`). `C` = eligible
    for the unattended auto-COMMENT path (`.auto_comment.eligible` in `queue.json`; the summary line carries
    `auto_comment=<n> auto_comment_mode=<mode>`; § Unattended auto-COMMENT below — off by default). `HUMANS` = last state per human reviewer
    (`APP`, `CHA`, `COM`). `THREADS/BOT` = unresolved threads / review-bot (`github.review_bot`) Assessment on
-   this head (`🟢`/`🟡`/`🔴`, `-` if none or no bot configured).
+   this head (`🟢`/`🟡`/`🔴`, `-` if none or no bot configured). `STATE` = `.state_label` from `queue.json`
+   (`row-state.py`, no `gh` call) — the row's state from its kind, the user's own review on this head and the
+   ledger, and the section it renders in below.
 3. Decide **NO-OP vs brief**: if the summary says `new=0`, answer with the single word `NO-OP` — nothing
    else. `new` counts the **shown** rows that were not surfaced before on this head with this kind
    (`--mark` records exactly those), so a follow-up or an `A` row that was already reported is not new
-   again; a new head, a new author reply, or a first-time `A` flag is. Otherwise answer with the brief below.
+   again; a new head, a new author reply, or a first-time `A` flag is. A prio-6 row is never new — the
+   user's own review is no reason for a brief; it only rides along when something else is. Otherwise answer
+   with the brief below.
 
 ## Answer (exactly this shape — real markdown, NO code fence, so the terminal draws the table)
 
 **PR QUEUE** · YYYY-MM-DD HH:MM UTC · 16 candidates · 10 new · dropped: 33 bots · 1 draft · 49 stale · 9 done · 9 approved · errors 0
 
-| # | PR | Prio | Why now | Size | Humans · Thr · Bot | Author · Title |
-|--:|----|------|---------|-----:|:--:|----|
-| 1 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 2 · follow-up | new head since your APPROVE | 592/2 | APP · 1 · – | <author> · Migrate the model descriptions to … |
-| 2 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 3 · team | via <team>, requested 09-17 | 159/3 | – · 0 · – | <author> · KEY-123: pin the local toolchain binary … |
-| 3 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 3 · team ‼ deep | via <team>, 1088 lines | 1088/13 | – · 1 · – | <author> · KEY-456: archive expired usage rows … |
+Five sections, always in this order — **Needs you** · **New — not started** · **Handled this tick** ·
+**Follow-up — manual** · **Watching** — each `.state`/`.section` off `queue.json` groups rows into (never
+recompute the grouping here). Each section is its own table, same columns as before plus a trailing
+`State` column; an empty section prints `none` instead of an empty table. The ≤8-row cap (`max_rows`) is
+on the **total** rows shown across all five sections, `.[:$m]` in `queue.json`'s own prio order — section
+order groups what's shown, it never re-ranks which rows make the cut.
 
-…up to 8 rows, PRIO ascending, newest first within a prio…
+What each section holds: **Needs you** — a STOP hold, or the author replied in a thread the user opened
+(whatever verdict they left). **New — not started** — never reviewed, plus re-requests the auto path covers.
+**Handled this tick** — a review the kit posted on this head since the last brief (shown once, then dropped as
+done). **Follow-up — manual** — reviewed on an older head; nothing acts unless asked. **Watching** — the
+user's APPROVE or REQUEST_CHANGES stands on this head and the PR is still open: the next move is the author's.
+
+**Needs you**
+| # | PR | Prio | Why now | Size | Humans · Thr · Bot | Author · Title | State |
+|--:|----|------|---------|-----:|:--:|----|----|
+| 1 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 2 · follow-up | author replied in 1 thread | 592/2 | APP · 1 · – | <author> · Migrate the model descriptions to … | needs you (author replied) |
+
+…or `none`…
+
+**New — not started**
+| # | PR | Prio | Why now | Size | Humans · Thr · Bot | Author · Title | State |
+|--:|----|------|---------|-----:|:--:|----|----|
+| 2 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 3 · team | via <team>, requested 09-17 | 159/3 | – · 0 · – | <author> · KEY-123: pin the local toolchain binary … | new (manual) |
+
+…or `none`…
+
+**Handled this tick** — or `none`
+**Follow-up — manual** — or `none`
+**Watching** — or `none`
 
 **Auto** (shadow) · none
 **AUTO-COMMENT** (off) · none
-**Follow-up** · [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) — you APPROVED `<sha-a>`, author pushed `<sha-b>`
 **Next** · `/pr-review <org>/<repo> <pr>` for the row you pick · errors 0
 
-Column rules:
-- `#` — row number; `PR` — always a `[repo#n](url)` link, repo without the `<org>/` prefix.
-- `Prio` — `<n> · <word>`: `1 · direct`, `2 · follow-up`, `3 · team`, `4 · sweep`, `5 · other`; append ` ‼ deep`
+Column rules (same meaning in every section):
+- `#` — row number, counting across sections (not restarting per section); `PR` — always a `[repo#n](url)`
+  link, repo without the `<org>/` prefix.
+- `Prio` — `<n> · <word>`: `1 · direct`, `2 · follow-up`, `3 · team`, `4 · sweep`, `5 · other`, `6 · reviewed`; append ` ‼ deep`
   for `!` (over the deep threshold) and ` ✓ auto` for `A` (passed the trivial gate). Drop the raw `*` marker — first-time
   rows are already counted in `new`.
 - `Why now` — one short clause of fact (≤ 40 chars) that adds something the other columns do not: prio 1 → `requested MM-DD`;
   prio 2 → `new head since your APPROVE` / `author replied in N threads`; prio 3 → `via <team>` (one of the env config's `github.owner_teams`);
-  prio 4/5 → `opened MM-DD`. Never write "no human review", "no review yet", "bot green" or a thread count here — the
+  prio 4/5 → `opened MM-DD`; prio 6 → `your review on this head`. Never write "no human review", "no review yet", "bot green" or a thread count here — the
   `Humans · Thr · Bot` column already carries those.
 - `Size` — `lines/files` (no spaces).
 - `Humans · Thr · Bot` — last state per human reviewer (`APP`/`CHA`/`COM`, comma-joined, `–` if none) · unresolved
   thread count · review-bot Assessment on this head (`🟢`/`🟡`/`🔴`, `–` if none).
 - `Author · Title` — first name from the profile's `github.display_names` map (`python3 $BATON/context-db/bin/kit_profile.py get github.display_names`),
   otherwise the login verbatim (never a capitalised login) · title truncated to 45 characters with `…`; never wrap a cell.
+- `State` — `.state_label` verbatim (e.g. `handled (review #123456)`, `needs you (STOP)`, `new (auto)`, `follow-up (manual)`, `watching (you approved)`).
 - Header line: date **and** time as `YYYY-MM-DD HH:MM UTC` (from `date -u`), counts from the summary line; `dropped:` lists only
   non-zero buckets.
 - Trailing lines: `**Auto**` repeats the gate facts only (`class`, `packages`, CI, threads from `queue.json .auto`) or `none`;
   `**AUTO-COMMENT**` is `(<auto_comment_mode>) · ` then every eligible row as a `[repo#n](url)` link (comma-joined) or `none` —
-  read `.auto_comment.eligible` off `queue.json`, never recompute the gate here;
-  `**Follow-up**` lists every PRIO-2 row with the old and new short SHAs / the thread count, or `none`; `**Next**` carries the
-  errors count. Nothing before the header line and nothing after `**Next**`.
+  read `.auto_comment.eligible` off `queue.json`, never recompute the gate here; `**Next**` carries the errors count. Nothing
+  before the header line and nothing after `**Next**`.
 
 Rules: `Why now` is fact from the data, never an opinion on the PR's value. Author names follow the map
 in the column rules. Every PR is a clickable link. Do not read PR bodies or diffs — that is `pr-review`'s
@@ -123,7 +152,9 @@ Kill switch: set `mode` to `off`. This is the one sanctioned exception to `scope
 Rows this fork flags `C` (config block `auto_comment` in `config.json`: `mode` off/shadow/live, `prios` — direct
 requests (`[1]`) by default, `max_per_tick`) are eligible for `pr-review`'s unattended auto-COMMENT path — a
 deterministic, gh-call-free pre-filter computed inline in `pr-scan.sh` alongside each row (prio in `prios`, `kind`
-not `follow_up`, author not a bot, capped at `max_per_tick` rows). This fork only computes and reports eligibility
+not `follow_up`, author not a bot, capped at `max_per_tick` rows). A direct re-request on a PR already reviewed
+(`kind=re_review`) is excluded by default — the prior review's prio alone does not carry a re-request onto the
+trailer; `auto_comment.include_re_review: true` opts it back in. This fork only computes and reports eligibility
 in the `**AUTO-COMMENT**` trailer — it never spawns a runner or decides anything; the full contract (what the main
 session does with an eligible row, the `on_stop` policy, the ledger status) is `pr-review/SKILL.md` § Unattended
 auto-COMMENT path for direct review requests.
