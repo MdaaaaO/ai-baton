@@ -51,6 +51,7 @@ TOOLS = (
     "commit_style.py",
     "sizing.py",
     "evidence_check.py",
+    "length_check.py",
     "migrate_frontmatter.py",
     "check_links.py",
     "transcripts.py",

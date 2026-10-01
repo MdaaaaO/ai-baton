@@ -102,6 +102,14 @@
       }
     }
   },
+  "length": {
+    "_comment": "repos.<owner/repo>.pr_words: overrides the PR surface's default word budget (1000) for a repo whose PR template runs long — `context-db/bin/length_check.py --surface pr --repo <owner/repo>`. Optional per repo; no override exists for the ticket or handoff surface, whose budgets (400 / 600) are kit-fixed.",
+    "repos": {
+      "<owner/repo>": {
+        "pr_words": 1000
+      }
+    }
+  },
   "commits": {
     "_comment": "default: conventional | ticket-key | free (kit default conventional); repos.<owner/repo>: per-repo override, set as one object with `kb.py config-set commits '{…}'`. A repo's own .claude/commit-style marker or commitlint config wins. Spec: docs/commit-style.md.",
     "default": "conventional",

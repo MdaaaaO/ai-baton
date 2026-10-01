@@ -2,8 +2,8 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "24"
-  updated: "2026-09-30"
+  version: "26"
+  updated: "2026-10-01"
   reviewed: "2026-09-25"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
 ---
@@ -51,6 +51,9 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    the body file — exit 0 → post; exit 1 → rewrite the hits generically (never post the file as is) and
    re-check; exit 3 → do not post — the env store could not be loaded, so the check did not run; fix the
    store or check the file by hand before posting; a no-op when `<o>/<r>` is one of `tracker.repos` or not public.
+   Also run `python3 $BATON/context-db/bin/length_check.py <file> --surface pr --repo <o>/<r>` on the same
+   file — a warning (step 7), never a blocker; a long template overrides the budget via
+   `length.repos.<o>/<r>.pr_words`.
 2. **Reviewers**: the code owner(s) who must approve (CODEOWNERS for the touched paths; the user's teams
    are `github.owner_teams`) — plus `github.review_bot` **only when it is non-empty**. Request via
    `gh api -X POST repos/<o>/<r>/pulls/<n>/requested_reviewers -f 'reviewers[]=…'` (teams:
@@ -90,7 +93,8 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    thread-vs-DM routing for related asks: `reference/slack-review-request.md`.
 7. **Tell the user** in one line: PR link + labels + where the ask went ("review-request draft is in
    #<channel>" or "reviewers requested: …") + the resolved Sizing line from step 0 when a ticket was sized
-   ("sizing: `sonnet`, delegate") — a main-session build is then a visible choice, not a silent default.
+   ("sizing: `sonnet`, delegate") + step 1's `LENGTH:` line (`LENGTH: over (<n> words, budget <m>)` when
+   over, the way `ticket-open` does) — a main-session build is then a visible choice, not a silent default.
 
 ## Diagrams — the right set for this PR's content, derived from the diff (owner decisions 2026-09-17 / 2026-09-25)
 
@@ -137,7 +141,9 @@ on a feature PR, *why this shape* — without reading the diff, and nothing the 
    and re-run `--sketch` too when the ticket has a marker. Before creating or updating the PR, and again
    after any redraw this step triggers, run the cold-reader gate on the `## Diagrams` section
    (`docs/cold-reader.md`) when the plan is not `SKIP`. The `pr-watch` head-move event is the reminder — the
-   same event is `verified.py check`'s STALE reminder too (§ Verified step 4).
+   same event is `verified.py check`'s STALE reminder too (§ Verified step 4), and the moment to re-run
+   `length_check.py <file> --surface pr --repo <o>/<r>`: the push step now runs all three body checks
+   (diagram marker, evidence/verified, length), none of which block.
 
 Exit codes, the facet → question matrix (intent overlays / composition), the WHY table, `--sketch`, the lint,
 the `ddl` facet, and the rules every block follows (native Mermaid rendering, validate-before-publishing,
