@@ -11,7 +11,7 @@ multi-line) is dropped whole — this is also how a diagram-plan or evidence-che
 link target is the `(url)` half of `[text](url)`, a reference-style `[label]: url` definition line, or a
 bare `http(s)://` URL — the link TEXT still counts as prose, only the target is dropped.
 
-Budgets (`docs/delegation.md`'s ~200 words/minute, kept here as the one source): ticket 400 (~2 min), PR
+Budgets (about 200 words a minute, kept here as the one source): ticket 400 (~2 min), PR
 1,000 (~5 min), handoff 600 (~3 min). A repo with a long PR template overrides its PR budget with the env
 fact `length.repos.<owner/repo>.pr_words` (`kb.py` / `environment-template/config.json`); pass `--repo` to
 look it up. No override exists for the ticket or handoff surface.

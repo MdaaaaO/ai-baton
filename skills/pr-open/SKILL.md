@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "25"
+  version: "26"
   updated: "2026-10-01"
   reviewed: "2026-09-25"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
@@ -93,7 +93,8 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    thread-vs-DM routing for related asks: `reference/slack-review-request.md`.
 7. **Tell the user** in one line: PR link + labels + where the ask went ("review-request draft is in
    #<channel>" or "reviewers requested: …") + the resolved Sizing line from step 0 when a ticket was sized
-   ("sizing: `sonnet`, delegate") — a main-session build is then a visible choice, not a silent default.
+   ("sizing: `sonnet`, delegate") + step 1's `LENGTH:` line (`LENGTH: over (<n> words, budget <m>)` when
+   over, the way `ticket-open` does) — a main-session build is then a visible choice, not a silent default.
 
 ## Diagrams — the right set for this PR's content, derived from the diff (owner decisions 2026-09-17 / 2026-09-25)
 
