@@ -61,7 +61,8 @@ step 3 fills your identity and your repos without a question.
 
 5. **Run `/kit-health`** (`/ai-baton:kit-health` if another plugin has a skill of that name). It checks the kit, the
    leaks, the env store and this machine's wiring, and stamps `.context/kit-health/HEALTH-<env>.md` once it is
-   GREEN or AMBER. Its § 1 prints the install mode (`plugin`).
+   GREEN or AMBER. Its § 1 prints the install mode (`plugin`). A plugin ships no auto-compact backstop, so § 4
+   warns until you set one: `/autocompact 200k` (`/kit-setup` offers it too).
 
 6. **A tracker, chat or warehouse?** The quick start leaves every `systems.*` flag false, so a skill that needs one
    stops with a "not applicable here" line. Name the environment and turn on the systems you have

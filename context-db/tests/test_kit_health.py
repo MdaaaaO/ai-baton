@@ -224,6 +224,127 @@ class GitIgnoredScan(unittest.TestCase):
                 self.assertEqual(kh.git_ignored(root, ["SKILL.md"]), set())
 
 
+class AutoCompactCheck(unittest.TestCase):
+    """`autocompact_wiring()`: the real backstop is env `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, env
+    `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`, or a top-level `autoCompactWindow` (or an `env` block carrying
+    either variable) in `~/.claude/settings.json`, the workspace's `.claude/settings.json` (a clone's own
+    copy of the kit's `settings.json` — already set there) or `.claude/settings.local.json`. Unset
+    everywhere is a WARN; a match anywhere is OK. Always hermetic: a temp HOME and a temp workspace
+    (`CONTEXT_ROOT` pointed at `<workspace>/.context`), never the real `~/.claude`."""
+
+    def run_check(self, home: Path, workspace: Path, extra_env: dict | None = None):
+        kh = load_kit_health()
+        r = kh.Report()
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_AUTO_COMPACT_WINDOW", None)
+        env.pop("CLAUDE_CODE_DISABLE_1M_CONTEXT", None)
+        env["CONTEXT_ROOT"] = str(workspace / ".context")
+        env.update(extra_env or {})
+        with mock.patch.object(kh.Path, "home", return_value=home), \
+             mock.patch.dict(os.environ, env, clear=True):
+            kh.autocompact_wiring(r)
+        return kh, r
+
+    def test_unset_everywhere_warns(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("auto-compact backstop unset", text)
+
+    def test_user_settings_json_set_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(json.dumps({"autoCompactWindow": 200000}), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("autoCompactWindow", text)
+        self.assertIn("~/.claude/settings.json", text)
+
+    def test_cloud_env_var_set_is_ok_without_reading_settings(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"  # no settings files at all — the env var alone must suffice
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace, {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", text)
+
+    def test_a_session_capped_at_200k_is_ok_without_either(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace, {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"})
+        self.assertEqual(r.counts[kh.WARN], 0, "\n".join(r.lines))
+        self.assertIn("CLAUDE_CODE_DISABLE_1M_CONTEXT", "\n".join(r.lines))
+
+    def test_project_settings_key_is_ok(self):
+        """A clone install: the kit's own `settings.json` lands at `<workspace>/.claude/settings.json`."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            (workspace / ".claude").mkdir(parents=True)
+            (workspace / ".claude" / "settings.json").write_text(json.dumps({"autoCompactWindow": 200000}), encoding="utf-8")
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("autoCompactWindow", text)
+        self.assertIn("workspace", text)
+
+    def test_local_settings_env_block_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            home.mkdir()
+            (workspace / ".claude").mkdir(parents=True)
+            (workspace / ".claude" / "settings.local.json").write_text(
+                json.dumps({"env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000"}}), encoding="utf-8")
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_AUTO_COMPACT_WINDOW", text)
+        self.assertNotIn("200000", text)  # never print settings.local.json contents
+
+    def test_user_settings_env_block_disable_1m_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(
+                json.dumps({"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "1"}}), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 0, text)
+        self.assertIn("CLAUDE_CODE_DISABLE_1M_CONTEXT", text)
+
+    def test_settings_json_as_a_list_warns_without_exception(self):
+        """A settings.json whose top level is a JSON array (not an object) reads as unset — no exception."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
+
+    def test_non_utf8_settings_json_warns_without_exception(self):
+        """Non-UTF-8 bytes in a settings file must not raise — they read as unset, like a missing file."""
+        with tempfile.TemporaryDirectory() as td:
+            home, workspace = Path(td) / "home", Path(td) / "work"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_bytes(b"\xff\xfe\x00\xff not json either")
+            workspace.mkdir()
+            kh, r = self.run_check(home, workspace)
+        self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
+
+
 class DiskCheck(unittest.TestCase):
     """`disk_wiring()` — free-disk on `/`, `$HOME` and the scratch root, plus the top-cache sizes above
     `DISK_WARN_PCT` (a sandbox root overlay filled silently from an untended build cache; the first symptom was
