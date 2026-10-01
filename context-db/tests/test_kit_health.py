@@ -345,6 +345,101 @@ class AutoCompactCheck(unittest.TestCase):
         self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
 
 
+class EnvFileCheck(unittest.TestCase):
+    """`env_file_wiring()`: a stale `$CLAUDE_ENV_FILE` — a `BATON`/`CLAUDE_PROJECT_DIR` line whose path no
+    longer exists, or an `export BATON=` line sitting outside the `kit_profile.SESSION_ENV_BEGIN`/`SESSION_ENV_END`
+    block the SessionStart hook replaces (pre-upgrade residue the block-replace never touches). Unset, missing
+    or unreadable: silent. Each test builds its own temp env file and passes `CLAUDE_ENV_FILE` explicitly."""
+
+    def run_check(self, env: dict):
+        kh = load_kit_health()
+        r = kh.Report()
+        with mock.patch.dict(os.environ, env, clear=True):
+            kh.env_file_wiring(r)
+        return kh, r
+
+    def test_unset_is_silent(self):
+        kh, r = self.run_check({})
+        self.assertEqual(r.lines, [])
+
+    def test_missing_file_is_silent(self):
+        with tempfile.TemporaryDirectory() as td:
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(Path(td) / "nope")})
+        self.assertEqual(r.lines, [])
+
+    def test_unreadable_file_is_silent_not_a_crash(self):
+        if os.geteuid() == 0:
+            self.skipTest("root bypasses permission bits")
+        with tempfile.TemporaryDirectory() as td:
+            envfile = Path(td) / "env"
+            envfile.write_text("export BATON=/nonexistent\n", encoding="utf-8")
+            envfile.chmod(0o000)
+            try:
+                kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+            finally:
+                envfile.chmod(0o644)
+        self.assertEqual(r.lines, [])
+
+    def test_paths_inside_the_block_that_exist_are_silent(self):
+        with tempfile.TemporaryDirectory() as td:
+            kept = Path(td) / "kept"
+            kept.mkdir()
+            envfile = Path(td) / "env"
+            envfile.write_text(
+                f"{kit_profile.SESSION_ENV_BEGIN}\nexport BATON={kept}\nexport CLAUDE_PROJECT_DIR={kept}\n"
+                f"{kit_profile.SESSION_ENV_END}\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        self.assertEqual(r.counts[kh.WARN], 0, "\n".join(r.lines))
+
+    def test_a_baton_path_that_no_longer_exists_warns(self):
+        with tempfile.TemporaryDirectory() as td:
+            gone = Path(td) / "gone"  # never created
+            envfile = Path(td) / "env"
+            envfile.write_text(
+                f"{kit_profile.SESSION_ENV_BEGIN}\nexport BATON={gone}\n{kit_profile.SESSION_ENV_END}\n",
+                encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("BATON", text)
+        self.assertIn(str(gone), text)
+
+    def test_a_project_dir_path_that_no_longer_exists_warns(self):
+        with tempfile.TemporaryDirectory() as td:
+            gone = Path(td) / "gone"
+            envfile = Path(td) / "env"
+            envfile.write_text(
+                f"{kit_profile.SESSION_ENV_BEGIN}\nexport CLAUDE_PROJECT_DIR={gone}\n{kit_profile.SESSION_ENV_END}\n",
+                encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("CLAUDE_PROJECT_DIR", text)
+        self.assertIn(str(gone), text)
+
+    def test_a_baton_line_outside_the_block_warns_even_if_the_path_exists(self):
+        with tempfile.TemporaryDirectory() as td:
+            kept = Path(td) / "kept"
+            kept.mkdir()
+            envfile = Path(td) / "env"
+            envfile.write_text(f"export BATON={kept}\n", encoding="utf-8")  # no block at all — stray residue
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("outside the session-env block", text)
+
+    def test_other_file_content_never_prints(self):
+        with tempfile.TemporaryDirectory() as td:
+            gone = Path(td) / "gone"
+            envfile = Path(td) / "env"
+            envfile.write_text(
+                f"export WORKSPACE_SECRET=do-not-print\n{kit_profile.SESSION_ENV_BEGIN}\nexport BATON={gone}\n"
+                f"{kit_profile.SESSION_ENV_END}\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertNotIn("do-not-print", text)
+
+
 class DiskCheck(unittest.TestCase):
     """`disk_wiring()` — free-disk on `/`, `$HOME` and the scratch root, plus the top-cache sizes above
     `DISK_WARN_PCT` (a sandbox root overlay filled silently from an untended build cache; the first symptom was
