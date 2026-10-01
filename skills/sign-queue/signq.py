@@ -142,6 +142,8 @@ def key_regex() -> Optional["re.Pattern[str]"]:
 
 
 def ticket_of(*candidates: str) -> str:
+    """The first key found in `candidates`: the regex's capture group when it has one (the key without the
+    characters the regex only anchors on), else the whole match."""
     rx = key_regex()
     if rx is None:
         return ""
@@ -150,7 +152,7 @@ def ticket_of(*candidates: str) -> str:
             continue
         m = rx.search(c) or rx.search(c.upper())
         if m:
-            return m.group(0).upper()
+            return (m.group(1) if rx.groups and m.group(1) else m.group(0)).upper()
     return ""
 
 
@@ -175,7 +177,9 @@ def epic_of(ticket: str) -> Dict[str, str]:
         key = ticket_of(p.stem, re.search(r"^title:\s*(.*)$", fm, re.M).group(1) if re.search(r"^title:", fm, re.M) else "")
         if not key:
             continue
-        hits = len(re.findall(re.escape(ticket) + r"\b", text))
+        # a bare issue number counts only where it is written as a reference (`#12`), never inside `0.12` or `112`
+        lead = r"(?<![\w/])#" if ticket.isdigit() else r"(?<!\w)"
+        hits = len(re.findall(lead + re.escape(ticket) + r"\b", text))
         if key == ticket:
             hits += 1000  # the ticket IS the epic
         if hits > best_hits:

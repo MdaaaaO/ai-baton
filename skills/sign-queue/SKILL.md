@@ -17,7 +17,8 @@ break on the user's terminal line wrap. So: sessions **enqueue**, the user **dra
 > On a machine where `signed_commits` is false, print `sign-queue: not applicable here — signed_commits is
 > false` and stop — a commit is made and pushed the ordinary way instead. The host side has the same gate:
 > every `make sign*` target prints that line and exits 0 without touching `signq.py` when `signed_commits`
-> is false, so a stray `make sign` on a machine with no signing key is harmless.
+> is false, so a stray `make sign` on a machine with no signing key is harmless. An env store that cannot
+> be read is not "false": the target stops with `sign-queue: systems.signed_commits could not be read`.
 
 ## Session side — enqueue a job
 

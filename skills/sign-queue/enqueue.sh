@@ -204,13 +204,18 @@ while :; do
   try="$Q/${ts}-${seqf}-$topic.sh"
   claim="$try.claim"
   # both checks matter: the claim file alone only protects against a concurrent enqueue.sh racing for the
-  # same name (the actual atomic point, via noclobber); a SEQUENTIAL enqueue run after the claimant already
-  # exited (and its EXIT trap already removed the claim) would otherwise reclaim the same sequence number
-  # and silently overwrite the still-pending job file from the earlier run.
-  if [ ! -e "$try" ] && ( set -C; : > "$claim" ) 2>/dev/null; then
-    job=$try
-    trap 'rm -f "$claim"' EXIT
-    break
+  # same name (the actual atomic point, via noclobber); an enqueue run after the claimant already exited
+  # (and its EXIT trap already removed the claim) would otherwise reclaim the same sequence number and
+  # silently overwrite the still-pending job file from the earlier run.
+  if ( set -C; : > "$claim" ) 2>/dev/null; then
+    # checked while holding the claim: nobody else can create this name now. A parked `.failed` twin counts
+    # as taken too — `sign_retry` renames it back to this very name.
+    if [ ! -e "$try" ] && [ ! -e "$try.failed" ]; then
+      job=$try
+      trap 'rm -f "$claim"' EXIT
+      break
+    fi
+    rm -f "$claim"
   fi
   seq=$((seq + 1))
   [ "$seq" -lt 1000 ] || { echo "enqueue.sh: could not claim a unique job name under $Q for $ts-$topic" >&2; exit 2; }

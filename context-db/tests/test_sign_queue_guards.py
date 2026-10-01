@@ -198,6 +198,26 @@ class KeyRegexSource(unittest.TestCase):
         sq = self._signq()
         self.assertIsNone(sq.key_regex())
 
+    def _issue_number_regex(self):
+        kb.save_config({**kb.load_config(), "tracker": {"kind": "github", "key_regex": r"(?:^|[^\w/])#(\d+)\b"}})
+        kit_profile.env_config.cache_clear()
+        kit_profile.load.cache_clear()
+        return self._signq()
+
+    def test_the_key_is_the_capture_group_not_the_text_the_regex_anchors_on(self):
+        sq = self._issue_number_regex()
+        self.assertEqual(sq.ticket_of("fix/the-thing", "the-thing", "fix: the thing (#123)"), "123")
+        self.assertEqual(sq.ticket_of("#123 leads the subject"), "123")
+
+    def test_a_bare_number_finds_its_epic_only_where_it_is_written_as_a_reference(self):
+        sq = self._issue_number_regex()
+        docs = sq.CONTEXT / "kit"
+        docs.mkdir(parents=True)
+        (docs / "right.md").write_text('---\ntype: epic\ntitle: "#7 — the plan"\n---\nsteps: #123, then #123 again\n')
+        (docs / "wrong.md").write_text('---\ntype: epic\ntitle: "#8 — something else"\n---\n'
+                                       'v0.123 shipped; 1123 rows; see #1123 and run 5123\n')
+        self.assertEqual(sq.epic_of("123").get("epic"), "7")
+
 
 class UniqueJobNames(unittest.TestCase):
     """A second-resolution timestamp alone collides when two jobs are enqueued within the same second — the
@@ -227,6 +247,34 @@ class UniqueJobNames(unittest.TestCase):
             self.assertEqual(names, sorted(names), "job names must already sort in the order they were enqueued")
             for p in jobs:
                 self.assertTrue(p.exists())
+            self.assertEqual(list(ctx.rglob("*.claim")), [], "no .claim marker should survive a finished enqueue")
+
+    def test_a_parked_job_keeps_its_name(self):
+        # `sign_retry` renames `<job>.sh.failed` back to `<job>.sh`: a new job must never take that name
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            fakebin = _fake_date_bin(tmp)
+            env = _env(tmp, ctx)
+            env["PATH"] = str(fakebin) + os.pathsep + env["PATH"]
+
+            def enqueue(i):
+                msg = tmp / f"msg{i}.txt"
+                msg.write_text(f"fix: change a ({i})\n")
+                r = subprocess.run(["sh", str(ENQUEUE), "parked", str(wt), "main", str(msg), "--files", "a.txt",
+                                    "--ticket", "none", "--epic", "none", "--pr", "1", "--summary", "s", "--by", "t"],
+                                   env=env, capture_output=True, text=True, timeout=60)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                return Path(r.stdout.strip().splitlines()[-1])
+
+            first = enqueue(0)
+            parked = first.with_name(first.name + ".failed")
+            first.rename(parked)
+            second = enqueue(1)
+            self.assertNotEqual(second.name, first.name)
+            self.assertTrue(parked.exists())
             self.assertEqual(list(ctx.rglob("*.claim")), [], "no .claim marker should survive a finished enqueue")
 
     def test_job_names_still_glob_as_plain_sh_files(self):
@@ -331,6 +379,24 @@ class WorkspaceMkSignGate(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("not applicable here", r.stdout + r.stderr)
         self.assertIn("queue empty", r.stdout)  # the real signq.py `list` ran, on an empty queue
+
+    def test_an_unreadable_store_stops_with_the_error_never_as_not_applicable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws, env = self._ws(Path(tmp), signed=True)
+            (ws / ".context" / "reference" / "env" / "config.json").write_text("{broken", encoding="utf-8")
+            r = subprocess.run([shutil.which("make"), "sign_list"], cwd=ws, env=env, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("sign-queue: systems.signed_commits could not be read", r.stderr)
+        self.assertIn("invalid JSON", r.stderr)
+        self.assertNotIn("not applicable here", r.stdout + r.stderr)
+
+    def test_no_env_store_at_all_is_not_applicable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws, env = self._ws(Path(tmp), signed=True)
+            shutil.rmtree(ws / ".context" / "reference" / "env")
+            r = subprocess.run([shutil.which("make"), "sign_list"], cwd=ws, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("sign-queue: not applicable here — signed_commits is false", r.stdout)
 
     def test_sign_show_without_job_still_gates_first(self):
         # the usage check (`JOB=<index|topic>`) must not run before the signed_commits gate
