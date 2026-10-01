@@ -5,7 +5,12 @@
 #
 #   . "$(dirname "$0")/hermetic.sh"; hermetic_git_env "$some_tmp_dir"
 
-hermetic_git_env() {  # hermetic_git_env <home-dir> → exports HOME/TMPDIR and disables inherited git config
+hermetic_git_env() {  # hermetic_git_env <home-dir> → exports HOME/TMPDIR, disables inherited git config, and
+  # turns off git's own background housekeeping (gc.auto, maintenance.auto): a `git commit` in a fixture can
+  # otherwise fork a detached `git maintenance run --auto` that keeps writing into .git after the fixture is
+  # already being removed. GIT_CONFIG_COUNT/KEY_n/VALUE_n are reset here at fixed indices 0 and 1 — this
+  # function is hermetic for those variables too, so a caller's own pre-existing GIT_CONFIG_COUNT is overwritten,
+  # never merged with.
   export HOME="$1"
   export TMPDIR="$1"
   export GIT_CONFIG_GLOBAL=/dev/null
@@ -15,6 +20,11 @@ hermetic_git_env() {  # hermetic_git_env <home-dir> → exports HOME/TMPDIR and 
   export GIT_AUTHOR_EMAIL=t@example.invalid
   export GIT_COMMITTER_NAME=t
   export GIT_COMMITTER_EMAIL=t@example.invalid
+  export GIT_CONFIG_COUNT=2
+  export GIT_CONFIG_KEY_0=gc.auto
+  export GIT_CONFIG_VALUE_0=0
+  export GIT_CONFIG_KEY_1=maintenance.auto
+  export GIT_CONFIG_VALUE_1=false
 }
 
 kit_copy_tracked() {  # kit_copy_tracked <src-repo> <dest-dir> → copies every git-TRACKED file out of <src-repo>'s

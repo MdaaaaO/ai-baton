@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
 ENQUEUE = KIT / "skills" / "sign-queue" / "enqueue.sh"
 sys.path.insert(0, str(HERE.parent))
-from tests import hermetic_env  # noqa: E402
+from tests import extend_git_config, hermetic_env  # noqa: E402
 
 BOGUS_SHA = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"  # well-formed hex, no such object anywhere
 
@@ -33,10 +33,7 @@ def _env(tmp: Path, origin: Path, allowed: Path, key: Path) -> dict:
         "user.signingkey": str(key), "gpg.ssh.allowedSignersFile": str(allowed),
         "remote.origin.url": str(origin),
     }
-    env.update(GIT_CONFIG_COUNT=str(len(cfg)),
-                **{f"GIT_CONFIG_KEY_{i}": k for i, k in enumerate(cfg)},
-                **{f"GIT_CONFIG_VALUE_{i}": v for i, v in enumerate(cfg.values())})
-    return env
+    return extend_git_config(env, cfg)
 
 
 @unittest.skipUnless(shutil.which("ssh-keygen") and shutil.which("git"), "ssh-keygen and git needed")

@@ -76,18 +76,48 @@ def hermetic_env(tmp, trust=None) -> dict:
     SIGN_QUEUE_DIR default under the same tmp dir (a caller that needs a specific store or queue overrides them
     afterward). Build every fixture's git/sh/make subprocess env from this, never from a bare dict(os.environ).
 
+    It also turns off git's own background housekeeping: `git commit` (and a few other commands) can fork a
+    detached `git maintenance run --auto` that keeps writing into .git well after the call that started it
+    returns — a fixture that gets torn down (`rm -rf`) right after commit can then race that writer. gc.auto=0
+    and maintenance.auto=false are set through GIT_CONFIG_COUNT/KEY_n/VALUE_n at fixed indices 0 and 1, same
+    mechanism as `trust` below, so both can coexist with consistent indices. This helper is hermetic for those
+    variables too: any GIT_CONFIG_* the calling process's own environment happens to carry is dropped first,
+    never merged in — the indices this function hands out must never depend on what a caller already exported.
+    A caller that layers its own git config on top (`extend_git_config` below) must append after these, never
+    overwrite them.
+
     `trust`: for a read-only git call against a REAL checkout (this kit's own working tree, not a throw-away
     fixture) — disabling the global config above also drops a host's own `safe.directory` entries, so a checkout
     owned by another user (common for a mounted or root-owned clone) fails with "detected dubious ownership"
-    without one. Pass the checkout's path and it is trusted via GIT_CONFIG_COUNT/KEY/VALUE, which applies
+    without one. Pass the checkout's path and it is trusted via GIT_CONFIG_KEY_2/VALUE_2, which applies
     regardless of GIT_CONFIG_GLOBAL/NOSYSTEM."""
     tmp = str(tmp)
-    env = dict(os.environ, HOME=tmp, TMPDIR=tmp, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+    base = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG_")}
+    env = dict(base, HOME=tmp, TMPDIR=tmp, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
                GIT_TERMINAL_PROMPT="0", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid",
                CONTEXT_ROOT=os.path.join(tmp, "store"), SIGN_QUEUE_DIR=os.path.join(tmp, "q"))
+    config = [("gc.auto", "0"), ("maintenance.auto", "false")]
     if trust is not None:
-        env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="safe.directory", GIT_CONFIG_VALUE_0=str(trust))
+        config.append(("safe.directory", str(trust)))
+    env["GIT_CONFIG_COUNT"] = str(len(config))
+    for i, (key, value) in enumerate(config):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
+    return env
+
+
+def extend_git_config(env: dict, cfg: dict) -> dict:
+    """Layers `cfg` (an ordered key -> value mapping) onto `env`'s existing GIT_CONFIG_COUNT/KEY_n/VALUE_n —
+    appending after whatever is already there (e.g. hermetic_env()'s gc.auto / maintenance.auto) instead of
+    resetting the count and overwriting index 0 onward, which would silently drop those entries. Use this
+    whenever a fixture needs its own git config (signing, a remote url, …) on top of hermetic_env()."""
+    start = int(env.get("GIT_CONFIG_COUNT", "0"))
+    env = dict(env)
+    env["GIT_CONFIG_COUNT"] = str(start + len(cfg))
+    for i, (key, value) in enumerate(cfg.items(), start=start):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
     return env
 
 

@@ -21,23 +21,21 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
 ENQUEUE = KIT / "skills" / "sign-queue" / "enqueue.sh"
 sys.path.insert(0, str(HERE.parent))
-from tests import hermetic_env  # noqa: E402
+from tests import extend_git_config, hermetic_env  # noqa: E402
 
 
 def _env(tmp: Path, origin: Path, allowed: Path, key: Path) -> dict:
     """hermetic_env(tmp) plus the ssh-signing config every git call in this file needs, layered on through
-    GIT_CONFIG_COUNT/KEY/VALUE (the override that reaches a call regardless of NOSYSTEM/GLOBAL, same as
-    test_sign_queue_home.py's HostileValues fixture)."""
+    extend_git_config (the override that reaches a call regardless of NOSYSTEM/GLOBAL, same as
+    test_sign_queue_home.py's HostileValues fixture) — appended after hermetic_env()'s own gc.auto /
+    maintenance.auto entries, never overwriting them."""
     env = {k: v for k, v in hermetic_env(tmp).items() if not k.startswith("SIGN_QUEUE_")}
     cfg = {
         "user.name": "t", "user.email": "t@example.invalid", "gpg.format": "ssh",
         "user.signingkey": str(key), "gpg.ssh.allowedSignersFile": str(allowed),
         "remote.origin.url": str(origin),
     }
-    env.update(GIT_CONFIG_COUNT=str(len(cfg)),
-                **{f"GIT_CONFIG_KEY_{i}": k for i, k in enumerate(cfg)},
-                **{f"GIT_CONFIG_VALUE_{i}": v for i, v in enumerate(cfg.values())})
-    return env
+    return extend_git_config(env, cfg)
 
 
 @unittest.skipUnless(shutil.which("ssh-keygen") and shutil.which("git"), "ssh-keygen and git needed")

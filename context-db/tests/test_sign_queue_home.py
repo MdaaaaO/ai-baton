@@ -19,7 +19,7 @@ KIT = HERE.parents[1]
 SIGNQ = KIT / "skills" / "sign-queue" / "signq.py"
 ENQUEUE = KIT / "skills" / "sign-queue" / "enqueue.sh"
 sys.path.insert(0, str(HERE.parent))
-from tests import hermetic_env  # noqa: E402
+from tests import extend_git_config, hermetic_env  # noqa: E402
 
 
 def _env(tmp, ctx=None) -> dict:
@@ -128,9 +128,7 @@ class HostileValues(unittest.TestCase):
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
             cfg = {"user.name": "t", "user.email": "t@example.invalid", "gpg.format": "ssh",
                    "user.signingkey": str(key), "remote.origin.url": str(origin)}
-            env = {**git_env, "GIT_CONFIG_COUNT": str(len(cfg)),
-                   **{f"GIT_CONFIG_KEY_{i}": k for i, k in enumerate(cfg)},
-                   **{f"GIT_CONFIG_VALUE_{i}": v for i, v in enumerate(cfg.values())}}
+            env = extend_git_config(git_env, cfg)  # appended after git_env's own gc.auto / maintenance.auto
             git = ["git", "-C", str(wt)]
             (wt / "seed").write_text("s\n")
             subprocess.run([*git, "add", "seed"], check=True, env=env)
