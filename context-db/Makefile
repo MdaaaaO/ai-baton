@@ -44,6 +44,8 @@
 #   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
 #   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
 #   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
+#   make -C $BATON/context-db migrate [CONTEXT=<store>] # bring a store forward: kb.py migrate, then ctx_adapter.py adopt —
+#                                                        #   both steps in one call (sync-check.sh and kit-health name each on its own)
 #   make -C $BATON/context-db kit-health [STALE=90] [KIT_HEALTH_ARGS=…]  # full kit audit of the store CONTEXT names (the kit-health skill's script)
 #   make -C $BATON/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
 #
@@ -82,7 +84,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
+.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
 # An explicit `SESSION_ID=` (command line or shell environment) wins as-is; otherwise take the CURRENT, expanded
 # value of CLAUDE_CODE_SESSION_ID (`:=`, not `?=`/`=`, which would store the unexpanded reference text — `sq` below
 # reads SESSION_ID with $(value …), so a lazily-expanded default would leak the literal "$(CLAUDE_CODE_SESSION_ID)").
@@ -105,6 +107,13 @@ kb:
 # make sync-check  — non-fatal: is the kit repo in step with origin? (session-register runs it)
 sync-check:
 	@sh $(ENGINE)../sync-check.sh || true
+
+# make migrate [CONTEXT=<store>]  — bring a store forward: kb.py migrate (env-config flags), then ctx_adapter.py
+# adopt (kit settings/types + any pending ctx migrations) — both steps in one call; sync-check.sh and kit-health
+# name each step on its own when it is the one behind.
+migrate:
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/kb.py migrate
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/ctx_adapter.py adopt; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 5 ] || exit $$rc
 
 # make kit-health [STALE=90] [CONTEXT=<store>] [KIT_HEALTH_ARGS="--quiet …"]  — the audit reads the store CONTEXT names
 # (CONTEXT_ROOT for the script and every child it runs) and writes nothing to it unless KIT_HEALTH_ARGS carries --stamp.
