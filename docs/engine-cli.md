@@ -57,6 +57,8 @@ Kit / config (env fact store .context/reference/env/):
   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
+  make -C $BATON/context-db migrate [CONTEXT=<store>] # bring a store forward: kb.py migrate, then ctx_adapter.py adopt —
+                                                       #   the one command sync-check.sh/kit-health name when either is behind
   make -C $BATON/context-db kit-health [STALE=90] [KIT_HEALTH_ARGS=…]  # full kit audit of the store CONTEXT names (the kit-health skill's script)
   make -C $BATON/context-db engine-cli-doc           # regenerate docs/engine-cli.md from this help + every tool's --help (tests fail on drift)
 
@@ -395,6 +397,14 @@ back once `init` is done, reporting the swap as above. The marker is written ato
 file in the same directory then `os.replace`) and, if it does not parse, `adopt` says so and stops before `init`
 runs rather than skip the problem.
 
+Behind — a full `adopt` also records a digest of the kit's store settings and type schemas (`ctx-store.json` plus
+every `types/*.json`, the same files `--settings`/`--types` hand `ctx init`) under the store's own ignored `state/`
+dir (`state/ctx-adapter/adopted-kit.json` — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never
+a file `ctx` itself tracks or writes through a verb). `adopt --check` recomputes that digest and compares it with
+what is on record: a mismatch — including no record at all, a store adopted before this existed — is reported
+`behind`, exit 6, so a kit release that edits a type schema or a store setting is caught even when every doc in
+the store already validates clean; one plain `adopt` run (no `--check`) brings the record current.
+
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
 or found, or when anything in the adapter itself fails, so a machine that has not adopted ctx-store sees nothing:
@@ -446,7 +456,9 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
 
 Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
 4 not adopted (`adopt --check`) · 5 adopted, but a store file differs from the kit's (kept; `adopt --replace`) — 3
-takes precedence when both hold (the `differs:` lines still print). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
+takes precedence when both hold (the `differs:` lines still print) · 6 adopted, but the store's recorded digest of
+the kit's settings/types is missing or stale (`adopt --check` only — a plain `adopt` records a fresh one; 3 takes
+precedence over 6 the same way). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
 
 positional arguments:
   {version,where,install,adopt,mcp,mcp-json,ctx,hook}

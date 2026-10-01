@@ -838,6 +838,56 @@ class Adopt(Base):
         self.assertEqual(self.adapter("ctx", "validate", **env).returncode, 0)
 
 
+class AdoptBehind(Base):
+    """A full `adopt` records a digest of the kit's store settings + type schemas under the store's ignored
+    `state/` dir; `adopt --check` recomputes it and reports the store `behind`, exit 6, on any mismatch —
+    including no record at all (a store adopted before this existed): the least surprising default, since one
+    plain `adopt` clears it either way. Findings (exit 3) still win over `behind` — the existing `--check`
+    precedence is untouched."""
+
+    def digest_path(self) -> Path:
+        return self.root / "state" / "ctx-adapter" / "adopted-kit.json"
+
+    def test_adopt_records_a_digest_check_is_clean_then_behind_with_no_record(self):
+        self.assertEqual(self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
+                          .returncode, 0)
+        self.assertTrue(self.digest_path().is_file())
+        self.assertEqual(self.adapter("adopt", "--check", KIT_CTX=str(self.fake)).returncode, 0)
+        self.digest_path().unlink()  # a store adopted before this digest existed carries no record at all
+        r = self.adapter("adopt", "--check", KIT_CTX=str(self.fake))
+        self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
+        self.assertIn("behind", r.stdout)
+
+    def test_check_never_writes_the_digest(self):
+        r = self.adapter("adopt", "--check", KIT_CTX=str(self.fake))
+        self.assertEqual(r.returncode, 6, r.stdout + r.stderr)  # adopted (no NO_STORE), never recorded: behind
+        self.assertFalse(self.digest_path().exists())
+
+    def test_findings_still_win_over_behind(self):
+        r = self.adapter("adopt", "--check", KIT_CTX=str(self.fake), FAKE_CTX_RC="3",
+                          FAKE_CTX_ERR="SCHEMA_VIOLATION d/bad status\n")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)  # not 6, though nothing was ever recorded either
+
+    def test_a_type_edited_in_a_copy_of_the_kit_data_is_behind_then_clean_after_adopt(self):
+        """The issue's own proof: adopt once, change a type in a COPY of the kit's types (never the repo's own
+        copy), `--check` reports behind, adopt again clears it."""
+        import shutil
+        mod = load_adapter()
+        env = {**self.env, "KIT_CTX": str(self.fake), "FAKE_CTX_OUT": "ok: 0 docs checked\n"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(mod.adopt(), 0)
+            self.assertEqual(mod.adopt(check=True), 0)
+            changed = self.t / "changed-kit-data"
+            shutil.copytree(KIT / "context-db" / "ctx-store", changed)
+            data = json.loads((changed / "types" / "log.json").read_text(encoding="utf-8"))
+            data["frontmatter"]["title"]["required"] = not data["frontmatter"]["title"]["required"]
+            (changed / "types" / "log.json").write_text(json.dumps(data), encoding="utf-8")
+            mod.STORE_DATA = changed
+            self.assertEqual(mod.adopt(check=True), 6)
+            self.assertEqual(mod.adopt(), 0)  # a plain adopt (still against `changed`) records a fresh digest
+            self.assertEqual(mod.adopt(check=True), 0)  # … so --check against the same `changed` data is clean
+
+
 class ResolveRule(Base):
     """The kit's `resolve.fields` names no field: a field match would outrank the context doc's own
     `resolve.section` match (`Tracker & links`), and every session doc carries the same key in its own

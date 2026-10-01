@@ -56,6 +56,17 @@ enforces the fields (§ Skill frontmatter); the reviewer checks the bump. A `des
 ≤ 400 B per unit, ≤ 9,500 B across the kit (`kit-verify` counts whitespace-separated tokens, so a `/` or
 `—` standing alone counts as a word) — it loads into every session whether or not the unit runs.
 
+A `context-db/ctx-store/types/*.json` file carries its own `version` — a doc's **shape**, separate from the
+`metadata.version` above (a skill or agent's behaviour). A change that alters what an existing doc of that type
+looks like (a frontmatter key added, renamed or retyped; a body section ctx now expects) bumps the type's
+`version` and adds a step under `migrations` so `ctx migrate --apply` can bring existing docs forward —
+`epic.json`'s `log_order` migration is the shape to follow. `adopt` (`context-db/bin/ctx_adapter.py`) carries
+every adopted store's `types/` forward the next time it runs; a store that has not yet is `behind`
+(`adopt --check`, exit 6) until it does. That makes it a step every machine must take: fill the PR template's §
+Machines with it, and start the resulting `BREAKING CHANGE:` footer `Machines: …`, naming `adopt` — so a
+"Machines: …" line is what a reader of the squash commit, and the `CHANGELOG.md` entry it generates, finds and
+runs (`make -C context-db migrate` runs it together with the env store's own `kb.py migrate`).
+
 ## Skills — the contract, on one screen
 
 A skill is `skills/<name>/SKILL.md` (+ files beside it); an agent is one file `agents/<name>.md`. Two tiers, one floor.

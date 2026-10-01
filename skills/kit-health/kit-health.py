@@ -1210,6 +1210,9 @@ def ctx_store(r: Report) -> None:
     elif rc == 4:
         r.add(WARN, "engine", f"store not adopted: `.context/` is not a ctx store, so the hooks neither validate nor route "
                               f"writes through ctx — `{adapter} adopt` (`ctx init`; a store file you changed is kept)")
+    elif rc == 6:
+        r.add(WARN, "engine", f"store behind: `.context/`'s settings or types predate the kit's — `{adapter} adopt` "
+                              f"(records a fresh digest, brings the store's settings/types forward)")
     elif rc == 3:
         found = [ln[len("finding: "):] for ln in out.splitlines() if ln.startswith("finding: ")]
         r.add(WARN, "engine", f"ctx validate: {len(found)} finding(s) in the store — fix each with the ctx tools:\n```\n"

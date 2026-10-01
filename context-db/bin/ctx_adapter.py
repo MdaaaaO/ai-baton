@@ -32,6 +32,14 @@ back once `init` is done, reporting the swap as above. The marker is written ato
 file in the same directory then `os.replace`) and, if it does not parse, `adopt` says so and stops before `init`
 runs rather than skip the problem.
 
+Behind — a full `adopt` also records a digest of the kit's store settings and type schemas (`ctx-store.json` plus
+every `types/*.json`, the same files `--settings`/`--types` hand `ctx init`) under the store's own ignored `state/`
+dir (`state/ctx-adapter/adopted-kit.json` — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never
+a file `ctx` itself tracks or writes through a verb). `adopt --check` recomputes that digest and compares it with
+what is on record: a mismatch — including no record at all, a store adopted before this existed — is reported
+`behind`, exit 6, so a kit release that edits a type schema or a store setting is caught even when every doc in
+the store already validates clean; one plain `adopt` run (no `--check`) brings the record current.
+
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
 or found, or when anything in the adapter itself fails, so a machine that has not adopted ctx-store sees nothing:
@@ -83,12 +91,15 @@ The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--stor
 
 Exit codes: 0 ok · 1 not installed · 2 usage or I/O error (one stderr line) · 3 adopted, with validation findings ·
 4 not adopted (`adopt --check`) · 5 adopted, but a store file differs from the kit's (kept; `adopt --replace`) — 3
-takes precedence when both hold (the `differs:` lines still print). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
+takes precedence when both hold (the `differs:` lines still print) · 6 adopted, but the store's recorded digest of
+the kit's settings/types is missing or stale (`adopt --check` only — a plain `adopt` records a fresh one; 3 takes
+precedence over 6 the same way). `ctx` and `mcp` exit as ctx does. A hook always exits 0. Stdlib only.
 """
 from __future__ import annotations
 import argparse
 import contextlib
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -312,6 +323,60 @@ def _apply_mcp_setting(root: Path, mcp: dict) -> None:
         _write_marker(root / "ctx-store.json", current)
 
 
+ADOPT_DIGEST_REL = Path("state") / "ctx-adapter" / "adopted-kit.json"  # under the store's own ignored `state/**`
+    # (ctx-store.json's `ignore` list) — a record this adapter owns, never a file `ctx` tracks or writes through a verb
+
+
+def _kit_data_digest() -> str:
+    """sha256 over the kit's store settings (`ctx-store.json`) and every type schema under `STORE_DATA/types`,
+    one relative name then its bytes, types sorted by filename — the same files `adopt` hands `ctx init`
+    (`--settings`/`--types`, `_settings_for_init`), so a kit release that edits either changes this digest.
+    `adopt --check` compares it with what the last `adopt` on this store recorded (`_recorded_digest`) to
+    report the store `behind`, without re-running `ctx init` or touching a store file itself."""
+    h = hashlib.sha256()
+    h.update(b"ctx-store.json\0")
+    h.update((STORE_DATA / "ctx-store.json").read_bytes())
+    for p in sorted((STORE_DATA / "types").glob("*.json")):
+        h.update(f"types/{p.name}\0".encode("utf-8"))
+        h.update(p.read_bytes())
+    return h.hexdigest()
+
+
+def _adopt_state_path(root: Path) -> Path:
+    return root / ADOPT_DIGEST_REL
+
+
+def _write_adopt_digest(root: Path) -> None:
+    """Record `_kit_data_digest()` under the store's ignored `state/` dir, atomically (temp file in the same
+    directory, then `os.replace` — the same pattern as `_write_marker`). Called once a full `adopt` has actually
+    run `ctx init`/`migrate --apply` (never on an early-return error), so the record always reflects settings
+    and types `ctx` was just handed, whatever `ctx validate` finds in the docs afterwards."""
+    path = _adopt_state_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".adopted-kit-", suffix=".json.tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"digest": _kit_data_digest()}, f)
+        os.replace(tmp, path)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def _recorded_digest(root: Path) -> str | None:
+    """The digest the last `adopt` on this store recorded, or None — no record at all (a store adopted before
+    this digest existed, or whose file does not parse). Either way `adopt --check` reports the store `behind`
+    (see `adopt`): a missing record is the least surprising case to treat as behind, since one plain `adopt` run
+    is all it takes to write a fresh one, and staying silent would mean a store that drifted from the kit right
+    after this feature shipped goes unreported until something else happens to touch it."""
+    try:
+        data = json.loads(_adopt_state_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data.get("digest") if isinstance(data, dict) else None
+
+
 def adopt(check: bool = False, replace: bool = False) -> int:
     ctx, why = resolve()
     if ctx is None:
@@ -380,13 +445,23 @@ def adopt(check: bool = False, replace: bool = False) -> int:
     for f in [] if check else blocked:
         print(f"finding: migrate: {f} (fix the doc, then re-run adopt)")
     findings = findings + ([] if check else blocked)
-    if not check:
+    behind = False
+    if check:
+        # a mismatch (including no record at all — see `_recorded_digest`) says the store's settings or types
+        # predate the kit's, even when every doc in it already validates clean: `findings` (exit 3) still wins,
+        # same as `differs` (exit 5, never set in --check — see below), the existing precedence stays intact
+        behind = _recorded_digest(root) != _kit_data_digest()
+        if behind:
+            print("behind: the store's settings or types predate the kit's — "
+                  "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
+    else:
         a = _ctx(ctx, store, "validate", "--changed", "--adopt", timeout=ADOPT_TIMEOUT)
         print("adopt: " + ((_lines(a.stdout) or ["ok"])[0] if a.returncode in (0, 3) else
                            (_lines(a.stderr) or [f"exit {a.returncode}"])[0]))
         if a.returncode not in (0, 3):
             return 2
-    return 3 if findings else 5 if differs else 0
+        _write_adopt_digest(root)  # the init/migrate/validate flow above actually ran: the record is current
+    return 3 if findings else 6 if behind else 5 if differs else 0
 
 
 # ── the MCP server and the Bash route ──────────────────────────────────────────────────────────────────────────
@@ -843,7 +918,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("where", help="print the ctx executable; exit 1 when not installed")
     sub.add_parser("install", help="fetch the pinned tag into the pinned location")
     ap = sub.add_parser("adopt", help="make the content root a ctx store with the kit's settings (ctx init)")
-    ap.add_argument("--check", action="store_true", help="report only: exit 4 when not adopted, 3 on findings")
+    ap.add_argument("--check", action="store_true",
+                     help="report only: exit 4 when not adopted, 3 on findings, 6 when the store's recorded "
+                          "settings/types digest is stale or missing (behind)")
     ap.add_argument("--replace", action="store_true", help="overwrite store files that differ from the kit's")
     sub.add_parser("mcp", help="run the ctx MCP server on the store (stdio)")
     mp = sub.add_parser("mcp-json", help="add the ctx MCP server to a project .mcp.json")

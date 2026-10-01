@@ -344,6 +344,15 @@ class CtxStoreCheck(unittest.TestCase):
         self.assertIn("SCHEMA_VIOLATION d/bad", line)
         self.assertEqual(self.check(2, "")[0], "ERR")
 
+    def test_a_behind_store_is_warn_naming_adopt(self):
+        # exit 6: adopted and every doc validates, but the recorded digest of the kit's settings/types is
+        # stale or missing (ctx_adapter.py's own `behind` — distinct from "not adopted", exit 4)
+        level, line = self.check(6, "store /x: ok: 3 docs checked\nbehind: the store's settings or types "
+                                    "predate the kit's — `python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
+        self.assertEqual(level, "WARN")
+        self.assertIn("behind", line)
+        self.assertIn("ctx_adapter.py adopt`", line)
+
 
 class CtxPinCheck(unittest.TestCase):
     """§ 5 also checks the ctx AT THE PIN, not just whether `.context/` is adopted: `where` finds the pinned

@@ -77,4 +77,7 @@ check_kit "$HERE"
 rc=0; python3 "$HERE/context-db/bin/kb.py" migrate --check >/dev/null 2>&1 || rc=$?
 [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ] && warn "\`kb.py migrate --check\` failed (exit $rc) — no or unreadable env store? \`python3 \$BATON/context-db/bin/kb.py init --blank\` creates one"
 [ "$rc" -eq 3 ] && warn "env store predates the kit's capability flags — \`python3 \$BATON/context-db/bin/kb.py migrate\` (keeps values, lists what it changed)"
+# content store behind the kit's settings/types: hooks still validate, but on stale rules until adopted again
+rc=0; python3 "$HERE/context-db/bin/ctx_adapter.py" adopt --check >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 6 ] && warn "content store predates the kit's settings/types — \`python3 \$BATON/context-db/bin/ctx_adapter.py adopt\` (records a fresh digest, brings the store's settings/types forward)"
 exit 0
