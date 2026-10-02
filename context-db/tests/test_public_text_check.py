@@ -211,6 +211,138 @@ class RepoIsPublicStub(unittest.TestCase):
         self.assertIn("clean", r.stdout)
 
 
+class SameOwnerOrgPath(unittest.TestCase):
+    """An `<org>/<repo>` path naming THIS environment's own `github.org` is a hit only when `<repo>` is not
+    itself a public repo of that org — `cross_org_shapes` already carries the different-org case, this is the
+    `github.org `<org>/<repo>` path` shape `configured_values` adds. A stub `gh` on PATH answers the per-repo
+    lookup (`repo_is_public`'s own `gh api repos/<o>/<x> --jq .private` call), never the network; the `--repo`
+    under test is always forced `--public` so only the repo-lookup under test touches the stub."""
+
+    ORG = "acme" + "corp"  # assembled: this file is itself scanned by the kit's own leak check
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        write_config(self.root, {"environment": "t", "tracker": {"kind": "github", "repos": []},
+                                 "github": {"org": self.ORG}})
+        self.stub_dir = Path(self.tmp.name) / "stubbin"
+        self.stub_dir.mkdir()
+        self.call_log = Path(self.tmp.name) / "calls.log"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, text: str) -> Path:
+        p = Path(self.tmp.name) / "body.md"
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def write_stub(self) -> None:
+        # real `gh api repos/o/x --jq .private` prints true/false on stdout and exits 0; a repo it cannot
+        # resolve exits non-zero with an error on stderr (here: a 404, the shape of a repo this token can't see)
+        stub = self.stub_dir / "gh"
+        stub.write_text(
+            "#!/bin/sh\n"
+            'echo "$2" >> "$CALL_LOG"\n'
+            'case "$2" in\n'
+            "  */pubrepo) echo false ;;\n"
+            "  */privrepo) echo true ;;\n"
+            '  */flakyrepo) echo "gh: Not Found (HTTP 404)" 1>&2; exit 1 ;;\n'
+            "  *) echo false ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+    def env_with_stub(self) -> dict:
+        return {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}", "CALL_LOG": str(self.call_log)}
+
+    def test_same_owner_public_repo_passes(self):
+        self.write_stub()
+        f = self.write(f"see {self.ORG}/pubrepo for details\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("clean", r.stdout)
+
+    def test_a_closing_period_or_git_suffix_is_not_part_of_the_repo_name(self):
+        self.write_stub()
+        f = self.write(f"the store side is {self.ORG}/pubrepo.\nclone {self.ORG}/pubrepo.git\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = [ln for ln in self.call_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        self.assertEqual(calls, [f"repos/{self.ORG}/pubrepo"])
+
+    def test_a_team_handle_stays_a_hit_even_when_a_public_repo_has_its_name(self):
+        self.write_stub()
+        f = self.write(f"cc @{self.ORG}/pubrepo for a look\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("ac…", r.stdout)
+        self.assertFalse(self.call_log.exists(), "a team handle is never looked up as a repo")
+
+    def test_a_public_tracker_repo_of_the_same_owner_passes(self):
+        write_config(self.root, {"environment": "t", "github": {"org": self.ORG},
+                                 "tracker": {"kind": "github", "repos": [f"{self.ORG}/pubrepo"]}})
+        self.write_stub()
+        f = self.write(f"tracked in {self.ORG}/pubrepo, see https://github.com/{self.ORG}/pubrepo/issues/7\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = [ln for ln in self.call_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        self.assertEqual(calls, [f"repos/{self.ORG}/pubrepo"])
+
+    def test_a_private_tracker_repo_of_the_same_owner_fails(self):
+        write_config(self.root, {"environment": "t", "github": {"org": self.ORG},
+                                 "tracker": {"kind": "github", "repos": [f"{self.ORG}/privrepo"]}})
+        self.write_stub()
+        f = self.write(f"tracked in {self.ORG}/privrepo\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("tracker.repos", r.stdout)
+        self.assertNotIn("lookup failed", r.stdout)
+
+    def test_a_tracker_repo_slug_is_unresolved_for_a_foreign_target(self):
+        # no stub on PATH: the same-owner lookup must not run when the text goes to another org's repo
+        write_config(self.root, {"environment": "t", "github": {"org": self.ORG},
+                                 "tracker": {"kind": "github", "repos": [f"{self.ORG}/pubrepo"]}})
+        f = self.write(f"tracked in {self.ORG}/pubrepo\n")
+        r = run(str(f), "--repo", "other" + "org/project", "--public", root=self.root)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("tracker.repos", r.stdout)
+        self.assertNotIn("lookup failed", r.stdout)
+
+    def test_same_owner_private_repo_fails(self):
+        self.write_stub()
+        f = self.write(f"see {self.ORG}/privrepo for details\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("ac…", r.stdout)
+        self.assertNotIn("lookup failed", r.stdout)
+
+    def test_lookup_failure_keeps_the_hit_and_says_so(self):
+        self.write_stub()
+        f = self.write(f"see {self.ORG}/flakyrepo for details\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("lookup failed", r.stdout)
+
+    def test_foreign_org_target_is_unaffected(self):
+        # posting to a DIFFERENT org's repo: this environment's own org path is still a hit, same-owner
+        # exception does not apply, and the lookup it would need is never run (no stub on PATH here)
+        f = self.write(f"see {self.ORG}/pubrepo for details\n")
+        r = run(str(f), "--repo", "other" + "org/project", "--public", root=self.root)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("ac…", r.stdout)
+        self.assertNotIn("lookup failed", r.stdout)
+
+    def test_lookup_runs_once_per_distinct_repo(self):
+        self.write_stub()
+        f = self.write(f"see {self.ORG}/pubrepo twice: {self.ORG}/pubrepo again\n")
+        r = run(str(f), "--repo", f"{self.ORG}/target", "--public", root=self.root, env=self.env_with_stub())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = [ln for ln in self.call_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        self.assertEqual(calls, [f"repos/{self.ORG}/pubrepo"])
+
+
 class LoaderErrors(unittest.TestCase):
     """#357 review: a loader/value-set error must never fall through to exit 0 "clean" — that is a false
     negative dressed up as a clean scan. `kb.all_facts()` failing is exit 3, distinct from exit 0 (clean) and
