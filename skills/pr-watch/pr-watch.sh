@@ -36,6 +36,11 @@
 #   PR_WATCH_KNOWN_RED=<extended-regex>: before emitting, fetch the failure-level annotations of the failing check
 #   runs; if every failing check run has at least one failure annotation and ALL of them match the regex, the line
 #   is suppressed (logged to stderr only). A failing check run with zero annotations is unexplained → line emitted.
+#   A mute that has suppressed a line on a PR (recorded with the regex it happened under) expires for that PR
+#   once its checks are next green and settled, the checks it suppressed among them: one stderr note, and a
+#   later red — even one whose annotations match the same regex — is reported like any other. The record (and the expiry) belongs to the PR, not to a
+#   head: it survives a re-arm, on the same head or a new one. A changed regex mutes again from scratch, and
+#   PR_WATCH_REPLAY=1 starts over. An expired mute never re-runs the annotation fetch.
 #   PR_WATCH_REPLAY=1: re-emit the current bot verdict / CHECK NOT GREEN on start even when the state dir already
 #   holds this head (default: a re-arm on a known head is silent about what it already reported; the state dir is
 #   ${TMPDIR:-/tmp}/pr-watch-<owner>-<repo>-<pr>/ and is shared by every session on the same machine).
@@ -123,6 +128,16 @@ backoff_due() {
   bo_last=$(getv "$1_last"); bo_step=$(getv "$1_step")
   [ -n "$bo_last" ] && [ $(( $(now_epoch) - bo_last )) -ge "${bo_step:-3600}" ]
 }
+# muted_checks_back: every check a known-red mute suppressed (known_red_checks, one name per line) is in the
+# rollup again. Checks register one by one after a push: a rollup that holds only the first, green ones is not
+# yet the suite the mute was about. No record of names → nothing to wait for.
+muted_checks_back() {
+  [ -s "$D/known_red_checks" ] || return 0
+  while IFS= read -r mc_name; do
+    [ -n "$mc_name" ] || continue
+    printf '%s\n' "$roll" | cut -f3 | grep -Fxq -- "$mc_name" || return 1
+  done <"$D/known_red_checks"
+}
 backoff_widen() {
   bo_step=$(getv "$1_step")
   putv "$1_last" "$(now_epoch)"; putv "$1_step" "$(backoff_cap $(( ${bo_step:-3600} + 7200 )))"
@@ -159,6 +174,8 @@ while [ $# -gt 0 ]; do
     echo "pr-watch: PR $pr re-armed on known head $prev — silent about already-reported state (PR_WATCH_REPLAY=1 to replay)" >&2
   else
     rm -f "$D/seen_bot" "$D/seen_c" "$D/seen_r" "$D/seen_i" "$D/init" "$D/notgreen" "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step" "$D/sync_stuck" "$D/appr_seen" "$D/dirty_seen" "$D/sync_from"
+    # the known-red record is per PR, not per head: a new head keeps it, only a replay starts it over
+    if [ "${PR_WATCH_REPLAY:-0}" = 1 ]; then rm -f "$D/known_red_used" "$D/known_red_checks" "$D/known_red_expired"; fi
     rm -f "$D"/lookup_fail_*                             # a lookup failure announced before the reset is said again
     : >"$D/seen_c"; : >"$D/seen_r"; : >"$D/seen_i"; putv head "$h"; putv seen_bot 0
   fi
@@ -317,8 +334,19 @@ while true; do
     # never counts as bad, so a PR whose only red signal is an external CI status (a required status context)
     # gets reported green. Map state to the same tri-state conclusion/status pair a CheckRun carries instead.
     # A head that already has its line is read again only when the backoff window of that line has passed.
+    # A PR_WATCH_KNOWN_RED mute that has suppressed a line on this PR (known_red_used holds the regex it
+    # was suppressed under) stays live until a green settles the suite — so the rollup is re-read every
+    # cycle while live, even on an unchanged head, to notice that green and expire the mute (one read; a
+    # head that is still red and already has its mute or its line costs no annotation lookup and is not
+    # announced again — the backoff of that line still decides when it repeats). Once expired
+    # (known_red_expired holds the same regex) it reverts to the plain once-per-head/backoff rule above —
+    # no more forced re-reads, and the mute decision below is skipped outright (no annotation lookups).
     ng=$(getv notgreen); ng_bad=$(getv notgreen_bad)
-    if [ -n "$cur" ] && { [ "$ng" != "$cur" ] || { [ -n "$ng_bad" ] && backoff_due notgreen; }; }; then
+    kru=$(getv known_red_used); kre=$(getv known_red_expired); muted_live=0
+    if [ -n "$known_red" ] && [ "$kru" = "$known_red" ] && [ "$kre" != "$known_red" ]; then muted_live=1; fi
+    due=0
+    if [ "$ng" != "$cur" ] || { [ -n "$ng_bad" ] && backoff_due notgreen; }; then due=1; fi
+    if [ -n "$cur" ] && { [ "$due" = 1 ] || [ "$muted_live" = 1 ]; }; then
       gh_retry gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq '
         .statusCheckRollup[] |
         if .__typename == "StatusContext" then
@@ -335,9 +363,11 @@ while true; do
         lookup_ok "check status"
         pend=$(printf '%s\n' "$roll" | awk -F'\t' '$1=="QUEUED"||$1=="IN_PROGRESS"||$1=="PENDING"||$1=="WAITING"||$1=="REQUESTED"' | grep -c . )
         bad=$(printf '%s\n' "$roll" | awk -F'\t' '$1=="COMPLETED" && $2!="" && $2!="SUCCESS" && $2!="SKIPPED" && $2!="NEUTRAL" {print $3": "$2}' | sort -u | tr '\n' ';')
-        if [ -n "$bad" ] && [ "$pend" = 0 ]; then
+        if [ -n "$bad" ] && [ "$pend" = 0 ] && [ "$due" = 0 ]; then
+          :  # read only to notice a green: this head is still red and already has its mute or its line
+        elif [ -n "$bad" ] && [ "$pend" = 0 ]; then
           mute=0
-          if [ -n "$known_red" ]; then
+          if [ -n "$known_red" ] && [ "$kre" != "$known_red" ]; then
             mute=1
             runs=$(gh api --paginate "repos/$repo/commits/$cur/check-runs?per_page=100" --jq '.check_runs[] | select(.status=="completed" and .conclusion!=null and .conclusion!="success" and .conclusion!="skipped" and .conclusion!="neutral") | .id' 2>/dev/null)
             [ -z "$runs" ] && mute=0                        # no failing check RUN behind the failing rollup entry → unexplained
@@ -348,20 +378,34 @@ while true; do
             done
           fi
           if [ "$mute" = 1 ]; then
-            # a muted head keeps no backoff state: it stays silent for as long as it is muted
+            # a muted head keeps no backoff state: it stays silent for as long as it is muted. Record which
+            # regex did the muting (known_red_used) — a later green on this PR, read with the same regex
+            # still configured, expires the mute (below); a changed regex here just overwrites the record.
             echo "pr-watch: PR $pr CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED ($bad)" >&2
             rm -f "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step"
+            putv known_red_used "$known_red"
+            printf '%s\n' "$roll" | awk -F'\t' '$1=="COMPLETED" && $2!="" && $2!="SUCCESS" && $2!="SKIPPED" && $2!="NEUTRAL" {print $3}' | sort -u >"$D/known_red_checks"
           else
             echo "PR $pr CHECK NOT GREEN: $bad"
             if [ "$ng" = "$cur" ]; then backoff_widen notgreen; else backoff_start notgreen; fi
             putv notgreen_bad "$bad"
           fi
           putv notgreen "$cur"
-        elif [ "$pend" = 0 ] && [ "$ng" = "$cur" ]; then
-          # the red this head was announced with is gone (a re-run went green): nothing left to repeat. The
-          # head is forgotten, so a check that goes red on it later is announced like a first red.
-          echo "pr-watch: PR $pr checks on $(printf %s "$cur" | cut -c1-9) are no longer red — CHECK NOT GREEN is not repeated" >&2
-          rm -f "$D/notgreen" "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step"
+        elif [ "$pend" = 0 ]; then
+          if [ "$ng" = "$cur" ]; then
+            # the red this head was announced with is gone (a re-run went green): nothing left to repeat. The
+            # head is forgotten, so a check that goes red on it later is announced like a first red.
+            echo "pr-watch: PR $pr checks on $(printf %s "$cur" | cut -c1-9) are no longer red — CHECK NOT GREEN is not repeated" >&2
+            rm -f "$D/notgreen" "$D/notgreen_bad" "$D/notgreen_last" "$D/notgreen_step"
+          fi
+          if [ "$muted_live" = 1 ] && [ -n "$roll" ] && muted_checks_back; then
+            # a mute that actually suppressed something on this PR expires once its checks settle green —
+            # from here a red that matches the same regex is reported like any other (no annotation lookup).
+            # A rollup with no entry is not a green: right after a push no check has registered yet. Nor is
+            # one that does not hold the suppressed checks yet.
+            echo "pr-watch: PR $pr PR_WATCH_KNOWN_RED mute expired — checks are green on $(printf %s "$cur" | cut -c1-9)" >&2
+            putv known_red_expired "$known_red"; rm -f "$D/known_red_used" "$D/known_red_checks"
+          fi
         fi
       fi
     fi
