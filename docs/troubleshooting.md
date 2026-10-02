@@ -57,8 +57,12 @@ the full state table; to see a failure immediately rather than at the next regis
 Each is a silent no-op (exit 0, no output) when ctx is not installed or no store is named or found, so a machine
 that has not adopted ctx-store sees nothing. The adapter names the store with `CTX_STORE` when set, else
 `--store <content root>`. To check it: `python3 $BATON/context-db/bin/ctx_adapter.py where` (exit 1 says what is
-missing), `… install` fetches the pinned tag, `KIT_CTX` points at another `ctx` (`docs/env-vars.md`). Changes made
+missing), `… install` fetches the pinned release, `KIT_CTX` points at another `ctx` (`docs/env-vars.md`). Changes made
 through `Bash` are not seen by the hook; the next hooked write's `validate --changed` picks them up.
+
+**`… install` fails with `CERTIFICATE_VERIFY_FAILED`** — the fetch from PyPI uses Python's own trust store, not git's,
+and this Python has no CA bundle. On a python.org build for macOS run its `Install Certificates.command`; elsewhere
+point `SSL_CERT_FILE` at the system bundle (e.g. `/etc/ssl/certs/ca-certificates.crt`) and run `install` again.
 
 **"`<doc>` is a doc in the adopted ctx store … may not write it"** — the `PreToolUse` deny. Nothing is broken: write
 the doc through the ctx MCP tools the reason names (`ctx_str_replace` for an `Edit`, `ctx_create` or `ctx_new` for
