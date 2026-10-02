@@ -2,11 +2,11 @@
 name: pr-scan
 description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row brief in 5 ordered sections by per-row State (Needs you, New, Handled this tick, Follow-up, Watching) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
 metadata:
-  version: "18"
-  updated: "2026-10-01"
+  version: "19"
+  updated: "2026-10-02"
   reviewed: "2026-09-27"
   facts: "github.display_names"
-argument-hint: "[--days N] [--limit N] [--repo owner/name]"
+argument-hint: "[--days N] [--limit N (enrich cap, not row count — max_rows caps rows)] [--repo owner/name]"
 context: fork
 agent: triage
 model: sonnet
@@ -36,12 +36,15 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
    `errors=` is not 0, `head -20 <out>/errors.txt` (the `out=` run dir in the summary; `latest` is a
    symlink beside it) and mention the failure in the brief — a failed `gh` call is not an empty queue.
    Exit 3 = another sweep holds the lock; answer `NO-OP` and say so in one line.
+   `--limit N` caps how many candidates get *enriched* (the 3 per-candidate `gh` calls) — it is not a cap
+   on rows shown or counted as new; `max_rows` in `config.json` is what trims the table (`.[:$m]` in
+   `queue.json`'s own prio order).
 2. Read the table. Column meanings: `PRIO` 1 = direct request to the user, 2 = follow-up on a PR they
    already reviewed (new head or author replied), 3 = team request with no human review yet,
    4 = swept PR with no human review, 5 = the rest, 6 = the user's own review already sits on this head and
    nothing waits on them (`kind=done`: kept while their APPROVE / REQUEST_CHANGES stands on an open PR, and
    once for a review the kit posted; it never counts as new). `*` = first time surfaced. `!` = over the deep
-   threshold (600 lines) — a `pr-review --deep` candidate. `A` = passed the trivial-PR auto-approve gate
+   threshold (`deep_lines` in `config.json`, 600 by default) — a `pr-review --deep` candidate. `A` = passed the trivial-PR auto-approve gate
    (`.auto.eligible` in `queue.json`; the summary line carries `auto=<n> auto_mode=<mode>`). `C` = eligible
    for the unattended auto-COMMENT path (`.auto_comment.eligible` in `queue.json`; the summary line carries
    `auto_comment=<n> auto_comment_mode=<mode>`; § Unattended auto-COMMENT below — off by default). `HUMANS` = last state per human reviewer
