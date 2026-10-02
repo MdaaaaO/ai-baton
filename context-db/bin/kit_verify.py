@@ -637,6 +637,10 @@ BODY_LINES_ALLOW = {
                "one discipline followed step by step when committing on a signing-less machine, not "
                "reference material to split out; the hand-off incident log is already its own "
                "reference/handoff-incidents.md",
+    "pr-scan": "the numbered sweep steps and the exact five-section Answer template (incl. the "
+               "self-executing MARK trailer) are the one procedure the fork reads top to bottom each run, "
+               "not reference material to split out; column rules and the two owner-decision gates' full "
+               "detail already moved to reference/answer-format.md and reference/auto-paths.md",
 }
 # a backticked path a unit cites inside its own directory: `scripts/x.sh …`, `references/y.md`, `.claude/skills/<name>/scripts/x`
 # `skills/<x>/SKILL.md` or a bare `skills/<x>/` in a body: another skill referenced by PATH. The contract is by name
