@@ -88,10 +88,10 @@ if [ "$cmd" = preview ] || [ "$bad" != 0 ]; then
   echo "digest: $digest"; echo "submit with: reply-threads.sh submit --repo $repo --pr $pr --head $head --request $req --confirm $digest"; exit 0
 fi
 [ "$confirm" = "$digest" ] || { echo "error: --confirm does not match current digest $digest" >&2; exit 4; }
-lock="$ROOT/.submitted/reply-$digest"; mkdir -p "$lock" 2>/dev/null
-# same exclusive-create claim as submit-review.sh: the holder is whoever creates $lock/claimed, never
-# whoever `mkdir "$lock"` said yes to.
-claim_owner "$lock/claimed" || { echo "error: this exact batch was already submitted ($lock)" >&2; exit 5; }
+lock="$ROOT/.submitted/reply-$digest"; mkdir -p "$ROOT/.submitted"
+# the same two gates as submit-review.sh: an existing dir refuses (a batch submitted earlier), and of
+# two concurrent submits only the one that creates $lock/claimed holds the lock.
+{ mkdir "$lock" 2>/dev/null && claim_owner "$lock/claimed"; } || { echo "error: this exact batch was already submitted ($lock)" >&2; exit 5; }
 mrep='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{databaseId url}}}'
 mres='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
 ok=0; failed=0

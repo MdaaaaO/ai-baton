@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -163,8 +164,9 @@ class WithLock(unittest.TestCase):
         """Several processes started together against the SAME brand-new lock path, many rounds: the
         mkdir-fallback path (flock hidden) must give exactly one of them the lock, every round. A host
         whose `mkdir` is not itself exclusive can still pass this because the real exclusivity gate is
-        claim_owner's `(set -C; : >…)`, never `mkdir`'s own exit status — the winner holds briefly
-        (a short sleep before it exits) so the others' attempts land inside the same window."""
+        claim_owner's `(set -C; : >…)`, never `mkdir`'s own exit status. Every process records its
+        result in a file of its own, and a winner holds the lock until the test has seen all of them:
+        a process that starts late on a loaded host still meets a held lock, never a freed one."""
         path = path_without("flock")
         procs_per_round = 8
         rounds = 40
@@ -172,9 +174,15 @@ class WithLock(unittest.TestCase):
             winners = []
             for i in range(rounds):
                 lock = Path(tmp) / f"r{i}.lock"
-                script = f'with_lock "{lock}"; rc=$?; [ "$rc" = 0 ] && sleep 0.2; echo "$rc"'
+                tried = Path(tmp) / f"r{i}.tried"
+                script = (f'with_lock "{lock}"; rc=$?; echo "$rc" > "{tmp}/r{i}.$$.rc"; '
+                          f'while [ "$rc" = 0 ] && [ ! -e "{tried}" ]; do sleep 0.05; done; echo "$rc"')
                 procs = [subprocess.Popen([SH, "-c", f'. "{LIB}"\n{script}'], env={**os.environ, "PATH": path},
                                           stdout=subprocess.PIPE, text=True) for _ in range(procs_per_round)]
+                deadline = time.monotonic() + 20
+                while len(list(Path(tmp).glob(f"r{i}.*.rc"))) < procs_per_round and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                tried.touch()
                 outs = [p.communicate(timeout=20)[0].strip() for p in procs]
                 winners.append(outs.count("0"))
             self.assertEqual(winners, [1] * rounds, f"winner count per round (want 1 every time): {winners}")

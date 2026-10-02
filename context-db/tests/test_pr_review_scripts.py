@@ -413,5 +413,41 @@ exec "{real}" "$@"
         self.assertNotIn("digest:", r.stdout)
 
 
+@unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
+class SubmittedDigestGuard(unittest.TestCase):
+    """A digest dir left by an earlier submit refuses the same submit again, whether or not that earlier
+    submit left a `claimed` file in it — nothing is posted a second time."""
+
+    setUp = TrackerKeyLint.setUp
+    write_env_config = TrackerKeyLint.write_env_config
+    base_env = TrackerKeyLint.base_env
+    write_request = TrackerKeyLint.write_request
+
+    def refused(self, script, payload, lock_prefix, extra_env=None):
+        self.write_env_config(kind="github", key_regex="")
+        env = {**self.base_env(), **(extra_env or {})}
+        args = ["--repo", REPO, "--pr", PR, "--head", HEAD, "--request", self.write_request("req.json", payload)]
+        r = subprocess.run(["bash", str(script), "preview", *args], env=env, capture_output=True, text=True,
+                           timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        digest = next(line.split()[1] for line in r.stdout.splitlines() if line.startswith("digest: "))
+        (self.state_dir / ".submitted" / f"{lock_prefix}{digest}").mkdir(parents=True)
+        Path(env["STUB_LOG"]).write_text("")
+        r = subprocess.run(["bash", str(script), "submit", *args, "--confirm", digest], env=env,
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("already submitted", r.stderr)
+        return Path(env["STUB_LOG"]).read_text()
+
+    def test_submit_review_refuses_a_digest_dir_without_a_claimed_file(self):
+        log = self.refused(SUBMIT, {"event": "COMMENT", "body": "looks fine", "comments": []}, "")
+        self.assertNotIn("POST", log)
+
+    def test_reply_threads_refuses_a_digest_dir_without_a_claimed_file(self):
+        log = self.refused(REPLY, {"replies": [{"thread_id": "PRRT_x", "body": "done", "resolve": False}]},
+                           "reply-", {"STUB_GRAPHQL_JSON": MATCHING_THREAD_GRAPHQL})
+        self.assertNotIn("addPullRequestReviewThreadReply", log)
+
+
 if __name__ == "__main__":
     unittest.main()

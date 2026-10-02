@@ -134,12 +134,12 @@ fi
 
 # 4. submit
 [ "$confirm" = "$digest" ] || { echo "error: --confirm does not match current digest $digest (request or head changed since preview)" >&2; exit 4; }
-lock="$ROOT/.submitted/$digest"; mkdir -p "$lock" 2>/dev/null
-# the holder of this digest's lock is whoever creates $lock/claimed with the shell's own exclusive
-# create (claim_owner, portable.sh), never whoever `mkdir "$lock"` said yes to — that call alone is
-# not a safe exclusivity check on every host, so two concurrent submits of the same digest must not
-# both pass this gate.
-claim_owner "$lock/claimed" || { echo "error: this exact review was already submitted (lock $lock). Inspect GitHub before retrying." >&2; exit 5; }
+lock="$ROOT/.submitted/$digest"; mkdir -p "$ROOT/.submitted"
+# two gates, both must hold. `mkdir "$lock"` refuses a digest dir that already exists — an earlier
+# submit of this review, whether or not it left a `claimed` file. It is not a safe exclusivity check on
+# every host, though: two concurrent submits can both get a yes. So the holder is whoever also creates
+# $lock/claimed with the shell's own exclusive create (claim_owner, portable.sh).
+{ mkdir "$lock" 2>/dev/null && claim_owner "$lock/claimed"; } || { echo "error: this exact review was already submitted (lock $lock). Inspect GitHub before retrying." >&2; exit 5; }
 resp=$(printf '%s' "$payload" | gh api -X POST "repos/$repo/pulls/$pr/reviews" --input - 2>"$lock/stderr") ; rc=$?
 printf '%s' "$resp" > "$lock/response.json"
 if [ $rc -ne 0 ] || ! jq -e '.id' <<<"$resp" >/dev/null 2>&1; then
