@@ -607,6 +607,11 @@ class CompactBriefHelpers(unittest.TestCase):
         body = "# Session: foo\n\nA note the session actually wrote here.\n\n## Notes\nhi\n"
         self.assertEqual(mod._strip_preamble(body), body)
 
+    def test_strip_preamble_keeps_a_deeper_heading_above_the_first_section(self):
+        mod = load_adapter()
+        body = "# Session: foo\n\n### blocker: the store is read-only\n\n## Notes\nhi\n"
+        self.assertEqual(mod._strip_preamble(body), body)
+
     def test_strip_preamble_without_any_heading_is_unchanged(self):
         mod = load_adapter()
         self.assertEqual(mod._strip_preamble("just a title\n"), "just a title\n")

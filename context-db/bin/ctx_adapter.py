@@ -173,8 +173,8 @@ RESPONSIBILITIES_MAX = 160  # characters of a kept `responsibilities` field a co
 SECTION_PRIORITY = ("Open PRs", "Open decisions", "Assumptions", "Owns", "Worktrees")  # a compact brief's body
                     # leads with these `##` sections, in this order, when present; every other section (there may
                     # be none) keeps its original relative order after them
-SECTION_HEAD_LINES = 4  # non-blank lines of a priority section a compact brief's first pass gives every one of
-                        # them that is present, heading included, before its second pass spends whatever budget
+SECTION_HEAD_LINES = 4  # non-blank lines of a priority section, after its heading, a compact brief's first pass
+                        # gives every one of them that is present, before its second pass spends whatever budget
                         # is left filling in further lines — the fix for a long first section spending a cut
                         # brief's whole budget before a later priority section ever got to show anything
 SESSION_FM_LINE_KEYS = {"session", "session_id", "ref", "status", "epic", "repos", "working_on",
@@ -934,7 +934,7 @@ def _strip_preamble(body: str) -> str:
     if len(parts) < 2:
         return body
     preamble, heading, tail = parts
-    noise = re.sub(r"(?m)^#[^\n]*$", "", preamble)
+    noise = re.sub(r"(?m)^# Session: [^\n]*$", "", preamble)
     noise = re.sub(r"(?s)<!--.*?-->", "", noise)
     if noise.strip():
         return body
