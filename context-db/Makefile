@@ -43,7 +43,7 @@
 #   make -C $BATON/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
 #   make -C $BATON/context-db test [T=test_kb]          # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file
 #   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
-#   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
+#   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3] [JOBS=4]  # run the eval suite (SPENDS TOKENS)
 #   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
 #   make -C $BATON/context-db migrate [CONTEXT=<store>] # bring a store forward: kb.py migrate, then ctx_adapter.py adopt —
 #                                                        #   both steps in one call (sync-check.sh and kit-health name each on its own)
@@ -193,18 +193,22 @@ parse:
 eval-check:
 	@cd $(ENGINE).. && $(PY) $(BIN)/eval_check.py $(if $(REQUIRE_ALL),--require-all,)
 
-# make eval [SKILL=<name>] [CASE=<glob>] [MODEL=<id>] [RUNS=<n>] [ABLATION=none|with-without] [THRESHOLD=<0..1>]
-#           [MAX_COST=<usd>] [TRUST=1]  — `claude plugin eval` on this plugin. It SPENDS TOKENS on your credential; CI
-# runs it only through the manual `evals` workflow. SKILL narrows to evals/<skill>-*; ABLATION=none (the default here)
-# scores every grader, which is what a trigger suite measures. Results land in evals/results/ (git-ignored) and the
-# report stays local (--no-publish). TRUST=1 answers the first-run trust prompt (CI only).
+# make eval [SKILL=<name>] [CASE=<glob>] [MODEL=<id>] [RUNS=<n>] [JUDGE=<model>] [JOBS=<1..8>]
+#           [ABLATION=none|with-without] [THRESHOLD=<0..1>] [MAX_COST=<usd>] [TRUST=1]  — `claude plugin eval` on this
+# plugin. It SPENDS TOKENS on your credential; CI runs it only through the manual `evals` workflow. SKILL narrows to
+# evals/<skill>-*; ABLATION=none (the default here) scores every grader, which is what a trigger suite measures.
+# JUDGE is the model the `llm` graders vote with — sonnet here, not the CLI's default: the smaller default judge
+# fails this suite's multi-condition criteria on answers that meet them (`JUDGE=` leaves the CLI's default). JOBS
+# runs that many agent runs at once (one credential, one rate limit). Results land in evals/results/ (git-ignored)
+# and the report stays local (--no-publish). TRUST=1 answers the first-run trust prompt (CI only).
 ABLATION ?= none
+JUDGE ?= sonnet
 eval:
 	@command -v claude >/dev/null 2>&1 || { echo "eval: needs the claude CLI"; exit 2; }
-	@cd $(ENGINE).. && claude plugin eval . --no-publish --ablation $(ABLATION) \
+	@cd $(ENGINE).. && claude plugin eval . --no-publish --ablation $(ABLATION) $(if $(JUDGE),--judge-model '$(JUDGE)',) \
 	  $(if $(CASE),--case '$(CASE)',$(if $(SKILL),--case '$(SKILL)-*',)) \
 	  $(if $(MODEL),--model '$(MODEL)',) $(if $(RUNS),--runs $(RUNS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),) \
-	  $(if $(MAX_COST),--max-cost-usd $(MAX_COST),) $(if $(TRUST),--trust-plugin,)
+	  $(if $(JOBS),--concurrency $(JOBS),) $(if $(MAX_COST),--max-cost-usd $(MAX_COST),) $(if $(TRUST),--trust-plugin,)
 
 # The relative Markdown links of every tracked *.md resolve; templates seeded elsewhere are skipped.
 check-links:

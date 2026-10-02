@@ -154,11 +154,25 @@ class PrTitleHygiene(unittest.TestCase):
                          "pr-title.yml's bootstrap fallback has drifted from .github/versions.env's pin")
 
 
+class RunBlocksParse(unittest.TestCase):
+    def test_every_run_block_parses_as_bash(self):
+        # a quote left open inside a `${VAR:-…}` default is a parse error only at run time: the step dies before
+        # its first command, and a workflow that starts by hand shows it on the first paid run
+        for wf in sorted(WORKFLOWS.glob("*.yml")):
+            text = wf.read_text(encoding="utf-8")
+            for n, (_, body) in enumerate(re.findall(r"(?m)^( +)run: \|\n((?:\1  .*\n|\n)+)", text)):
+                r = subprocess.run(["bash", "-n"], input=body, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, f"{wf.name}, run block {n}:\n{r.stderr}")
+
+
 class EvalsHygiene(unittest.TestCase):
     TEXT = (WORKFLOWS / "evals.yml").read_text(encoding="utf-8")
 
     def test_timeout_is_not_the_old_90_minutes(self):
         self.assertNotIn("timeout-minutes: 90", self.TEXT)
+
+    def test_no_comment_says_the_credential_was_never_configured(self):
+        self.assertNotIn("has never been configured", self.TEXT)
 
     def test_a_missing_credential_fails_the_job(self):
         # a run with the secret missing must not conclude success — a required check satisfied by a run that

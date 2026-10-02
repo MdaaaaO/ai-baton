@@ -47,8 +47,8 @@ drifted plan on a real `HEAD MOVED` event reads `DRIFT` and picks `REDRAW`, and 
 | run | what | tokens |
 |---|---|---|
 | `make -C $BATON/context-db eval-check` | every case loads (prompt keys, grader types), every trigger suite has ≥ 10 cases with both kinds; skills without a suite and descriptions with no recognized trigger phrase (`TRIGGER_WHEN` / `TRIGGER_OTHER`) are notes on a bare run, but `ci.yml` runs `REQUIRE_ALL=1`, so both are a failure there. Part of `make ci` and `ci.yml` | none |
-| `make -C $BATON/context-db eval SKILL=<skill> [MODEL=<id>] [RUNS=<n>]` | `claude plugin eval . --ablation none --case '<skill>-*' --no-publish` — the trigger rate on your machine | yes |
-| `evals` workflow (Actions → evals → Run workflow; inputs `skill`, `models`) | the same run on a hosted runner with the `CLAUDE_CODE_OAUTH_TOKEN` secret, one pass per model; the output is the job summary | yes |
+| `make -C $BATON/context-db eval SKILL=<skill> [MODEL=<id>] [RUNS=<n>] [JUDGE=<model>] [JOBS=<n>]` | `claude plugin eval . --ablation none --judge-model sonnet --case '<skill>-*' --no-publish` — the trigger rate on your machine. `JUDGE` is the model the `llm` graders vote with (default `sonnet`; the CLI's smaller default judge fails criteria with several conditions on answers that meet them); `JOBS` runs that many agent runs at once | yes |
+| `evals` workflow (Actions → evals → Run workflow; inputs `skill`, `models`, `judge_model`, `runs`) | the same run on a hosted runner with the `CLAUDE_CODE_OAUTH_TOKEN` secret, four agent runs at once, one pass per model; the output is the job summary. Run it per skill: with `skill` empty it runs every case, which takes hours. Models and runs multiply the time; a combination that cannot fit the job's time limit is refused before it spends anything | yes |
 
 A change to a skill's `description:` cites a green run of that skill's suite (the workflow or `make eval`) in its PR:
 the suite is the acceptance test for shortening or rewording a trigger.
