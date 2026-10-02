@@ -4,7 +4,8 @@ The kit's `main` only ever fast-forwards to `origin/main`; every change arrives 
 
 > **Plugin install:** this page is about a clone (`.claude/`, a git checkout). A plugin install has no `sync.sh`, no
 > SessionEnd sync hook and no git hooks; it moves release by release through `claude plugin update`
-> (`docs/packaging.md` § Updating).
+> (`docs/packaging.md` § Updating). Updating one safely, step by step:
+> [`plugin-setup.md`](plugin-setup.md#updating-a-plugin-install-safely) § Updating a plugin install safely.
 
 ## Commands
 
@@ -60,7 +61,7 @@ refused pull is seen by the next session instead of staying silent:
 |---|---|---|
 | `pending <epoch>` | written just before the fetch (bounded by `timeout 60`, or a shell watchdog where `timeout` is missing); still there = the run was killed | when older than 5 minutes |
 | `ok <kit@sha>` | fetched; fast-forwarded, already in step, or already past the held tag | never |
-| `ok <kit@sha> unverified (<reason>)` | `--accept` applied a release tag whose manifest attestation could not be checked (no `gh` or one too old, not authenticated, a manifest.txt that could not be downloaded for any reason, or the verify call itself got no answer) | not from `sync-check.sh` — the standalone word `unverified` and the reason are in `.sync-status` and in `make claude_sync`'s output only |
+| `ok <kit@sha> unverified (<reason>)` | `--accept` applied a release tag whose manifest attestation could not be checked (no `gh` or one too old, not authenticated, a manifest.txt that could not be downloaded for any reason, or the verify call itself got no answer) | not from `sync-check.sh` — the standalone word `unverified` and the reason are in `.sync-status` and in `make claude_sync`'s output; `kit-health` § 1 warns on it and names the command to verify by hand |
 | `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | not from the status line — its kit check names the waiting tag for as long as `HEAD` lacks it (unless `.sync-rejected` already names this tag — see below) |
 | `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
 | `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed, an accepted release tag failed manifest verification, or a previously rejected tag is still waiting | always |
@@ -99,8 +100,11 @@ rate limit, a server error, bad credentials — gh's own rejection of the manife
 even when its wording overlaps) — → applies anyway: a clone must still be able to catch up with no
 network or an unauthenticated `gh`, so `.sync-status` is `ok …` with the standalone word `unverified` and
 a short reason appended. The word and the reason live in `.sync-status` and in `make claude_sync`'s
-output; `sync-check.sh` does not warn on it. `kit.channel main` never verifies — there is no release tag
+output; `sync-check.sh` does not warn on it, `kit-health` § 1 does. `kit.channel main` never verifies — there is no release tag
 to verify against.
+
+[`SECURITY.md`](../SECURITY.md#verifying-a-release) § Verifying a release has what the manifest and the
+attestation check prove, and what immutable releases and the tag ruleset on `v*` do and don't guarantee.
 
 **A rejected tag stays rejected.** `.sync-rejected` (ignored, same shape as `.sync-status`'s detail: one
 line, `<tag> <reason>`) remembers the tag the check last **failed** — not one it could merely not check —
