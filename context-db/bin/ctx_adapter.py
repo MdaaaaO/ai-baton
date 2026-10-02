@@ -5,39 +5,31 @@ The kit talks to ctx through its verbs only: it never reads or writes the store'
 `.ctx/`, `.audit/`), and `CTX_STORE` is an opaque locator it passes through, never a path it inspects. Whether a
 store exists is ctx's answer (`NO_STORE`), not a file test here. The one exception is `adopt` (below).
 
-Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against. It is
-fetched, not vendored: `install` clones exactly that tag (`git clone --depth 1 --branch <tag>`) into a per-user
-cache directory whose path carries the tag, so a bumped pin never picks up an older copy. `CTX_SHA` beside it
-names the commit that tag resolves to right now: `install` reads the clone's detached HEAD and refuses to apply
-a clone whose commit disagrees (naming both shas) — a tag repointed at another commit after the kit was pinned
-to it is exactly what this catches, not a network failure. When the clone's own commit cannot be read at all
-(no git on PATH mid-clone, a corrupted checkout), the fetch is applied anyway and recorded unverified rather than
-blocked — a verify that cannot run is not the same as one that ran and disagreed. `install` writes what it found
-next to the pinned `ctx` (`pin status`, below); `kit-health`'s ctx pin line reads it back, offline, so a moved tag
-or a cache installed before a pin bump is reported without a second clone.
+Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against, as its PyPI
+version. It is fetched, not vendored: `install` reads PyPI's JSON for exactly that release, takes its
+`py3-none-any` wheel and unzips it into a per-user cache directory whose path carries the version, so a bumped pin
+never picks up an older copy; a `ctx` shim beside it runs `python3 -m ctxstore` on that directory (the wheel is
+pure Python with no dependencies: no pip, no venv, no git). `CTX_WHEEL_SHA256` beside the version is the wheel's
+sha256, taken from the file itself when the pin was bumped, never from PyPI's JSON (the same server as the file):
+`install` hashes what it downloaded and refuses a wheel whose digest differs, naming both, before anything is
+unpacked — a file replaced upstream after the kit was pinned to it is exactly what this catches. A wheel member
+whose path is absolute or escapes the directory is refused too. `install` writes the version and digest it
+installed next to the pinned `ctx` (`pin status`, below); `kit-health`'s ctx pin line reads it back, offline, so a
+cache installed before a pin bump is reported without a second download.
 
 Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
-pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
+pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<version>/ctx`, else not installed.
 
 Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
 `context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
 kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
 `ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
 log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check`
-is the read-only probe kit-health runs. The kit never writes a store file itself — except `ctx-store.json`'s `mcp`
-key (`_strip_mcp_for_upgrade`/`_apply_mcp_setting`, below): the pinned ctx's own `init` does not accept it in
-`--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file. Every other
-key follows `init`'s own kept rule above; `mcp` does not — a local edit to it is not supported, because the kit owns
-this key (its `actors` pattern is `session.py`'s own NAME_RE — a local pattern would break session writes), so
-`adopt` always replaces it with the kit's value, never silently: `updated: ctx-store.json mcp — the kit owns this
-key (session.py's name pattern); the previous value was replaced` prints (exit code unaffected: a kit release that
-changes its own pattern looks the same as a local edit, and neither is a `kept` file) whenever the value replaced
-was not already the kit's; an equal value prints nothing. `--upgrade` decides
-`kept` vs `written` by the marker's digest, not its content (ctx-store#73), so before it runs the adapter strips its
-own last `mcp` patch off the marker (the digest then matches what `init` last wrote) and puts the kit's `mcp` value
-back once `init` is done, reporting the swap as above. The marker is written atomically (`_write_marker`, a temp
-file in the same directory then `os.replace`) and, if it does not parse, `adopt` says so and stops before `init`
-runs rather than skip the problem.
+is the read-only probe kit-health runs. The kit never writes a store file itself: `ctx-store.json` goes to `init`
+whole, its `mcp` key included, so that key follows the same kept rule as every other. (A store adopted by an older
+kit carries an `mcp` that kit wrote in itself: the next `adopt` finds it unchanged, but `init`'s own record of the
+marker predates that write, so the first kit settings change after it reports `ctx-store.json` kept once —
+`adopt --replace` takes the kit's and the record lines up from then on.)
 
 Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
 — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes
@@ -105,10 +97,12 @@ or found, or when anything in the adapter itself fails, so a machine that has no
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
-  python3 ctx_adapter.py version          # the pinned tag, `api <CTX_API>` on a second line, `sha <CTX_SHA>` on a third
+  python3 ctx_adapter.py version          # the pinned version, `api <CTX_API>` on a second line, `sha256
+                                           # <CTX_WHEEL_SHA256>` on a third
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
-  python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
-  python3 ctx_adapter.py pin              # the sha `install` found at the pinned location, and whether it verified;
+  python3 ctx_adapter.py install          # fetch the pinned release from PyPI into the pinned location (no-op when
+                                           # present); exit 2, nothing installed, on a digest mismatch or no network
+  python3 ctx_adapter.py pin              # the version and wheel sha256 `install` recorded at the pinned location;
                                            # exit 1 when nothing is installed or the copy predates this check
   python3 ctx_adapter.py adopt [--check [--no-validate]] [--replace]  # ctx init with the kit's settings; --check
                                            # only reports; --check --no-validate skips the whole-store `ctx
@@ -148,17 +142,21 @@ import subprocess
 import sys
 import tempfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable
 
-CTX_VERSION = "v0.6.0"  # the ctx-store release tag the kit's adapters are written against — bump here only
-CTX_SHA = "d706db379d4ae5814c01a6a31837f4eebff319c5"  # the commit CTX_VERSION's tag names right now — bump together
-                         # with CTX_VERSION, from the tag's own commit (`git rev-parse <tag>^{commit}`), never
-                         # from the tag object's own sha (an annotated tag's `git rev-parse <tag>` alone)
-CTX_API = 1             # the ctx API `ctx --version` must report (its `(api N)` suffix) — bump only alongside a
+CTX_VERSION = "0.7.0"  # the ctx-store release (its PyPI version) the kit's adapters are written against — bump here only
+CTX_WHEEL_SHA256 = "ad6f32570971fdc118a72324bd672bc09b73296d5ec85a684912c77225094f0c"  # sha256 of that release's
+                         # `py3-none-any` wheel on PyPI — bump together with CTX_VERSION, from the downloaded file's
+                         # own hash (`sha256sum ctx_store-<version>-py3-none-any.whl`), never from PyPI's JSON alone:
+                         # that digest comes from the same server as the file, so it cannot be the pin
+CTX_API = 1            # the ctx API `ctx --version` must report (its `(api N)` suffix) — bump only alongside a
                          # verb/output change the adapter now relies on; `ctx_adapter.py version`'s second line
                          # exposes it so kit-health can catch a pinned install answering a different one
-CTX_REPO = "https://github.com/MdaaaaO/ctx-store"
+CTX_REPO = "https://github.com/MdaaaaO/ctx-store"  # the upstream project (named, not fetched: `install` reads PyPI)
+CTX_PYPI_JSON = "https://pypi.org/pypi/ctx-store/{version}/json"  # PyPI's JSON API for one release: its file list
+WHEEL_TAG = "-py3-none-any.whl"  # the one wheel `install` takes: pure Python, any interpreter, any platform
+WHEEL_MAX_BYTES = 50 * 1024 * 1024  # a download larger than this is refused before it is hashed (the wheel is ~80KB)
 BRIEF_BUDGET = 2048     # bytes of a SessionStart brief (ctx's default is 4096; the start of a session is prime context)
 EPIC_BUDGET = 600       # bytes of a compact brief's context-doc tail (its key plus the head of its Remaining work)
 REMAINING_WORK_HEAD = 8  # lines of a context doc's Remaining work section a compact brief carries
@@ -196,7 +194,7 @@ BIN = Path(__file__).resolve().parent
 KIT_ROOT = BIN.parent.parent  # context-db/bin -> context-db -> the kit root, where .claude-plugin/plugin.json lives
 STORE_DATA = BIN.parent / "ctx-store"  # the kit's store settings + type schemas, handed to `ctx init` by `adopt`
 ADOPT_TIMEOUT = 300     # seconds `adopt` gives one ctx call (a whole-store validate; not a hook)
-INSTALL_TIMEOUT = 120   # seconds `install` gives the pinned-tag clone (setup.sh runs it unattended)
+INSTALL_TIMEOUT = 120   # seconds `install` gives the whole PyPI fetch, JSON and wheel (setup.sh runs it unattended)
 MCP_ACTOR = "claude"    # CTX_ACTOR of the MCP server unless the user set one: the audit rows of the model's writes
 # A write through the ctx MCP server's tools (plugin: mcp__plugin_<plugin>_ctx__…, a clone's .mcp.json: mcp__ctx__…).
 CTX_WRITE_TOOL = re.compile(r"^mcp__(?:\w[\w-]*_)?ctx__ctx_(?:create|str_replace|insert|delete|rename|log|fm|new|move|maintain|migrate)$")
@@ -228,25 +226,27 @@ def resolve() -> tuple[Path | None, str]:
 
 
 PIN_STATUS_NAME = ".pin-status.json"  # beside the pinned `ctx`: what `install` found when it fetched this copy
+SHIM = """#!/bin/sh
+# ctx: ctx-store {version}, unpacked from {wheel} (sha256 {sha256}) by ai-baton's
+# `ctx_adapter.py install`. It runs the unpacked wheel beside this file, so it needs no pip, venv or git.
+# Generated: remove this directory and run `install` again rather than edit it.
+p=$0
+while [ -h "$p" ]; do
+  l=$(readlink -- "$p")
+  case $l in /*) p=$l ;; *) p=$(dirname -- "$p")/$l ;; esac
+done
+d=$(CDPATH= cd -P -- "$(dirname -- "$p")" && pwd -P) || exit 127
+exec python3 -c 'import runpy, sys; sys.path[0] = sys.argv.pop(1); runpy.run_module("ctxstore", run_name="__main__", alter_sys=True)' "$d" "$@"
+"""  # this directory replaces sys.path[0] (the caller's working directory under `-c`, as under `-m`), so no other
+     # `ctxstore` — one in the working directory, on PYTHONPATH or in site-packages — can shadow the pinned one, on
+     # every Python (PYTHONSAFEPATH would do it only on 3.11+)
 
 
-def _clone_commit_sha(src: Path) -> str | None:
-    """The commit the clone's detached HEAD sits at (`git rev-parse HEAD`) — read while `src/.git` still exists,
-    before `install` strips it. None when that cannot be read (no git on PATH mid-clone, a corrupted checkout):
-    the caller applies the fetch anyway and records it unverified rather than block on a check that could not
-    run (owner decision, 2026-10-01: a verify that cannot run applies, unverified; only one that runs and
-    disagrees refuses)."""
-    try:
-        r = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
-
-
-def _write_pin_status(dest: Path, pinned_sha: str, cloned_sha: str | None, verified: bool) -> None:
-    """Record, next to the pinned `ctx`, the sha `install` pinned against and what the clone's own commit turned
-    out to be — atomically (temp file, then `os.replace`), so `pin_status` never reads a half-written file."""
-    data = {"pinned_sha": pinned_sha, "cloned_sha": cloned_sha, "verified": verified}
+def _write_pin_status(dest: Path, version: str, wheel: str, sha256: str) -> None:
+    """Record, next to the pinned `ctx`, the release `install` unpacked there and the sha256 of the wheel it came
+    from (equal to the pin, or `install` would have refused it) — atomically (temp file, then `os.replace`), so
+    `pin_status` never reads a half-written file."""
+    data = {"version": version, "wheel": wheel, "sha256": sha256}
     fd, tmp = tempfile.mkstemp(prefix=".pin-status-", suffix=".json.tmp", dir=str(dest))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -259,62 +259,148 @@ def _write_pin_status(dest: Path, pinned_sha: str, cloned_sha: str | None, verif
 
 
 def pin_status(dest: Path | None = None) -> dict | None:
-    """The sha-verification record `install` wrote for the copy at `dest` (default: the pinned location for
-    `CTX_VERSION`) — None when there is no copy there, or it predates this check (nothing to read)."""
+    """The `{version, wheel, sha256}` record `install` wrote for the copy at `dest` (default: the pinned location
+    for `CTX_VERSION`) — None when there is no copy there, or none this check can read (a record without a wheel
+    digest predates it)."""
     dest = dest or pinned_dir()
     try:
-        return json.loads((dest / PIN_STATUS_NAME).read_text(encoding="utf-8"))
+        data = json.loads((dest / PIN_STATUS_NAME).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    return data if isinstance(data, dict) and data.get("sha256") else None
 
 
-def install(url: str = CTX_REPO, version: str = CTX_VERSION, sha: str = CTX_SHA, dest: Path | None = None) -> Path:
-    """Clone `version` of `url` into `dest` (default: the pinned location) and check it reports that version. When
-    `sha` is set, the clone's own commit (`_clone_commit_sha`) must match it — a mismatch means the tag now points
-    somewhere else and installs nothing, naming both shas; a commit that could not be read at all is not a
-    mismatch, it is applied and recorded unverified (`_write_pin_status`; see `_clone_commit_sha`). The clone lands
-    in a temporary sibling first and is renamed into place, so an interrupted fetch never leaves a half copy the
-    resolver would take. Already present: returns it untouched (no re-check, no new record; a stale cache is
+def _fetch(url: str, deadline: float, what: str) -> bytes:
+    """GET `url` with the standard library, all of it before `deadline` (time.monotonic()), at most WHEEL_MAX_BYTES.
+    Every failure is an OSError fit to print: setup.sh runs `install` unattended, so a stalled network must fail,
+    never hang — each read waits at most the time left, and the deadline is checked again between reads."""
+    import http.client  # imported here, not at the top: every hook loads this module, and only `install` fetches
+    import socket
+    import urllib.error
+    import urllib.request
+
+    def stalled() -> OSError:
+        return OSError(f"fetching {what} did not finish within {INSTALL_TIMEOUT}s (network stalled?)")
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise stalled()
+    req = urllib.request.Request(url, headers={"User-Agent": "ai-baton ctx_adapter.py"})
+    chunks, size = [], 0
+    try:
+        with urllib.request.urlopen(req, timeout=left) as r:  # noqa: S310 — the result is checked against the pin
+            while True:
+                if time.monotonic() >= deadline:
+                    raise stalled()
+                chunk = r.read(65536)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > WHEEL_MAX_BYTES:
+                    raise OSError(f"{what} is larger than {WHEEL_MAX_BYTES} bytes — refusing to install")
+                chunks.append(chunk)
+    except (socket.timeout, TimeoutError):
+        raise stalled() from None
+    except urllib.error.URLError as e:  # an HTTPError (404, 503, …) is one too
+        if isinstance(e, urllib.error.HTTPError):
+            e.close()  # it holds the response open
+        if isinstance(e.reason, (socket.timeout, TimeoutError)):
+            raise stalled() from None
+        raise OSError(f"fetching {what} failed: {getattr(e, 'code', None) or ''} {e.reason}".replace("  ", " ")) from None
+    except http.client.HTTPException as e:  # a truncated or malformed response
+        raise OSError(f"fetching {what} failed: {type(e).__name__} {e}") from None
+    return b"".join(chunks)
+
+
+def _wheel_url(index: str, version: str, deadline: float) -> tuple[str, str]:
+    """(file name, URL) of the release's `py3-none-any` wheel, read from PyPI's JSON for it (`index`). Only the URL
+    is taken from there: the digest the JSON also lists is never the pin (see CTX_WHEEL_SHA256)."""
+    raw = _fetch(index, deadline, f"PyPI's file list for ctx-store {version}")
+    try:
+        files = json.loads(raw.decode("utf-8"))["urls"]
+        wheels = [(f["filename"], f["url"]) for f in files
+                  if isinstance(f, dict) and str(f.get("filename", "")).endswith(WHEEL_TAG) and f.get("url")]
+    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+        raise OSError(f"PyPI's file list for ctx-store {version} ({index}) is not the JSON it should be") from None
+    if not wheels:
+        raise OSError(f"PyPI lists no {WHEEL_TAG.lstrip('-')} wheel for ctx-store {version} ({index}) — "
+                      "refusing to install anything else")
+    return wheels[0]
+
+
+def _unpack_wheel(data: bytes, dest: Path) -> None:
+    """Unzip a wheel into `dest`, refusing the whole wheel — before anything is written — when any member's path is
+    absolute or would land outside `dest` (zip slip). A wheel is a zip of plain files, so nothing else is needed."""
+    import io  # imported here for the same reason as `_fetch`'s
+    import zipfile
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as e:
+        raise OSError(f"the wheel is not a zip file: {e}") from None
+    with zf:
+        members = zf.infolist()
+        root = dest.resolve()
+        for m in members:
+            name = m.filename
+            parts = PurePosixPath(name).parts
+            if (name.startswith(("/", "\\")) or "\\" in name or re.match(r"[A-Za-z]:", name) or ".." in parts
+                    or not (root / name).resolve().is_relative_to(root)):
+                raise OSError(f"wheel member {name!r} is absolute or escapes the install directory — "
+                              "refusing to install")
+        for m in members:
+            target = dest / m.filename
+            if m.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(m) as src, open(target, "wb") as out:
+                shutil.copyfileobj(src, out)
+
+
+def install(version: str = CTX_VERSION, sha256: str = CTX_WHEEL_SHA256, dest: Path | None = None,
+            index: str = CTX_PYPI_JSON) -> Path:
+    """Fetch ctx-store `version` from PyPI into `dest` (default: the pinned location): PyPI's JSON for that release
+    (`index`) names its `py3-none-any` wheel; the wheel's own sha256 must equal `sha256` (the pin), or nothing is
+    installed and the error names both digests. The wheel is unzipped (`_unpack_wheel`, zip-slip refused) into a
+    temporary sibling, a `ctx` shim (`SHIM`) is written beside it, `ctx --version` must report `version`, the
+    record (`_write_pin_status`) is written, and only then is the directory renamed into place, so an interrupted
+    fetch never leaves a half copy the resolver would take. The whole fetch has INSTALL_TIMEOUT seconds; every
+    failure is an OSError. Already present: returns it untouched (no re-check, no new record; a stale cache is
     kit-health's `pin` line to catch, see `ctx_pin_check` in kit-health.py — its fix removes the copy first)."""
     dest = dest or pinned_dir(version)
     if _usable(dest / "ctx"):
         return dest
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256 or ""):
+        raise OSError(f"no wheel digest is pinned for ctx-store {version} (CTX_WHEEL_SHA256 is {sha256!r}) — "
+                      "refusing to install a wheel nothing vouches for")
+    deadline = time.monotonic() + INSTALL_TIMEOUT
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=".fetch-", dir=dest.parent))
     try:
+        name, url = _wheel_url(index.format(version=version), version, deadline)
+        data = _fetch(url, deadline, name)
+        got = hashlib.sha256(data).hexdigest()
+        if got != sha256:
+            raise OSError(f"{name} has sha256 {got}, not the pinned {sha256} — the file on PyPI is not the one the "
+                          "kit was pinned to; refusing to install")
         src = tmp / "ctx-store"
-        # setup.sh runs this unattended: a stalled network or a credential prompt must fail, never hang
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
-        env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
-        try:
-            r = subprocess.run(["git", "-c", "advice.detachedHead=false", "clone", "-q", "--depth", "1", "--branch",
-                                version, url, str(src)], capture_output=True, text=True, env=env,
-                               stdin=subprocess.DEVNULL, timeout=INSTALL_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            raise OSError(f"git clone of {version} did not finish within {INSTALL_TIMEOUT}s (network stalled?)")
-        if r.returncode != 0:
-            raise OSError(f"git clone of {version} failed: {(r.stderr.strip().splitlines() or ['no output'])[-1]}")
-        if not _usable(src / "ctx"):
-            raise OSError(f"{version} of {url} has no executable `ctx`")
-        v = subprocess.run([str(src / "ctx"), "--version"], capture_output=True, text=True, timeout=30)
-        want = version.lstrip("v")
-        if v.returncode != 0 or want not in v.stdout.split():
-            raise OSError(f"the fetched ctx reports {v.stdout.strip() or v.stderr.strip()!r}, not {want}")
-        cloned_sha = _clone_commit_sha(src)  # must run before .git is stripped, below
-        verified = False
-        if sha:
-            if cloned_sha and cloned_sha != sha:
-                raise OSError(f"{version} now resolves to {cloned_sha}, not the pinned {sha} — "
-                              "the tag may have moved; refusing to install")
-            verified = cloned_sha == sha
-        shutil.rmtree(src / ".git", ignore_errors=True)  # a pinned copy, not a checkout anyone should commit in
+        src.mkdir()
+        _unpack_wheel(data, src)
+        if not (src / "ctxstore" / "__main__.py").is_file():
+            raise OSError(f"{name} has no ctxstore/__main__.py — not a ctx-store wheel")
+        shim = src / "ctx"
+        shim.write_text(SHIM.format(version=version, wheel=name, sha256=got), encoding="utf-8")
+        shim.chmod(0o755)
+        v = subprocess.run([str(shim), "--version"], capture_output=True, text=True, timeout=30,
+                           stdin=subprocess.DEVNULL)
+        if v.returncode != 0 or version not in v.stdout.split():
+            raise OSError(f"the fetched ctx reports {v.stdout.strip() or v.stderr.strip()!r}, not {version}")
+        _write_pin_status(src, version=version, wheel=name, sha256=got)
         try:
             os.replace(src, dest)
         except OSError:
             if not _usable(dest / "ctx"):  # a concurrent install won the rename: theirs is as good as ours
                 raise
-            return dest  # theirs stands, pin status included: writing ours over it would race it needlessly
-        _write_pin_status(dest, pinned_sha=sha, cloned_sha=cloned_sha, verified=verified)
+            return dest  # theirs stands, record included
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return dest
@@ -331,100 +417,6 @@ def _lines(text: str) -> list[str]:
     return [ln.strip() for ln in text.splitlines() if ln.strip()]
 
 
-def _settings_for_init() -> tuple[Path, dict | None]:
-    """The file `ctx init --settings` gets: the kit's `ctx-store.json`, minus `mcp` when it has one. The pinned
-    ctx's `init` bootstrap predates the `mcp.actors` setting (ctx-store#66/#71) and refuses any settings file
-    that names it (`SCHEMA_VIOLATION mcp`), even though every other ctx entry point reads `mcp.actors` straight
-    from `ctx-store.json` once it is there. `adopt` hands `init` everything `init` knows and applies `mcp`
-    itself, below — until `init` catches up, the one exception to "the kit never writes a store file"."""
-    data = json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8"))
-    mcp = data.pop("mcp", None)
-    if mcp is None:
-        return STORE_DATA / "ctx-store.json", None
-    fd, name = tempfile.mkstemp(prefix="ctx-store-settings-", suffix=".json")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    return Path(name), mcp
-
-
-def _init_marker(data: dict) -> bytes:
-    """The exact bytes `ctx init` itself writes for a settings marker (`ctxstore.bootstrap._marker`, pinned
-    CTX_VERSION) — matched byte for byte, so a file this writes digests to what `init`'s own audit row records
-    for it (ctx-store#73)."""
-    return (json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
-
-
-def _write_marker(path: Path, data: dict) -> None:
-    """Write a store marker atomically: `init`'s own bytes (`_init_marker`) to a temp file in `path`'s own
-    directory, then `os.replace` — so a write interrupted here leaves either the old marker or the new one, never
-    a truncated file the next parse trips on."""
-    fd, tmp = tempfile.mkstemp(prefix=".ctx-store-", suffix=".json.tmp", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(_init_marker(data))
-        os.replace(tmp, path)
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
-
-
-def _read_marker(root: Path) -> dict | None:
-    """Parse `ctx-store.json`'s marker. None when the file does not exist yet — a fresh store, nothing for either
-    `mcp` helper to do. Raises ValueError, message fit to print, when the file exists but its bytes do not parse
-    as a JSON object: callers must not skip that silently (a truncated marker from an interrupted write is exactly
-    what `_write_marker` above now prevents; one that still does not parse is treated as a real problem)."""
-    marker = root / "ctx-store.json"
-    try:
-        text = marker.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
-    try:
-        current = json.loads(text)
-    except ValueError as e:
-        raise ValueError(str(e)) from e
-    if not isinstance(current, dict):
-        raise ValueError("not a JSON object")
-    return current
-
-
-def _strip_mcp_for_upgrade(root: Path) -> dict | None:
-    """Before `ctx init --upgrade` runs (never for a fresh init or `--replace`, where this cannot matter): strip
-    `mcp` off the marker, if it parses and still carries one, so the file's bytes go back to exactly what the last
-    `init` wrote. `init --upgrade` (ctxstore.bootstrap) decides `kept` vs `written`/`unchanged` by comparing the
-    marker's digest to the hash its own audit row recorded, not by reading the file itself — stripped, that digest
-    lines up again and a kit settings change reaches the store normally (ctx-store#73). A local `mcp` is not
-    supported (the kit owns this key: its `actors` pattern is `session.py`'s own NAME_RE, and a local pattern would
-    break session writes) — every other key follows `init`'s own kept rule, but whatever value this removes is
-    replaced by `_apply_mcp_setting`, below, once `init` has run; the caller reports the swap, loudly, when the
-    removed value was not already the kit's. Returns the removed value, or None when there was none to remove.
-    Raises ValueError (see `_read_marker`) when the marker exists but does not parse — the caller stops before
-    `init` runs rather than skip the problem."""
-    current = _read_marker(root)
-    if current is None or "mcp" not in current:
-        return None
-    removed = current.pop("mcp")
-    _write_marker(root / "ctx-store.json", current)
-    return removed
-
-
-def _apply_mcp_setting(root: Path, mcp: dict) -> None:
-    """`ctx-store.json`'s `mcp` key, since `init` cannot write it (`_settings_for_init` above) and a local value is
-    not supported: put the kit's value back in, atomically (`_write_marker`) — after `init` has run, whether it
-    succeeded or not, so a failed upgrade never leaves the store without its actors pattern. A marker that does not
-    parse at this point was already reported by `_strip_mcp_for_upgrade` before `init` ran, or is a problem the
-    next `adopt` will catch the same way — this does nothing further rather than mask `init`'s own exit code."""
-    try:
-        current = _read_marker(root)
-    except ValueError:
-        return
-    if current is None:
-        return
-    if current.get("mcp") != mcp:
-        current["mcp"] = mcp
-        _write_marker(root / "ctx-store.json", current)
-
-
 ADOPT_DIGEST_REL = Path("state") / "ctx-adapter" / "adopted-kit.json"  # under the store's own ignored `state/**`
     # (ctx-store.json's `ignore` list) — a record this adapter owns, never a file `ctx` tracks or writes through a verb
 
@@ -432,7 +424,7 @@ ADOPT_DIGEST_REL = Path("state") / "ctx-adapter" / "adopted-kit.json"  # under t
 def _kit_data_digest() -> str:
     """sha256 over the kit's store settings (`ctx-store.json`) and every type schema under `STORE_DATA/types`,
     one relative name then its bytes, types sorted by filename — the same files `adopt` hands `ctx init`
-    (`--settings`/`--types`, `_settings_for_init`), so a kit release that edits either changes this digest.
+    (`--settings`/`--types`), so a kit release that edits either changes this digest.
     `adopt --check` compares it with what the last `adopt` on this store recorded (`_recorded_state`) to
     report the store `behind`, without re-running `ctx init` or touching a store file itself."""
     h = hashlib.sha256()
@@ -473,7 +465,7 @@ def _write_adopt_digest(root: Path, kept: list[str] | None = None) -> None:
     """Record `_kit_data_digest()`, this kit's own version (`_kit_version`) and, when `ctx init --upgrade` kept a
     locally edited store file this run (`kept`, the same list `adopt` already prints `differs:` lines for), that
     list too — under the store's ignored `state/` dir, atomically (temp file in the same directory, then
-    `os.replace` — the same pattern as `_write_marker`). Called once a full `adopt` has actually run `ctx
+    `os.replace` — the same pattern as `_write_pin_status`). Called once a full `adopt` has actually run `ctx
     init`/`migrate --apply` (never on an early-return error), so the record always reflects settings and types
     `ctx` was just handed, whatever `ctx validate` finds in the docs afterwards — `kept` is recorded right
     alongside the digest, not hidden behind it, so a `--check` that finds the digest clean still sees a kept
@@ -575,22 +567,8 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
             print(f"not adopted: {root} is not a ctx store — run `python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
             return 4
     else:
-        settings_path, mcp = _settings_for_init()
-        removed_mcp = None
-        if not replace and mcp is not None:
-            try:
-                removed_mcp = _strip_mcp_for_upgrade(root)  # undo the last patch so --upgrade's digest check sees init's own bytes
-            except ValueError as e:
-                settings_path.unlink(missing_ok=True)  # the temp file _settings_for_init wrote; never the kit's own
-                print(f"ctx_adapter.py adopt: ctx-store.json does not parse — {e}", file=sys.stderr)
-                return 2
-        try:
-            r = _ctx(ctx, store, "init", "--settings", str(settings_path),
-                     "--types", str(STORE_DATA / "types"), "--replace" if replace else "--upgrade", timeout=ADOPT_TIMEOUT)
-        finally:
-            if mcp is not None:
-                settings_path.unlink(missing_ok=True)  # the temp file _settings_for_init wrote; never the kit's own
-                _apply_mcp_setting(root, mcp)  # ctx-store#73: put it back whatever init just did to the file
+        r = _ctx(ctx, store, "init", "--settings", str(STORE_DATA / "ctx-store.json"),
+                 "--types", str(STORE_DATA / "types"), "--replace" if replace else "--upgrade", timeout=ADOPT_TIMEOUT)
         if r.returncode != 0:
             print(f"ctx_adapter.py adopt: ctx init failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
                   file=sys.stderr)
@@ -598,9 +576,6 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
         out = _lines(r.stdout)
         print((out or [f"ok: store {root}"])[0])
         kept = [ln.split(":", 1)[1].strip() for ln in out if ln.startswith("kept:")]  # edited here: it stays
-        if removed_mcp is not None and removed_mcp != mcp:  # a local mcp is not supported: always the kit's; say so,
-            print("updated: ctx-store.json mcp — the kit owns this key (session.py's name pattern); "  # never exit 5 —
-                  "the previous value was replaced")  # the kit's own next pattern would trip a "kept" message otherwise
         differs = bool(kept)
         for f in kept:
             print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
@@ -1213,10 +1188,10 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="ctx_adapter.py", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("version", help="print the pinned ctx-store tag")
+    sub.add_parser("version", help="print the pinned ctx-store version")
     sub.add_parser("where", help="print the ctx executable; exit 1 when not installed")
-    sub.add_parser("install", help="fetch the pinned tag into the pinned location")
-    sub.add_parser("pin", help="report the sha `install` found at the pinned location, and whether it verified")
+    sub.add_parser("install", help="fetch the pinned release from PyPI into the pinned location")
+    sub.add_parser("pin", help="report the version and wheel sha256 `install` recorded at the pinned location")
     ap = sub.add_parser("adopt", help="make the content root a ctx store with the kit's settings (ctx init)")
     ap.add_argument("--check", action="store_true",
                      help="report only: exit 4 when not adopted, 3 on findings, 6 when the store's recorded "
@@ -1245,7 +1220,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "version":
         print(CTX_VERSION)
         print(f"api {CTX_API}")
-        print(f"sha {CTX_SHA}")
+        print(f"sha256 {CTX_WHEEL_SHA256}")
         return 0
     if a.cmd == "where":
         ctx, why = resolve()
@@ -1257,13 +1232,13 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "pin":
         status = pin_status()
         if status is None:
-            print(f"no sha record at the pinned location ({pinned_dir()}) — not installed, or installed before "
+            print(f"no install record at the pinned location ({pinned_dir()}) — not installed, or installed before "
                   "this check existed; `ctx_adapter.py install` writes one with a fresh fetch only, so remove "
                   "that directory first when a copy is already there", file=sys.stderr)
             return 1
-        print(f"pinned_sha {status.get('pinned_sha') or ''}")
-        print(f"cloned_sha {status.get('cloned_sha') or ''}")
-        print(f"verified {'true' if status.get('verified') else 'false'}")
+        print(f"version {status.get('version') or ''}")
+        print(f"wheel {status.get('wheel') or ''}")
+        print(f"sha256 {status.get('sha256') or ''}")
         return 0
     if a.cmd == "mcp":
         return run_ctx(["mcp"], mcp=True)

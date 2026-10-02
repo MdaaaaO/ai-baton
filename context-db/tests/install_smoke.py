@@ -150,7 +150,7 @@ def main(argv: list[str]) -> int:
         script = PRELUDE + "\n".join(lines) + "\n"
         env = {k: v for k, v in git_env.items()
                if not k.startswith(("CLAUDE_", "WORKSPACE_", "BATON", "CONTEXT_ROOT", "GH_", "GITHUB_TOKEN"))}
-        # KIT_NO_CTX_FETCH=1: setup.sh must not clone ctx-store over the network in this smoke
+        # KIT_NO_CTX_FETCH=1: setup.sh must not download ctx-store from the network in this smoke
         env.update(PATH=f"{stub}{os.pathsep}{os.environ['PATH']}", KIT_SRC=str(src), KIT_NO_CTX_FETCH="1")
         # errors="replace": the block trims display lines with `cut -c`, which counts bytes and can split a UTF-8 character
         r = subprocess.run(["bash", "-c", script], cwd=home, env=env, capture_output=True, text=True, errors="replace", timeout=600)

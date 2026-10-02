@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "26"
+  version: "27"
   updated: "2026-10-02"
   reviewed: "2026-10-02"
 user-invocable: true
@@ -35,13 +35,11 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
      nested list (`docs/diagrams.md` § Rendering), through `ctx_str_replace`/`ctx_insert`. When the map does
      not move, add one Session log line instead: `Architecture unchanged: <reason>`. A landed PR with no
      `where=` needs nothing here.
-   - **Cap the Session log.** If `.context/archive/<slug>-log.md` does not exist yet, create it first
-     (`ctx_new` TYPE=log, same DOMAIN as the context doc, SLUG=`<slug>-log`) — `maintain`'s own fallback for a
-     missing archive doc fills in only `title`/`type`/`updated`, which the `log` type's `domain`/`status`
-     rules would then refuse. Then run `ctx_maintain` on the doc's store (Bash fallback: `ctx_adapter.py ctx
+   - **Cap the Session log.** Run `ctx_maintain` on the doc's store (Bash fallback: `ctx_adapter.py ctx
      maintain`) — a no-op below the store's size guard (30KB); past it, it keeps the newest ~6 entries
      (`maintain.keep_log` in `ctx-store.json`) in the doc, oldest-first, and moves the rest verbatim into the
-     archive doc, newest-first (the `log` type's order) — no manual move-and-reverse.
+     archive doc `.context/archive/<slug>-log.md`, newest-first (the `log` type's order) — no manual
+     move-and-reverse. A missing archive doc is created by `maintain` itself, valid for the `log` type.
      `make -C $BATON/context-db verify` warns at the same **30KB** — an oversized doc thrashes any session
      that re-reads it after a compact, so run `maintain` (or split the doc) as soon as you see the warning.
    - Reference every ticket/PR as a clickable link (§ Rules).
