@@ -10,6 +10,7 @@
 #   make -C $BATON/context-db verify         # validate frontmatter + INDEX freshness (CI-style gate)
 #   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
 #   make -C $BATON/context-db find DOMAIN=<domain>    # docs in a domain
+#   make -C $BATON/context-db find DOMAIN=<domain> STATUS=archived   # only the ones in that status
 #   make -C $BATON/context-db archive SLUG=opine      # flip a doc to status: archived
 #
 # Live session registry (who is working on what, right now — see SESSION_INDEX.md):
@@ -244,16 +245,17 @@ review-gate-tree:
 	@cd $(ENGINE).. && $(PY) $(BIN)/review_gate.py --tree --head HEAD
 review-evidence:
 	@cd $(ENGINE).. && $(PY) $(BIN)/review_evidence.py --base $(BASE) --head HEAD $(if $(SKIP_BUMP),--skip-bump,) --out .review/evidence.md
-# make find TAG=foo   |   make find DOMAIN=bar
+# make find TAG=foo   |   make find DOMAIN=bar   — STATUS=<status> keeps only the docs in that status
+FIND_STATUS = $(if $(STATUS),| while IFS= read -r f; do grep -qE '^status:[[:space:]]*$(STATUS)[[:space:]]*$$' "$$f" && echo "$$f"; done,)
 find:
 ifdef TAG
-	@grep -rIl --include='*.md' -E '^tags:.*\b$(TAG)\b' $(CONTEXT) | sed 's|$(CONTEXT)/||' | sort || true
+	@grep -rIl --include='*.md' -E '^tags:.*\b$(TAG)\b' $(CONTEXT) $(FIND_STATUS) | sed 's|$(CONTEXT)/||' | sort || true
 endif
 ifdef DOMAIN
-	@grep -rIl --include='*.md' -E '^domain:[[:space:]]*$(DOMAIN)[[:space:]]*$$' $(CONTEXT) | sed 's|$(CONTEXT)/||' | sort || true
+	@grep -rIl --include='*.md' -E '^domain:[[:space:]]*$(DOMAIN)[[:space:]]*$$' $(CONTEXT) $(FIND_STATUS) | sed 's|$(CONTEXT)/||' | sort || true
 endif
 ifeq ($(TAG)$(DOMAIN),)
-	@echo "usage: make find TAG=<tag>  |  make find DOMAIN=<domain>"
+	@echo "usage: make find TAG=<tag> [STATUS=<status>]  |  make find DOMAIN=<domain> [STATUS=<status>]"
 endif
 
 # --- live session registry (operational; skipped by index/verify) ---
@@ -302,7 +304,8 @@ session-index:
 session-archive:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) gen_sessions.py $(if $(DRY),--dry-run,) $(if $(NOARCHIVE),--no-archive,)
 
-# make archive SLUG=<file-slug>  — flip status to archived in place (kept in INDEX).
+# make archive SLUG=<file-slug>  — flip status to archived in place (INDEX folds it into its domain's
+# archived count; `make find DOMAIN=<domain> STATUS=archived` still lists it).
 # Atomic: sed writes a temp copy in the same directory, `mv` replaces the doc in one rename — a reader
 # (or a second `make archive`/`make index` racing this one) sees the old doc or the new one, never a
 # half-written one; the temp copy is removed if the sed or the mv fails, so nothing is left behind.
@@ -314,6 +317,6 @@ archive:
 	 test -n "$$f" || { echo "no doc named $(SLUG).md"; exit 1; }; \
 	 tmp=$$(mktemp "$$f.XXXXXX"); \
 	 if cp -p "$$f" "$$tmp" && sed -E 's|^status:.*|status: archived|' "$$f" > "$$tmp" && mv -f "$$tmp" "$$f"; then \
-	   echo "archived $$f (still indexed; move to archive/ by hand if you want it out of the domain view)"; \
+	   echo "archived $$f (INDEX.md counts it under its domain; \`make find DOMAIN=<domain> STATUS=archived\` still lists it)"; \
 	 else rm -f "$$tmp"; exit 1; fi; \
 	 $(MAKE) --no-print-directory -f $(lastword $(MAKEFILE_LIST)) index

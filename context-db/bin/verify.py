@@ -6,7 +6,8 @@ Checks every content doc for:
   - the required keys (title/type/domain/status/updated),
   - `type` and `status` drawn from the allowed vocabularies,
   - an ISO `updated` date that parses,
-  - INDEX.md being up to date (regenerate and diff).
+  - INDEX.md being up to date (regenerate and diff),
+  - INDEX.md staying under its size budget (non-fatal — see INDEX_SIZE_WARN below).
 
 Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & gotchas*
 (`docs/carousel.md` § After the answer) — a line that is ledger-shaped (starts with a bare date,
@@ -43,6 +44,10 @@ ACTIVE_SIZE_WARN = 30 * 1024  # ~8k tokens
 # SESSION_INDEX.md is read at every session start (WORKSPACE.md § Sessions); gen_sessions.py keeps
 # ended rows short and capped (MAX_ENDED), so passing this means active rows have bloated. Non-fatal.
 SESSION_INDEX_WARN = 10 * 1024
+# INDEX.md is read whole at every "find first" step (WORKSPACE.md § The .context/ DB); gen_index.py's
+# fold rule keeps archived rows out of it, so passing this means the active roster itself has grown —
+# the one number SESSION_INDEX_WARN already uses. Non-fatal.
+INDEX_SIZE_WARN = 10 * 1024
 
 # Decision-ledger shape (docs/carousel.md § After the answer): "YYYY-MM-DD · <question> → <chosen>;
 # not <rejected options> — <one clause why>". A line only counts as ledger-shaped (and so only then
@@ -143,6 +148,14 @@ def main() -> int:
     if si > SESSION_INDEX_WARN:
         print(f"⚠ SESSION_INDEX.md is {si // 1024}KB (> {SESSION_INDEX_WARN // 1024}KB) — it is read at every "
               f"session start; trim the active rows' working_on/responsibilities or lower MAX_ENDED",
+              file=sys.stderr)
+    try:
+        ix = os.path.getsize(index_path)
+    except OSError:
+        ix = 0
+    if ix > INDEX_SIZE_WARN:
+        print(f"⚠ INDEX.md is {ix} bytes (> {INDEX_SIZE_WARN // 1024}KB) — it is read whole at every "
+              f"\"find first\" step; archive finished docs (`make -C $BATON/context-db archive SLUG=<slug>`) to bring it back under budget",
               file=sys.stderr)
 
     # Decision-ledger shape (non-fatal) — a line that already starts with a date and has the
