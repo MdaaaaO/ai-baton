@@ -92,6 +92,23 @@ class MarkOnlyRequiresRun(unittest.TestCase):
         self.assertIn("outside", r.stderr, r.stderr)
         self.assertEqual(self.ledger_rows(), [], "a refused --run must never write the ledger")
 
+    def test_a_symlink_under_base_out_that_points_outside_is_refused(self):
+        outside = self.make_run("run.outside", [row(106, "f" * 40)], under_base=False)
+        (self.base_out / "run.link").symlink_to(outside, target_is_directory=True)
+
+        r = self.mark(self.base_out / "run.link")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertEqual(self.ledger_rows(), [])
+
+    # --- the old refusals still hold: no dir, or a sweep that never wrote queue.json, exits 5 ---
+
+    def test_a_missing_run_dir_or_unfinished_sweep_exits_5(self):
+        unfinished = self.base_out / "run.unfinished"; unfinished.mkdir()
+        for target in (self.base_out / "run.gone", unfinished):
+            r = self.mark(target)
+            self.assertEqual(r.returncode, 5, f"{target.name}: {r.stdout + r.stderr}")
+        self.assertEqual(self.ledger_rows(), [])
+
     # --- --run is mandatory: omitting it is a usage error, not a 'latest' fallback ---
 
     def test_run_is_required_no_latest_fallback(self):

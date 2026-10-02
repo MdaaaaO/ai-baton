@@ -1,6 +1,6 @@
 ---
 name: pr-scan
-description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row brief in 5 ordered sections by per-row State, ending in a mark trailer the main session runs, or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
+description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row brief in 5 ordered sections by per-row State (Needs you, New, Handled this tick, Follow-up, Watching) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
 metadata:
   version: "20"
   updated: "2026-10-02"
