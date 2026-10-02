@@ -69,6 +69,12 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `SIGN_QUEUE_CONTEXT` | `SIGN_QUEUE_ROOT/.context`, else `kit_profile.context_root()` | `skills/sign-queue/enqueue.sh`, `skills/sign-queue/signq.py` | override which `.context/` the queue lives under | internal |
 | `SIGN_QUEUE_DIR` | `<context>/state/sign-queue` | `skills/sign-queue/enqueue.sh`, `skills/sign-queue/signq.py` | override the queue directory itself | internal |
 
+## `cost-report`
+
+| Name | Default | Read by | Purpose | Scope |
+|---|---|---|---|---|
+| `COST_REPORT_RETRY_DELAY` | `10` (seconds) | `skills/cost-report/cost_report.py` | first wait before retrying a rate-limited `gh search` call, doubled on each further retry (tests set it near 0) | test-only |
+
 ## `pr-review`
 
 | Name | Default | Read by | Purpose | Scope |
