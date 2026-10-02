@@ -112,7 +112,8 @@ ERR=$OUT/errors.txt; : > "$ERR"; : > "$ERR.raw"
 # epoch arithmetic + epoch_to_iso, not `date -d "-N days"` (GNU-only — BSD `date` has no `-d`)
 since=$(epoch_to_iso "$(( $(date -u +%s) - DAYS * 86400 ))")
 
-# one scan at a time — a second sweep would double-mark the ledger; with_lock falls back to an
+# one scan at a time — a second sweep would repeat the gh calls and race the first for `latest` (the ledger is
+# written only by --mark-only, under ledger-append.sh's own lock); with_lock falls back to an
 # atomic mkdir where this host has no flock (macOS without coreutils)
 with_lock "$ROOT/.scan.lock" || { echo "error: another pr-scan holds $ROOT/.scan.lock — not starting a second sweep" >&2; exit 3; }
 
