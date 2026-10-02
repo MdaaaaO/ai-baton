@@ -2,8 +2,8 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads; a trivial PR auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "36"
-  updated: "2026-10-01"
+  version: "37"
+  updated: "2026-10-02"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
@@ -41,7 +41,7 @@ enter its prefix — everything read there is re-billed on every later tick. The
 
 The main session never opens `$CTX/diff.patch`, `files.json`, `reviews.json` or `threads.json`
 itself; if a walk question needs them, that is a deep dive (a child reads them). `--deep` spawns its
-three lenses **inside** the runner (it has `Agent`), so the main session sees one return either way.
+lenses **inside** the runner (it has `Agent`), so the main session sees one return either way.
 `--local` runs steps 1–4 in-session — only for a session that exists for this one review and ends
 after it, never in the `pr-scan` monitor session.
 
@@ -97,11 +97,10 @@ Read, in this order, only the slices you need (`grep -n '^## ' file` first):
 Read `diff.patch` (and `files.json` for per-file stats). Default is one careful pass by this model,
 collecting candidates per `scope.md` classes. `--deep` — **only** when the user passes it or the queue row
 is over `deep_lines` (the `!` marker); a write-audit-publish/layer-placement/grant change is a reason to
-*suggest* `--deep` to the user, not to trigger it — runs three lenses (design & data contracts, failure
-modes, verification & maintainability) **in parallel** as `Agent` calls with `model: opus` spawned by the
-runner, each given the bundle dir and one lens, returning ≤ 12 lines of claims only (no SQL, no fixes);
-the exact lens scope for each: `reference/runner.md` § Deep lenses. Then the runner verifies their claims
-in **one** batched pass — a lens finding without evidence you can restate is a question, not a finding.
+*suggest* `--deep` to the user, not to trigger it — runs the three lenses, plus a security lens when
+`security-surface.py` (no model call) prints `SURFACE`, **in parallel** as opus `Agent` calls, each given
+the bundle dir and one lens, returning ≤ 12 lines of claims only (`reference/runner.md` § Deep lenses). The
+runner then verifies their claims in **one** batched pass — a claim without restatable evidence is a question.
 
 ## 4. Verify before you repeat *(runner)*
 
@@ -131,6 +130,7 @@ Numbers are assigned once and never change — the user refers to "#3" later.
 ```
 REVIEW SHEET <repo>#<pr> @ <head7> · mode <mode> · <author> · <title> · +A/-D F files
 bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits>)
+[lenses: design, failure modes, verification[, security (<reasons>)][ · security gate failed: <reason>]]   ← only on `--deep`
 [<System> enrichment: n/a in this environment]   ← one per skipped gate
 | # | sev | class | file:line | finding (one line) |
 …

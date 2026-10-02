@@ -2,8 +2,8 @@
 name: review-runner
 description: "Opus worker for pr-review steps 1–4 (snapshot, repo trap KB, review pass incl. --deep lenses, independent verification) on one PR: writes the triage sheet to $CTX/triage.json, returns only the overview block (≤3K tokens) — the diff never enters a long-lived prefix. Never posts, never asks. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "15"
-  updated: "2026-09-30"
+  version: "16"
+  updated: "2026-10-02"
   reviewed: "2026-09-27"
   facts: "tracker.mcp_tools.search"
 model: opus
@@ -68,10 +68,19 @@ so you spend them on judgment, not on fetching.
    circumstantial · **NIT** style/naming, posted with `nit:`. Proportionality: ≤ 3 inline comments on a
    20-line PR (merge the rest into the body); out-of-diff bugs are fast-follows `FF1…`, not blockers; one
    instance per pattern; no finding without evidence.
-   **`--deep`** (only when the prompt says so): spawn the three lenses as parallel `Agent` calls,
-   `subagent_type: general-purpose`, `model: opus`, each with this brief and nothing more:
+   **`--deep`** (only when the prompt says so): first run the security-surface gate —
+   `python3 $BATON/skills/pr-review/scripts/security-surface.py $CTX` (no model call; reads `bundle.json`
+   and `diff.patch`, or the per-file patches under `diffs/` when `diff.patch` is empty). `SURFACE <reason>[,
+   <reason>…]` → the lens set is the usual three **plus** a fourth, **security**, whose scope line is the
+   printed reasons verbatim. `NONE` → the usual three. A non-zero exit (unreadable bundle, or added lines
+   it could not read) → the usual three, and name the failure (its stderr line) in the sheet's `lenses:`
+   line — never a lens skipped in silence. Spawn the lens set as parallel `Agent` calls,
+   `subagent_type: general-purpose`, `model: opus`, each with this
+   brief and nothing more:
    ```
-   Lens <design & contracts | failure modes | verification & maintainability> for <repo>#<pr>.
+   Lens <design & contracts | failure modes | verification & maintainability | security> for <repo>#<pr>.
+   [security lens only:] Scope: <the SURFACE reasons, verbatim>. Read for security alone: does the diff
+   widen a grant, leak a credential, or let PR-controlled input reach a shell or `eval`?
    Read only under <$CTX>: bundle.json, diff.patch, head/, base/, kb-traps.md. Do not run gh, git or SQL.
    Return ≤ 12 lines: "## Findings" — one per line, `sev · file:line · claim · what in the bundle shows it`.
    Claims only; no fixes, no prose, no SQL. Nothing verified = say "none".
@@ -123,6 +132,7 @@ tracker key into a proposed `comment` — link keys as `[KEY-n](<tracker.url_tem
 ```
 REVIEW SHEET <repo>#<pr> @ <head7> · mode <mode> · <author> · <title> · +A/-D F files
 bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits>)
+[lenses: design, failure modes, verification[, security (<reasons>)][ · security gate failed: <reason>]]   ← only on `--deep`
 | # | sev | class | file:line | finding (one line) |
 …
 RECOMMEND: COMMENT | REQUEST_CHANGES | APPROVE-if-user-agrees
