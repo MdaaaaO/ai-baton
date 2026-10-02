@@ -154,6 +154,17 @@ class PrTitleHygiene(unittest.TestCase):
                          "pr-title.yml's bootstrap fallback has drifted from .github/versions.env's pin")
 
 
+class RunBlocksParse(unittest.TestCase):
+    def test_every_run_block_parses_as_bash(self):
+        # a quote left open inside a `${VAR:-…}` default is a parse error only at run time: the step dies before
+        # its first command, and a workflow that starts by hand shows it on the first paid run
+        for wf in sorted(WORKFLOWS.glob("*.yml")):
+            text = wf.read_text(encoding="utf-8")
+            for n, (_, body) in enumerate(re.findall(r"(?m)^( +)run: \|\n((?:\1  .*\n|\n)+)", text)):
+                r = subprocess.run(["bash", "-n"], input=body, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, f"{wf.name}, run block {n}:\n{r.stderr}")
+
+
 class EvalsHygiene(unittest.TestCase):
     TEXT = (WORKFLOWS / "evals.yml").read_text(encoding="utf-8")
 

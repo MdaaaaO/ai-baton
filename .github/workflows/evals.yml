@@ -122,7 +122,7 @@ jobs:
           rc=0
           for model in ${MODELS:-default}; do
             [ "$model" = default ] && model=""
-            echo "## evals — ${SKILL:-every case} on ${model:-the default model}, judge ${JUDGE_MODEL:-the make target's default}" >> "$GITHUB_STEP_SUMMARY"
+            echo "## evals — ${SKILL:-every case} on ${model:-the default model}, judge ${JUDGE_MODEL:-the make default}" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
             # an empty JUDGE switches the make target's default judge off, on the command line and from the
             # environment alike (make reads both): the input lives in JUDGE_MODEL, a name make does not use, and
