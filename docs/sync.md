@@ -4,7 +4,8 @@ The kit's `main` only ever fast-forwards to `origin/main`; every change arrives 
 
 > **Plugin install:** this page is about a clone (`.claude/`, a git checkout). A plugin install has no `sync.sh`, no
 > SessionEnd sync hook and no git hooks; it moves release by release through `claude plugin update`
-> (`docs/packaging.md` § Updating).
+> (`docs/packaging.md` § Updating). Updating one safely, step by step:
+> [`plugin-setup.md`](plugin-setup.md#updating-a-plugin-install-safely) § Updating a plugin install safely.
 
 ## Commands
 
@@ -101,6 +102,9 @@ network or an unauthenticated `gh`, so `.sync-status` is `ok …` with the stand
 a short reason appended. The word and the reason live in `.sync-status` and in `make claude_sync`'s
 output; `sync-check.sh` does not warn on it, `kit-health` § 1 does. `kit.channel main` never verifies — there is no release tag
 to verify against.
+
+[`SECURITY.md`](../SECURITY.md#verifying-a-release) § Verifying a release has what the manifest and the
+attestation check prove, and what immutable releases and the tag ruleset on `v*` do and don't guarantee.
 
 **A rejected tag stays rejected.** `.sync-rejected` (ignored, same shape as `.sync-status`'s detail: one
 line, `<tag> <reason>`) remembers the tag the check last **failed** — not one it could merely not check —
