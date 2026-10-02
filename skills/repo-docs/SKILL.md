@@ -1,12 +1,12 @@
 ---
 name: repo-docs
-description: Write or restructure a repo's README.md and CONTRIBUTING.md in the house style — badges, a short pitch, code on the first screen, tables over prose, detail linked to docs/ — measured by readme-check.py. Use when a README reads as a wall of text or a repo goes public. Not for docs/ pages or CHANGELOGs.
+description: Write or restructure a repo's README.md and CONTRIBUTING.md in the house style — badges, a short pitch, code first, tables over prose, detail linked to docs/ — measured by readme-check.py. Use when a README reads as a wall of text or a repo goes public. Not for docs/ pages or CHANGELOGs.
 user-invocable: true
 argument-hint: "<repo-dir> [readme|contributing|both]"
 metadata:
   version: "3"
-  updated: "2026-09-28"
-  reviewed: "2026-09-28"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
 ---
 
 # repo-docs — a front page a stranger understands in one screen

@@ -17,7 +17,7 @@ Loaded by Claude Code at session start, before the first prompt:
 | the root `CLAUDE.md` preamble | the user's file, seeded from `CLAUDE.example.md` | 480 B skeleton (the user's preamble adds to it) | none — keep it about the user |
 | `@.claude/WORKSPACE.md` | the kit, imported by the root `CLAUDE.md` | 9,990 B | `ALWAYS_ON_BUDGET["WORKSPACE.md"]` = 10,000 B |
 | `@.context/reference/environment.md` | the machine's prose, seeded from `environment-template/environment.md` | 2,039 B template | `ALWAYS_ON_BUDGET["environment-template/environment.md"]` = 2,200 B (the seeded copy grows on the machine and is not capped) |
-| every skill's and agent's `name` + `description` | `skills/*/SKILL.md`, `agents/*.md` (<!-- kit-verify:units -->30<!-- /kit-verify:units --> units) | <!-- kit-verify:desc-bytes -->9,376 B<!-- /kit-verify:desc-bytes --> | `DESC_MAX_WORDS` 60 and `DESC_MAX_BYTES` 400 per unit, `DESC_TOTAL_BYTES` 9,500 across the kit (warns past 90%) |
+| every skill's and agent's `name` + `description` | `skills/*/SKILL.md`, `agents/*.md` (<!-- kit-verify:units -->30<!-- /kit-verify:units --> units) | <!-- kit-verify:desc-bytes -->8,514 B<!-- /kit-verify:desc-bytes --> | `DESC_MAX_WORDS` 60 and `DESC_MAX_BYTES` 400 per unit, `DESC_TOTAL_BYTES` 9,500 across the kit (warns past 90%) |
 | the auto-memory index `MEMORY.md` | `.context/memory/` (the harness memory dir, symlinked there by `setup.sh`) | per machine | none in the kit |
 
 ≈ 22.0 KB from the kit and templates before the user's preamble and memory index. What belongs here: rules that
@@ -28,7 +28,7 @@ does: a procedure, an example exchange, a rationale, an environment value.
 ## Layer 2 — on invoke (when a skill or agent runs)
 
 - **`SKILL.md` bodies** load when the skill is invoked (by trigger or `/name`): <!-- kit-verify:bodies -->27<!-- /kit-verify:bodies --> bodies,
-  <!-- kit-verify:body-bytes -->248,034 B<!-- /kit-verify:body-bytes --> together, so the
+  <!-- kit-verify:body-bytes -->222,772 B<!-- /kit-verify:body-bytes --> together, so the
   layer is roughly ten times the always-on one and is paid only by the session that uses it. Cap `BODY_MAX_LINES` = 300
   lines per body (a warn past `BODY_WARN_LINES` = 130); target 70–130 (`docs/contributing.md` § Skills). A unit that
   genuinely needs more is named in `BODY_LINES_ALLOW` (kit_verify.py) with a reason.

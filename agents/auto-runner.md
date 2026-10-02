@@ -1,10 +1,10 @@
 ---
 name: auto-runner
-description: "Sonnet worker for the trivial-PR auto-approve path (docs-only / dependency patch bumps that passed trivial-check.py): runs fetch-context.sh, checks the docs claims or the bump's release notes and lockfile, writes $CTX/auto.json, returns AUTO approve/fallback lines only. Any doubt is a fallback. Never posts; the main session decides."
+description: "Sonnet worker for the trivial-PR auto-approve path (docs-only/dependency-bump PRs that passed trivial-check.py): checks the docs claims or release notes/lockfile, writes $CTX/auto.json, returns AUTO approve/fallback lines only. Use when trivial-check.py routes a PR here. Any doubt is a fallback. Never posts; the main session decides."
 metadata:
   version: "7"
-  updated: "2026-09-28"
-  reviewed: "2026-09-24"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
 model: sonnet
 effort: medium
 omitClaudeMd: true

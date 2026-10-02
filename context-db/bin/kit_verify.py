@@ -609,12 +609,27 @@ BODY_MAX_LINES = 300  # the hard cap — errors past this for every unit, allow-
 # its reason. Exempts the unit from the BODY_WARN_LINES warning only: BODY_MAX_LINES still applies, so an
 # allow-listed body cannot grow without bound.
 BODY_LINES_ALLOW = {
+    "session-handoff": "step 10's full handoff-prompt text (the `### Since last handoff` block, the "
+                 "first-handoff fallback, the ≤12-line full-state cap and its fields) is quoted verbatim, "
+                 "substring-for-substring, by tests/test_diff_shaped.py — extracting it to reference/ broke "
+                 "that contract, so it stays inline rather than risk another drift",
     "pr-review": "the per-finding walk (Post / Deep dive / Body only / Skip), the repo trap KB and the "
                  "verification steps are the one walkthrough a reviewer follows top to bottom, not reference "
                  "material to split out",
     "self-assessment": "the week-file, report-block and ledger-card templates and the back-fill branch for "
                        "every systems-of-record source are the procedure itself, not reference material to "
                        "split out",
+    "pr-open": "the numbered 0-7 checklist (sizing gate, create with Verified/public-text-check/length_check, "
+               "reviewers, labels, watch, tracker, Slack draft, tell the user) is the one ordered sequence a "
+               "session follows top to bottom to open a PR, not reference material to split out; rationale and "
+               "detail already moved to reference/diagrams.md and reference/labels.md",
+    "session-register": "the numbered startup sequence (orient, narrate-back/carousel, register, re-arm "
+               "PR-watch), the heartbeat and the on-end steps are the one ordered procedure every session runs, "
+               "not reference material to split out; mechanism detail, field tables and rationale already moved "
+               "to reference/registry.md",
+    "pr-watch": "arm/re-arm, park, triage-and-act and merge are five distinct operational sequences a session "
+               "runs at different points, each already condensed to a pointer-backed summary; full mechanism "
+               "detail, tables and rationale already moved to five reference/*.md files",
 }
 # a backticked path a unit cites inside its own directory: `scripts/x.sh …`, `references/y.md`, `.claude/skills/<name>/scripts/x`
 # `skills/<x>/SKILL.md` or a bare `skills/<x>/` in a body: another skill referenced by PATH. The contract is by name

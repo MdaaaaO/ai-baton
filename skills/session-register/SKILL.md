@@ -1,10 +1,10 @@
 ---
 name: session-register
-description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
+description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate-back-then-carousel when paste-started as a successor, re-arm PR-watch at startup, rename a mis-named session, name ctx writes as yourself, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
   version: "30"
-  updated: "2026-10-01"
-  reviewed: "2026-09-24"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
 user-invocable: true
 ---
 
@@ -33,38 +33,25 @@ worktree.
    the successor of `<name>`; your prompt is in `<path>` § Next session." — that line is not the
    prompt itself: open `<path>` (relative to the workspace root, e.g. `.context/sessions/<name>.md`,
    or the archive path when the predecessor was already swept) and read its `## Next session` section
-   for the full text; the table never carries the prompt's own words. Only the newest `MAX_ENDED`
-   ended sessions get a starter; an older one (still in the fold) is named with a link to the same
-   path but no starter — open the file the same way. A session that ended with nothing to hand over
-   (no `## Next session`, or a "no successor" note) is not listed at all — there is nothing to pick up.
-   A predecessor that ended more than `SESSION_ARCHIVE_DAYS` (7) days ago is no longer in the index —
-   it was swept to `sessions/archive/<name>.md` (listed in `sessions/archive/INDEX.md`, prompt intact).
-   Register under the name it proposes, read what it lists, claim what it names.
+   for the full text; the table never carries the prompt's own words. A session with nothing to hand
+   over is not listed at all. Register under the name it proposes, read what it lists, claim what it
+   names. Starter-eligibility window and the archived/no-starter cases: `reference/registry.md` § Startup.
    **Narrate back before touching anything else.** Right after reading `## Next session`, say the
    state back in five lines — Owns · Landed · Open · First step · Not known — before any edit,
    comment, worktree or push (only registration, the heartbeat and re-arming PR watches, steps 3-4
    below, may run first). Check each time-sensitive claim (a PR merged, a draft sent, a ticket
    closed) against the surface before stating it; put anything unverifiable under Not known.
    Confirm with one carousel (`docs/carousel.md`): Proceed (recommended when nothing drifted) ·
-   Different first step · Stop — a correction is the carousel's free-text answer. No tool available
-   (a headless or scheduled run): print the five lines, log them, and proceed only with the steps
-   the handoff prompt marks standing go; the rest waits in a `Decisions` block. Either way, log the
-   five lines — joined with ` · ` — as this session's first Session log entry (`ctx_log` on the
-   epic context doc).
+   Different first step · Stop — a correction is the carousel's free-text answer. Log the five
+   lines — joined with ` · ` — as this session's first Session log entry (`ctx_log` on the
+   epic context doc). The headless/no-tool fallback: `reference/registry.md` § Narrate-back.
 2. **Decide coordination:** if another *active* session already owns the epic/PR/worktree you
    are about to touch, agree ownership explicitly (one `SendMessage`, or leave it to them) —
    don't both edit the same PR or run git in the same worktree. If no one owns it, you do.
-3. **Register yourself.** `NAME` follows the convention **`<lane>-<topic>[-n]`**: lower-case kebab-case, at
-   least two parts, at most 32 characters. The *lane* is the repo or area (`kit`, the repo's short name), the *topic*
-   what you own (`hardening`, a ticket number, a feature); a successor on the same lane adds `-2`, `-3`
-   (`kit-hardening`, `kit-216-changelog`, `<repo>-weekly-2`). `session-register` refuses a new name outside it; a
-   successor takes the name its predecessor's prompt proposes. The name ends every PR body and PR comment you post on
-   your own PRs (the `footer:` line of the resolved-profile block, below), so it is public: no person, org or private project in it — enforced,
-   not just asked: a NEW name is refused when it embeds one of this environment's own `tracker.repos` (full slug
-   or bare name)/domain names, or its `tracker.key_regex` shape (lower-case included, e.g. a lane like
-   `key-123-topic`); an existing name already on file is grandfathered. A generic
-   placeholder still matches the regex and is not exempt — `<lane>-lane-<n>` (e.g. `kit-lane-6`) is not a topic;
-   the *topic* part must name what you actually own. Get your `ref` from `ListAgents` (your own row):
+3. **Register yourself.** `NAME` follows **`<lane>-<topic>[-n]`** (kebab-case, ≥2 parts, ≤32 chars) — lane
+   = repo/area, topic = what you own; a successor on the same lane adds `-2`/`-3`. Public (it ends every PR
+   you post as the `footer:` line, below): the refusal and grandfather rules for the convention:
+   `reference/registry.md` § Naming. Get your `ref` from `ListAgents` (your own row):
 
    ```sh
    make -C $BATON/context-db session-register NAME=<name> REF=<ref> EPIC=<tracker-key> \
@@ -73,63 +60,45 @@ worktree.
    ```
    Then fill the body of `.context/sessions/<name>.md` (a direct `Edit`, or the ctx tools — `sessions/` is
    exempt from the write deny) with anything another session needs (what you own vs. don't, in-flight
-   worktrees/PRs). The session type is owned (§ below): a ctx write to your own file must name your
-   actor, or the store refuses it `NOT_OWNER`. **Override it whenever your
-   responsibilities change** — re-run `session-register` (it upserts, preserving the body) or
-   edit the body directly (`sessions/` stays writable; the hook regenerates `SESSION_INDEX.md`).
+   worktrees/PRs). A ctx write to your own file must name your actor (§ below) or the store refuses it
+   `NOT_OWNER`. **Override it whenever your responsibilities change** — re-run `session-register` (it
+   upserts, preserving the body) or edit the body directly (`sessions/` stays writable; the hook
+   regenerates `SESSION_INDEX.md`).
    **Rename** a session already registered under a generic or wrong name instead of leaving it and
-   re-registering fresh — this moves the file, rewrites its frontmatter and title, and, only when your
-   own backstop heartbeat (below) was actually running for the old name, restarts it under the new name
-   with the same focus in one step. Only rename **your own live session** — renaming an ended or someone
-   else's entry moves the file but starts no heartbeat (there is none of yours to restart), so do that by
-   hand if it still needs one. A loop another session started under the same name is left running:
+   re-registering fresh — moves the file, restarts your own live backstop heartbeat under the new name.
+   Mechanics and the own-live-session-only restriction: `reference/registry.md` § Rename.
    ```sh
    make -C $BATON/context-db session-rename FROM=<old-name> TO=<new-name>
    ```
    `<new-name>` follows the same convention and is refused if another entry already has it.
 4. **Re-arm the PR watches.** `Monitor`s die with the session that armed them, so a restarted or
-   successor session owns PRs that nobody is watching. `session.py end`/`touch` always leave a
-   `## Open PRs` heading behind (`none` when there is nothing to list) — a predecessor file missing
-   the heading entirely predates that fix and is not the same as "no PRs": treat it as unknown and
-   check `gh pr list --author @me` before assuming there is nothing to re-arm. For **every open PR
-   you now own** (the `## Open PRs` list in the predecessor's session file, the context doc's *What
-   was built* / *Remaining work*, or `gh pr list --author @me`), verify the current head with
-   `gh api repos/<o>/<r>/pulls/<n> --jq .head.sha` and arm **one** multi-PR `pr-watch` Monitor covering
-   all of them (the `pr-watch` skill;
+   successor session owns PRs that nobody is watching. A missing `## Open PRs` heading is unknown, not
+   "no PRs" — check `gh pr list --author @me` (detail: `reference/registry.md` § Re-arm). For **every
+   open PR you now own** (predecessor's `## Open PRs`, the context doc's *Remaining work*, or `gh pr
+   list --author @me`), verify the current head with `gh api repos/<o>/<r>/pulls/<n> --jq .head.sha`
+   and arm **one** multi-PR `pr-watch` Monitor covering all of them:
    `PR_WATCH_WORKTREE=<checkout> bash …/pr-watch.sh <o>/<r> <n> <head> [<n> <head> …]` under
-   `Monitor`, `timeout_ms: 1800000` — the harness caps a Monitor at 30 min, and each expiry is a
-   billed wake-up; one Monitor per repo, not per PR; owner decision, 2026-09-22).
-   On expiry, re-arm with the identical call (same command and heads; the watcher stays silent) — unless the last **two** windows brought zero actionable events, in which case
-   park instead: `session-handoff` and end the session (`pr-watch` § Park when the gates are not yours).
-   Park at once — do not wait for two windows — the moment the user signs off, or when the only pending event
-   is a human approval / host-only gate (2026-09-22).
-   Skip a PR only if `SESSION_INDEX.md` shows another *active* session already watching it
-   (one watcher per PR across sessions). Then list the armed PRs under `## Open PRs` in your session file
-   (`repo#n head — what it waits on`) so the next session can repeat this step. Registration is not
-   complete until the watches are up — a PR whose review lands unwatched is the failure this step
-   prevents (owner decision, 2026-09-18).
+   `Monitor`, `timeout_ms: 1800000` (30-min cap,
+   each expiry billed; one Monitor per repo, not per PR). On expiry, re-arm with the identical call
+   unless the last **two** windows brought zero actionable events — then park instead (`session-handoff`
+   and end; `pr-watch` § Park). Park at once, not after two windows, the moment the user signs off or
+   the only pending event is a human-approval/host-only gate. Skip a PR only if `SESSION_INDEX.md` shows
+   another *active* session already watching it. List the armed PRs under `## Open PRs`
+   (`repo#n head — what it waits on`) — registration is not complete until the watches are up.
 
-Registering records the name for this session: `python3 $BATON/context-db/bin/kit_profile.py session-name` prints it,
-and the session self-identifier — `session \`<name>\`` — is the `footer:` line of the resolved-profile block the
-SessionStart hook prints (from the next session start; once a compaction drops that block, it never printed, or
-you registered or renamed after the start — the block shows the name of that moment — `kit_profile.py footer`
-prints the current one). It is the last line of every PR body and PR comment on your own PRs
-(`pr-open`, `pr-watch`); never an AI attribution line.
+Registering records the name for this session: `kit_profile.py session-name` prints it, and the session
+self-identifier — `session \`<name>\`` — is the `footer:` line of the resolved-profile block the
+SessionStart hook prints (`kit_profile.py footer` gets the current one after a compaction or a late
+rename). It is the last line of every PR body and PR comment on your own PRs (`pr-open`, `pr-watch`);
+never an AI attribution line. The same hook re-grounds you after a compaction too — what it opens with
+and in what order: `reference/registry.md` § Compaction re-grounding.
 
-The same hook re-grounds you after a compaction too: its `compact` matcher opens with one line naming your
-session file and, when one resolves, its context doc, then your session brief — `session`/`epic`/`working_on`/
-`responsibilities` first, `## Open PRs`/`## Open decisions`/`## Assumptions`/`## Owns`/`## Worktrees` ahead of
-whatever else you wrote — and the context doc's *Remaining work* head, so a compaction does not cost you either.
-
-**Name every ctx write as yourself (since v0.6.0, #393).** The ctx MCP server writes as one shared process
-identity unless a call says otherwise, so a ctx tool call that omits `actor` on a doc your session owns (your own
-`sessions/<name>.md`, once registered) is refused `NOT_OWNER`. Pass `actor: <name>` (the name you registered
+**Name every ctx write as yourself (since v0.6.0, #393).** Pass `actor: <name>` (the name you registered
 under) on **every** `ctx_*` write tool call (`ctx_create`, `ctx_str_replace`, `ctx_insert`, `ctx_delete`,
-`ctx_rename`, `ctx_log`, `ctx_fm`, `ctx_new`, `ctx_move`, `ctx_maintain`, `ctx_migrate`) — not only the ones that
-touch your session file: the store only ever sees the actor a call names, so a write that leaves it out is an
-unnamed write, never "this session" by default. The Bash fallback (`ctx_adapter.py ctx <verb> …`, used when the
-MCP tools are absent) needs no such flag: it reads your registered name itself (`kit_profile.py session-name`)
-and sets `CTX_ACTOR` from it when the environment does not already have one.
+`ctx_rename`, `ctx_log`, `ctx_fm`, `ctx_new`, `ctx_move`, `ctx_maintain`, `ctx_migrate`) — not only the ones
+that touch your session file: an omitted actor is refused `NOT_OWNER` on a doc you own. The Bash fallback
+(`ctx_adapter.py ctx <verb> …`) needs no such flag — it reads your registered name itself. Full rule and
+why: `reference/registry.md` § Actor naming.
 
 ## 2. Keep the heartbeat fresh (≤12h)
 
@@ -141,42 +110,31 @@ Your entry must show a heartbeat within the last 12h or it is treated as stale.
   ```sh
   make -C $BATON/context-db session-touch NAME=<name> WORKING="<what you're on now>"
   ```
-- **Backstop heartbeat — pure shell, zero model turns.** Right after registering, run once:
+- **Backstop heartbeat — pure shell, zero model turns.** Right after registering, run once, from the
+  session's own Bash tool (not a subagent — it captures `$CLAUDE_CODE_SESSION_ID`, which the stats line
+  below is derived from):
   ```sh
   bash $BATON/skills/session-register/heartbeat.sh <name> "<current focus>"
   ```
-  It finds the `claude` process that owns this session (the walk also accepts a bare version string as
-  the comm, the shape the desktop app's own binary reports), detaches itself (`skills/_lib/portable.sh`'s
-  `detach` — the Bash tool kills its process group after ~10 min otherwise; `setsid` where the host
-  has it, a `python3 os.setsid()` re-exec on macOS/BSD, which ship none), touches your row every 6h
-  while that process is alive, and marks the row `ended` within a minute of the session dying. So the
-  registry never lies about liveness *and* no `/loop` wake-up re-bills the prefix for a heartbeat (the
-  old `/loop 8h` backstop cost one full-prefix turn per tick — retired 2026-09-18). A second start for
-  the SAME session is a no-op, also under another key: the same name and the same owning process is one
-  loop (pidfile `$TMPDIR/ai-baton-<uid>/heartbeat-<key>.pid`; log
-  `…heartbeat-<key>.log` beside it, `<key>` your `$CLAUDE_CODE_SESSION_ID` else your name — namespaced
-  per user and per session, never a bare `/tmp/heartbeat-<name>.*` shared by everyone on the host, nor
-  one name's pidfile mistaken for another live session's). Later focus changes still go
-  through `session-touch … WORKING=` — the script's own first tick only fills a still-blank
-  `working_on`, never overwriting one you already registered.
-  Run it from the session's own Bash tool (not a subagent): it captures `$CLAUDE_CODE_SESSION_ID`
-  there, which is what the stats line (below) is derived from.
+  Detaches itself, touches your row every 6h while the owning process is alive, and marks the row
+  `ended` within a minute of the session dying — the registry never lies about liveness and no `/loop`
+  wake-up re-bills the prefix for it. A second start for the same session/process is a no-op. Later
+  focus changes still go through `session-touch … WORKING=`. Process detection, pidfile/log
+  namespacing, the retired `/loop 8h` backstop: `reference/registry.md` § Backstop heartbeat.
 
 ## 2b. Stats — the row shows what the session costs and does (since 2026-09-19)
 
 Every `session-register` / `session-touch` / `session-end` (yours or the heartbeat's) refreshes the
-row's `stats:` line from the session transcript (`~/.claude/projects/*/<session-id>.jsonl`, found via
-`$CLAUDE_CODE_SESSION_ID`; engine: `$BATON/context-db/bin/session_stats.py`) — **zero model turns**:
+row's `stats:` line from the session transcript (engine: `$BATON/context-db/bin/session_stats.py`) —
+**zero model turns**:
 
 `<n> turns · <h>h · ctx peak/avg · cache-read · out · ~$ (list price) · compactions · tool calls ·
 PRs referenced (gh pr create calls) · tickets referenced (created / comments / transitions) · sign
 jobs · Slack drafts`
 
-- Turns are **API requests** (deduped per `requestId`), not transcript lines — a multi-block reply is
-  one turn. Spend is a list-price floor at `SESSION_STATS_PRICES` (default Opus-4-class
-  `15,18.75,1.5,75` $/Mtok in/cache-write/cache-read/out) for the **TOTAL** — main session + every
-  subagent transcript summed in, same figure the ledger and cost-report use; `session-stats`'s full
-  block (below) breaks the two back out. PRs/tickets are *referenced in tool inputs* (touched), not "owned".
+Field definitions (what counts as a turn, the price table, PRs/tickets scope): `reference/registry.md`
+§ Stats fields.
+
 - `make -C $BATON/context-db session-stats` prints the full block (window, prompts, token split,
   top tools, delegation, PR/ticket lists, hand-offs) — what `session-handoff` pastes into the wind-down
   entry. `NOSTATS=1` skips the refresh; `SESSION_ID=<uuid>` derives stats for another session.
@@ -185,9 +143,8 @@ jobs · Slack drafts`
   the index).
 - The line ends with `split hint: …` once the average prefix over the last `SESSION_STATS_SPLIT_WINDOW`
   turns (default 20) reaches `SESSION_STATS_SPLIT_THRESHOLD` tokens (default 150k) — a sustained fat
-  prefix, not one busy turn, and never on the strength of turns from before the last auto-compact. When
-  it shows: finish the current step, run `session-handoff`, and continue in a successor session — one
-  scope per session (`WORKSPACE.md` § Cost & context hygiene).
+  prefix, not one busy turn. When it shows: finish the current step, run `session-handoff`, and continue
+  in a successor session — one scope per session (`WORKSPACE.md` § Cost & context hygiene).
 
 ## 3. On end (part of `session-handoff`)
 
@@ -195,20 +152,14 @@ jobs · Slack drafts`
 make -C $BATON/context-db session-end NAME=<name> NEXT=$(python3 $BATON/context-db/bin/kit_profile.py scratch)/next.md
 ```
 Marks the row `ended`, stores the `NEXT` file as your `## Next session` hand-off prompt (the Ended table
-gets a starter that points at it, never the prompt's own words — `session-handoff` step 10 decides
-whether there is one to write — a session with nothing to hand over omits `NEXT` entirely, and
-`NEXT=none` withdraws a prompt already on file that has gone stale). An ended session **without** a
-real prompt (nothing on file, or a "no successor" note) does not appear in the Ended table at all, and
-is archived out of the index entirely after
-`SESSION_ARCHIVE_NOPROMPT_HOURS` (48, never more than `ARCHIVE_DAYS`) — that covers both a clean end with
-nothing left to do and a crash (`heartbeat.sh` ends a crashed session the same way, without a prompt);
-`session-register` / `session-touch` / `session-end` move an archived file back from `sessions/archive/`
-before writing (a re-register reactivates it), so a resumed session can still add a hand-off later — a
-lane that continues with follow-on work always leaves a prompt. `session-end` also writes the
-`## Session stats` block into your session file and appends the `_ledger.md` row (§ 2b). Before that,
-refresh the `## Open PRs` list in your session file (repo#n, current head, what each waits on) — your
-`Monitor`s stop with you, and that list is what the successor's startup step 4 re-arms from.
-Then do the rest of the `session-handoff` close-out (flush to the context doc through the ctx tools, priorities).
+gets a starter that points at it, never the prompt's own words; a session with nothing to hand over
+omits `NEXT` entirely, and `NEXT=none` withdraws a prompt already on file that has gone stale). Archive
+timing for a prompt-less end, and how a resumed session un-archives: `reference/registry.md` § Archive
+timing. `session-end` also writes the `## Session stats` block into your session file and appends the
+`_ledger.md` row (§ 2b). Before that, refresh the `## Open PRs` list in your session file (repo#n,
+current head, what each waits on) — your `Monitor`s stop with you, and that list is what the
+successor's startup step 4 re-arms from. Then do the rest of the `session-handoff` close-out (flush to
+the context doc through the ctx tools, priorities).
 
 ## Fields
 

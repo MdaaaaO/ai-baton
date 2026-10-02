@@ -1,10 +1,10 @@
 ---
 name: pr-scan
-description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row brief in 5 ordered sections by per-row State (Needs you, New, Handled this tick, Follow-up, Watching) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
+description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts, stale, already-reviewed heads. Returns a <=8-row brief in 5 ordered State sections, or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
 metadata:
   version: "20"
   updated: "2026-10-02"
-  reviewed: "2026-09-27"
+  reviewed: "2026-10-02"
   facts: "github.display_names"
 argument-hint: "[--days N] [--limit N (enrich cap, not row count — max_rows caps rows)] [--repo owner/name]"
 context: fork
@@ -121,28 +121,7 @@ user's APPROVE or REQUEST_CHANGES stands on this head and the PR is still open: 
 **Next** · `/pr-review <org>/<repo> <pr>` for the row you pick · errors 0
 MARK — run: bash $BATON/skills/pr-scan/pr-scan.sh --mark-only --run '<out dir>'
 
-Column rules (same meaning in every section):
-- `#` — row number, counting across sections (not restarting per section); `PR` — always a `[repo#n](url)`
-  link, repo without the `<org>/` prefix.
-- `Prio` — `<n> · <word>`: `1 · direct`, `2 · follow-up`, `3 · team`, `4 · sweep`, `5 · other`, `6 · reviewed`; append ` ‼ deep`
-  for `!` (over the deep threshold) and ` ✓ auto` for `A` (passed the trivial gate). Drop the raw `*` marker — first-time
-  rows are already counted in `new`.
-- `Why now` — one short clause of fact (≤ 40 chars) that adds something the other columns do not: prio 1 → `requested MM-DD`;
-  prio 2 → `new head since your APPROVE` / `author replied in N threads`; prio 3 → `via <team>` (one of the env config's `github.owner_teams`);
-  prio 4/5 → `opened MM-DD`; prio 6 → `your review on this head`. Never write "no human review", "no review yet", "bot green" or a thread count here — the
-  `Humans · Thr · Bot` column already carries those.
-- `Size` — `lines/files` (no spaces).
-- `Humans · Thr · Bot` — last state per human reviewer (`APP`/`CHA`/`COM`, comma-joined, `–` if none) · unresolved
-  thread count · review-bot Assessment on this head (`🟢`/`🟡`/`🔴`, `–` if none).
-- `Author · Title` — first name from the profile's `github.display_names` map (`python3 $BATON/context-db/bin/kit_profile.py get github.display_names`),
-  otherwise the login verbatim (never a capitalised login) · title truncated to 45 characters with `…`; never wrap a cell.
-- `State` — `.state_label` verbatim (e.g. `handled (review #123456)`, `needs you (STOP)`, `new (auto)`, `follow-up (manual)`, `watching (you approved)`).
-- Header line: date **and** time as `YYYY-MM-DD HH:MM UTC` (from `date -u`), counts from the summary line; `dropped:` lists only
-  non-zero buckets.
-- Trailing lines: `**Auto**` repeats the gate facts only (`class`, `packages`, CI, threads from `queue.json .auto`) or `none`;
-  `**AUTO-COMMENT**` is `(<auto_comment_mode>) · ` then every eligible row as a `[repo#n](url)` link (comma-joined) or `none` —
-  read `.auto_comment.eligible` off `queue.json`, never recompute the gate here; `**Next**` carries the errors count. Nothing
-  before the header line; the `MARK` trailer (above) is the only thing after `**Next**`.
+Column rules (same meaning in every section): full list in `reference/answer-format.md`.
 
 Rules: `Why now` is fact from the data, never an opinion on the PR's value. Author names follow the map
 in the column rules. Every PR is a clickable link. Do not read PR bodies or diffs — that is `pr-review`'s
@@ -150,39 +129,19 @@ job. The `**Auto**` and `**AUTO-COMMENT**` lines repeat the gate's facts only �
 
 ## Trivial-PR auto-approve (owner's standing decision, 2026-09-19 — `shadow` until `auto_approve.shadow_review_due`)
 
-Small docs-only PRs and dependency **patch** bumps (minor only for dev tooling, major never) may be
-approved on the user's behalf without a walk. Two layers, both outside this fork:
-
-1. **Gate — deterministic, no model.** `pr-scan.sh` pre-filters on size and runs
-   `$BATON/skills/pr-review/scripts/trivial-check.py <repo> <pr>` (config block `auto_approve` in
-   `config.json`: **ownership first** — the user must be a requested reviewer, directly or via a team in `owner_teams`
-   (the env config's `github.owner_teams`); `src=sweep` rows never run the gate (a sweep row is not a review request); then classes, globs, hard excludes `.github/**`/`.claude/**`/CODEOWNERS, size caps, CI +
-   review-bot-green requirement per repo, no human CHANGES_REQUESTED, 0 unresolved threads).
-   dependabot/renovate PRs are kept **only** when eligible; lock-only PRs, stacked PRs (base ≠ default branch)
-   and Actions bumps are not eligible; `docs_exclude_globs` keeps dbt model docs and `packages.txt`/`constraints.txt`
-   out of the docs class. A gate that errors (`error: true`) counts as not eligible and as a sweep error.
-2. **Review — Sonnet `auto-runner`.** The main session spawns `auto-runner` per `A` row
-   (`pr-review/reference/runner.md` § `--auto`, ≤ 15 turns): docs claims checked against the bundle at the head
-   ref, bump release notes read for breaking/behaviour notes, lockfile consistency. Zero findings → `AUTO: approve`;
-   anything else → `AUTO: fallback` and the PR goes through the normal queue with its sheet (`shadow_fallback`
-   rows stay ordinary rows).
-
-Modes (`auto_approve.mode`): `off` · `shadow` (runner runs, ledger gets `shadow_approve` / `shadow_fallback`,
-the main session tells the user one line "would approve …", nothing is posted) · `live` (the main session posts
-`APPROVE` via `submit-review.sh --auto` with the runner's body — the script re-runs the gate on the exact head and
-refuses unless mode is `live` — then tells the user one line; ledger `auto_approved`).
-Kill switch: set `mode` to `off`. This is the one sanctioned exception to `scope.md` "APPROVE is never inferred".
+Rows flagged `A` are eligible for approval on the user's behalf without a walk: a deterministic gate
+(`trivial-check.py`, outside this fork) filters on ownership, class/globs/excludes, size, CI + review-bot-green,
+and threads; eligible rows then get a Sonnet `auto-runner` pass that returns `AUTO: approve` or `AUTO: fallback`.
+Mode (`auto_approve.mode`: `off`/`shadow`/`live`) controls whether that posts. Kill switch: `mode: off`; the one
+sanctioned exception to `scope.md` "APPROVE is never inferred". Full gate rules and the two layers: `reference/auto-paths.md` § Trivial-PR auto-approve.
 
 ## Unattended auto-COMMENT (owner-decision scope, opt-in — off by default)
 
-Rows this fork flags `C` (config block `auto_comment` in `config.json`: `mode` off/shadow/live, `prios` — direct
-requests (`[1]`) by default, `max_per_tick`) are eligible for `pr-review`'s unattended auto-COMMENT path — a
-deterministic, gh-call-free pre-filter computed inline in `pr-scan.sh` alongside each row (prio in `prios`, `kind`
-not `follow_up`, author not a bot, capped at `max_per_tick` rows). A direct re-request on a PR already reviewed
-(`kind=re_review`) is excluded by default — the prior review's prio alone does not carry a re-request onto the
-trailer; `auto_comment.include_re_review: true` opts it back in. This fork only computes and reports eligibility
-in the `**AUTO-COMMENT**` trailer — it never spawns a runner or decides anything; the full contract (what the main
-session does with an eligible row, the `on_stop` policy, the ledger status) is `pr-review/SKILL.md` § Unattended
+Rows this fork flags `C` (config block `auto_comment` in `config.json`) are eligible for `pr-review`'s unattended
+auto-COMMENT path — a deterministic, gh-call-free pre-filter computed inline in `pr-scan.sh`. This fork only
+computes and reports eligibility in the `**AUTO-COMMENT**` trailer — it never spawns a runner or decides anything.
+Full pre-filter rules: `reference/auto-paths.md` § Unattended auto-COMMENT; the full contract (what the main
+session does with an eligible row, the `on_stop` policy, the ledger status): `pr-review/SKILL.md` § Unattended
 auto-COMMENT path for direct review requests.
 
 ## Skip / tune (the user's call, main session executes)

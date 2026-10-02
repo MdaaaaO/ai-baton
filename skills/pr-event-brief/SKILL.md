@@ -1,10 +1,10 @@
 ---
 name: pr-event-brief
-description: "Sonnet-forked triage of one pr-watch event — reads the PR's reviews, unresolved threads, checks and mergeability and returns a ≤10-line brief with exactly one recommended ACTION. Invoke for every BOT REVIEW / NEW comment / NEW review / CHECK NOT GREEN / HEAD MOVED(drift) line a pr-watch Monitor emits; the main session then performs the action."
+description: "Sonnet-forked triage of one pr-watch event — reads reviews, threads, checks and mergeability; returns a ≤10-line brief with one ACTION. Invoke when a pr-watch Monitor emits an actionable event line; the main session then performs the action."
 metadata:
   version: "15"
-  updated: "2026-10-01"
-  reviewed: "2026-10-01"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
   facts: "github.review_bot"
 argument-hint: <owner/repo> <pr_number> "<event line>"
 arguments: [repo, pr, event]

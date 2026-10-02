@@ -1,7 +1,29 @@
-# Diagrams — exit codes, the facet matrix, and the rules for every block
+# Diagrams — why this shape, exit codes, the facet matrix, and the rules for every block
 
 Loaded from `SKILL.md` § Diagrams. The contract every diagram surface follows (tickets, reviews, the epic doc) is
 [`docs/diagrams.md`](../../../docs/diagrams.md); this file covers the PR body's plan only.
+
+## Why this shape (owner decisions 2026-09-17 / 2026-09-25)
+
+"When you create a PR description please also add event flow diagrams, and component / architecture diagrams"
+(2026-09-17) — refined 2026-09-25: "not just all diagrams randomly added but rather the right set of diagrams
+based on PR content — if pipeline then pipeline flow, if model changes the table before and after, if
+architecture then components". A reviewer should see *where the change sits*, *what changes*, *what runs* and,
+on a feature PR, *why this shape* — without reading the diff, and nothing the PR does not raise.
+
+**Three principles**
+1. **One artifact per reviewer question, only for the questions the content raises.** WHERE (placement), WHAT
+   (before → after), RUNS (flow) — at most three blocks, most PRs need one or two — plus WHY (the option that
+   lost) on a feature PR with a real alternative. A refactor raises WHERE + WHAT, never RUNS; a bugfix raises
+   RUNS only; a docs/config/deps/test PR raises none; none of those three ever carries WHY.
+2. **The form follows the content — Mermaid is not always the answer.** Graphs and flows are Mermaid
+   (`flowchart`, `sequenceDiagram`, `stateDiagram-v2`); a *delta* (columns, fields, resources, jobs, seed
+   windows, DDL grants) is a markdown **table** `x | before | after | note`; WHY is always a table too (≤ 4
+   rows). A column list as an `erDiagram` is worse than the table.
+3. **The plan is deterministic and comes from the diff, not from habit.** Changed paths → facets → plan,
+   computed by `diagram-plan.py`; the same facets that pick the labels. The model draws exactly what the plan
+   asks for, writes the WHY table and the Sketch reason by hand, and stamps the plan marker so a later push
+   can be checked for drift.
 
 **Exit codes** (`diagram-plan.py`, also in `--help`): `0` success (a plan printed, `--check` found the
 marker current, or `--sketch` printed its line) · `1` a `gh`/`git` call failed · `2` bad usage (no changed

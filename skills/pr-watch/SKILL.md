@@ -1,149 +1,118 @@
 ---
 name: pr-watch
-description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
+description: "Low-noise PR watch: one Monitor per repo/session surfaces only actionable events, triages via `pr-event-brief`, keeps branches synced, merges via `pr-merge.sh` once gates hold. Parks on sign-off, idle windows or a human-only gate. Use when your session owns an open PR."
 metadata:
   version: "27"
-  updated: "2026-10-01"
-  reviewed: "2026-10-01"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
 ---
 
 # pr-watch — stay on top of your PRs without the noise
 
 **One `Monitor` per repo per session**, covering every open PR that session owns in that repo (owner
-decision, 2026-09-22 — the script takes one repo; one process round-robins the PRs, one `sleep 120` per
-cycle). The script polls GitHub every 120 s and prints
-one line per actionable event; the harness turns each line into a notification, so the polling is free
-and only real events — plus the Monitor's own expiry, every 30 min — cost a wake-up at full prefix (~$0.30 each).
+decision, 2026-09-22 — one process round-robins the PRs per repo, `sleep 120` per cycle). Polling is
+free; only a real event or the Monitor's own 30-min expiry costs a wake-up at full prefix (~$0.30 each).
 
 ## Watches are session-scoped — re-arm on every session start
 
-A `Monitor` dies with the session that armed it. Ending a session (cost, compaction, crash) leaves
-its PRs unwatched, and the next session inherits them silently. So **arming watches is part of
-session startup**: the `session-register` skill (startup step 4) re-arms one multi-PR watch over every
-open PR you take over, from the predecessor's `## Open PRs` list; the `session-handoff` skill refreshes that
-list before ending. Never assume a watch exists because the context doc says one was armed.
+A `Monitor` dies with the session that armed it, so **arming watches is part of session startup**:
+`session-register` (startup step 4) re-arms one multi-PR watch over every PR you take over, from the
+predecessor's `## Open PRs` list; `session-handoff` refreshes that list before ending. Never assume a
+watch exists because the context doc says one was armed.
 
 ## Arm a watch
 
 ```
 Monitor({
-  command: "PR_WATCH_WORKTREE=<checkout> bash $BATON/skills/pr-watch/pr-watch.sh <org>/<repo> <pr1> <head1> <pr2> <head2> <pr3> <head3>",   // always via `bash …`: the file's execute bit is not reliable on this mount (exit 126). The script is POSIX-safe since 2026-09-14 (a bash-only `${cur:0:9}` in the HEAD MOVED branch crashed a `sh`-run watcher with "Bad substitution" on the first head move)
+  command: "PR_WATCH_WORKTREE=<checkout> bash $BATON/skills/pr-watch/pr-watch.sh <org>/<repo> <pr1> <head1> <pr2> <head2> <pr3> <head3>",   // always via `bash …`: the file's execute bit is not reliable on this mount (exit 126)
   description: "<repo> #<pr1>/#<pr2>/#<pr3>: actionable events only, until merged",
   timeout_ms: 1800000   // the harness caps every Monitor at 30 min (a larger value is silently capped)
 })
 ```
 
-`<checkout>` is a local checkout of the repo the session pushes from — any of its worktrees does, they share
-one object store. With it set, the session's own pushes are tracked silently instead of waking it as
-`HEAD MOVED`; leave the variable out when the pushes come from another machine.
+`<checkout>` is a local checkout of the repo the session pushes from — any of its worktrees does, they
+share one object store. With it set, the session's own pushes are tracked silently instead of waking it
+as `HEAD MOVED`; leave it out when the pushes come from another machine. Arguments: `<owner/repo>
+<pr_number> <head_sha_prefix> [<pr_number> <head_sha_prefix> …]` — all PRs of one repo in one process (a
+second repo needs a second Monitor); the single-PR form still works unchanged. Per-PR state lives in
+`${TMPDIR:-/tmp}/pr-watch-<owner-repo>-<pr>/`; a merged/closed PR drops out of the round-robin and the
+process exits when the last one is gone. The script applies `github.sandbox_token_prefix` itself.
 
-**Re-arm on expiry = the identical call**, same command, original heads: the state dir makes it silent
-(nothing already reported is replayed, and a head the watcher already followed is kept, not reported
-again), so an expiry costs its one wake-up and nothing more. Never look the heads up again for it.
-
-Arguments: `<owner/repo> <pr_number> <head_sha_prefix> [<pr_number> <head_sha_prefix> …]` — all PRs of
-one repo in one process. The single-PR form (`… <owner>/<repo> <pr> <sha>`) still works unchanged;
-a second repo needs a second Monitor. Per-PR state lives in `${TMPDIR:-/tmp}/pr-watch-<owner-repo>-<pr>/`
-(one file per variable). A merged/closed PR prints its line and drops out of the round-robin; the
-process exits when the last one is gone. The script applies `github.sandbox_token_prefix` itself (a
-placeholder token in a sandbox whose proxy injects credentials, nothing where `gh` is logged in). Set `PR_WATCH_SELF=<your GitHub login>` if it is not `$WORKSPACE_GITHUB_LOGIN` (the user's login);
-events by that login are dropped as your own. Neither set and `gh api user` fails (or names nobody):
-startup prints an `ERROR … startup:` line and exits 2 — it never falls back to a placeholder identity,
-since that would stop filtering this session's own replies and turn every one of them into a new event.
+**Re-arm on expiry = the identical call**, same heads: the state dir makes it silent (nothing already
+reported is replayed), so an expiry costs its one wake-up and nothing more — never look the heads up
+again for it. Set `PR_WATCH_SELF=<your GitHub login>` if it is not `$WORKSPACE_GITHUB_LOGIN`; events by
+that login are dropped as your own. Neither set and `gh api user` fails (or names nobody): startup prints
+`ERROR … startup:` and exits 2 — it never falls back to a placeholder identity, since that would turn
+every one of this session's own replies into a new event.
 
 **No bot configured (`github.review_bot` empty — the default on most machines).** The watcher prints
-which mode it is in on the first line (`pr-watch: bot mode …` / `pr-watch: no-bot mode … — gating on CI
-+ human review only`, stderr) and never polls for a bot Assessment: no `BOT REVIEW` line, no wait, no
-wasted paginated `reviews` fetch every cycle. `pr-merge.sh` does the same on its own first line — the
-merge gate becomes `mergeStateStatus CLEAN` + `reviewDecision APPROVED` + zero unresolved threads, same
-as the bot-mode phase 3 loop.
+which mode it is in on line 1 (stderr) and never polls for a bot Assessment; `pr-merge.sh` does the
+same — the merge gate becomes `mergeStateStatus CLEAN` + `reviewDecision APPROVED` + zero unresolved
+threads, same as the bot-mode phase 3 loop.
 
 ## What it emits (and what it deliberately does not)
 
-One stdout line per actionable event — bot verdict on the current head, human comment/approval, checks
-settling red, a real head move, conflicts, merge/close, or a query error — each with what to do about
-it. Bookkeeping the session has nothing to do about goes to stderr instead (the Monitor output file,
-never a wake-up): its own `update-branch` sync, a head move this session's own push produced (named by
-committer login + a local git object in `PR_WATCH_WORKTREE`, when set — unset it and every push reads
-as a real `HEAD MOVED`), and a stale review (`commit_id` not the current head) from the configured
-review bot or a `github.bots` login — a bot re-reviews the new head on its own. A human's stale review
-is still emitted, in every state, marked `(on older head <sha>)`: humans do not automatically re-review
-after a push. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
-non-green states. The full per-line table: `reference/events.md`.
-
-**A failed lookup is UNKNOWN, never red or green.** Every `gh` read an event depends on (PR info,
-behind-by, the reviews — read once per cycle for the approval count, the bot verdict and the review
-listing — the check-status rollup, the comment listings) gets 3 attempts,
-`PR_WATCH_RETRY_DELAY` apart, and a failure that survives them never falls back to "nothing pending"
-(a silent GREEN), "not behind" (a silent no-op) or "nothing new" — it prints one
-`PR N LOOKUP FAILED: <what> — <error>` line instead; a changed error, or a recovery in between,
-announces again. **A repeated alarm backs off additively**: the same `CHECK NOT GREEN` on an unchanged
-head, and a `LOOKUP FAILED` that lasts (`… (still failing)`), repeat after 1h, then 3h, then 5h … +2h
-each time, capped by `PR_WATCH_BACKOFF_MAX` (default 86400s). A due `CHECK NOT GREEN` reads the checks
-again first — it lists what is red now and is dropped when they went green. The first announcement is
-immediate, and `PR_WATCH_KNOWN_RED`'s mute is unaffected — a muted head stays
-silent, until a mute that actually suppressed a line on that PR expires on the next green settle (one
-stderr note; a later red there is then reported like any other). Details: `reference/events.md`, `reference/cost-controls.md`.
+One stdout line per actionable event — bot verdict, human comment/approval, checks settling red, a head
+move, conflicts, merge/close, or a query error — each with what to do about it. The watcher's own
+bookkeeping (its `update-branch` sync, a head move this session's own push produced, a stale review from
+the configured review bot or a `github.bots` login) goes to stderr only, never a wake-up; your own
+comments/reviews, the bot's in-thread replies and repeated non-green states are filtered the same way. A
+human's stale review is still emitted, marked `(on older head <sha>)` — humans do not auto-re-review
+after a push. **A failed lookup is UNKNOWN, never red or green**: 3 retries, then one `LOOKUP FAILED`
+line, never a silent fallback. **A repeated alarm backs off additively** (1h, 3h, 5h … +2h, capped by
+`PR_WATCH_BACKOFF_MAX`), and `PR_WATCH_KNOWN_RED` mutes a matched cause until its next green settle. Full
+per-line table, retry/backoff timing and the mute rule: `reference/events.md`, `reference/cost-controls.md`.
 
 ## Auto-sync with the base branch (since 2026-09-21)
 
-While a PR waits for review it cannot merge anyway, so the watcher keeps the branch merged with its base:
-every poll it reads `compare/<base>...<head>.behind_by`, and when behind and **no human `APPROVED`
-review exists** (a bot/automerge-bot approval does not count), it runs `update-branch` itself — one
-attempt per head, cooled down by `PR_WATCH_SYNC_COOLDOWN`, off via `PR_WATCH_SYNC=0` — and logs `SYNCED`
-to stderr only (bookkeeping, not an event). **Standing rule: before any further push from the worktree**,
-`git fetch origin <branch>` and, when the remote is ahead, rebase onto it first (`sign-queue --rebase`
-where commits are signed) — the watcher may have auto-synced the branch behind your back. The
-approval-detection nuance and the failure cases: `reference/auto-sync.md`.
+While a PR waits for review it cannot merge anyway, so the watcher keeps the branch merged with its
+base: every poll it reads `behind_by`, and when behind with **no human `APPROVED` review** (a
+bot/automerge-bot approval doesn't count), runs `update-branch` itself — cooled down by
+`PR_WATCH_SYNC_COOLDOWN`, off via `PR_WATCH_SYNC=0` — and logs `SYNCED` to stderr only. **Standing rule:
+before any further push from the worktree**, `git fetch origin <branch>` and rebase onto it if ahead
+(`sign-queue --rebase` where signed) — the watcher may have auto-synced the branch behind your back.
+Approval-detection nuance and failure cases: `reference/auto-sync.md`.
 
 ## Cost controls (2026-09-22)
 
-The shell polling is free; what costs is every line emitted and every Monitor expiry (~$0.30 each at a
-~120k prefix). `PR_WATCH_SELF` / `PR_WATCH_SYNC` / `PR_WATCH_SYNC_COOLDOWN` / `PR_WATCH_KNOWN_RED` /
-`PR_WATCH_REPLAY` — the full table, the once-per-head `CHECK NOT GREEN` rule and the silent-re-arm
-behaviour that motivates it: `reference/cost-controls.md`.
+What costs is every line emitted and every Monitor expiry (~$0.30 each at a ~120k prefix). Knob table
+(`PR_WATCH_SELF`/`SYNC`/`SYNC_COOLDOWN`/`KNOWN_RED`/`REPLAY`), the once-per-head `CHECK NOT GREEN` rule
+and the silent-re-arm behaviour: `reference/cost-controls.md`.
 
 ## Park when the gates are not yours (2026-09-22)
 
-Arm **one** Monitor per repo per session for all its PRs there, `timeout_ms: 1800000` (the harness maximum). On each expiry,
-look back: if the previous **two consecutive windows** delivered zero actionable events (only expiries,
-muted CI lines), do **not** re-arm — run the `session-handoff` skill and end the session. The successor
-re-arms from the `## Open PRs` list (`session-register` step 4) when the user reports the gate moved.
+Arm **one** Monitor per repo per session for all its PRs there, `timeout_ms: 1800000` (the harness
+maximum). On each expiry, look back: two consecutive idle windows (only expiries, muted CI lines) →
+do **not** re-arm — run `session-handoff` and end the session. The successor re-arms from `## Open PRs`
+(`session-register` step 4) once the user reports the gate moved.
 
-Arithmetic: 3 PRs × one Monitor each ≈ 6 expiry wake-ups/h ≈ $1.80/h idle; one multi-PR Monitor ≈ 2/h ≈ $0.60/h;
-parked = $0. A PR waiting on an `update-branch` only the user's machine can run, a human review or a third party is not
-something a live session makes happen faster.
+Cost: one Monitor per PR ≈ $1.80/h idle for 3 PRs vs. one multi-PR Monitor ≈ $0.60/h; parked = $0 — a PR
+waiting on a human-only gate does not go faster for a live session watching it. Three park triggers, any
+one is enough (an unparked session once ran three 30-min watchers all night, ~$85, 2026-09-21/22):
+**the user signs off** (leaving, or outside working hours with nothing mid-flight) — stop and end **now**,
+don't wait for two idle windows; **two consecutive idle windows** (above); **the only pending event is a
+human-only gate** (approval, `update-branch` 403, catalog bump, feature flag, a third party's reply) —
+never re-arm for that.
 
-Three park triggers, any one is enough (one idle session with three
-30-min watchers ran 30–40 turns/h all night, ~$85, 2026-09-21/22):
-
-1. **The user signs off** (says they are leaving, or it is outside their working hours and nothing is mid-flight) —
-   stop the watcher and end the session **now**, do not wait for two idle windows.
-2. **Two consecutive idle windows** (above).
-3. **The only pending event is a human's approval or a gate only the user's machine can pass** (`update-branch` 403, catalog bump,
-   feature flag, a third party's reply) — never re-arm for that; the successor re-arms when the user reports it.
-
-Stopping is `TaskStop` on the Monitor; nothing on GitHub changes. The `session-handoff` skill's step 7 is
-where the stop belongs, and step 9 records the heads the successor re-arms from.
+Stopping is `TaskStop` on the Monitor; nothing on GitHub changes. `session-handoff` step 7 is where the
+stop belongs; step 9 records the heads the successor re-arms from.
 
 ## Triage each event on Sonnet — `pr-event-brief`
 
-Don't read the PR yourself at full prefix when a line lands. Invoke the forked skill
-`pr-event-brief <owner/repo> <n> "<event line>"` (Skill tool; it runs on the `triage` agent — Sonnet,
-low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line brief ending in one
-`ACTION:` (`REPLY+RESOLVE` / `FIX+PUSH` / `RE-REQUEST-BOT` / `UPDATE-BRANCH` / `MERGE` / `WAIT(<who>)` /
-`INVESTIGATE-CHECK` / `REDRAW`). **You perform the action** — replies, resolves, re-requests, merges post
-to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot and run
-`python3 $BATON/skills/pr-open/diagram-plan.py --pr <o/r> <n> --check` yourself (one script call) —
-`OK` / `NO MARKER` → nothing; `DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD
-MOVED line only (the brief reruns the check itself), and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
-own sync emits no head move and gets no check. Skip the fork for
-`MERGED`/`CLOSED` (close out per `reference/events.md`), and `LOOKUP FAILED` / `ERROR … startup:` (never fork
-`pr-event-brief` for either — a failed read is not a PR event, there is nothing on the PR to triage). A brief slot
-marked `unverified` means fetch it yourself.
+Don't read the PR yourself at full prefix when a line lands. Invoke the forked skill `pr-event-brief
+<owner/repo> <n> "<event line>"` (Skill tool; runs on the `triage` agent — Sonnet, low effort, no
+CLAUDE.md — blocks until it returns): a ≤10-line brief ending in one `ACTION:` (`REPLY+RESOLVE` /
+`FIX+PUSH` / `RE-REQUEST-BOT` / `UPDATE-BRANCH` / `MERGE` / `WAIT(<who>)` / `INVESTIGATE-CHECK` /
+`REDRAW`). **You perform the action** on the main model — replies, resolves, re-requests, merges post to
+GitHub. On a real `HEAD MOVED`, re-request the bot and run `python3
+$BATON/skills/pr-open/diagram-plan.py --pr <o/r> <n> --check` yourself: `OK`/`NO MARKER` → nothing;
+`DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD MOVED line, act on its `REDRAW`
+per `docs/diagrams.md` (the watcher's own sync emits no head move and gets no check). Skip the fork for
+`MERGED`/`CLOSED` (close out per `reference/events.md`) and `LOOKUP FAILED`/`ERROR … startup:` (a failed
+read is not a PR event). A brief slot marked `unverified` means fetch it yourself.
 
-Whether to merge past a settled red check (a known-flaky test, an annotation you already judged
-harmless) or wait for the rerun is the user's call, not a default — ask it per `docs/carousel.md`.
+Merging past a settled red check (a known-flaky test, an annotation you already judged harmless) vs.
+waiting for the rerun is the user's call, not a default — ask per `docs/carousel.md`.
 
 ## Rules this encodes (verified on a strict-ruleset repo with a review bot)
 
@@ -162,19 +131,16 @@ Monitor({
 })
 ```
 
-Phases: (1) wait for the review bot's **Assessment on the current head**, read from the review
-*object* (a green "PR Review" check is not a review); (2) if BEHIND, `update-branch`, force a full
-bot review on the merge head with a DELETE + POST re-request of the bot as a requested reviewer — a
-single, plain re-request (`POST` alone) is a no-op on a merge-commit head, and the draft-toggle
-fallback named above (§ Rules this encodes: `gh pr ready --undo && gh pr ready`) is visible to every
-other reviewer and cancels a `ready_for_review`-triggered run, so `pr-merge.sh` uses neither of
-those and does the DELETE+POST itself), wait again; (3) squash-merge when `CLEAN` +
-`reviewDecision APPROVED` + zero unresolved threads,
-**confirmed by re-reading the PR's `merged_at`** — a `gh pr merge` call that reports success but
-leaves `merged_at` unset is not read as merged. Exit 0 = confirmed merged; exit 1 = a gate failed,
-the merge call failed, or `merged_at` came back unset (one-line reason: head moved, open threads,
-not green, approval missing — read it and rerun after acting); exit 3 = gave up (CLEAN + APPROVED
-never held within the deadline).
+Phases: (1) wait for the review bot's **Assessment on the current head**, read from the review *object*
+(a green "PR Review" check is not a review); (2) if BEHIND, `update-branch`, then force a full bot
+review on the merge head with a DELETE + POST re-request (a plain `POST` alone is a no-op on a
+merge-commit head; the draft-toggle fallback, § Rules this encodes, is visible to every other reviewer
+and cancels a `ready_for_review`-triggered run, so `pr-merge.sh` uses neither), wait again; (3)
+squash-merge when `CLEAN` + `reviewDecision APPROVED` + zero unresolved threads, **confirmed by
+re-reading `merged_at`** — a `gh pr merge` success with `merged_at` unset is not read as merged. Exit 0 =
+confirmed merged; exit 1 = a gate failed, the merge call failed, or `merged_at` came back unset (reason
+given: head moved, open threads, not green, approval missing); exit 3 = gave up (CLEAN + APPROVED never
+held within the deadline).
 
 ## Staleness rules — why the scripts look the way they do
 
