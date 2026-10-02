@@ -64,10 +64,16 @@ listed below for completeness, but their single source of truth is `docs/packagi
 |---|---|---|---|---|
 | `SIGN_QUEUE_BY` | none — required (or pass `--by`) | `skills/sign-queue/enqueue.sh` | who a queued commit job is attributed to; neither this nor `--by` set exits 2 with a usage message | user-facing |
 | `SIGN_QUEUE_SKIP_STYLE` | `0` | `skills/sign-queue/enqueue.sh` | `1` skips the commit-style check for one deliberate one-off enqueue | user-facing |
-| `SIGN_QUEUE_JOB_TIMEOUT` | `300` (seconds) | `skills/sign-queue/signq.py` | how long `run_job` lets one job's `git`/`gh` chain run before killing its whole process group | user-facing |
+| `SIGN_QUEUE_JOB_TIMEOUT` | `300` (seconds) | `skills/sign-queue/signq.py` | how long `run_job` lets one job's `git`/`gh` chain run before killing the job and the processes it started | user-facing |
 | `SIGN_QUEUE_ROOT` | unset | `skills/sign-queue/signq.py` | override the workspace root the queue resolves everything else from (a plugin install's own workaround) | internal |
 | `SIGN_QUEUE_CONTEXT` | `SIGN_QUEUE_ROOT/.context`, else `kit_profile.context_root()` | `skills/sign-queue/enqueue.sh`, `skills/sign-queue/signq.py` | override which `.context/` the queue lives under | internal |
 | `SIGN_QUEUE_DIR` | `<context>/state/sign-queue` | `skills/sign-queue/enqueue.sh`, `skills/sign-queue/signq.py` | override the queue directory itself | internal |
+
+## `cost-report`
+
+| Name | Default | Read by | Purpose | Scope |
+|---|---|---|---|---|
+| `COST_REPORT_RETRY_DELAY` | `10` (seconds) | `skills/cost-report/cost_report.py` | first wait before retrying a rate-limited `gh search` call, doubled on each further retry (tests set it near 0) | test-only |
 
 ## `pr-review`
 

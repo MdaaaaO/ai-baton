@@ -3,7 +3,7 @@ name: sign-queue
 description: "Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains it with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners. Inert where `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "22"
+  version: "23"
   updated: "2026-10-01"
   reviewed: "2026-09-27"
   requires: "signed_commits"
@@ -138,9 +138,25 @@ fixes the worktree, and either re-enqueues (delete the `.failed` first) or asks 
 the job itself was fine (transient network, remote fixed meanwhile).
 
 Only one drain runs at a time: `make sign` holds an exclusive lock on the queue for the whole run, so a second
-`make sign` started while the first is still going prints one line ("another drain already holds the lock —
-exiting") and exits 0 immediately, never a half-drained overlap. A job file removed by hand while a drain is
-already in progress is skipped with one line; the rest of the drain and its summary still run.
+`make sign` started while the first is still going prints one line naming the holder — "another drain (pid
+1234, on key-123-p4) already holds the lock — exiting", or "another sign-queue process" when the lock file
+names no live drain — and exits 0 immediately, never a half-drained overlap. A job file removed by hand
+while a drain is already in progress is skipped with one line; the rest of the drain and its summary still run.
+
+Jobs a pre-workspace-queue kit left under the kit dir are moved under that same lock, and only into the queue
+of the workspace the kit sits in (a kit that drains another workspace's queue leaves them alone and names them
+on stderr; a plugin install sits in no workspace, so the workspace it drains takes them): `run` moves
+them itself before it loads a job (`make sign` calls `run` only; a `--dry-run` moves nothing), and `make
+sign_list` runs `signq.py migrate-legacy` first, which takes the lock for the move; while a drain holds it,
+it moves nothing and says so.
+
+A job stays in the drain's terminal session — signing may need the terminal for a passphrase, and Ctrl-C
+stops the drain and its job together. A drain that is killed outright (`kill -9`) can still leave its job
+running, so the lock file records the holder's pid and the job it is on. The next `run` that finds that job's
+process alive (same pid and same start time by `ps -o lstart=`, read in UTC, so neither a reused pid nor a
+zombie counts) names the job and its pid and exits 2 without starting a job; once that process is gone, `run`
+drains as usual. An exit 2 for a pid that `ps -p <pid>` shows is not that job: delete `<queue>/.lock` while
+no drain runs, then `make sign` again. Not covered: two machines sharing one queue directory.
 
 ## Why
 
