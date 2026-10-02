@@ -4,7 +4,8 @@ The kit's `main` only ever fast-forwards to `origin/main`; every change arrives 
 
 > **Plugin install:** this page is about a clone (`.claude/`, a git checkout). A plugin install has no `sync.sh`, no
 > SessionEnd sync hook and no git hooks; it moves release by release through `claude plugin update`
-> (`docs/packaging.md` § Updating).
+> (`docs/packaging.md` § Updating). Updating one safely, step by step:
+> [`plugin-setup.md`](plugin-setup.md#updating-a-plugin-install-safely) § Updating a plugin install safely.
 
 ## Commands
 
@@ -88,6 +89,9 @@ included) or the manifest names a different commit than the tag — → applies 
 `error <reason>` and the run exits 1 with the reason on stderr — the one error that does, since `--accept`
 only ever runs in the foreground. The tag and reason are also written to the ignored `.sync-rejected`
 (one line: `<tag> <reason>`); see below for what that changes about the next unattended run.
+
+[`SECURITY.md`](../SECURITY.md#verifying-a-release) § Verifying a release has what the manifest and the
+attestation check prove, and what immutable releases and the tag ruleset on `v*` do and don't guarantee.
 
 The check **cannot run at all** — no `gh` on `PATH`, a `gh` from before `gh attestation` existed, `gh`
 not authenticated, an `origin` that is not on github.com (an ssh host alias such as
