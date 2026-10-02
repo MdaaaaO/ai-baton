@@ -19,6 +19,8 @@ usage() { sed -n '2,/^set -u/p' "$0" | sed '$d' >&2; exit 2; }
 [ $# -ge 2 ] || usage
 repo=$1 ref=$2 timeout=${3:-900} interval=${4:-20}
 [[ $timeout =~ ^[0-9]+$ && $interval =~ ^[1-9][0-9]*$ ]] || { echo "wait-checks: timeout/interval must be whole seconds" >&2; usage; }
+KIT="$(cd "$(dirname "$0")/../.." && pwd)"
+eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any — every other gh script evals this
 
 if [[ $ref =~ ^[0-9]{1,9}$ ]]; then
   sha=$(gh api "repos/$repo/pulls/$ref" --jq .head.sha) || { echo "wait-checks: cannot read $repo#$ref" >&2; exit 2; }

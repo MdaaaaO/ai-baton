@@ -4,6 +4,7 @@ query (reason on stderr, never read as "still pending"), 124 the deadline hit be
 covers the two-poll confirmation (a check-suite with no runs yet clears between polls) and the numeric-PR head
 resolution path. Stdlib unittest, no network. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import json
 import os
 import shutil
 import subprocess
@@ -114,6 +115,51 @@ class WaitChecksExitCodes(unittest.TestCase):
         }, ref="42")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(f"commits/{FULL}/check-runs", self.log.read_text())
+
+
+@unittest.skipUnless(shutil.which("bash"), "bash needed")
+class GhEnvAppliesTokenPrefix(unittest.TestCase):
+    # every other gh-calling script (bot-verdict.sh, pr-scan.sh, fetch-context.sh, ...) evals
+    # `kit_profile.py gh-env` before its first `gh` call so a sandbox's `github.sandbox_token_prefix`
+    # reaches the real `gh` binary — wait-checks.sh was the one exception. This proves the env var the
+    # prefix sets is actually visible inside the stub `gh`'s process, not just that the script still runs.
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="kit-waitchecks-ghenv-test."))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.bin = self.tmp / "bin"
+        self.log = self.tmp / "gh.log"
+        env_dir = self.tmp / "ws" / ".context" / "reference" / "env"
+        env_dir.mkdir(parents=True)
+        env_dir.joinpath("config.json").write_text(json.dumps(
+            {"github": {"sandbox_token_prefix": "FAKE_GH_TOKEN=shhh-token-value"}}))
+        self.bin.mkdir(parents=True, exist_ok=True)
+        gh = self.bin / "gh"
+        gh.write_text(
+            "#!/bin/bash\n"
+            f'echo "FAKE_GH_TOKEN=${{FAKE_GH_TOKEN:-unset}} $*" >> {self.log}\n'
+            'case "$*" in\n'
+            f'  *"commits/{FULL}/check-runs"*) printf "build\\tcompleted\\tsuccess\\n" ;;\n'
+            f'  *"commits/{FULL}/check-suites"*) : ;;\n'
+            f'  *"commits/{FULL}/statuses"*) : ;;\n'
+            '  *) exit 9 ;;\n'
+            'esac\n',
+        )
+        gh.chmod(0o755)
+
+    def test_the_token_prefix_env_var_reaches_the_gh_calls(self):
+        env = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+               "CONTEXT_ROOT": str(self.tmp / "ws" / ".context")}
+        r = subprocess.run(["bash", str(SCRIPT), REPO, FULL, "5", "1"], env=env,
+                            capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = self.log.read_text()
+        self.assertIn("FAKE_GH_TOKEN=shhh-token-value", calls,
+                       "wait-checks.sh did not eval kit_profile.py gh-env before its gh calls")
+        # the one call made to DETECT a native login (`gh auth token`, run before gh-env applies the
+        # prefix) legitimately sees it unset — every call after that must carry the prefix
+        api_calls = [ln for ln in calls.splitlines() if "commits/" in ln]
+        self.assertTrue(api_calls, calls)
+        self.assertTrue(all(ln.startswith("FAKE_GH_TOKEN=shhh-token-value") for ln in api_calls), calls)
 
 
 if __name__ == "__main__":
