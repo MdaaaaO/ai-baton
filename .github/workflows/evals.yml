@@ -42,8 +42,9 @@ jobs:
     name: evals
     runs-on: ubuntu-latest
     # One skill's suite fits 30 minutes: every agent run is bounded by its case's `timeout_seconds`, and four run at
-    # once (JOBS=4 below). Every case at once is some 940 agent runs, which takes hours — hence the larger limit for
-    # an empty `skill`; that limit is an estimate from the per-skill runs, not a measurement.
+    # once (JOBS=4 below) — the 45 runs of one 15-case suite took 738 s. Every case at once is some 940 agent runs,
+    # about 4.3 hours at that rate — hence the larger limit for an empty `skill`; that limit is an estimate from the
+    # one-suite run, not a measurement.
     timeout-minutes: ${{ inputs.skill == '' && 300 || 30 }}
     steps:
       - id: token
@@ -71,15 +72,15 @@ jobs:
         env:
           SKILL: ${{ inputs.skill }}
           MODELS: ${{ inputs.models }}
-          JUDGE: ${{ inputs.judge_model }}
+          JUDGE_MODEL: ${{ inputs.judge_model }}
           RUNS: ${{ inputs.runs }}
         run: |
           if [ -n "$SKILL" ]; then
             printf '%s' "$SKILL" | grep -Eq '^[a-z0-9][a-z0-9-]*$' && [ -f "skills/$SKILL/SKILL.md" ] \
               || { echo "::error::skill '$SKILL' is not a skill in this kit"; exit 1; }
           fi
-          if [ -n "$JUDGE" ]; then
-            printf '%s' "$JUDGE" | grep -Eq '^[A-Za-z0-9._:@-]+(\[[0-9a-z]+\])?$' || { echo "::error::judge model '$JUDGE' is not a model id"; exit 1; }
+          if [ -n "$JUDGE_MODEL" ]; then
+            printf '%s' "$JUDGE_MODEL" | grep -Eq '^[A-Za-z0-9._:@-]+(\[[0-9a-z]+\])?$' || { echo "::error::judge model '$JUDGE_MODEL' is not a model id"; exit 1; }
           fi
           if [ -n "$RUNS" ]; then
             printf '%s' "$RUNS" | grep -Eq '^[1-9]$' || { echo "::error::runs '$RUNS' is not a number from 1 to 9"; exit 1; }
@@ -113,7 +114,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SKILL: ${{ inputs.skill }}
           MODELS: ${{ steps.inputs.outputs.models }}
-          JUDGE: ${{ inputs.judge_model }}
+          JUDGE_MODEL: ${{ inputs.judge_model }}
           RUNS: ${{ inputs.runs }}
         shell: bash
         run: |
@@ -121,11 +122,12 @@ jobs:
           rc=0
           for model in ${MODELS:-default}; do
             [ "$model" = default ] && model=""
-            echo "## evals — ${SKILL:-every case} on ${model:-the default model}" >> "$GITHUB_STEP_SUMMARY"
+            echo "## evals — ${SKILL:-every case} on ${model:-the default model}, judge ${JUDGE_MODEL:-the make target's default}" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            # an empty JUDGE= on the command line would switch the make target's default judge off, so it is
-            # passed only when the input names one
-            make -C context-db eval TRUST=1 JOBS=4 SKILL="$SKILL" MODEL="$model" RUNS="$RUNS" ${JUDGE:+"JUDGE=$JUDGE"} \
+            # an empty JUDGE switches the make target's default judge off, on the command line and from the
+            # environment alike (make reads both): the input lives in JUDGE_MODEL, a name make does not use, and
+            # JUDGE is passed only when the input names a model
+            make -C context-db eval TRUST=1 JOBS=4 SKILL="$SKILL" MODEL="$model" RUNS="$RUNS" ${JUDGE_MODEL:+"JUDGE=$JUDGE_MODEL"} \
               2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           done

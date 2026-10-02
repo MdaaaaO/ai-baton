@@ -347,8 +347,9 @@ class Coverage(unittest.TestCase):
 
 
 class Wiring(unittest.TestCase):
-    def make_n(self, *args: str) -> str:
+    def make_n(self, *args: str, extra_env: "dict[str, str] | None" = None) -> str:
         env = {k: v for k, v in os.environ.items() if k not in ("CONTEXT", "CONTEXT_ROOT")}
+        env.update(extra_env or {})
         p = subprocess.run(["make", "-C", str(KIT / "context-db"), "-n", *args], env=env, capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         return p.stdout
@@ -402,8 +403,19 @@ class Wiring(unittest.TestCase):
         # variable only when the input names a model
         text = (KIT / ".github" / "workflows" / "evals.yml").read_text(encoding="utf-8")
         run_line = next(line for line in text.splitlines() if "make -C context-db eval " in line)
-        self.assertIn('${JUDGE:+"JUDGE=$JUDGE"}', run_line)
+        self.assertIn('${JUDGE_MODEL:+"JUDGE=$JUDGE_MODEL"}', run_line)
         self.assertNotRegex(run_line, r'(?<![+"])JUDGE="')
+
+    def test_the_workflow_step_environment_keeps_the_default_judge(self):
+        # make reads its environment too: a step variable named like one of the target's, exported empty because
+        # the input was left empty, counts as set and switches `JUDGE ?=` off. Dry-run the target the way the step
+        # calls it, with every variable of the step's `env:` block empty.
+        text = (KIT / ".github" / "workflows" / "evals.yml").read_text(encoding="utf-8")
+        step_env = text.split("name: Run the suite", 1)[1].split("run: |", 1)[0]
+        names = re.findall(r"(?m)^          ([A-Z_]+): ", step_env)
+        self.assertIn("SKILL", names)
+        out = self.make_n("eval", "TRUST=1", "JOBS=4", "SKILL=", "MODEL=", "RUNS=", extra_env={n: "" for n in names})
+        self.assertIn("--judge-model 'sonnet'", " ".join(out.split()))
 
 
 if __name__ == "__main__":
