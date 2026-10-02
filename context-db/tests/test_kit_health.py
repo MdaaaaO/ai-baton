@@ -666,40 +666,31 @@ class ReadOnlyRun(unittest.TestCase):
             (root / "repos" / "bad.md").write_text("---\ntitle: Bad\ntype: novel\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n", encoding="utf-8")
             self.assertIn("❌ `make verify` failed", self.engine_section(root))
 
-    def test_oversized_active_doc_adds_warn(self):
-        # an active doc over the size limit: verify exits 0 but warns on stderr, sec_engine adds a WARN row
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / ".context"
-            env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_TZ"}
-            env["CONTEXT_ROOT"] = str(root)
-            subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env, check=True, capture_output=True)
-            (root / "repos").mkdir()
-            # Add an oversized active doc (over ACTIVE_SIZE_WARN = 30KB)
-            (root / "repos" / "oversized.md").write_text("---\ntitle: Oversized\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n" + "x" * 40_000 + "\n", encoding="utf-8")
-            # Regenerate INDEX.md so verify passes (even though doc is oversized)
-            subprocess.run([sys.executable, str(BIN / "gen_index.py")], env=env, check=True, capture_output=True)
-            report = self.engine_section(root)
-            # verify exits 0 but prints a warning about the oversized doc
-            self.assertIn("active doc(s) over", report)
-            self.assertIn("trim to keep re-reads cheap", report)
+    def verified_store(self, tmp: str, body: str) -> Path:
+        """A blank store with one active doc and a current INDEX.md, so `make verify` exits 0."""
+        root = Path(tmp) / ".context"
+        env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_TZ"}
+        env["CONTEXT_ROOT"] = str(root)
+        subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env, check=True, capture_output=True)
+        (root / "repos").mkdir()
+        (root / "repos" / "a.md").write_text("---\ntitle: A\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n" + body + "\n", encoding="utf-8")
+        subprocess.run([sys.executable, str(BIN / "gen_index.py")], env=env, check=True, capture_output=True)
+        return root
 
-    def test_clean_store_has_no_verify_warnings(self):
-        # a clean store with all docs under size limits: verify exits 0, no warnings
+    def test_a_warning_of_a_passing_verify_is_a_warn_row(self):
+        # verify exits 0 on an oversized active doc and says so on stderr only; a WARN row is what turns the
+        # verdict AMBER, and it keeps the fix the warning names
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / ".context"
-            env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_TZ"}
-            env["CONTEXT_ROOT"] = str(root)
-            subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env, check=True, capture_output=True)
-            (root / "repos").mkdir()
-            (root / "repos" / "a.md").write_text("---\ntitle: A\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\nsmall content", encoding="utf-8")
-            # Regenerate INDEX.md so verify passes
-            subprocess.run([sys.executable, str(BIN / "gen_index.py")], env=env, check=True, capture_output=True)
-            report = self.engine_section(root)
-            # verify exits 0 with OK message, no verify warnings
-            self.assertIn("✅ `make verify`", report)
-            self.assertNotIn("⚠️ active doc(s) over", report)
-            self.assertNotIn("⚠️ SESSION_INDEX.md", report)
-            self.assertNotIn("⚠️ INDEX.md is", report)
+            report = self.engine_section(self.verified_store(tmp, "x" * 40_000))
+            self.assertIn("- ✅ `make verify`", report)
+            self.assertRegex(report, r"(?m)^- ⚠️ 1 active doc\(s\) over .*trim to keep re-reads cheap")
+
+    def test_a_passing_verify_without_warnings_adds_no_warn_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self.engine_section(self.verified_store(tmp, "small"))
+            rows = report.splitlines()
+            verify_row = next(i for i, row in enumerate(rows) if row.startswith("- ✅ `make verify`"))
+            self.assertTrue(rows[verify_row + 1].startswith("- ✅ "), rows[verify_row + 1])
 
 
 class CtxStoreCheck(unittest.TestCase):
