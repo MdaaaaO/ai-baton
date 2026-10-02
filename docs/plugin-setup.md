@@ -118,6 +118,8 @@ Verifying a release has what the release manifest and its attestation check prov
      --signer-workflow MdaaaaO/ai-baton/.github/workflows/release.yml
    ```
 
+   A pass proves that release's manifest came from the release workflow. Whether the files the update
+   installs match that manifest is what step 4 checks.
 3. Update:
 
    ```sh
