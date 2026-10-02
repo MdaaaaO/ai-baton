@@ -69,7 +69,8 @@ Before spawning, the runner runs the deterministic gate:
 ```sh
 python3 $BATON/skills/pr-review/scripts/security-surface.py $CTX
 ```
-No model call — it reads only `bundle.json`'s changed paths and `diff.patch`'s added lines. `SURFACE
+No model call — it reads `bundle.json`'s changed paths and `diff.patch`'s added lines (the per-file
+patches under `diffs/` when `diff.patch` is empty). `SURFACE
 <reason>[, <reason>…]` → spawn a **fourth** lens, **security**, same brief shape as the other three,
 its scope line the printed reasons verbatim. `NONE` → spawn the usual three. A non-zero exit (unreadable
 bundle, or added lines it could not read) → spawn the usual three and report the failure (one line, the

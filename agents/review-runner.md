@@ -69,12 +69,13 @@ so you spend them on judgment, not on fetching.
    20-line PR (merge the rest into the body); out-of-diff bugs are fast-follows `FF1…`, not blockers; one
    instance per pattern; no finding without evidence.
    **`--deep`** (only when the prompt says so): first run the security-surface gate —
-   `python3 $BATON/skills/pr-review/scripts/security-surface.py $CTX` (no model call, reads only
-   `bundle.json`/`diff.patch`). `SURFACE <reason>[, <reason>…]` → the lens set is the usual three **plus**
-   a fourth, **security**, whose scope line is the printed reasons verbatim. `NONE` → the usual three. A
-   non-zero exit (unreadable bundle, or added lines it could not read) → the usual three, and name the
-   failure (its stderr line) in the sheet's `lenses:` line — never a lens skipped in silence. Spawn the
-   lens set as parallel `Agent` calls, `subagent_type: general-purpose`, `model: opus`, each with this
+   `python3 $BATON/skills/pr-review/scripts/security-surface.py $CTX` (no model call; reads `bundle.json`
+   and `diff.patch`, or the per-file patches under `diffs/` when `diff.patch` is empty). `SURFACE <reason>[,
+   <reason>…]` → the lens set is the usual three **plus** a fourth, **security**, whose scope line is the
+   printed reasons verbatim. `NONE` → the usual three. A non-zero exit (unreadable bundle, or added lines
+   it could not read) → the usual three, and name the failure (its stderr line) in the sheet's `lenses:`
+   line — never a lens skipped in silence. Spawn the lens set as parallel `Agent` calls,
+   `subagent_type: general-purpose`, `model: opus`, each with this
    brief and nothing more:
    ```
    Lens <design & contracts | failure modes | verification & maintainability | security> for <repo>#<pr>.

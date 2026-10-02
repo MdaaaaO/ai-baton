@@ -41,7 +41,7 @@ enter its prefix — everything read there is re-billed on every later tick. The
 
 The main session never opens `$CTX/diff.patch`, `files.json`, `reviews.json` or `threads.json`
 itself; if a walk question needs them, that is a deep dive (a child reads them). `--deep` spawns its
-three lenses **inside** the runner (it has `Agent`), so the main session sees one return either way.
+lenses **inside** the runner (it has `Agent`), so the main session sees one return either way.
 `--local` runs steps 1–4 in-session — only for a session that exists for this one review and ends
 after it, never in the `pr-scan` monitor session.
 
