@@ -155,7 +155,7 @@ def main() -> int:
         ix = 0
     if ix > INDEX_SIZE_WARN:
         print(f"⚠ INDEX.md is {ix // 1024}KB (> {INDEX_SIZE_WARN // 1024}KB) — it is read whole at every "
-              f"\"find first\" step; archive finished docs (`make archive SLUG=<slug>`) to bring it back under budget",
+              f"\"find first\" step; archive finished docs (`make -C $BATON/context-db archive SLUG=<slug>`) to bring it back under budget",
               file=sys.stderr)
 
     # Decision-ledger shape (non-fatal) — a line that already starts with a date and has the

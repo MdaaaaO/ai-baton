@@ -302,7 +302,8 @@ session-index:
 session-archive:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) gen_sessions.py $(if $(DRY),--dry-run,) $(if $(NOARCHIVE),--no-archive,)
 
-# make archive SLUG=<file-slug>  — flip status to archived in place (kept in INDEX).
+# make archive SLUG=<file-slug>  — flip status to archived in place (INDEX folds it into its domain's
+# archived count; `make find DOMAIN=<domain>` still lists it).
 # Atomic: sed writes a temp copy in the same directory, `mv` replaces the doc in one rename — a reader
 # (or a second `make archive`/`make index` racing this one) sees the old doc or the new one, never a
 # half-written one; the temp copy is removed if the sed or the mv fails, so nothing is left behind.
@@ -314,6 +315,6 @@ archive:
 	 test -n "$$f" || { echo "no doc named $(SLUG).md"; exit 1; }; \
 	 tmp=$$(mktemp "$$f.XXXXXX"); \
 	 if cp -p "$$f" "$$tmp" && sed -E 's|^status:.*|status: archived|' "$$f" > "$$tmp" && mv -f "$$tmp" "$$f"; then \
-	   echo "archived $$f (still indexed; move to archive/ by hand if you want it out of the domain view)"; \
+	   echo "archived $$f (INDEX.md counts it under its domain; \`make find DOMAIN=<domain>\` still lists it)"; \
 	 else rm -f "$$tmp"; exit 1; fi; \
 	 $(MAKE) --no-print-directory -f $(lastword $(MAKEFILE_LIST)) index
