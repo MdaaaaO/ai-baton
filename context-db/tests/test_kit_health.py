@@ -1353,10 +1353,12 @@ class Release(unittest.TestCase):
 
 class CloneChannelReport(unittest.TestCase):
     """A clone install's channel, installed tag and held preview (`.sync-preview`, shown verbatim — it
-    already names the tag and the apply command); an `ok` last sync whose `.sync-status` detail names itself
-    `unverified (reason)` gets its own WARN naming the hand-verify command."""
+    already names the tag and the apply command); the durable mark in `.sync-unverified` (not `.sync-status`,
+    which only carries the word for the one run that applied it) gets its own WARN naming the hand-verify
+    command."""
 
-    def run_report(self, channel_rc=1, channel_out="", describe="v0.3.0", preview_text=None, status_text=None):
+    def run_report(self, channel_rc=1, channel_out="", describe="v0.3.0", preview_text=None, status_text=None,
+                   unverified_text=None, head="abc1234"):
         kh = load_kit_health()
         with tempfile.TemporaryDirectory() as tmp:
             kh.KIT = Path(tmp)
@@ -1364,6 +1366,8 @@ class CloneChannelReport(unittest.TestCase):
                 (kh.KIT / ".sync-preview").write_text(preview_text, encoding="utf-8")
             if status_text is not None:
                 (kh.KIT / ".sync-status").write_text(status_text, encoding="utf-8")
+            if unverified_text is not None:
+                (kh.KIT / ".sync-unverified").write_text(unverified_text, encoding="utf-8")
             r = kh.Report()
 
             def fake(cmd, *a, **kw):
@@ -1373,6 +1377,8 @@ class CloneChannelReport(unittest.TestCase):
                     return (0, describe, "") if describe else (128, "", "no tag")
                 if "remote" in cmd:
                     return (0, "https://github.com/example/kit.git", "")
+                if "rev-parse" in cmd:
+                    return (0, head + "\n", "") if head else (128, "", "not a git repository")
                 return (0, "", "")
             with mock.patch.object(kh, "sh", side_effect=fake):
                 kh.clone_channel_report(r)
@@ -1397,13 +1403,44 @@ class CloneChannelReport(unittest.TestCase):
         self.assertNotIn("held", r.lines[0])
 
     def test_unverified_last_sync_warns_with_the_hand_verify_command(self):
-        kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok unverified (offline, no gh)\n")
+        kh, r = self.run_report(describe="v0.3.0", unverified_text="abc1234 unverified (offline, no gh)\n")
         self.assertEqual(r.counts[kh.WARN], 1, r.lines)
         text = r.findings[0][2]
         self.assertIn("unverified (offline, no gh)", text)
         self.assertIn("gh attestation verify", text)
         self.assertIn("gh release download", text)
         self.assertIn("example/kit", text)
+        self.assertIn("make claude_sync", text)
+
+    def test_a_mark_for_another_commit_never_warns(self):
+        # HEAD moved without a sync run since: the mark says nothing about the commit checked out now
+        mark = "abc1234 unverified (offline, no gh)\n"
+        kh, r = self.run_report(describe="v0.3.0", unverified_text=mark, head="abc1234")
+        self.assertEqual(r.counts[kh.WARN], 1, "the same mark warns while HEAD is the commit it names")
+        kh, r = self.run_report(describe="v0.3.0", unverified_text=mark, head="def5678")
+        self.assertEqual(r.counts[kh.WARN], 0, r.lines)
+
+    def test_a_rejected_mark_is_an_error(self):
+        # a later check ran on the applied release and failed: louder than "could not check"
+        text = "abc1234 rejected (attestation verify rejected it: HTTP 404)\n"
+        kh, r = self.run_report(describe="v0.3.0", unverified_text=text)
+        self.assertEqual((r.counts[kh.ERR], r.counts[kh.WARN]), (1, 0), r.lines)
+        finding = r.findings[0][2]
+        self.assertIn("failed a later manifest check (attestation verify rejected it: HTTP 404)", finding)
+        self.assertIn("still applied", finding)
+        self.assertIn("gh attestation verify", finding)
+        kh, r = self.run_report(describe="v0.3.0", unverified_text=text, head="def5678")
+        self.assertEqual(r.counts[kh.ERR], 0, "a rejected mark for another commit says nothing either")
+
+    def test_a_mark_still_warns_when_head_cannot_be_read(self):
+        kh, r = self.run_report(describe="v0.3.0", unverified_text="abc1234 unverified (offline, no gh)\n", head="")
+        self.assertEqual(r.counts[kh.WARN], 1, r.lines)
+
+    def test_a_stale_status_line_alone_never_warns(self):
+        # only the dedicated file is the durable mark: an `unverified` word left in .sync-status by a
+        # run long past is not read
+        kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok unverified (offline, no gh)\n")
+        self.assertEqual(r.counts[kh.WARN], 0, r.lines)
 
     def test_a_plain_ok_sync_never_warns(self):
         kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok kit@abc1234\n")
