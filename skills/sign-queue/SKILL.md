@@ -3,7 +3,7 @@ name: sign-queue
 description: "Shared queue for commits that must be GPG/SSH-signed and pushed by the user on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains it with one command. Use for every commit or push in a signed-commits repo; never paste git one-liners. Inert where `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "21"
+  version: "22"
   updated: "2026-10-01"
   reviewed: "2026-09-27"
   requires: "signed_commits"
@@ -23,7 +23,7 @@ break on the user's terminal line wrap. So: sessions **enqueue**, the user **dra
 ## Session side — enqueue a job
 
 ```
-sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [--rebase] [--new-branch] [--files "<paths>" | --all] [--onto <upstream-branch>:<old-base-sha>]
+sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [--rebase] [--new-branch] [--files <path> [--files <path> ...] | --files "<paths>" | --all] [--onto <upstream-branch>:<old-base-sha>]
 ```
 
 - `topic` names the job (`key-123-p4`, `kb-round4`); `[A-Za-z0-9._-]` only.
@@ -57,13 +57,20 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
     pushing at all, refusing (parked, `UNSIGNED <sha>`) rather than land one with no signature or a bad one
     (`%G?` N or B; U and E carry a signature this host cannot fully trust or check, and the drain reports them).
 - **One staging rule, same as `signed-git-commits`: stage explicit paths, never a silent `add -A`.**
-  `--files "a b"` stages only those paths — the norm, especially in a worktree with unrelated noise. Each
-  path is single-quoted in the job: route dirs of some web frameworks contain `$param`, and the unquoted
-  form aborts at `set -u` ("param: unbound variable") before any git runs — re-enqueue is the fix.
+  Repeat `--files <path>` once per path — the norm for more than one path; a repeated path is never
+  split. Every path is literal, never a glob or git pathspec magic (`a*.txt` is the file of that name).
+  Given exactly once, the legacy space-separated form still works for existing callers: `--files "a b"`
+  is staged as one path when `a b` already exists in the worktree or is tracked as such, otherwise it is
+  split on whitespace into `a` and `b` (the old behaviour) — so a list of several paths that happen to contain a space needs one `--files` per path, not
+  one `--files` with all of them. Each kept path is single-quoted in the job: route dirs of some web
+  frameworks contain `$param`, and the unquoted form aborts at `set -u` ("param: unbound variable") before
+  any git runs — re-enqueue is the fix.
   `--all` stages with `git add -A` **on purpose** (mutually exclusive with `--files`) — pass it when you
   mean to carry everything. Passing neither still falls back to `add -A` for a plain retry, but `enqueue.sh`
   prints a warning either way: `-A` is never a silent default.
-- `--by <your session name>` (as ListAgents shows it) — **always pass it**: a failed job is routed back to its owner by this.
+- `--by <your session name>` (as ListAgents shows it) — **required**: a call with neither `--by` nor
+  `SIGN_QUEUE_BY` set exits 2 with a usage message instead of queuing an unowned job. There is no fallback
+  to a workspace identity — a failed job is routed back to its owner by this value alone.
 - `--ticket <KEY>` / `--epic <KEY>` / `--pr <n>` / `--summary "<text>"` — the overview columns the user sees in `make sign`
   (added 2026-09-22, `signq.py`). All optional and auto-derived: ticket from the branch/topic, epic from the `.context/`
   epic doc that mentions the ticket, PR via `gh pr list --head <branch>`, summary = first line of the message file.
