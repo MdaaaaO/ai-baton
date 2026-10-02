@@ -1358,7 +1358,7 @@ class CloneChannelReport(unittest.TestCase):
     command."""
 
     def run_report(self, channel_rc=1, channel_out="", describe="v0.3.0", preview_text=None, status_text=None,
-                    unverified_text=None):
+                   unverified_text=None, head="abc1234"):
         kh = load_kit_health()
         with tempfile.TemporaryDirectory() as tmp:
             kh.KIT = Path(tmp)
@@ -1377,6 +1377,8 @@ class CloneChannelReport(unittest.TestCase):
                     return (0, describe, "") if describe else (128, "", "no tag")
                 if "remote" in cmd:
                     return (0, "https://github.com/example/kit.git", "")
+                if "rev-parse" in cmd:
+                    return (0, head + "\n", "") if head else (128, "", "not a git repository")
                 return (0, "", "")
             with mock.patch.object(kh, "sh", side_effect=fake):
                 kh.clone_channel_report(r)
@@ -1408,11 +1410,21 @@ class CloneChannelReport(unittest.TestCase):
         self.assertIn("gh attestation verify", text)
         self.assertIn("gh release download", text)
         self.assertIn("example/kit", text)
+        self.assertIn("make claude_sync", text)
+
+    def test_a_mark_for_another_commit_never_warns(self):
+        # HEAD moved without a sync run since: the mark says nothing about the commit checked out now
+        kh, r = self.run_report(describe="v0.3.0", unverified_text="abc1234 unverified (offline, no gh)\n",
+                                head="def5678")
+        self.assertEqual(r.counts[kh.WARN], 0, r.lines)
+
+    def test_a_mark_still_warns_when_head_cannot_be_read(self):
+        kh, r = self.run_report(describe="v0.3.0", unverified_text="abc1234 unverified (offline, no gh)\n", head="")
+        self.assertEqual(r.counts[kh.WARN], 1, r.lines)
 
     def test_a_stale_status_line_alone_never_warns(self):
-        # the mark moved to .sync-unverified precisely so it survives past the one run that applied
-        # it; a leftover `unverified` word in .sync-status (from a run long past) must not be read
-        # as the durable mark — only the dedicated file is.
+        # only the dedicated file is the durable mark: an `unverified` word left in .sync-status by a
+        # run long past is not read
         kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok unverified (offline, no gh)\n")
         self.assertEqual(r.counts[kh.WARN], 0, r.lines)
 

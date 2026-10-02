@@ -124,9 +124,10 @@ overwrite it: `kit-health` § 1 reads this file, not `.sync-status`, so the warn
 session that applied the release. It is cleared once `HEAD` no longer matches the commit it names — a
 later fast-forward, verified or not, or anything else that moved `HEAD` — or once a later
 `sh .claude/sync.sh --accept` on that same, still-current commit gets a verified answer (`gh` now
-installed or authenticated, say); a check that still cannot run just refreshes the stored reason, and one
-that runs and fails reports `error` for that run without touching the mark — the release stays applied,
-only that attempt found no new answer.
+installed or authenticated, say); a check that still cannot run refreshes the stored reason and reports
+`ok … unverified (<reason>)` again, and one that runs and fails reports `error` (exit 1) and writes the
+rejection into the mark — the release stays applied, nothing is rolled back, and `kit-health` § 1 warns
+with that reason from then on.
 
 A contributor who wants the old behaviour — always track `origin/main`, no hold — opts out with:
 

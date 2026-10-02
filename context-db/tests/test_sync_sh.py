@@ -769,9 +769,8 @@ class SyncSh(unittest.TestCase):
 
     # ── the durable unverified mark (.sync-unverified) outlives the run that applied it ──
     def test_unverified_mark_survives_a_later_plain_run(self):
-        # the bug this covers: a plain run (no --accept, what the SessionEnd hook runs) used to
-        # rewrite .sync-status with no `unverified` suffix at all, so kit-health's warning lasted one
-        # session. The durable mark must still be there after such a run.
+        # a plain run (no --accept, what the SessionEnd hook runs) rewrites .sync-status with no
+        # `unverified` word; the durable mark must still be there after it
         self.origin_commit("a")
         self.seed_tag("v0.1.0")
         self.sync()
@@ -788,9 +787,8 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
 
     def test_reaccepting_the_same_commit_clears_the_mark_once_verified(self):
-        # the owner's decision: a later `--accept` on the exact commit that is still marked unverified
-        # gets one more chance at the check (e.g. `gh` got installed since) and clears the mark on a
-        # verified answer, without moving HEAD any further.
+        # a later `--accept` on the commit that is still marked unverified runs the check again
+        # (`gh` got installed since, say) and clears the mark on a verified answer; HEAD does not move
         self.fake_github_remote()
         self.origin_commit("a")
         self.seed_tag("v0.1.0")
@@ -827,6 +825,60 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha2)
         self.assertFalse(self.unverified_file.exists(), "HEAD moved to a new, verified commit: the old mark is gone")
+
+    def test_reaccepting_while_the_check_still_cannot_run_keeps_the_mark_and_says_so(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        self.sync(env=_env(self.tmp, path=self.path_without("gh")), args=["--accept"])
+        self.assertIn("no gh on PATH", self.unverified_file.read_text())
+
+        r = self.sync(env=self.gh_env(GH_AUTH_RC="1"), args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status()[1], "ok")
+        self.assertIn("unverified (gh not authenticated or unreachable)", self.status_file.read_text())
+        self.assertEqual(self.unverified_file.read_text(),
+                         f"{tag_sha} unverified (gh not authenticated or unreachable)\n", "the reason is refreshed")
+
+    def test_reaccepting_a_release_the_check_now_rejects_reports_it_as_applied(self):
+        self.fake_github_remote()
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        self.sync(env=_env(self.tmp, path=self.path_without("gh")), args=["--accept"])
+
+        env = self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n", GH_ATTEST_RC="1")
+        r = self.sync(env=env, args=["--accept"])
+        self.assertEqual(r.returncode, 1, "a rejected release is loud, applied or not")
+        self.assertEqual(self.status()[1], "error")
+        line = self.status_file.read_text()
+        self.assertIn("is applied but failed verification", line)
+        self.assertNotIn("nothing applied", line)
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha, "nothing is rolled back")
+        mark = self.unverified_file.read_text()
+        self.assertTrue(mark.startswith(f"{tag_sha} unverified (a later check rejected it: "), mark)
+        self.assertFalse(self.rejected_file.exists(), "no rejection record: that file is for a release held back")
+
+        r = self.sync()
+        self.assertEqual(self.status()[1], "ok", "a plain run does not repeat the error")
+        self.assertEqual(self.unverified_file.read_text(), mark, "and leaves the mark as it is")
+
+    def test_unverified_mark_cleared_once_head_moves_outside_a_release_apply(self):
+        self.origin_commit("a")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        self.sync(env=_env(self.tmp, path=self.path_without("gh")), args=["--accept"])
+        self.assertTrue(self.unverified_file.exists())
+
+        self.origin_commit("b")
+        self.git("config", "kit.channel", "main", cwd=self.kit)
+        r = self.sync()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), self.rev_parse("HEAD", cwd=self.seed))
+        self.assertFalse(self.unverified_file.exists(), "the mark named a commit that is not HEAD any more")
 
     def test_accept_release_without_manifest_asset_applies_unverified(self):
         self.fake_github_remote()

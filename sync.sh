@@ -85,7 +85,7 @@
 # release is verified by hand or replaced. Written when --accept applies a release the manifest check
 # could not run on; removed once HEAD no longer matches the commit it names (a later fast-forward —
 # verified or not — or anything else that moves HEAD, checked once at the end of every run) or once a
-# later --accept on that same, still-current commit gets a verified answer (sync_release above).
+# later --accept on that same, still-current commit gets a verified answer (sync_release below).
 set -u
 FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-60}"  # seconds; Claude Code does not enforce an async hook's `timeout` (docs/sync.md)
 LOCK_WAIT="${SYNC_LOCK_WAIT:-30}"          # seconds to wait for another sync.sh's flock
@@ -309,8 +309,9 @@ verify_release() {
 # Already at <tag> and --accept is given: usually a no-op, except when .sync-unverified still marks
 # this exact commit unverified — then the manifest is checked again (the user is asking on purpose,
 # e.g. after fixing `gh`), so a release that now verifies can clear its own mark. A check that still
-# cannot run refreshes the stored reason; one that runs and fails reports `error` for this run but
-# leaves the mark alone — the release stays applied, only this attempt found no new answer.
+# cannot run refreshes the stored reason and says `unverified` in this run's status again; one that
+# runs and fails reports `error` (exit 1) and writes the rejection into the mark — the release stays
+# applied, nothing is rolled back, and `kit-health` § 1 warns with that reason from then on.
 sync_release() {
   local tag=$1 target before verify_suffix rej_line rej_tag mark_line mark_sha
   target="$(git rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)"
@@ -327,11 +328,15 @@ sync_release() {
       if [ "$mark_sha" = "$before" ]; then
         if verify_release "$tag" "$before"; then
           if [ -n "$VERIFY_SUFFIX" ]; then
+            PULLED="$PULLED $VERIFY_SUFFIX"
             printf '%s %s\n' "$before" "$VERIFY_SUFFIX" >"$UNVERIFIED"
           else
             rm -f "$UNVERIFIED"
           fi
         else
+          # verify_release words its failure for a release that was held back; this one is applied
+          FAIL="kit: release $tag is applied but failed verification: $REJECT_REASON"
+          printf '%s unverified (a later check rejected it: %s)\n' "$before" "$REJECT_REASON" >"$UNVERIFIED"
           return 1
         fi
       fi

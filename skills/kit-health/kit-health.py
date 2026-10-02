@@ -290,10 +290,14 @@ def unverified_mark() -> str:
     """The reason text from `.sync-unverified` (sync.sh's durable mark — one line, `<commit-sha> unverified
     (<reason>)` — written when `--accept` applies a release without being able to check its manifest, and kept
     past that one run: cleared only once `HEAD` moves off that commit or a later `--accept` on it verifies).
-    `""` when the file is missing, empty, or carries no `unverified` word."""
+    `""` when the file is missing, empty, carries no `unverified` word, or names a commit that is not `HEAD`
+    any more (sync.sh removes such a mark at its next run; until then it says nothing about this checkout)."""
     try:
         detail = (KIT / ".sync-unverified").read_text(encoding="utf-8").strip()
     except OSError:
+        return ""
+    rc, head, _ = sh(["git", "-C", str(KIT), "rev-parse", "HEAD"])
+    if rc == 0 and head.strip() and detail.split(" ", 1)[0] != head.strip():
         return ""
     m = UNVERIFIED.search(detail)
     return (m.group(1) or "no reason given").strip() if m else ""
@@ -336,7 +340,8 @@ def clone_channel_report(r: Report) -> None:
               ("gh release download <tag> --pattern manifest.txt && gh attestation verify manifest.txt "
                "--repo <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yml")
         r.add(WARN, "kit", f"last sync applied an update unverified ({reason}) — verify by hand: `{cmd}` "
-              "(docs/contributing.md § Releases)")
+              "(docs/contributing.md § Releases); `make claude_sync` checks it again and drops this warning "
+              "once it verifies")
 
 
 def semver(tag: str) -> tuple[int, ...] | None:

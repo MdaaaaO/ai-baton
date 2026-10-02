@@ -70,8 +70,8 @@ update: nothing is applied. The check being unable to *run* at all — no `gh` o
 too-old `gh`, no answer from GitHub, a release with no `manifest.txt` asset (the full list:
 [`docs/sync.md`](docs/sync.md)) — still applies the release (a clone must be able to catch up with no
 network), and records the sync as `unverified` in `.sync-status` and, durably, in `.sync-unverified`;
-`kit-health` § 1 reads the latter and warns, naming the command above to run by hand. The mark stays until
-the release verifies by hand, a later release replaces it, or `HEAD` moves to a different commit — not just
-until the next sync run.
+`kit-health` § 1 reads the latter and warns, naming the command above to run by hand. The mark stays until a
+later `make claude_sync` verifies the release or `HEAD` moves to a different commit — not just until the next
+sync run.
 
 There is no way yet to pull back a release that turns out to be bad: the remedy today is a newer release.
