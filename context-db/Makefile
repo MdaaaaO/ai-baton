@@ -246,13 +246,12 @@ review-gate-tree:
 review-evidence:
 	@cd $(ENGINE).. && $(PY) $(BIN)/review_evidence.py --base $(BASE) --head HEAD $(if $(SKIP_BUMP),--skip-bump,) --out .review/evidence.md
 # make find TAG=foo   |   make find DOMAIN=bar   — STATUS=<status> keeps only the docs in that status
-FIND_STATUS = $(if $(STATUS),| while IFS= read -r f; do grep -qE '^status:[[:space:]]*$(STATUS)[[:space:]]*$$' "$$f" && echo "$$f"; done,)
 find:
 ifdef TAG
-	@grep -rIl --include='*.md' -E '^tags:.*\b$(TAG)\b' $(CONTEXT) $(FIND_STATUS) | sed 's|$(CONTEXT)/||' | sort || true
+	@$(PY) $(BIN)/find_frontmatter.py "$(CONTEXT)" TAG "$(TAG)" $(if $(STATUS),STATUS "$(STATUS)",) || true
 endif
 ifdef DOMAIN
-	@grep -rIl --include='*.md' -E '^domain:[[:space:]]*$(DOMAIN)[[:space:]]*$$' $(CONTEXT) $(FIND_STATUS) | sed 's|$(CONTEXT)/||' | sort || true
+	@$(PY) $(BIN)/find_frontmatter.py "$(CONTEXT)" DOMAIN "$(DOMAIN)" $(if $(STATUS),STATUS "$(STATUS)",) || true
 endif
 ifeq ($(TAG)$(DOMAIN),)
 	@echo "usage: make find TAG=<tag> [STATUS=<status>]  |  make find DOMAIN=<domain> [STATUS=<status>]"
