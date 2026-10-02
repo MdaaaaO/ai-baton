@@ -81,8 +81,8 @@
 #
 # .sync-unverified (ignored; one line: `<commit-sha> <reason>`, the same "unverified (<reason>)" text
 # `.sync-status` carries for that one run) is the durable mark of an applied-but-unverified release: it
-# stays, unlike `.sync-status`, past the run that wrote it, so `kit-health` § 1 keeps warning until the
-# release is verified by hand or replaced. Written when --accept applies a release the manifest check
+# stays, unlike `.sync-status`, past the run that wrote it, so `kit-health` § 1 keeps warning until a
+# later --accept verifies the release or HEAD moves to another commit. Written when --accept applies a release the manifest check
 # could not run on; removed once HEAD no longer matches the commit it names (a later fast-forward —
 # verified or not — or anything else that moves HEAD, checked once at the end of every run) or once a
 # later --accept on that same, still-current commit gets a verified answer (sync_release below).
