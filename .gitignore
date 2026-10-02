@@ -7,6 +7,7 @@ settings.local.json
 .sync-status
 .sync-preview
 .sync-rejected
+.sync-unverified
 sync.log
 __pycache__/
 *.pyc

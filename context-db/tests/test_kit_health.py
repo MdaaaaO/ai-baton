@@ -1353,10 +1353,12 @@ class Release(unittest.TestCase):
 
 class CloneChannelReport(unittest.TestCase):
     """A clone install's channel, installed tag and held preview (`.sync-preview`, shown verbatim — it
-    already names the tag and the apply command); an `ok` last sync whose `.sync-status` detail names itself
-    `unverified (reason)` gets its own WARN naming the hand-verify command."""
+    already names the tag and the apply command); the durable mark in `.sync-unverified` (not `.sync-status`,
+    which only carries the word for the one run that applied it) gets its own WARN naming the hand-verify
+    command."""
 
-    def run_report(self, channel_rc=1, channel_out="", describe="v0.3.0", preview_text=None, status_text=None):
+    def run_report(self, channel_rc=1, channel_out="", describe="v0.3.0", preview_text=None, status_text=None,
+                    unverified_text=None):
         kh = load_kit_health()
         with tempfile.TemporaryDirectory() as tmp:
             kh.KIT = Path(tmp)
@@ -1364,6 +1366,8 @@ class CloneChannelReport(unittest.TestCase):
                 (kh.KIT / ".sync-preview").write_text(preview_text, encoding="utf-8")
             if status_text is not None:
                 (kh.KIT / ".sync-status").write_text(status_text, encoding="utf-8")
+            if unverified_text is not None:
+                (kh.KIT / ".sync-unverified").write_text(unverified_text, encoding="utf-8")
             r = kh.Report()
 
             def fake(cmd, *a, **kw):
@@ -1397,13 +1401,20 @@ class CloneChannelReport(unittest.TestCase):
         self.assertNotIn("held", r.lines[0])
 
     def test_unverified_last_sync_warns_with_the_hand_verify_command(self):
-        kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok unverified (offline, no gh)\n")
+        kh, r = self.run_report(describe="v0.3.0", unverified_text="abc1234 unverified (offline, no gh)\n")
         self.assertEqual(r.counts[kh.WARN], 1, r.lines)
         text = r.findings[0][2]
         self.assertIn("unverified (offline, no gh)", text)
         self.assertIn("gh attestation verify", text)
         self.assertIn("gh release download", text)
         self.assertIn("example/kit", text)
+
+    def test_a_stale_status_line_alone_never_warns(self):
+        # the mark moved to .sync-unverified precisely so it survives past the one run that applied
+        # it; a leftover `unverified` word in .sync-status (from a run long past) must not be read
+        # as the durable mark — only the dedicated file is.
+        kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok unverified (offline, no gh)\n")
+        self.assertEqual(r.counts[kh.WARN], 0, r.lines)
 
     def test_a_plain_ok_sync_never_warns(self):
         kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok kit@abc1234\n")
