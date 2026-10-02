@@ -46,6 +46,29 @@ def _seed_repo(root: Path) -> Path:
     return wt
 
 
+def _track(root: Path, wt: Path, *names: str) -> None:
+    """Commit `names` and then change each one, so a pattern that reached git as a pathspec would have
+    tracked, modified files to match."""
+    git_env = _env(root)
+    git = ["git", "-C", str(wt), "-c", "user.name=t", "-c", "user.email=t"]
+    for n in names:
+        (wt / n).write_text("v1\n")
+    subprocess.run([*git, "add", "--", *names], check=True, env=git_env)
+    subprocess.run([*git, "commit", "-q", "-m", "chore: more files"], check=True, env=git_env)
+    for n in names:
+        (wt / n).write_text("v2\n")
+
+
+def _run_staging(root: Path, wt: Path, job: Path) -> list[str]:
+    """Run only the job's staging lines (never its commit or push) and return what ended up staged."""
+    keep = [ln for ln in job.read_text().splitlines()
+            if ln.startswith(("WT=", "GIT_LITERAL_PATHSPECS=", 'git -C "$WT" add --'))]
+    subprocess.run(["sh", "-c", "set -eu\n" + "\n".join(keep)], check=True, env=_env(root), timeout=60)
+    r = subprocess.run(["git", "-C", str(wt), "diff", "--cached", "--name-only"], check=True, env=_env(root),
+                       capture_output=True, text=True, timeout=60)
+    return sorted(r.stdout.splitlines())
+
+
 def _enqueue(tmp: Path, wt: Path, ctx: Path, topic: str, *extra: str, env_extra=None):
     msg = tmp / f"{topic}-msg.txt"
     msg.write_text("fix: change things\n")
@@ -93,17 +116,70 @@ class RepeatedFiles(unittest.TestCase):
             ctx = tmp / "ws" / ".context"
             ctx.mkdir(parents=True)
             wt = _seed_repo(tmp / "ws")
-            (wt / "a1.txt").write_text("a\n")
+            _track(tmp / "ws", wt, "a1.txt", "a2.txt")  # tracked and modified: what a pathspec would match
             (wt / "c.txt").write_text("c\n")
             msg = tmp / "glob-msg.txt"
             msg.write_text("fix: change things\n")
-            # run from inside the worktree: an expanded pattern would match a1.txt there
+            # run from inside the worktree: a pattern expanded by the shell would match a1.txt there too
             r = subprocess.run(["sh", str(ENQUEUE), "glob", str(wt), "main", str(msg), "--ticket", "none",
                                 "--epic", "none", "--pr", "1", "--summary", "s", "--by", "t",
                                 "--files", "a*.txt", "--files", "c.txt"],
                                env=_env(tmp, ctx), cwd=wt, capture_output=True, text=True, timeout=60)
             self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
             self.assertIn("a*.txt is neither in the worktree nor tracked", r.stderr)
+
+    def test_a_file_named_like_a_pattern_stages_only_itself(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            _track(tmp / "ws", wt, "f1.txt")  # `f[1].txt` read as a pattern matches this one
+            (wt / "f[1].txt").write_text("literal\n")
+            (wt / "c.txt").write_text("c\n")
+            r = _enqueue(tmp, wt, ctx, "literal", "--files", "f[1].txt", "--files", "c.txt", "--by", "t")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            job = Path(r.stdout.strip().splitlines()[-1])
+            self.assertEqual(_run_staging(tmp / "ws", wt, job), ["c.txt", "f[1].txt"])
+
+    def test_pathspec_magic_is_a_file_name_not_a_pattern(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            _track(tmp / "ws", wt, "a1.txt")
+            (wt / "c.txt").write_text("c\n")
+            r = _enqueue(tmp, wt, ctx, "magic", "--files", ":(glob)a*.txt", "--files", "c.txt", "--by", "t")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn(":(glob)a*.txt is neither in the worktree nor tracked", r.stderr)
+
+    def test_a_backslash_in_a_path_reaches_the_job_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            name = "a\\tb.txt"  # a backslash and a t, not a TAB
+            (wt / name).write_text("x\n")
+            (wt / "c.txt").write_text("c\n")
+            r = _enqueue(tmp, wt, ctx, "backslash", "--files", name, "--files", "c.txt", "--by", "t")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            job = Path(r.stdout.strip().splitlines()[-1])
+            self.assertEqual(self._staged(job), [name, "c.txt"])
+
+    def test_a_value_flag_given_last_is_a_usage_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            (wt / "c.txt").write_text("c\n")
+            for flag in ("--files", "--by"):
+                with self.subTest(flag=flag):
+                    r = _enqueue(tmp, wt, ctx, "dangling", "--by", "t", flag)
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                    self.assertIn(f"{flag} needs a value", r.stderr)
 
     def test_an_empty_files_value_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
