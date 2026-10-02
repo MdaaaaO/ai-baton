@@ -666,6 +666,32 @@ class ReadOnlyRun(unittest.TestCase):
             (root / "repos" / "bad.md").write_text("---\ntitle: Bad\ntype: novel\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n", encoding="utf-8")
             self.assertIn("❌ `make verify` failed", self.engine_section(root))
 
+    def verified_store(self, tmp: str, body: str) -> Path:
+        """A blank store with one active doc and a current INDEX.md, so `make verify` exits 0."""
+        root = Path(tmp) / ".context"
+        env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_TZ"}
+        env["CONTEXT_ROOT"] = str(root)
+        subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env, check=True, capture_output=True)
+        (root / "repos").mkdir()
+        (root / "repos" / "a.md").write_text("---\ntitle: A\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n" + body + "\n", encoding="utf-8")
+        subprocess.run([sys.executable, str(BIN / "gen_index.py")], env=env, check=True, capture_output=True)
+        return root
+
+    def test_a_warning_of_a_passing_verify_is_a_warn_row(self):
+        # verify exits 0 on an oversized active doc and says so on stderr only; a WARN row is what turns the
+        # verdict AMBER, and it keeps the fix the warning names and the doc verify lists under it
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self.engine_section(self.verified_store(tmp, "x" * 40_000))
+            self.assertIn("- ✅ `make verify`", report)
+            self.assertRegex(report, r"(?m)^- ⚠️ 1 active doc\(s\) over .*trim to keep re-reads cheap.* repos/a\.md: \d+KB$")
+
+    def test_a_passing_verify_without_warnings_adds_no_warn_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self.engine_section(self.verified_store(tmp, "small"))
+            rows = report.splitlines()
+            verify_row = next(i for i, row in enumerate(rows) if row.startswith("- ✅ `make verify`"))
+            self.assertTrue(rows[verify_row + 1].startswith("- ✅ "), rows[verify_row + 1])
+
 
 class CtxStoreCheck(unittest.TestCase):
     """§ 5 reports whether `.context/` is an adopted ctx store, from `ctx_adapter.py adopt --check` (read-only)."""
