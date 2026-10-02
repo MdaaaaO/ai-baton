@@ -27,7 +27,8 @@
    `make -C context-db test` builds the same blank store itself.
 4. It gives every test that spawns git, sh or make a ready-made hermetic subprocess env (`hermetic_env` below), so
    a host's own commit.gpgsign / gpg.format / system git config can never make a fixture fail: a fixture repo is
-   built with its own throw-away HOME, no global or system git config, and fixed author/committer placeholders.
+   built with its own throw-away HOME, no host global or system git config, and fixed author/committer
+   placeholders.
 """
 import atexit
 import json
@@ -68,56 +69,38 @@ for _k in _SESSION_SCRATCH_VARS:
     os.environ.pop(_k, None)
 
 
+# The global git config every fixture reads instead of the host's: it only turns git's background housekeeping
+# off. `git commit`, and the receive-pack of a push into a local origin, can start a detached `git maintenance
+# run --auto` that still writes into .git while the fixture is removed. A file, not GIT_CONFIG_COUNT entries:
+# git drops those before it starts receive-pack, and a fixture that sets its own entries replaces them.
+_git_config_dir = tempfile.mkdtemp(prefix="kit-tests-gitconfig-")
+atexit.register(shutil.rmtree, _git_config_dir, True)
+GIT_CONFIG_FILE = os.path.join(_git_config_dir, "gitconfig")
+with open(GIT_CONFIG_FILE, "w", encoding="utf-8") as _f:
+    _f.write("[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n")
+
+
 def hermetic_env(tmp, trust=None) -> dict:
     """A subprocess env for a test that spawns git, sh or make against a throw-away fixture: `tmp` becomes both
-    HOME and TMPDIR (no inherited .gitconfig, no real scratch dir), the global and system git config are both
-    disabled so a host's commit.gpgsign / gpg.format can never reach the fixture, GIT_TERMINAL_PROMPT is off so a
+    HOME and TMPDIR (no inherited .gitconfig, no real scratch dir), the system git config is disabled and the
+    global one is the suite's own file (GIT_CONFIG_FILE above: background housekeeping off, nothing else) so a
+    host's commit.gpgsign / gpg.format can never reach the fixture, GIT_TERMINAL_PROMPT is off so a
     missing credential never hangs the suite, author/committer are fixed placeholders, and CONTEXT_ROOT /
     SIGN_QUEUE_DIR default under the same tmp dir (a caller that needs a specific store or queue overrides them
     afterward). Build every fixture's git/sh/make subprocess env from this, never from a bare dict(os.environ).
 
-    It also turns off git's own background housekeeping: `git commit` (and a few other commands) can fork a
-    detached `git maintenance run --auto` that keeps writing into .git well after the call that started it
-    returns — a fixture that gets torn down (`rm -rf`) right after commit can then race that writer. gc.auto=0
-    and maintenance.auto=false are set through GIT_CONFIG_COUNT/KEY_n/VALUE_n at fixed indices 0 and 1, same
-    mechanism as `trust` below, so both can coexist with consistent indices. This helper is hermetic for those
-    variables too: any GIT_CONFIG_* the calling process's own environment happens to carry is dropped first,
-    never merged in — the indices this function hands out must never depend on what a caller already exported.
-    A caller that layers its own git config on top (`extend_git_config` below) must append after these, never
-    overwrite them.
-
     `trust`: for a read-only git call against a REAL checkout (this kit's own working tree, not a throw-away
-    fixture) — disabling the global config above also drops a host's own `safe.directory` entries, so a checkout
+    fixture) — replacing the global config above also drops a host's own `safe.directory` entries, so a checkout
     owned by another user (common for a mounted or root-owned clone) fails with "detected dubious ownership"
-    without one. Pass the checkout's path and it is trusted via GIT_CONFIG_KEY_2/VALUE_2, which applies
+    without one. Pass the checkout's path and it is trusted via GIT_CONFIG_COUNT/KEY/VALUE, which applies
     regardless of GIT_CONFIG_GLOBAL/NOSYSTEM."""
     tmp = str(tmp)
-    base = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG_")}
-    env = dict(base, HOME=tmp, TMPDIR=tmp, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+    env = dict(os.environ, HOME=tmp, TMPDIR=tmp, GIT_CONFIG_GLOBAL=GIT_CONFIG_FILE, GIT_CONFIG_NOSYSTEM="1",
                GIT_TERMINAL_PROMPT="0", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid",
                CONTEXT_ROOT=os.path.join(tmp, "store"), SIGN_QUEUE_DIR=os.path.join(tmp, "q"))
-    config = [("gc.auto", "0"), ("maintenance.auto", "false")]
     if trust is not None:
-        config.append(("safe.directory", str(trust)))
-    env["GIT_CONFIG_COUNT"] = str(len(config))
-    for i, (key, value) in enumerate(config):
-        env[f"GIT_CONFIG_KEY_{i}"] = key
-        env[f"GIT_CONFIG_VALUE_{i}"] = value
-    return env
-
-
-def extend_git_config(env: dict, cfg: dict) -> dict:
-    """Layers `cfg` (an ordered key -> value mapping) onto `env`'s existing GIT_CONFIG_COUNT/KEY_n/VALUE_n —
-    appending after whatever is already there (e.g. hermetic_env()'s gc.auto / maintenance.auto) instead of
-    resetting the count and overwriting index 0 onward, which would silently drop those entries. Use this
-    whenever a fixture needs its own git config (signing, a remote url, …) on top of hermetic_env()."""
-    start = int(env.get("GIT_CONFIG_COUNT", "0"))
-    env = dict(env)
-    env["GIT_CONFIG_COUNT"] = str(start + len(cfg))
-    for i, (key, value) in enumerate(cfg.items(), start=start):
-        env[f"GIT_CONFIG_KEY_{i}"] = key
-        env[f"GIT_CONFIG_VALUE_{i}"] = value
+        env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="safe.directory", GIT_CONFIG_VALUE_0=str(trust))
     return env
 
 
