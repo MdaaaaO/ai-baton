@@ -119,11 +119,11 @@ are the only work units — lines changed are never a denominator.
 - **Say what was skipped.** The Basis lists every factor that could not be computed (no control in private
   mode, tickets not supplied, estimate not bill). A number without its basis is not a finding.
 - **Numbers are parsed strictly, never silently zeroed.** A row whose amount/date does not parse (not a
-  number, not `YYYY-MM-DD`, not a `$`/thousands-separator form like `$1,234.50`) exits 2 naming the row
-  and column instead of counting as 0. `--since`/`--until` are checked the same way, in every subcommand
+  finite number, not `YYYY-MM-DD`, not a `$`/thousands-separator form like `$1,234.50`) exits 2 naming the
+  row (counted from 1) and column instead of counting as 0. `--since`/`--until` are checked the same way, in every subcommand
   that takes them.
-- **A rate-limited `gh search` retries, bounded.** `work-prs`/`work-tickets` back off and retry a few
-  times on a 403/429/"rate limit" from `gh` (`COST_REPORT_RETRY_DELAY`, `docs/env-vars.md`); any other
+- **A rate-limited `gh search` retries, bounded.** `work-prs`/`work-tickets` wait 10, 20, then 40 s
+  (each wait announced on stderr) on a 403/429/"rate limit" from `gh` (`COST_REPORT_RETRY_DELAY`, `docs/env-vars.md`); any other
   `gh` failure, or the retries running out, is a clear error naming the scope/repo and month — never a
   partial TSV.
 

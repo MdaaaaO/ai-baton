@@ -300,12 +300,18 @@ def _num(v, *, row: int | None = None, col: str | None = None) -> float:
     if v in (None, ""):
         return 0.0
     if isinstance(v, (int, float)) and not isinstance(v, bool):
+        if not math.isfinite(v):
+            raise _parse_error(row, col, v, "a finite number")
         return float(v)
     s = str(v).strip()
     try:
-        return float(s)
+        f = float(s)
     except ValueError:
         pass
+    else:
+        if not math.isfinite(f):  # float() also reads "nan" / "inf" / "Infinity" — not an amount
+            raise _parse_error(row, col, v, "a finite number")
+        return f
     m = _CURRENCY_RE.match(s)
     if m:
         sign = -1.0 if m.group("sign") == "-" else 1.0
@@ -314,6 +320,7 @@ def _num(v, *, row: int | None = None, col: str | None = None) -> float:
 
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+_FLAG_DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _day(v, *, row: int | None = None, col: str | None = None) -> str:
@@ -330,12 +337,16 @@ def _day(v, *, row: int | None = None, col: str | None = None) -> str:
 def _check_since_until(a) -> int | None:
     """`--since`/`--until`, as real `YYYY-MM-DD` dates — one shared check so every subcommand that defines
     either flag fails the same way; a subcommand without one of the two (`getattr(..., None)`) just skips it.
+    The shape is checked beside the calendar: `date.fromisoformat` alone also reads `20260901` and
+    `2026-W36-1` on newer Pythons, and the value goes on into SQL text and string compares as typed.
     Returns 2 (the caller returns it straight on) on a bad value, else None."""
     for k in ("since", "until"):
         v = getattr(a, k, None)
         if not v:
             continue
         try:
+            if not _FLAG_DAY_RE.fullmatch(v):
+                raise ValueError(v)
             date.fromisoformat(v)
         except ValueError:
             print(f"--{k} wants YYYY-MM-DD, got {v!r}", file=sys.stderr)
@@ -371,7 +382,7 @@ def cmd_ingest(a) -> int:
         rows = _lower_keys(json.load(fh))
     daily = []
     skipped = 0
-    for i, r in enumerate(rows):
+    for i, r in enumerate(rows, 1):
         if not r.get("d"):
             skipped += 1
             continue
@@ -395,7 +406,7 @@ def cmd_ingest(a) -> int:
         weekly: dict[str, dict] = {}
         cskipped = 0
         bad_wk: list[str] = []
-        for i, r in enumerate(crow):
+        for i, r in enumerate(crow, 1):
             wk = _control_week_key(r)
             if not wk:
                 cskipped += 1
@@ -504,7 +515,7 @@ def read_csv(path: str) -> list[dict]:
                 keymap[h] = CSV_ALIASES[norm]
         if "d" not in keymap.values():
             raise SystemExit(f"{path}: no date column recognised (accepted: {sorted(set(k for k, v in CSV_ALIASES.items() if v == 'd'))})")
-        for i, r in enumerate(rd):
+        for i, r in enumerate(rd, 1):  # data rows, the header not counted
             row = {"d": "", "model": "unknown", "usd": None, "inp": 0.0, "cached": 0.0, "cwrite": 0.0, "outp": 0.0}
             for h, f in keymap.items():
                 v = r.get(h)
@@ -552,23 +563,25 @@ def cmd_collect_private(a) -> int:
 # A `gh search`/`gh api` call that hits GitHub's primary or secondary rate limit fails outright (gh does not
 # retry on its own); gh's stderr names it one of these ways depending on which limit and which gh version.
 GH_RATE_LIMIT_RE = re.compile(r"(^|[^0-9])(403|429)([^0-9]|$)|rate limit", re.IGNORECASE)
-GH_RATE_LIMIT_ATTEMPTS = 3  # small and bounded: a scope/month that keeps failing should surface, not hang
+GH_RATE_LIMIT_ATTEMPTS = 4  # small and bounded: a scope/month that keeps failing should surface, not hang
+GH_RETRY_DELAY_DEFAULT = 10.0  # doubled per wait: 10 + 20 + 40 s, past the one-minute window of the search limit
 
 
 def _gh_retry_delay() -> float:
     """Base backoff (seconds) before retrying a rate-limited `gh` call; COST_REPORT_RETRY_DELAY overrides it
     — docs/env-vars.md § cost-report. Test-only: production runs on the default, tests set it near 0."""
     try:
-        return float(os.environ.get("COST_REPORT_RETRY_DELAY", "2"))
+        delay = float(os.environ.get("COST_REPORT_RETRY_DELAY", ""))
     except ValueError:
-        return 2.0
+        return GH_RETRY_DELAY_DEFAULT
+    return delay if math.isfinite(delay) and delay >= 0 else GH_RETRY_DELAY_DEFAULT
 
 
 def _gh(args: list[str], *, context: str = "") -> str:
     """Run `gh`. A rate-limited call (403/429 or "rate limit" in stderr) gets GH_RATE_LIMIT_ATTEMPTS tries
-    total, waiting `attempt * delay` seconds between them (increasing, not flat) before giving up. Any other
-    failure (bad query, auth, timeout) is not retried. `context` names the scope/month/repo being fetched so
-    the final error is specific, never a bare "gh failed"."""
+    total, the wait doubling from the base delay each time and announced on stderr (a silent minute looks
+    like a hang). Any other failure (bad query, auth, timeout) is not retried. `context` names the
+    scope/month/repo being fetched so the final error is specific, never a bare "gh failed"."""
     env = profile.gh_env(dict(os.environ))
     delay = _gh_retry_delay()
     r = None
@@ -581,7 +594,10 @@ def _gh(args: list[str], *, context: str = "") -> str:
         if r.returncode == 0:
             return r.stdout
         if attempt < GH_RATE_LIMIT_ATTEMPTS and GH_RATE_LIMIT_RE.search(r.stderr or ""):
-            time.sleep(attempt * delay)
+            wait = delay * 2 ** (attempt - 1)
+            print(f"gh {' '.join(args[:3])} rate-limited" + (f" ({context})" if context else "") +
+                  f" — waiting {wait:g}s, attempt {attempt} of {GH_RATE_LIMIT_ATTEMPTS}", file=sys.stderr)
+            time.sleep(wait)
             continue
         break
     where = f" for {context}" if context else ""
@@ -880,7 +896,7 @@ def cmd_report(a) -> int:
                 b.pr_merged += 1
     for t in tks:
         rs = t.get("resolved", "")
-        if not rs or rs > last or "epic" in [x.strip().lower() for x in str(t.get("type", "")).split(",")]:
+        if not rs or not first <= rs <= last or "epic" in [x.strip().lower() for x in str(t.get("type", "")).split(",")]:
             continue
         for b in allb:
             if b.contains(rs):
@@ -918,7 +934,7 @@ def cmd_report(a) -> int:
         "fixed_prices_usd_per_mtok": mode["fixed_prices"],
         "control": (f"{len(control)} weeks, anonymous aggregate per user-day" if control else "none"),
         "prs": (f"{len(prs)} PRs from GitHub search (author:{mode['github_login'] or '?'}), capped at {first}..{last}" if prs else "not supplied"),
-        "tickets": (f"{len(tks)} tickets ({mode['tracker']}), closed by resolution date, capped at {last}" if tks else "not supplied"),
+        "tickets": (f"{len(tks)} tickets ({mode['tracker']}), closed by resolution date, capped at {first}..{last}" if tks else "not supplied"),
         "phases": [{"name": n, "start": s, "end": e} for n, s, e in phases] or "none (rolling 7 days vs the prior 7)",
         "skipped": ["lines changed as a denominator (never)", "per-epic billed cost (not attributable from billing)"]
                    + ([] if control else ["control (private mode has no peer table)"]),

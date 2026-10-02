@@ -72,7 +72,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 
 | Name | Default | Read by | Purpose | Scope |
 |---|---|---|---|---|
-| `COST_REPORT_RETRY_DELAY` | `2` (seconds) | `skills/cost-report/cost_report.py` | base backoff before retrying a rate-limited `gh search` call (tests set it near 0) | test-only |
+| `COST_REPORT_RETRY_DELAY` | `10` (seconds) | `skills/cost-report/cost_report.py` | first wait before retrying a rate-limited `gh search` call, doubled on each further retry (tests set it near 0) | test-only |
 
 ## `pr-review`
 

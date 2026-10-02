@@ -302,6 +302,25 @@ class StrictNumParsing(unittest.TestCase):
         self.assertIn("usd", msg)
 
 
+class NonFiniteNumbersRefused(unittest.TestCase):
+    """`float()` reads "nan", "inf" and "Infinity", and JSON rows can carry a bare NaN; none of them is an
+    amount, and one NaN turns every sum it joins into NaN."""
+
+    def test_nan_and_inf_strings_are_refused(self):
+        for raw in ("nan", "NaN", "inf", "-inf", "Infinity"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(cost_report.StrictParseError) as cm:
+                    cost_report._num(raw, row=3, col="usd")
+                self.assertIn("row 3", str(cm.exception))
+                self.assertIn("a finite number", str(cm.exception))
+
+    def test_nan_and_inf_floats_are_refused(self):
+        for raw in (float("nan"), float("inf")):
+            with self.subTest(raw=raw):
+                with self.assertRaises(cost_report.StrictParseError):
+                    cost_report._num(raw, row=1, col="usd")
+
+
 class StrictDayParsing(unittest.TestCase):
     def test_bad_date_names_row_and_column(self):
         with self.assertRaises(cost_report.StrictParseError) as cm:
@@ -335,7 +354,7 @@ class StrictErrorReachesMainAsOneLine(unittest.TestCase):
                 rc = cost_report.main(argv)
             self.assertEqual(rc, 2)
             self.assertIn("usd", buf.getvalue())
-            self.assertIn("row 0", buf.getvalue())
+            self.assertIn("row 1", buf.getvalue())  # rows are counted from 1, the way a person counts them
             self.assertNotIn("Traceback", buf.getvalue())
 
 
@@ -350,7 +369,7 @@ class CsvReaderStrictNum(unittest.TestCase):
             with self.assertRaises(cost_report.StrictParseError) as cm:
                 cost_report.read_csv(str(path))
             msg = str(cm.exception)
-            self.assertIn("row 1", msg)  # the second data row, 0-indexed
+            self.assertIn("row 2", msg)  # the second data row; the header is not counted
             self.assertIn("cost", msg)
 
 
@@ -364,6 +383,21 @@ class SinceUntilValidatedEverywhere(unittest.TestCase):
             rc = cost_report._check_since_until(ns(since="09/01/2026", until=None))
         self.assertEqual(rc, 2)
         self.assertIn("--since wants YYYY-MM-DD, got '09/01/2026'", buf.getvalue())
+
+    def test_check_since_until_rejects_other_iso_spellings(self):
+        # Newer Pythons read these with `date.fromisoformat`; the value goes into SQL text and string
+        # compares as typed, so only the dashed calendar form is accepted.
+        for raw in ("20260901", "2026-W36-1", "2026-09-01T00:00:00", "2026-9-1"):
+            with self.subTest(raw=raw):
+                buf = io.StringIO()
+                with contextlib.redirect_stderr(buf):
+                    rc = cost_report._check_since_until(ns(since=None, until=raw))
+                self.assertEqual(rc, 2)
+                self.assertIn(f"--until wants YYYY-MM-DD, got {raw!r}", buf.getvalue())
+
+    def test_check_since_until_rejects_an_impossible_calendar_date(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cost_report._check_since_until(ns(since="2026-02-30", until=None)), 2)
 
     def test_check_since_until_accepts_good_dates_and_missing_flags(self):
         self.assertIsNone(cost_report._check_since_until(ns(since="2026-09-01", until="2026-09-30")))
@@ -439,7 +473,7 @@ class CollectPrivateMtimeSkip(unittest.TestCase):
 
 class GhRateLimitRetry(unittest.TestCase):
     """A `gh search` call used to fail outright on a rate limit; it must now retry a small, bounded number
-    of times with an increasing delay before giving up."""
+    of times with a doubling delay, each wait announced on stderr, before giving up."""
 
     def test_retries_on_rate_limit_then_succeeds(self):
         calls = []
@@ -455,11 +489,32 @@ class GhRateLimitRetry(unittest.TestCase):
 
         with unittest.mock.patch.dict(os.environ, {"COST_REPORT_RETRY_DELAY": "1"}), \
              unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=fake_run), \
-             unittest.mock.patch.object(cost_report.time, "sleep") as sleep_mock:
+             unittest.mock.patch.object(cost_report.time, "sleep") as sleep_mock, \
+             contextlib.redirect_stderr(io.StringIO()) as err:
             out = cost_report._gh(["search", "prs"], context="org:acme 2026-01-01..2026-01-31")
         self.assertEqual(out, "[]")
         self.assertEqual(len(calls), 3)
-        self.assertEqual([c.args[0] for c in sleep_mock.call_args_list], [1, 2])  # increasing, not flat
+        self.assertEqual([c.args[0] for c in sleep_mock.call_args_list], [1, 2])  # doubling, not flat
+        notices = err.getvalue().splitlines()
+        self.assertEqual(len(notices), 2)  # one line per wait, so a silent minute never looks like a hang
+        self.assertIn("org:acme 2026-01-01..2026-01-31", notices[0])
+        self.assertIn("waiting 1s, attempt 1 of 4", notices[0])
+        self.assertIn("waiting 2s, attempt 2 of 4", notices[1])
+
+    def test_default_waits_outlast_the_one_minute_search_window(self):
+        def fake_run(cmd, **kw):
+            return unittest.mock.Mock(returncode=1, stdout="", stderr="API rate limit exceeded")
+
+        with unittest.mock.patch.dict(os.environ, {}, clear=False), \
+             unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=fake_run), \
+             unittest.mock.patch.object(cost_report.time, "sleep") as sleep_mock, \
+             contextlib.redirect_stderr(io.StringIO()):
+            os.environ.pop("COST_REPORT_RETRY_DELAY", None)
+            with self.assertRaises(SystemExit):
+                cost_report._gh(["search", "prs"])
+        waits = [c.args[0] for c in sleep_mock.call_args_list]
+        self.assertEqual(waits, [10, 20, 40])
+        self.assertGreater(sum(waits), 60)
 
     def test_non_rate_limit_failure_is_not_retried(self):
         calls = []
@@ -481,7 +536,8 @@ class GhRateLimitRetry(unittest.TestCase):
 
         with unittest.mock.patch.dict(os.environ, {"COST_REPORT_RETRY_DELAY": "0"}), \
              unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=fake_run), \
-             unittest.mock.patch.object(cost_report.time, "sleep"):
+             unittest.mock.patch.object(cost_report.time, "sleep"), \
+             contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as cm:
                 cost_report._gh(["search", "issues"], context="acme/repo 2026-01-01..2026-01-31")
         self.assertNotEqual(cm.exception.code, 0)
@@ -496,7 +552,12 @@ class CostReportRetryDelayEnvVar(unittest.TestCase):
     def test_default_when_unset(self):
         with unittest.mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("COST_REPORT_RETRY_DELAY", None)
-            self.assertEqual(cost_report._gh_retry_delay(), 2.0)
+            self.assertEqual(cost_report._gh_retry_delay(), 10.0)
+
+    def test_a_negative_or_unreadable_value_falls_back_to_the_default(self):
+        for raw in ("-5", "soon", "nan", "inf"):
+            with self.subTest(raw=raw), unittest.mock.patch.dict(os.environ, {"COST_REPORT_RETRY_DELAY": raw}):
+                self.assertEqual(cost_report._gh_retry_delay(), 10.0)
 
 
 class WorkPrsDraftExclusion(unittest.TestCase):
@@ -556,6 +617,32 @@ class PrOverlayCappedBothEnds(unittest.TestCase):
             o = json.loads(out_json.read_text(encoding="utf-8"))
         wide = next(b for b in o["buckets"] if b["bucket"] == "wide")
         self.assertEqual(wide["pr_open"], 1)
+
+    def test_ticket_resolved_before_first_spend_day_excluded(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            daily = d / "daily.json"
+            daily.write_text(json.dumps([
+                {"d": "2026-01-10", "model": "sonnet", "usd": 1.0, "inp": 1, "cached": 0, "cwrite": 0, "outp": 10, "billed": True},
+                {"d": "2026-01-15", "model": "sonnet", "usd": 1.0, "inp": 1, "cached": 0, "cwrite": 0, "outp": 10, "billed": True},
+            ]), encoding="utf-8")
+            tickets = d / "tickets.tsv"
+            tickets.write_text(
+                "key\tcreated\tresolved\ttype\tparent\n"
+                "KEY-121\t2026-01-02\t2026-01-05\ttask\t\n"   # resolved before the first spend day
+                "KEY-122\t2026-01-02\t2026-01-20\ttask\t\n"   # resolved after the last spend day
+                "KEY-123\t2026-01-02\t2026-01-12\ttask\t\n",  # inside the window — the only one that counts
+                encoding="utf-8")
+            out_json = d / "report.json"
+            args = ns(daily=str(daily), control=None, prs=None, tickets=str(tickets),
+                      phase=["wide=2026-01-01..2026-01-31"], view="phases", until=None, out=None, json=str(out_json))
+            with unittest.mock.patch("builtins.print", lambda *a, **k: None):
+                rc = cost_report.cmd_report(args)
+            self.assertEqual(rc, 0)
+            o = json.loads(out_json.read_text(encoding="utf-8"))
+        wide = next(b for b in o["buckets"] if b["bucket"] == "wide")
+        self.assertEqual(wide["tk_closed"], 1)
+        self.assertIn("capped at 2026-01-10..2026-01-15", o["basis"]["tickets"])
 
 
 class ReservedPhaseNameRefused(unittest.TestCase):
