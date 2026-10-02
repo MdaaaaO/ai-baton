@@ -1501,6 +1501,11 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
     problems = [ln.strip()[2:] for ln in tail.splitlines() if ln.strip().startswith("- ")]
     if rc == 0:
         r.add(OK, "engine", "`make verify` on the live `.context/`: " + (out.splitlines()[-1] if out else "OK"))
+        # Extract warnings: each ⚠ line from verify becomes a WARN row
+        for line in err.splitlines():
+            if line.strip().startswith("⚠ "):
+                warning_text = line.strip()[2:].strip()
+                r.add(WARN, "engine", warning_text)
     elif problems and all("INDEX.md is stale" in p for p in problems):
         r.add(WARN, "engine", "`.context/INDEX.md` is stale — `make -C $BATON/context-db index`" +
               (" (this run re-indexes after the stamp)" if stamping else " (a `--stamp` run does it; a plain run never writes the DB)"))
