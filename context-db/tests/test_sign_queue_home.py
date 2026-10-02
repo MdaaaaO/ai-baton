@@ -196,8 +196,9 @@ def _seed_repo(root: Path) -> Path:
 
 class LegacyMigrationIsExplicit(unittest.TestCase):
     """the migration a pre-workspace-queue kit needs (jobs/logs it queued under the kit dir) must never run as a
-    side effect of some other subcommand — only an explicit `migrate-legacy` moves anything. A checkout that still
-    holds a legacy `sign-queue/logs/` must not lose it to whatever queue a plain `overview`/`list` happens to resolve."""
+    side effect of an overview — only an explicit `migrate-legacy`, or a `run` under its lock, moves anything. A
+    checkout that still holds a legacy `sign-queue/logs/` must not lose it to whatever queue a plain
+    `overview`/`list` happens to resolve."""
 
     @staticmethod
     def _kit(tmp: Path):
@@ -214,7 +215,7 @@ class LegacyMigrationIsExplicit(unittest.TestCase):
             tmp = Path(tmp)
             legacy, ctx, q = self._kit(tmp)
             sq = _load_in(ctx)
-            sq.migrate_legacy.__defaults__ = (legacy, q)  # stand in for the real kit-dir / workspace-queue paths
+            sq._own_legacy_queue = lambda: legacy  # stand in for the kit dir of this workspace
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 rc = sq.main(["list"])  # the overview `make sign_list` runs
@@ -227,7 +228,7 @@ class LegacyMigrationIsExplicit(unittest.TestCase):
             tmp = Path(tmp)
             legacy, ctx, q = self._kit(tmp)
             sq = _load_in(ctx)
-            sq.migrate_legacy.__defaults__ = (legacy, q)
+            sq._own_legacy_queue = lambda: legacy
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 rc = sq.main(["migrate-legacy"])
