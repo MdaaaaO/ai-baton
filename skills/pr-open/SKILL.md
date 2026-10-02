@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "30"
+  version: "31"
   updated: "2026-10-01"
   reviewed: "2026-09-25"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
@@ -79,7 +79,7 @@ only where the environment has Slack (`systems.slack`); everything else holds in
       unlabelled and never wait for someone to name one. Reuse order, where to create it, and recording the
       new name for next time: `reference/labels.md`.
    Dependabot's `dependencies` / `python` / `github_actions` are automatic — never add them by hand.
-4. **Watch**: arm `/pr-watch` on the head sha (`$BATON/skills/pr-watch/pr-watch.sh <o/r> <n> <head>`).
+4. **Watch**: arm `/pr-watch` on the head sha (`PR_WATCH_WORKTREE=<worktree> bash $BATON/skills/pr-watch/pr-watch.sh <o/r> <n> <head>`).
 5. **Tracker**: comment the PR link on the ticket (`ticket-update`). Where `tracker.kind` is `jira` and the
    PR is the ticket's deliverable, move it to *In Review* (`tracker.transitions.in_review`). Where it is
    `github`, the `Closes #<n>` in the body is the link; add the issue's in-review label if the repo uses one.

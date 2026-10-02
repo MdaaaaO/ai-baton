@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo per session surfaces only actionable events (review-bot verdict, others' reviews/comments, a settled red check, head moves, merge/close), keeps waiting branches updated with base, merges via `pr-merge.sh` once gates hold. Park rule: sign-off, idle windows, human gate. For every PR your session owns."
 metadata:
-  version: "26"
+  version: "27"
   updated: "2026-10-01"
   reviewed: "2026-10-01"
 ---
@@ -27,7 +27,7 @@ list before ending. Never assume a watch exists because the context doc says one
 
 ```
 Monitor({
-  command: "bash $BATON/skills/pr-watch/pr-watch.sh <org>/<repo> <pr1> <head1> <pr2> <head2> <pr3> <head3>",   // always via `bash …`: the file's execute bit is not reliable on this mount (exit 126). The script is POSIX-safe since 2026-09-14 (a bash-only `${cur:0:9}` in the HEAD MOVED branch crashed a `sh`-run watcher with "Bad substitution" on the first head move)
+  command: "PR_WATCH_WORKTREE=<checkout> bash $BATON/skills/pr-watch/pr-watch.sh <org>/<repo> <pr1> <head1> <pr2> <head2> <pr3> <head3>",   // always via `bash …`: the file's execute bit is not reliable on this mount (exit 126). The script is POSIX-safe since 2026-09-14 (a bash-only `${cur:0:9}` in the HEAD MOVED branch crashed a `sh`-run watcher with "Bad substitution" on the first head move)
   description: "<repo> #<pr1>/#<pr2>/#<pr3>: actionable events only, until merged",
   timeout_ms: 1800000   // the harness caps every Monitor at 30 min (a larger value is silently capped)
 })
@@ -64,7 +64,7 @@ committer login + a local git object in `PR_WATCH_WORKTREE`, when set — unset 
 as a real `HEAD MOVED`), and a stale review (`commit_id` not the current head) from the configured
 review bot or a `github.bots` login — a bot re-reviews the new head on its own. A human's stale review
 is still emitted, in every state, marked `(on older head <sha>)`: humans do not automatically re-review
-after a push. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
+after a push. Set `<checkout>` to the worktree the session pushes from (any of its worktrees share the object store); leave it unset when pushes come from another machine. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
 non-green states. The full per-line table: `reference/events.md`.
 
 **A failed lookup is UNKNOWN, never red or green.** Every `gh` read an event depends on (PR info,
