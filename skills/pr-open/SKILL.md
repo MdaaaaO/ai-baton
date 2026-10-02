@@ -64,13 +64,21 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    1. If `labels.repos.<repo>` exists in the env config, that is the repo's type/area/risk map — use it.
       Otherwise (or to confirm a name still exists) `gh label list -R <o>/<r> --limit 200 --json name -q
       '.[].name'` — the repo's existing names (an unknown name silently creates a bare label, so never guess).
-   2. Classify the PR on three axes (type, area, risk/handling) and pick a label for each that applies —
-      under the conventional style the **type** follows from the title (`commit_style.py label "<title>"` →
-      `enhancement` / `bug` / `documentation`, empty for the other types). The axis table and the
-      type-label-spelling rule: `reference/labels.md`.
+   2. Classify the PR on three axes and pick a label for each that applies (under the conventional style the
+      **type** follows from the title: `commit_style.py label "<title>"` → `enhancement` / `bug` / `documentation`,
+      empty for the other types — then pick from the repo's own set as below):
+      | axis | meaning | typical names |
+      |---|---|---|
+      | **type** (exactly one) | what kind of change | `feature` / `enhancement`, `bug`, `documentation`, `hotfix`, `tech-debt`/`refactor` |
+      | **area** (one or more) | which component / language the reviewer must know | the repo's component or language labels (`python`, `javascript`, a module/app name, …) |
+      | **risk / handling** (when it applies) | what the merge or deploy must respect | `data-migration`, `config-only`, `hotfix`, `breaking` |
+      Spell the type labels exactly as `labels.shared` does, so ticket labels (`ticket-open` § Labels) and PR
+      labels match.
    3. Apply with `gh api -X POST repos/<o>/<r>/issues/<n>/labels -f 'labels[]=…'` and re-read the PR to verify.
-   4. No name for an axis that applies → **create a best-practice label**, never ship unlabelled: `reference/labels.md`
-      (reuse order, Dependabot's automatic labels, recording the new name for next time).
+   4. If the repo has no name for an axis that applies, **create a best-practice label** — never ship the PR
+      unlabelled and never wait for someone to name one. Reuse order, where to create it, and recording the
+      new name for next time: `reference/labels.md`.
+   Dependabot's `dependencies` / `python` / `github_actions` are automatic — never add them by hand.
 4. **Watch**: arm `/pr-watch` on the head (`PR_WATCH_WORKTREE=<checkout> bash $BATON/skills/pr-watch/pr-watch.sh <o/r> <n> <head>`).
 5. **Tracker**: comment the PR link on the ticket (`ticket-update`). Where `tracker.kind` is `jira` and the
    PR is the ticket's deliverable, move it to *In Review* (`tracker.transitions.in_review`). Where it is
@@ -88,17 +96,34 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    ("sizing: `sonnet`, delegate") + step 1's `LENGTH:` line (`LENGTH: over (<n> words, budget <m>)` when
    over, the way `ticket-open` does) — a main-session build is then a visible choice, not a silent default.
 
-## Diagrams — the right set for this PR's content, derived from the diff
+## Diagrams — the right set for this PR's content, derived from the diff (owner decisions 2026-09-17 / 2026-09-25)
 
-Not every diagram, not habit — the set `diagram-plan.py` derives from the diff: at most WHERE / WHAT / RUNS,
-plus WHY on a feature PR with a real alternative, Mermaid for graphs/flows and a table for a delta. The
-rationale (owner decisions 2026-09-17 / 2026-09-25, the three principles): `reference/diagrams.md`.
+"When you create a PR description please also add event flow diagrams, and component / architecture diagrams"
+(2026-09-17) — refined 2026-09-25: "not just all diagrams randomly added but rather the right set of diagrams
+based on PR content — if pipeline then pipeline flow, if model changes the table before and after, if
+architecture then components". A reviewer should see *where the change sits*, *what changes*, *what runs* and,
+on a feature PR, *why this shape* — without reading the diff, and nothing the PR does not raise.
+
+**Three principles**
+1. **One artifact per reviewer question, only for the questions the content raises.** WHERE (placement), WHAT
+   (before → after), RUNS (flow) — at most three blocks, most PRs need one or two — plus WHY (the option that
+   lost) on a feature PR with a real alternative. A refactor raises WHERE + WHAT, never RUNS; a bugfix raises
+   RUNS only; a docs/config/deps/test PR raises none; none of those three ever carries WHY.
+2. **The form follows the content — Mermaid is not always the answer.** Graphs and flows are Mermaid
+   (`flowchart`, `sequenceDiagram`, `stateDiagram-v2`); a *delta* (columns, fields, resources, jobs, seed
+   windows, DDL grants) is a markdown **table** `x | before | after | note`; WHY is always a table too (≤ 4
+   rows). A column list as an `erDiagram` is worse than the table.
+3. **The plan is deterministic and comes from the diff, not from habit.** Changed paths → facets → plan,
+   computed by `diagram-plan.py`; the same facets that pick the labels. The model draws exactly what the plan
+   asks for, writes the WHY table and the Sketch reason by hand, and stamps the plan marker so a later push
+   can be checked for drift.
 
 **Procedure**
 1. From the workspace root, with the branch pushed or the diff local, run `diagram-plan.py --repo <repo-dir>
-   [--base origin/main] [--type bugfix|refactor|feature]` (or `--pr <owner/repo> <n>` after create). It prints
-   the plan (`WHERE`/`WHAT`/`RUNS`, a `?` suffix = conditional), notes, and the `<!-- diagram-plan: … -->`
-   marker — every flag, mode and the facet → question matrix: `reference/diagrams.md`.
+   [--base origin/main] [--type bugfix|refactor|feature]` (or `--pr <owner/repo> <n>` after create, which also
+   reads the type label). It prints the facets, the dominant one, the plan (`WHERE`/`WHAT`/`RUNS`, a `?`
+   suffix = conditional), notes, and the `<!-- diagram-plan: … -->` marker — every flag and mode, and the facet
+   → question matrix: `reference/diagrams.md`.
 2. Draw **exactly** the planned blocks under `## Diagrams`, in WHERE → WHAT → RUNS order, each with a one-line
    caption naming the question it answers; a conditional block (`RUNS?`) only when its clause holds, else one
    line why not. Add the WHY table (`reference/diagrams.md` § WHY) on a feature PR with a real alternative.
@@ -111,13 +136,14 @@ rationale (owner decisions 2026-09-17 / 2026-09-25, the three principles): `refe
 4. Validate every Mermaid block (`reference/diagrams.md` § Rules that hold for every block), then create/update the PR.
 5. **On every later push** run `diagram-plan.py --pr <o/r> <n> --check` — `OK` / `DRIFT <old> → <new>` / `NO
    MARKER` / `MALFORMED MARKER <line>` (fix a hand-edited marker, don't just redraw), each of the last three
-   exit 3; it also prints `LINT: ok` or one `LINT: warn <reason>` per finding — warn only, the exit code
-   stays the marker result (`reference/diagrams.md` § Lint). On drift, redraw in the same turn as the code,
+   exit 3; it also prints `LINT: ok` or one `LINT: warn <reason>` per finding (`reference/diagrams.md` §
+   Lint) — warn only, the exit code stays the marker result. On drift, redraw in the same turn as the code,
    and re-run `--sketch` too when the ticket has a marker. Before creating or updating the PR, and again
    after any redraw this step triggers, run the cold-reader gate on the `## Diagrams` section
-   (`docs/cold-reader.md`) when the plan is not `SKIP`. The `pr-watch` head-move event is the reminder to
-   re-run this, `verified.py check` (§ Verified step 4) and `length_check.py <file> --surface pr --repo
-   <o>/<r>` — the push step runs all three body checks, none of which block.
+   (`docs/cold-reader.md`) when the plan is not `SKIP`. The `pr-watch` head-move event is the reminder — the
+   same event is `verified.py check`'s STALE reminder too (§ Verified step 4), and the moment to re-run
+   `length_check.py <file> --surface pr --repo <o>/<r>`: the push step now runs all three body checks
+   (diagram marker, evidence/verified, length), none of which block.
 
 Exit codes, the facet → question matrix (intent overlays / composition), the WHY table, `--sketch`, the lint,
 the `ddl` facet, and the rules every block follows (native Mermaid rendering, validate-before-publishing,

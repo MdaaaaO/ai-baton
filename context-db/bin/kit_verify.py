@@ -625,11 +625,18 @@ BODY_LINES_ALLOW = {
                "detail already moved to reference/diagrams.md and reference/labels.md",
     "session-register": "the numbered startup sequence (orient, narrate-back/carousel, register, re-arm "
                "PR-watch), the heartbeat and the on-end steps are the one ordered procedure every session runs, "
-               "not reference material to split out; mechanism detail, field tables and rationale already moved "
-               "to reference/registry.md",
+               "not reference material to split out",
     "pr-watch": "arm/re-arm, park, triage-and-act and merge are five distinct operational sequences a session "
                "runs at different points, each already condensed to a pointer-backed summary; full mechanism "
                "detail, tables and rationale already moved to five reference/*.md files",
+    "sign-queue": "the flag-by-flag enqueue spec (--rebase/--new-branch/--force-with-lease/--onto, the "
+               "no-op re-stack trap, --files staging, --supersede folding) and the drain side are one "
+               "command-line contract read top to bottom while enqueuing or draining, not reference "
+               "material to split out",
+    "signed-git-commits": "the worktree-first branching, staging and rebase-signing-quirk sequence is the "
+               "one discipline followed step by step when committing on a signing-less machine, not "
+               "reference material to split out; the hand-off incident log is already its own "
+               "reference/handoff-incidents.md",
 }
 # a backticked path a unit cites inside its own directory: `scripts/x.sh …`, `references/y.md`, `.claude/skills/<name>/scripts/x`
 # `skills/<x>/SKILL.md` or a bare `skills/<x>/` in a body: another skill referenced by PATH. The contract is by name

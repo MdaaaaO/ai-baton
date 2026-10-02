@@ -40,10 +40,10 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
      missing archive doc fills in only `title`/`type`/`updated`, which the `log` type's `domain`/`status`
      rules would then refuse. Then run `ctx_maintain` on the doc's store (Bash fallback: `ctx_adapter.py ctx
      maintain`) — a no-op below the store's size guard (30KB); past it, it keeps the newest ~6 entries
-     (`maintain.keep_log` in `ctx-store.json`), oldest-first, and moves the rest verbatim into the archive
-     doc, newest-first — no manual move-and-reverse. `make -C $BATON/context-db verify` warns at the same
-     **30KB**: run `maintain` (or split the doc) as soon as you see it, before the oversized doc thrashes a
-     session that re-reads it after a compact.
+     (`maintain.keep_log` in `ctx-store.json`) in the doc, oldest-first, and moves the rest verbatim into the
+     archive doc, newest-first (the `log` type's order) — no manual move-and-reverse.
+     `make -C $BATON/context-db verify` warns at the same **30KB** — an oversized doc thrashes any session
+     that re-reads it after a compact, so run `maintain` (or split the doc) as soon as you see the warning.
    - Reference every ticket/PR as a clickable link (§ Rules).
 2. **Priorities** — where `.context/reference/priorities.md` exists, tick the matching checkbox(es)
    (`ctx_str_replace`) and add the next step if one emerged (`ctx_insert`) (an environment without that
@@ -56,10 +56,10 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    go to `WORKSPACE.md` § Rules). Write or update the note **and** add or fix its one-line entry in
    `MEMORY.md`. Prefer updating an existing note over adding a duplicate; delete notes proven wrong.
 5. **Index integrity** — nothing to run: after every `.context/` write the kit's hooks validate the doc,
-   regenerate `INDEX.md`/`SESSION_INDEX.md` and touch your registry row. A `ctx validate: …` system
-   message after a write is a finding — fix it now. Added a skill → add its trigger to `WORKSPACE.md` §
-   Skills; added a memory note → confirm its `MEMORY.md` line (no orphans). Every `[[wikilink]]` should
-   resolve.
+   regenerate `INDEX.md` and `SESSION_INDEX.md` and touch your registry row. A `ctx validate: …` system
+   message after a write is a finding — fix it now. If you added a
+   skill, add its trigger to `WORKSPACE.md` § Skills. If you added a memory note, confirm it has a
+   `MEMORY.md` line (no orphans). Every `[[wikilink]]` should resolve.
 6. **Signing** — only where the env config has `systems.signed_commits: true`: pending commits go through
    the `sign-queue` skill (enqueue; the user drains). Don't leave a session with unpushed signed work
    unmentioned. Elsewhere, commits are pushed directly per the repo's own conventions.
@@ -70,22 +70,26 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    costs a full-prefix wake-up per expiry, a parked session costs nothing (owner decision, 2026-09-22; `pr-watch`
    § Park when the gates are not yours).
 8. **What the session did, then its stats.** First run `make -C $BATON/context-db session-activity` (zero
-   model turns: files edited, commits, PRs, tickets, drafts, compactions) and treat it as a checklist —
-   every item reflected in the context doc above or named here as deliberately left out; no transcript →
-   say so, then flush from memory. It lands under `## What this session did` at `session-end`. Then the
-   stats (owner decision, 2026-09-19: "stats for geeks"): `make -C $BATON/context-db session-stats`
-   prints **the block** (window, prompts, token split, spend basis, top tools, delegation, PR + ticket
-   lists, hand-offs; zero model turns, derived from the transcript via `$CLAUDE_CODE_SESSION_ID`), which
-   lands under `## Session stats` in `.context/sessions/<name>.md` plus one row in
-   `.context/sessions/_ledger.md` at `session-end` (step 9) — don't paste it twice. Put the **one-liner**
-   (already on your registry row's `stats:` field — turns · hours · ctx peak/avg · cache-read · out · ~$ ·
-   compactions · tool calls · PRs · tickets · sign jobs · drafts; kept current automatically) into the
-   context doc's wind-down **Session log** entry, plus one line of *judgment* next to the numbers (what
-   drove the cost: fat prefix × watcher events, a CI-log read at full prefix, etc.) — the numbers alone
-   don't teach the next session anything. Turns are deduped API requests; spend is a per-model list-price
-   estimate, since 2026-09-22 the TOTAL of main session + every subagent transcript — quote the total and
-   say "estimate"; no discoverable transcript (no `CLAUDE_CODE_SESSION_ID`, e.g. a subagent) → say so and
-   skip, never invent the figures.
+   model turns; the transcript's files edited, commits, PRs, tickets, drafts and compactions, identifiers only)
+   and treat the list as a checklist: every item is reflected in the context doc above or named here as
+   deliberately left out; no transcript → one line saying so, then flush from memory as before. The same
+   block lands under `## What this session did` at `session-end`. Then the stats (owner decision,
+   2026-09-19: "stats for geeks"). Run `make -C $BATON/context-db session-stats` — it prints **the
+   block** (window, prompts, token split, spend basis, top tools, delegation, PR + ticket lists,
+   hand-offs; zero model turns, derived from the transcript via `$CLAUDE_CODE_SESSION_ID`), which lands
+   for you under `## Session stats` in `.context/sessions/<name>.md`, together with one row in
+   `.context/sessions/_ledger.md`, when `session-end` runs (step 9) — don't paste it twice. Then put:
+   - the **one-liner** — already on your registry row's `stats:` field (turns · hours · ctx peak/avg ·
+     cache-read · out · ~$ · compactions · tool calls · PRs · tickets · sign jobs · drafts; kept current
+     by every register/touch/end, no extra command needed) — into the context doc's wind-down
+     **Session log** entry;
+   - one line of *judgment* next to the numbers in the context doc (what drove the cost: fat
+     prefix × watcher events, a CI-log read at full prefix, etc.) — the numbers alone don't teach the
+     next session anything.
+   Turns are deduped API requests; spend is a per-model list-price estimate and, since 2026-09-22, the
+   TOTAL of main session + every subagent transcript (`<session-id>/subagents/*.jsonl`) — quote the total,
+   the block shows the main/subagent split — and say "estimate" when you quote it. If the transcript isn't discoverable (no
+   `CLAUDE_CODE_SESSION_ID`, e.g. a subagent), say so and skip; never invent the figures.
 9. **Session registry + PR watches** — first refresh the `## Open PRs` list in
    `.context/sessions/<name>.md` (every open PR you own: `repo#n`, current head, what it waits on):
    your `pr-watch` `Monitor`s died with step 7, and the successor's `session-register` startup step
@@ -151,7 +155,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 
 The next session could pick up cold from `.context/` alone — no reliance on this transcript. Either its
 start prompt is in the registry **and** in your final chat message (step 10), or there genuinely is no
-follow-on work and your final message says so instead of inventing one. Then end the session (don't let
-it sprawl past its ticket; the backstop is a clone install's own `settings.json`, or on a plugin install
-the user's `autoCompactWindow` setting in `~/.claude/settings.json` (`/autocompact 200k`), or
-`CLAUDE_CODE_AUTO_COMPACT_WINDOW` for cloud — not a reason to keep a session alive).
+follow-on work and your final message says so instead of inventing one.
+Then end the session (don't let it sprawl past its ticket; the backstop is a clone install's own
+`settings.json`, or on a plugin install the user's `autoCompactWindow` setting in `~/.claude/settings.json`
+(`/autocompact 200k`), or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for cloud — not a reason to keep a session alive).

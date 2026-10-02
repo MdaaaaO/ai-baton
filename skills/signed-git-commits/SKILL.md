@@ -57,7 +57,10 @@ corrupting the user's working tree or silently dropping files.
 2. **Stage exactly the files the commit should contain.** Use `git add <path> <path>`
    with explicit paths, never `git add -A`, and never assume the index is empty —
    staged changes accumulate across separate `git add` calls if nothing has been
-   committed yet (incident: `reference/handoff-incidents.md` #3). Run
+   committed yet. Concretely, this bit us in one session: `git add file1.sql` for
+   change A, then later `git add file2.md` for change B, then `git commit -F msgA`
+   swept in *both* files under commit A's message, and a follow-up `git add -A` for
+   commit B only picked up unrelated leftover scratch files. Fix: run
    `git diff --cached --stat` right before every commit and confirm it matches what
    you expect, every time — don't trust that staging state is what you last set it to.
    The same rule applies to the `sign-queue` hand-off: always pass one `--files <path>`
@@ -85,22 +88,32 @@ corrupting the user's working tree or silently dropping files.
    you **enqueue** the job (`sign-queue`'s `enqueue.sh`) and the user runs one `sign.sh`
    that drains the queue in order. Use `--rebase` on the job when the remote branch is
    ahead; a failed job is parked as `<job>.failed` and routed back to its owning session.
-6. **Rebase has its own signing trap.** Once `git rebase` starts, the sign flag is frozen in
-   `.git/rebase-merge/gpg_sign_opt` and config changes are ignored for the rest of that rebase — if
-   `--continue` mysteriously doesn't ask for a signature, delete that file (emptying it still triggers
-   signing) before continuing (`reference/handoff-incidents.md` #4).
-7. **The paste hazard is exactly why we enqueue instead of handing over commands.** A chained `git commit
-   --amend -S --no-edit && git push --force-with-lease` and a wrapped `git add <file1> <file2>` both broke
-   in the user's terminal before (`reference/handoff-incidents.md` #2) — `sign-queue` removes the whole
-   class of failure, since the job file is a fixed script, not a pasted line. The surviving discipline is
-   on **your** side: run `git -C <worktree> status --short` and confirm it shows exactly the files (and
-   count) the commit should carry *before* you enqueue.
-8. **Where a proxy injects the credentials (a sandbox), `gh` needs a placeholder token.** `gh auth status`
-   reads logged out there — the proxy injects credentials at the network layer, invisibly to `gh` itself
-   (`reference/handoff-incidents.md` #5) — so `gh` refuses to run until it sees *some* token. Prefix every
-   `gh` invocation with `github.sandbox_token_prefix`, or run `eval "$(python3
-   $BATON/context-db/bin/kit_profile.py gh-env)"` once per shell (skill `gh-cli`); an empty prefix means
-   `gh` is logged in natively and runs bare. Plain `curl` against `api.github.com` works the same way.
+6. **Rebase has its own signing trap.** Once `git rebase` starts, the sign flag is
+   frozen in `.git/rebase-merge/gpg_sign_opt` and config changes are ignored for the
+   rest of that rebase. If a rebase was somehow started with signing off and needs to
+   pick it back up, delete that file (emptying it still triggers signing — must be
+   removed) before `--continue`. In the normal flow (rebase started fresh, conflict
+   resolved by you, `--continue` run by the human) this doesn't come up, but it's the
+   first thing to check if `--continue` mysteriously doesn't ask for a signature.
+7. **The paste hazard is exactly why we enqueue instead of handing over commands.**
+   Pasting git into the user's terminal bit this workflow repeatedly: a chained `git commit
+   --amend -S --no-edit && git push --force-with-lease` had its second half silently
+   misread as its own command; a wrapped `git add <file1> <file2>` line dropped the
+   second path so the commit silently contained only one of two files. `sign-queue`
+   removes the whole class of failure — the job file is a fixed script, not a pasted
+   line. The surviving discipline is on **your** side: run `git -C <worktree> status
+   --short` and confirm it shows exactly the files (and count) the commit should carry
+   *before* you enqueue — the queue commits what is staged, so a wrong index becomes a
+   wrong commit with no paste step to catch it.
+8. **Where a proxy injects the credentials (a sandbox), `gh` needs a placeholder token.**
+   `gh auth status` is genuinely logged out there — the proxy injects credentials at the
+   network layer, invisibly to `gh` itself — so `gh` refuses to run until it sees *some*
+   token. The placeholder is `github.sandbox_token_prefix` in the env config (`NAME=value`);
+   prefix every `gh` invocation with it, or `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)"`
+   once per shell (skill `gh-cli`). This covers `pr create`, `pr view`, `pr checks`, `api`
+   (including writes) — anything going over HTTPS. Where the prefix is empty, `gh` is logged
+   in natively: call it bare. Plain `curl`
+   against `api.github.com` works the same way, no prefix needed.
 
 ## Worked example (the shape this takes in practice)
 
