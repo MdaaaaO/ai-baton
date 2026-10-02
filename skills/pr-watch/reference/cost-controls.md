@@ -51,8 +51,8 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
   green and settled, the watcher writes an expiry record (the regex it belongs to) and logs one stderr
   note naming the PR and head — from then on a red on that PR is reported even if its annotations still
   match. A mute that never suppressed anything there is untouched by a green. The record lives in the
-  state dir, so a silent re-arm with the same call keeps the expiry; a changed regex mutes again from
-  scratch, and `PR_WATCH_REPLAY=1` (or any other reset of the state dir) clears it. Dropping the variable
+  state dir and belongs to the PR, not to a head: a re-arm keeps it, on the same head or on a new one. A
+  changed regex mutes again from scratch, and `PR_WATCH_REPLAY=1` clears it. Dropping the variable
   once the cause is fixed is still the clean end — the expiry just covers the case where it is left set.
 - **Silent re-arm.** The per-PR state dir (`${TMPDIR:-/tmp}/pr-watch-<owner>-<repo>-<pr>/`) survives the
   process, so a watcher re-armed on a head it already reported emits nothing until something changes —

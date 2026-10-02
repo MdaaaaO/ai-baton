@@ -824,6 +824,50 @@ class PrWatchStub(unittest.TestCase):
         self.assertIn(f"PR {PR} CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED", r3.stderr)
         self.assertEqual((self.state_dir() / "known_red_used").read_text().strip(), regex_b)
 
+    def test_a_used_mute_survives_a_rearm_on_a_new_head_and_expires_on_its_green(self):
+        # stop the watcher, push, re-arm with the new head: the registration resets the per-head state, but the
+        # record of a mute that suppressed something belongs to the PR and has to outlive that reset.
+        regex = "known flaky timeout"
+        old = "d" * 40
+        self.seed_state(head=old[:9], notgreen=old, known_red_used=regex)
+        kwargs = dict(identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_KNOWN_RED": regex})
+        r1 = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "SUCCESS")]), **kwargs)
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        self.assertIn(f"PR {PR} PR_WATCH_KNOWN_RED mute expired — checks are green on {HEAD9}", r1.stderr)
+        self.assertEqual((self.state_dir() / "known_red_expired").read_text().strip(), regex)
+        # a red on the new head whose annotations still match is now reported
+        r2 = self.run_watch(rollup=json.dumps([self.check_run("unit-tests", "FAILURE")]),
+                            checkruns=self.FAILING_RUN, annotations=self.failing_annotations("a known flaky timeout"),
+                            **kwargs)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;", r2.stdout)
+
+    def test_a_head_that_is_already_muted_and_still_red_costs_no_second_lookup(self):
+        self.seed_state(head=HEAD9)
+        regex = "known flaky timeout"
+        bad = json.dumps([self.check_run("unit-tests", "FAILURE")])
+        anns = self.failing_annotations("a known flaky timeout on CI")
+        kwargs = dict(identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_KNOWN_RED": regex})
+        r1 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns, **kwargs)
+        self.assertIn(f"PR {PR} CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED", r1.stderr)
+        before = self.calls()
+        r2 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns, **kwargs)
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r2.stdout)
+        self.assertNotIn("muted by PR_WATCH_KNOWN_RED", r2.stderr)
+        self.assertNotIn("check-runs", self.calls()[len(before):])
+        self.assertEqual((self.state_dir() / "known_red_used").read_text().strip(), regex)
+
+    def test_a_rollup_with_no_entry_does_not_expire_a_used_mute(self):
+        # right after a push no check has registered: nothing pending and nothing red is not a green
+        regex = "known flaky timeout"
+        self.seed_state(head=HEAD9, known_red_used=regex)
+        r = self.run_watch(rollup="[]", identity_env={"PR_WATCH_SELF": "tester"},
+                           extra_env={"PR_WATCH_KNOWN_RED": regex})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("mute expired", r.stderr)
+        self.assertEqual((self.state_dir() / "known_red_used").read_text().strip(), regex)
+        self.assertFalse((self.state_dir() / "known_red_expired").exists())
+
     def test_an_expired_mute_survives_a_silent_rearm(self):
         # a re-arm on the same, already-initialised head keeps state (the registration reset is skipped) —
         # the expiry record must be one of the things it keeps.
