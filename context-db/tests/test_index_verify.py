@@ -142,15 +142,24 @@ class IndexAndVerify(ContextRoot):
         index = (self.root / "INDEX.md").read_text(encoding="utf-8")
         self.assertIn("repos/kit.md", index)  # active row: present
         self.assertNotIn("repos/old.md", index)  # archived row: absent from the table
-        self.assertIn("_1 archived — `make -C $BATON/context-db find DOMAIN=repos` lists them_", index)
+        self.assertIn("_1 archived — `make -C $BATON/context-db find DOMAIN=repos STATUS=archived` lists them_", index)
         v = run(self.root, "verify.py")
         self.assertEqual(v.returncode, 0, v.stderr)
-        # the folded line's command really lists the archived doc (and the active one, same domain)
-        m = subprocess.run(["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "DOMAIN=repos"],
-                            env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+        # the folded line's command lists the archived doc and nothing else of the domain
+        find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "DOMAIN=repos"]
+        m = subprocess.run(find + ["STATUS=archived"], env=env_for(self.root), cwd=self.root,
+                           capture_output=True, text=True)
         self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertIn("repos/old.md", m.stdout)
-        self.assertIn("repos/kit.md", m.stdout)
+        self.assertEqual(m.stdout.split(), ["repos/old.md"])
+        # without the status filter the whole domain comes back, as before
+        m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(m.returncode, 0, m.stderr)
+        self.assertEqual(m.stdout.split(), ["repos/kit.md", "repos/old.md"])
+        # a status no doc of the domain has: no line, still exit 0
+        m = subprocess.run(find + ["STATUS=superseded"], env=env_for(self.root), cwd=self.root,
+                           capture_output=True, text=True)
+        self.assertEqual(m.returncode, 0, m.stderr)
+        self.assertEqual(m.stdout.split(), [])
 
     def test_all_archived_domain_has_fold_line_and_no_table(self):
         # repos/ starts with exactly one doc (kit.md, active); flip it archived so every doc
@@ -166,7 +175,7 @@ class IndexAndVerify(ContextRoot):
         section = rest[:nxt] if nxt != -1 else rest
         self.assertNotIn("| Doc | Title |", section)  # no table header
         self.assertNotIn("|---|", section)  # no table rule either
-        self.assertIn("_1 archived — `make -C $BATON/context-db find DOMAIN=repos` lists them_", section)
+        self.assertIn("_1 archived — `make -C $BATON/context-db find DOMAIN=repos STATUS=archived` lists them_", section)
         v = run(self.root, "verify.py")
         self.assertEqual(v.returncode, 0, v.stderr)
 
@@ -201,7 +210,7 @@ class IndexSizeBudget(ContextRoot):
         self.assertEqual(index_path.stat().st_size, self.BUDGET + 1)
         v = run(self.root, "verify.py")
         self.assertEqual(v.returncode, 0, v.stderr)  # non-fatal — a warning, not a FAIL
-        self.assertIn(f"INDEX.md is {self.BUDGET // 1024}KB (> {self.BUDGET // 1024}KB)", v.stderr)
+        self.assertIn(f"INDEX.md is {self.BUDGET + 1} bytes (> {self.BUDGET // 1024}KB)", v.stderr)
         self.assertIn("archive finished docs", v.stderr)
 
 

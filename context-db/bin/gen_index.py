@@ -117,7 +117,7 @@ def render(rows: list[dict]) -> str:
             out.append("")
         if archived:
             # folded, not listed: an archived row stays queryable (`make find`), not re-read by default
-            out.append(f"_{len(archived)} archived — `make -C $BATON/context-db find DOMAIN={domain}` lists them_")
+            out.append(f"_{len(archived)} archived — `make -C $BATON/context-db find DOMAIN={domain} STATUS=archived` lists them_")
             out.append("")
     return "\n".join(out)
 

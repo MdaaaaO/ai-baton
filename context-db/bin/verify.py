@@ -154,7 +154,7 @@ def main() -> int:
     except OSError:
         ix = 0
     if ix > INDEX_SIZE_WARN:
-        print(f"⚠ INDEX.md is {ix // 1024}KB (> {INDEX_SIZE_WARN // 1024}KB) — it is read whole at every "
+        print(f"⚠ INDEX.md is {ix} bytes (> {INDEX_SIZE_WARN // 1024}KB) — it is read whole at every "
               f"\"find first\" step; archive finished docs (`make -C $BATON/context-db archive SLUG=<slug>`) to bring it back under budget",
               file=sys.stderr)
 

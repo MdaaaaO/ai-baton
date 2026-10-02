@@ -23,6 +23,7 @@ These targets create, index, verify, and find docs.
   make -C $BATON/context-db verify         # validate frontmatter + INDEX freshness (CI-style gate)
   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
   make -C $BATON/context-db find DOMAIN=<domain>    # docs in a domain
+  make -C $BATON/context-db find DOMAIN=<domain> STATUS=archived   # only the ones in that status
   make -C $BATON/context-db archive SLUG=opine      # flip a doc to status: archived
 
 Live session registry (who is working on what, right now — see SESSION_INDEX.md):
