@@ -904,11 +904,25 @@ def cmd_meta(argv: List[str]) -> int:
 
 
 def _own_legacy_queue() -> Optional[Path]:
-    """The kit's own pre-workspace queue dir, or None when this kit does not sit in the workspace whose queue
-    it drains. The old queue belonged to the workspace around the kit, so its jobs move into that
-    workspace's queue only: a kit pointed at another workspace or store (SIGN_QUEUE_ROOT, CONTEXT_ROOT, a
-    plugin install, a test fixture) leaves them where they are."""
-    return LEGACY_Q if KIT.parent.resolve() == ROOT.resolve() else None
+    """The kit's own pre-workspace queue dir, or None when its jobs are not this workspace's to take. A kit
+    that sits in a workspace hands its old queue to that workspace only: pointed at another workspace or
+    store (SIGN_QUEUE_ROOT, CONTEXT_ROOT, a test fixture) it leaves the jobs where they are. A plugin install
+    sits in no workspace — every workspace that used the plugin queued there, and a plugin update deletes
+    the directory — so the workspace it drains takes the jobs."""
+    if KIT.parent.resolve() == ROOT.resolve() or kit_profile.install_mode(KIT) == "plugin":
+        return LEGACY_Q
+    return None
+
+
+def _name_jobs_left_behind() -> None:
+    """One stderr line when the kit's old queue holds jobs this workspace does not take: nothing else says
+    they are still there."""
+    if not LEGACY_Q.is_dir():
+        return
+    n = len([*LEGACY_Q.glob("*.sh"), *LEGACY_Q.glob("*.sh.failed")])
+    if n:
+        print(f"sign-queue: {n} job(s) left in {LEGACY_Q} — not the old queue of the workspace {ROOT}; "
+              f"drain them from the workspace that kit sits in, or move them by hand", file=sys.stderr)
 
 
 def migrate_legacy(legacy: Optional[Path] = None, q: Optional[Path] = None) -> int:
@@ -921,6 +935,7 @@ def migrate_legacy(legacy: Optional[Path] = None, q: Optional[Path] = None) -> i
     if legacy is None:
         legacy = _own_legacy_queue()
         if legacy is None:
+            _name_jobs_left_behind()
             return 0
     if "SIGN_QUEUE_DIR" in os.environ or not legacy.is_dir() or legacy.resolve() == q.resolve():
         return 0
@@ -939,10 +954,13 @@ def migrate_legacy(legacy: Optional[Path] = None, q: Optional[Path] = None) -> i
 
 
 def cmd_migrate_legacy(args: List[str]) -> int:
-    """`-q`: say something only when files moved (`make sign_list` runs it before every overview). Takes the
-    drain lock for the move; while a drain holds it nothing moves, and without `-q` the line says so."""
+    """`-q`: say something only when files moved or jobs are left behind (`make sign_list` runs it before
+    every overview). Takes the drain lock for the move; while a drain holds it nothing moves, and without
+    `-q` the line says so."""
     quiet = "-q" in args
     legacy = _own_legacy_queue()
+    if legacy is None:
+        _name_jobs_left_behind()
     if legacy is None or not legacy.is_dir():
         if not quiet:
             print("nothing to migrate" if legacy is not None else

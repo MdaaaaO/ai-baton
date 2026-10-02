@@ -35,7 +35,8 @@ _SIGN_GATE_SC = sge="$$(mktemp)"; sc="$$(python3 "$(KIT)/context-db/bin/kit_prof
 _SIGN_NA = echo "sign-queue: not applicable here — signed_commits is false"
 
 # jobs a pre-workspace-queue kit left under the kit dir move under the drain lock, into the queue of the
-# workspace the kit sits in: `run` moves them itself before it loads a job, so `sign` calls `run` only;
+# workspace the kit sits in (a plugin install: the workspace it drains): `run` moves them itself before it
+# loads a job, so `sign` calls `run` only;
 # `sign_list` runs `migrate-legacy` first, which takes the same lock and moves nothing while a drain holds it
 sign:
 	@$(_SIGN_GATE_SC); if [ "$$sc" != "true" ]; then $(_SIGN_NA); else $(_SIGNQ) run $(if $(V),-v,); fi

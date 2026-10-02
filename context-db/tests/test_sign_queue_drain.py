@@ -224,7 +224,8 @@ class MigrationRunsUnderTheLock(unittest.TestCase):
 class TheOldQueueBelongsToItsWorkspace(unittest.TestCase):
     """The kit's old queue is moved only into the queue of the workspace the kit sits in. A kit that drains
     another workspace's queue leaves it alone — a fixture workspace must never pull in, and run, a job that
-    waits in the checkout the suite runs from."""
+    waits in the checkout the suite runs from — and says that jobs are left there. A plugin install sits in
+    no workspace: the workspace it drains takes its old queue."""
 
     def test_a_run_for_another_workspace_leaves_the_kits_old_queue_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,7 +237,7 @@ class TheOldQueueBelongsToItsWorkspace(unittest.TestCase):
             sq.LEGACY_Q = legacy_job.parent  # the kit's old queue; the kit does not sit in tmp/ws
             self.assertIsNone(sq._own_legacy_queue())
             buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
                 rc = sq.main(["run"])
                 rc_cmd = sq.main(["migrate-legacy"])
             out = buf.getvalue()
@@ -245,6 +246,46 @@ class TheOldQueueBelongsToItsWorkspace(unittest.TestCase):
             self.assertNotIn("pushed", out, "and must not be run")
             self.assertEqual(list(sq.Q.glob("*.sh")), [])
             self.assertIn("is not the old queue of the workspace", out)
+
+    def test_jobs_left_behind_are_named_even_quietly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            legacy_job = _legacy_job(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            sq.LEGACY_Q = legacy_job.parent
+            for argv in (["run"], ["migrate-legacy", "-q"]):
+                with self.subTest(argv=argv):
+                    out, err = io.StringIO(), io.StringIO()
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                        rc = sq.main(argv)
+                    self.assertEqual(rc, 0)
+                    self.assertIn(f"1 job(s) left in {legacy_job.parent}", err.getvalue())
+            legacy_job.unlink()
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                sq.main(["migrate-legacy", "-q"])
+            self.assertEqual(err.getvalue(), "", "an old queue with no job in it is not worth a line")
+
+    def test_a_plugin_install_hands_its_old_queue_to_the_workspace_it_drains(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            legacy_job = _legacy_job(tmp)  # tmp/kit/sign-queue/a.sh
+            plugin = legacy_job.parent.parent
+            (plugin / ".claude-plugin").mkdir()
+            (plugin / ".claude-plugin" / "plugin.json").write_text("{}")
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            sq.KIT, sq.LEGACY_Q = plugin, legacy_job.parent  # a kit in a plugin cache, not in tmp/ws
+            self.assertEqual(sq._own_legacy_queue(), legacy_job.parent)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                rc = sq.main(["run"])
+            self.assertEqual(rc, 0, buf.getvalue())
+            self.assertFalse(legacy_job.exists(), "the plugin's old job must move into the drained workspace")
+            self.assertIn("pushed", buf.getvalue(), "and run there")
 
     def test_a_kit_in_its_own_workspace_names_its_old_queue(self):
         with tempfile.TemporaryDirectory() as tmp:

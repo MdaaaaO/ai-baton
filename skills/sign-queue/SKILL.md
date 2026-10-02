@@ -144,7 +144,8 @@ names no live drain — and exits 0 immediately, never a half-drained overlap. A
 while a drain is already in progress is skipped with one line; the rest of the drain and its summary still run.
 
 Jobs a pre-workspace-queue kit left under the kit dir are moved under that same lock, and only into the queue
-of the workspace the kit sits in (a kit that drains another workspace's queue leaves them alone): `run` moves
+of the workspace the kit sits in (a kit that drains another workspace's queue leaves them alone and names them
+on stderr; a plugin install sits in no workspace, so the workspace it drains takes them): `run` moves
 them itself before it loads a job (`make sign` calls `run` only; a `--dry-run` moves nothing), and `make
 sign_list` runs `signq.py migrate-legacy` first, which takes the lock for the move; while a drain holds it,
 it moves nothing and says so.
