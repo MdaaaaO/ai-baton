@@ -164,6 +164,46 @@ class IndexAndVerify(ContextRoot):
         self.assertEqual(m.returncode, 0, m.stderr)
         self.assertEqual(m.stdout.split(), [])
 
+    def run_find(self, *args: str) -> "subprocess.CompletedProcess[str]":
+        return subprocess.run(["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", *args],
+                              env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+
+    def find(self, *args: str) -> "list[str]":
+        m = self.run_find(*args)
+        self.assertEqual(m.returncode, 0, m.stderr)
+        return m.stdout.split()
+
+    def test_find_reads_the_frontmatter_never_the_body(self):
+        # a body line shaped like a frontmatter key (a pasted example, a quoted doc) is not the doc's own key
+        p = self.doc("repos/quoting.md", title="Quoting", type="repo", domain="repos", status="active")
+        p.write_text(p.read_text(encoding="utf-8") + "\ntags: [internal]\ndomain: projects\nstatus: archived\n",
+                     encoding="utf-8")
+        self.doc("repos/old.md", title="Old thing", type="repo", domain="repos", status="archived")
+        self.assertEqual(self.find("TAG=internal"), [])
+        self.assertEqual(self.find("DOMAIN=projects"), [])
+        self.assertEqual(self.find("DOMAIN=repos", "STATUS=archived"), ["repos/old.md"])
+        self.assertEqual(self.find("TAG=alpha", "STATUS=archived"), ["repos/old.md"])
+
+    def test_find_matches_a_tag_as_a_whole_entry(self):
+        for name, tags in (("health", "[kit-health]"), ("kit", "[kit, other]")):
+            p = self.doc(f"repos/{name}.md", title=name, type="repo", domain="repos", status="active")
+            p.write_text(p.read_text(encoding="utf-8").replace('[alpha, "beta"]', tags), encoding="utf-8")
+        self.assertEqual(self.find("TAG=kit"), ["repos/kit.md"])
+        self.assertEqual(self.find("TAG=kit-health"), ["repos/health.md"])
+
+    def test_find_skips_what_the_index_skips(self):
+        # a session file is no row of the index, so `find` does not list it either
+        self.doc("sessions/lane-topic.md", title="A session", type="repo", domain="repos", status="active")
+        self.assertNotIn("sessions/lane-topic.md", self.find("DOMAIN=repos"))
+
+    def test_find_names_a_file_it_cannot_read_and_lists_the_rest(self):
+        self.doc("repos/kept.md", title="Kept", type="repo", domain="repos", status="active")
+        (self.root / "repos" / "gone.md").symlink_to(self.root / "nowhere.md")
+        m = self.run_find("DOMAIN=repos")
+        self.assertIn("repos/kept.md", m.stdout.split())
+        self.assertIn("find: cannot read repos/gone.md: ", m.stderr)
+        self.assertNotEqual(m.returncode, 0)
+
     def test_all_archived_domain_has_fold_line_and_no_table(self):
         # repos/ starts with exactly one doc (kit.md, active); flip it archived so every doc
         # in the domain is archived — the heading must still show, with no empty table markup
