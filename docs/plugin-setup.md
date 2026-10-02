@@ -106,9 +106,10 @@ Verifying a release has what the release manifest and its attestation check prov
 ### Updating a plugin install safely
 
 1. Run `/kit-health` before you update, not after. Its § 1 checks the plugin cache against the installed
-   release's attested manifest, and — when a newer release is out — warns with the update command, the release
-   notes, and the files the update would change (`manifest_check` / `pending_update_check`,
-   `skills/kit-health/kit-health.py`).
+   release's attested manifest (`manifest_check`; an installed release up to v0.7.0 has no manifest, and § 1
+   says it cannot check). When a newer release is out, it warns with the update command and the release notes
+   (`release_check`) and lists the files the update would change (`pending_update_check`). All three functions
+   are in `skills/kit-health/kit-health.py`.
 2. Verify the release named in that warning yourself ([`SECURITY.md`](../SECURITY.md#verifying-a-release) §
    Verifying a release):
 

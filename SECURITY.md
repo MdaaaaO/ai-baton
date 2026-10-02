@@ -36,10 +36,12 @@ refresh the marketplace first, or the update can stay on the old release) or `ma
 
 ## Verifying a release
 
-Every release carries a manifest: `commit <sha>` plus one sha256 line per git-tracked file at that commit,
-built by `context-db/bin/release_manifest.py` and uploaded as the `manifest.txt` release asset. The `release`
-workflow attests that manifest with a build-provenance attestation (Sigstore, signed with the job's own OIDC
-token — no secrets) before the release is published, so a published release never exists without one.
+Every release after v0.7.0 carries a manifest: `commit <sha>` plus one sha256 line per git-tracked file at that
+commit, built by `context-db/bin/release_manifest.py` and uploaded as the `manifest.txt` release asset. The
+`release` workflow attests that manifest with a build-provenance attestation (Sigstore, signed with the job's own
+OIDC token — no secrets) before the release is published, so such a release never exists without one. v0.7.0 and
+the releases before it were published before the workflow built a manifest: they have no `manifest.txt` asset,
+and the commands below have nothing to check for them.
 
 Check a downloaded release:
 
@@ -49,22 +51,25 @@ gh attestation verify manifest.txt --repo MdaaaaO/ai-baton \
   --signer-workflow MdaaaaO/ai-baton/.github/workflows/release.yml
 ```
 
-A pass proves the manifest came from that workflow run, untampered. `python3 context-db/bin/release_manifest.py
-verify manifest.txt --root <checkout>` then checks the manifest's own claims against a local checkout of that
-tag — every tracked file's hash, and the commit.
+A pass proves the manifest was signed by this repository's `release` workflow and has not changed since. It
+does not say which run or which tag: the manifest's own `commit` line does. Run from a checkout of the kit,
+`python3 context-db/bin/release_manifest.py verify manifest.txt --root <checkout of that tag>` then checks the
+manifest's claims against that checkout — every tracked file's hash, and the commit.
 
-Immutable releases and a tag ruleset on `v*` (no update, no delete) are both on for this repository. Together
-they guarantee that a published release's tag cannot be moved or deleted and that its assets cannot be replaced
-afterwards — the release you verify today is the one anyone fetches tomorrow. They do not guarantee the release is good: nothing
-here says the code behind a release is free of bugs or was reviewed, only where it came from and that it has
-not changed since.
+Immutable releases and a tag ruleset on `v*` (no update, no delete) are both on for this repository. The
+ruleset covers every `v*` tag, old and new: a tag cannot be moved or deleted. Immutability covers a release
+published while the setting is on, which is every release after v0.7.0: its assets cannot be replaced
+afterwards, so the release you verify today is the one anyone fetches tomorrow. v0.7.0 and the releases before
+it are not immutable. Neither setting says the release is good: nothing here says the code behind a release is
+free of bugs or was reviewed, only where it came from and that it has not changed since.
 
-A clone's sync verifies a held release tag before applying it. The check running and *failing* — `gh
+A clone's sync verifies a held release tag before applying it (a clone on `kit.channel main` follows
+`origin/main` and verifies nothing). The check running and *failing* — `gh
 attestation verify` rejects the manifest, or the manifest names a different commit than the tag — refuses the
 update: nothing is applied. The check being unable to *run* at all — no `gh` on `PATH`, an unauthenticated or
 too-old `gh`, no answer from GitHub, a release with no `manifest.txt` asset (the full list:
 [`docs/sync.md`](docs/sync.md)) — still applies the release (a clone must be able to catch up with no
-network), and records the sync as `unverified`; `kit-health` § 1 warns on it and names the command above to
-run by hand.
+network), and records the sync as `unverified` in `.sync-status`; `kit-health` § 1 warns on that record and
+names the command above to run by hand. The record lasts until the next sync run rewrites `.sync-status`.
 
 There is no way yet to pull back a release that turns out to be bad: the remedy today is a newer release.

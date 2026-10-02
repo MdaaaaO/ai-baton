@@ -90,9 +90,6 @@ included) or the manifest names a different commit than the tag — → applies 
 only ever runs in the foreground. The tag and reason are also written to the ignored `.sync-rejected`
 (one line: `<tag> <reason>`); see below for what that changes about the next unattended run.
 
-[`SECURITY.md`](../SECURITY.md#verifying-a-release) § Verifying a release has what the manifest and the
-attestation check prove, and what immutable releases and the tag ruleset on `v*` do and don't guarantee.
-
 The check **cannot run at all** — no `gh` on `PATH`, a `gh` from before `gh attestation` existed, `gh`
 not authenticated, an `origin` that is not on github.com (an ssh host alias such as
 `git@github.com-work:owner/repo`, which looks like a github.com remote but is not one, counts — it is
@@ -105,6 +102,9 @@ network or an unauthenticated `gh`, so `.sync-status` is `ok …` with the stand
 a short reason appended. The word and the reason live in `.sync-status` and in `make claude_sync`'s
 output; `sync-check.sh` does not warn on it, `kit-health` § 1 does. `kit.channel main` never verifies — there is no release tag
 to verify against.
+
+[`SECURITY.md`](../SECURITY.md#verifying-a-release) § Verifying a release has what the manifest and the
+attestation check prove, and what immutable releases and the tag ruleset on `v*` do and don't guarantee.
 
 **A rejected tag stays rejected.** `.sync-rejected` (ignored, same shape as `.sync-status`'s detail: one
 line, `<tag> <reason>`) remembers the tag the check last **failed** — not one it could merely not check —
