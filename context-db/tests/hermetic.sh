@@ -11,6 +11,7 @@ hermetic_git_env() {  # hermetic_git_env <home-dir> (absolute) → exports HOME/
   # origin, can start a detached `git maintenance run --auto` that still writes into .git while the fixture is
   # removed. The two switches sit in a global config file under <home-dir>, not in GIT_CONFIG_COUNT entries:
   # git drops those before it starts receive-pack.
+  mkdir -p "$1"  # a caller may name a home that does not exist yet; the config file below needs it
   export HOME="$1"
   export TMPDIR="$1"
   printf '[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n' > "$1/.hermetic-gitconfig"

@@ -205,6 +205,11 @@ class HermeticShTurnsGitHousekeepingOff(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(self._run(tmp, f"git init -q repo; cd repo; {_SHOW_SWITCHES}"), _HOUSEKEEPING_OFF)
 
+    def test_a_home_dir_that_does_not_exist_yet_still_gets_both_switches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "home")
+            self.assertEqual(self._run(home, f"git init -q repo; cd repo; {_SHOW_SWITCHES}"), _HOUSEKEEPING_OFF)
+
     def test_config_inherited_through_the_environment_does_not_outrank_them(self):
         inherited = {"GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "gc.auto", "GIT_CONFIG_VALUE_0": "6700",
                      "GIT_CONFIG_KEY_1": "maintenance.auto", "GIT_CONFIG_VALUE_1": "true",
