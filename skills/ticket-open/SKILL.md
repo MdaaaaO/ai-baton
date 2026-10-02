@@ -1,10 +1,10 @@
 ---
 name: ticket-open
-description: "Checklist every session follows when it CREATES a ticket in the environment's tracker (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing), and the matching .context/ doc. The tracker analogue of pr-open. Invoke right before/after creating it."
+description: "Checklist for CREATING a ticket (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing-gated Sketch), the cold-reader gate, public/length checks, and the matching .context/ doc. Use when creating a ticket, right before/after posting it."
 metadata:
   version: "16"
-  updated: "2026-10-01"
-  reviewed: "2026-09-27"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
   facts: "tracker.kind"
 user-invocable: true
 ---

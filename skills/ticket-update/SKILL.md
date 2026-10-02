@@ -1,10 +1,10 @@
 ---
 name: ticket-update
-description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment (Win / Pivot / Next / Verified), label and status sync, and an optional durable pointer to the thread or PR; never a restatement of earlier comments. Invoke whenever a ticket step lands or direction changes."
+description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment, label/status sync, and an optional durable pointer to the thread or PR; never restating earlier comments. Invoke whenever a ticket step lands or direction changes."
 metadata:
   version: "18"
-  updated: "2026-10-01"
-  reviewed: "2026-09-24"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
   facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
 user-invocable: true
 ---
@@ -120,32 +120,16 @@ The gate is **not the clock** — it's *did notify-worthy state change, and has 
    The ticket is the team-facing trace; the context doc is the private handoff — keep them aligned,
    not identical (the ticket is not a mirror of `.context/`).
 
-## Adapter — Jira (tracker.kind = jira)
+## Adapters — Jira and GitHub issues
 
-- **Comment** per Sync — core § 1 (`tracker.mcp_tools.comment`). @-mentions need an ADF comment (a mention
-  inside a markdown body is plain text to the tracker, nobody is notified) — rich markdown body + a
-  one-line ADF cc underneath.
-- **Status** via `tracker.mcp_tools.transition`: In Progress → **In Review**
-  (`tracker.transitions.in_review`, when the PR is up — `pr-open` does this) → Done (`ticket-close`).
-  Check the transitions actually available first via `tracker.mcp_tools.transitions_list` (ids drift).
-- **Pointer** = a `**Thread** <url>` / `**PR** <url>` line in the comment (Sync — core § 3) — the sanctioned
-  form here too; it needs no write scope and always lands. Only when `tracker.write_api` is also true, mirror
-  it as a real remote issue link: first list the links already there via `tracker.mcp_tools.remote_link`
-  (read-only) and stop if this URL is one of them, even when the read tool is missing (then read the links
-  via `GET` on the same endpoint); otherwise create it with `POST /rest/api/3/issue/{key}/remotelink` —
-  cloud id from the env fact `tracker.setting cloud_id` — body `{"object": {"url": "<link>", "title":
-  "<title>"}}`. Check, then create: never create without checking. `tracker.write_api` false or unset (the
-  common case — a read-only roster exposes only `getJiraIssueRemoteIssueLinks`, no write tool and no API
-  token) → skip the POST silently, the comment line already carries the pointer.
-
-## Adapter — GitHub issues (tracker.kind = github)
-
-- **Comment** per Sync — core § 1 (`--body-file`). Mentions are plain `@login`. Edit-the-last-comment =
-  `gh issue comment <n> --edit-last` under the same gate.
-- **Status = labels + milestone** (no workflow states): `gh issue edit <n> -R <repo>
-  --add-label/--remove-label/--milestone` from the repo's own label set; an open PR with
-  `Closes #<n>` in its body is the "In Review" signal — no extra state to set.
-- **Pointer** = `#<pr>` or the thread URL in the comment; GitHub cross-links PRs/issues itself.
+Follow exactly one, by `tracker.kind`. Comment: Sync — core § 1 in both. **Jira** — status via
+`tracker.mcp_tools.transition` (In Progress → In Review once the PR is up → Done at `ticket-close`); pointer
+is the `**Thread**`/`**PR**` comment line, optionally mirrored as a remote issue link when
+`tracker.write_api` is true; @-mentions need an ADF cc, not a markdown mention. **GitHub** — status = labels
++ milestone (no workflow states, `gh issue edit`); pointer is `#<pr>`/the thread URL, GitHub cross-links
+itself; edit-the-last-comment is `gh issue comment <n> --edit-last`. Full per-adapter mechanics (mention
+format, transition ids, the remote-link check/create sequence, cloud id, the write-scope fallback):
+`reference/adapters.md`.
 
 ## Not in scope
 Creating the ticket → `ticket-open`. Closing it → `ticket-close`.

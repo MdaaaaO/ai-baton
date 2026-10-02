@@ -1,10 +1,10 @@
 ---
 name: session-register
-description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
+description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate-back-then-carousel when paste-started as a successor, re-arm PR-watch at startup, rename a mis-named session, name ctx writes as yourself, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
   version: "30"
-  updated: "2026-10-01"
-  reviewed: "2026-09-24"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
 user-invocable: true
 ---
 

@@ -719,12 +719,22 @@ class LoadingTable(unittest.TestCase):
             self.assertIn(f"{key}:", out)
 
     def test_description_budget_warns_past_90_percent(self):
-        # the real kit sits at 9,470 / 9,500 B today — past the 90% line kit-verify warns at, not yet over the
-        # cap (the whole point: a warning before the surprise failure)
-        rc, out, err = run("--no-env")
-        self.assertEqual(rc, 0, err)
-        self.assertIn("~ warn: descriptions total", err)
-        self.assertIn("largest:", err)
+        # decoupled from the kit's live description total (#425 pulled it back under the 90% line on purpose):
+        # lower DESC_TOTAL_BYTES in-process so today's real total still crosses the warn ratio, without this
+        # test needing the kit to sit near its real 9,500 B cap — the whole point is a warning before the
+        # surprise failure, whatever the live total happens to be.
+        saved_bytes = kit_verify.DESC_TOTAL_BYTES
+        kit_verify.DESC_TOTAL_BYTES = kit_verify.loading_numbers()["desc_bytes"] + 1
+        try:
+            out_buf, err_buf = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+                rc = kit_verify.main(["--no-env"])
+            err = err_buf.getvalue()
+            self.assertEqual(rc, 0, err)
+            self.assertIn("~ warn: descriptions total", err)
+            self.assertIn("largest:", err)
+        finally:
+            kit_verify.DESC_TOTAL_BYTES = saved_bytes
 
 
 if __name__ == "__main__":

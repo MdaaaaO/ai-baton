@@ -1,10 +1,10 @@
 ---
 name: pr-open
-description: "Checklist for opening a PR: body with the diagram set derived from the diff, labels in every repo, commit-style check of commits and title, reviewers plus the review bot where configured, pr-watch, tracker link, and the review request (a Slack DRAFT where enabled, never sent). Use when writing a PR body and right after `gh pr create`."
+description: "Checklist for opening a PR: sizing gate first, body with the diff-derived diagram set, a ## Verified section (a failing run forces --draft), public-text-check and length_check, labels, reviewers, pr-watch, tracker link, and a Slack review draft where enabled (never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
   version: "31"
-  updated: "2026-10-01"
-  reviewed: "2026-09-25"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
 ---
 

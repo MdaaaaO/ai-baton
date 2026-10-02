@@ -1,4 +1,17 @@
-# Labels — creating one the repo doesn't have yet
+# Labels — the three axes, and creating one the repo doesn't have yet
+
+## The three axes (step 3.2)
+
+| axis | meaning | typical names |
+|---|---|---|
+| **type** (exactly one) | what kind of change | `feature` / `enhancement`, `bug`, `documentation`, `hotfix`, `tech-debt`/`refactor` |
+| **area** (one or more) | which component / language the reviewer must know | the repo's component or language labels (`python`, `javascript`, a module/app name, …) |
+| **risk / handling** (when it applies) | what the merge or deploy must respect | `data-migration`, `config-only`, `hotfix`, `breaking` |
+
+Spell the type labels exactly as `labels.shared` does, so ticket labels (`ticket-open` § Labels) and PR
+labels match.
+
+## Creating one the repo doesn't have yet (step 3.4)
 
 Loaded from `SKILL.md` step 3.4. If the repo has no name for an axis that applies, **create a
 best-practice label** — never ship the PR unlabelled and never wait for someone to name one (owner

@@ -1,10 +1,10 @@
 ---
 name: ticket-pickup
-description: "Verifies a ticket's Sizing line against the default branch, decides main session vs a background sub-agent and model, sizes a missing line, and claims the ticket. Use when picking up, starting or resuming a tracker ticket. Not for creating one (`ticket-open`) or posting a progress update (`ticket-update`)."
+description: "Verifies a ticket's Sizing line against the default branch, decides main session vs a sub-agent + model, sizes a missing line, and claims the ticket. Use when picking up, starting or resuming a ticket. Not for creating (`ticket-open`) or updating (`ticket-update`)."
 metadata:
   version: "5"
-  updated: "2026-09-30"
-  reviewed: "2026-09-27"
+  updated: "2026-10-02"
+  reviewed: "2026-10-02"
   facts: "tracker.kind"
 user-invocable: true
 argument-hint: "<ticket>"
