@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """signq — the sign-queue tool (host side: `make sign`; session side: enqueue.sh calls `meta`).
 
-    signq.py run   [-v] [--dry-run]     drain every pending job, non-interactive, with an overview
+    signq.py run   [-v] [--dry-run]     take the drain lock, migrate any legacy jobs (not on a dry run),
+                                        then drain every pending job, non-interactive, with an overview.
+                                        A lock already held prints its holder's pid and current job, then
+                                        exits 0. A lock just freed by a holder that died mid-job (its job
+                                        still running) prints that job's name + pid and exits 2 without
+                                        starting anything.
     signq.py list                       overview table of pending + parked jobs (no git runs)
     signq.py show  <job>                print a job's metadata and the script itself
     signq.py log   <job>                print the last drain log of a job
@@ -11,8 +16,9 @@
                                         emit the META JSON line enqueue.sh embeds in a job
     signq.py migrate-legacy             move jobs/logs a pre-workspace-queue kit queued under the kit dir
                                         into the workspace queue and print what moved; a no-op otherwise.
-                                        Never runs as a side effect of another subcommand — `make sign` /
-                                        `make sign_list` run it first (`-q`: silent unless files move).
+                                        Takes the drain lock for the move; while a drain holds it, nothing
+                                        moves here (`run` migrates itself, under its lock, before it loads
+                                        a job). `make sign_list` runs it first (`-q`: silent unless files move).
 
 <job> is the 1-based index from `list`, the topic, or the file name. Jobs are self-contained POSIX sh
 scripts under .context/state/sign-queue/ (written by enqueue.sh). A job carries one `# META {...}` line with
@@ -55,7 +61,10 @@ else:
 Q = Path(os.environ.get("SIGN_QUEUE_DIR", str(CONTEXT / "state" / "sign-queue")))
 LEGACY_Q = KIT / "sign-queue"  # where jobs were queued before #7
 LOGS = Q / "logs"
-LOCK = Q / ".lock"  # held exclusively (fcntl.flock) for the whole drain — a second `run` finds it held and exits
+LOCK = Q / ".lock"  # held exclusively (fcntl.flock) for the whole drain. Its bytes also record the holder's
+# pid and the job it is currently on (_write_lock_state/_read_lock_state): a second `run` that finds the
+# lock held names both; a `run` that takes a just-freed lock reads the same bytes for a job process a dead
+# holder left running (SIGKILL, …) and refuses to start a new one on top of it.
 
 # ── terminal styling ────────────────────────────────────────────────────────────────────────
 TTY = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
@@ -518,6 +527,95 @@ def _alive(pid: int) -> bool:
     return True
 
 
+def _ps(pid: int, field: str) -> str:
+    """One `ps -o <field>=` column for one pid, or "" when `ps` has nothing to say (no such pid, or a `ps`
+    without that column — some minimal images). Run with a fixed time zone and locale: `lstart` is printed
+    in local time, and two drains started under different `TZ` values must read the same string."""
+    try:
+        r = subprocess.run(["ps", "-o", f"{field}=", "-p", str(pid)], capture_output=True, text=True, timeout=5,
+                           env={**os.environ, "TZ": "UTC", "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return r.stdout.strip()
+
+
+def _pid_start(pid: int) -> str:
+    """The process's start time as `ps -o lstart=` reports it, or "" when `ps` cannot say. The same probe
+    sync.sh's `pid_start()` uses for its own lock-staleness check, so a pid later reused by an unrelated
+    process is never mistaken for the one that originally held it."""
+    return _ps(pid, "lstart")
+
+
+def _job_still_alive(pid: int, started: str) -> bool:
+    """Mirrors sync.sh's `owner_gone()`: alive by `os.kill(pid, 0)`, and — when a start time was recorded —
+    still the SAME process by `ps -o lstart=` (a pid reused by an unrelated process after the original
+    exited reads as gone, not alive). A zombie is gone: it runs nothing, it only waits for a parent that
+    does not reap it. No recorded start time, or a `ps` that cannot answer for a pid that is still there,
+    falls back to the plain liveness check: never treat a live pid as gone just because the extra check
+    could not be made."""
+    if not _alive(pid):
+        return False
+    if _ps(pid, "stat").startswith("Z"):
+        return False
+    if not started:
+        return True
+    now = _pid_start(pid)
+    if not now:
+        return _alive(pid)  # it may have exited between the two probes
+    return now == started
+
+
+def _read_lock_state(lock_f) -> Dict[str, object]:
+    """The lock file's recorded state: {"pid": the holder's os.getpid(), "job": the job name it is
+    currently on ("" when idle), "job_pid": that job's own process id (or None), "job_started": that
+    process's `_pid_start()` string}. A fresh lock file, or one from before this recording existed, reads
+    as {} — never an error."""
+    try:
+        lock_f.seek(0)
+        text = lock_f.read()
+    except OSError:
+        return {}
+    if not text.strip():
+        return {}
+    try:
+        state = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _holder(lock_f) -> str:
+    """Who holds the lock, for the one line a locked-out `run` prints. The record is read without the lock,
+    so it can be caught empty in the middle of a rewrite: read it again a few times before giving up on a
+    name. A record whose pid is no longer alive was left by an earlier drain — the lock is then held by a
+    process that has written no record (a `migrate-legacy`, or a drain in its first instant), so no pid is
+    named rather than a wrong one."""
+    state: Dict[str, object] = {}
+    for _ in range(5):
+        state = _read_lock_state(lock_f)
+        if state:
+            break
+        time.sleep(0.05)
+    pid = state.get("pid")
+    if isinstance(pid, int) and _alive(pid):
+        return f"another drain (pid {pid}, on {state.get('job') or '(no job yet)'})"
+    return "another sign-queue process"
+
+
+def _write_lock_state(lock_f, holder_pid: Optional[int] = None, job: str = "", job_pid: Optional[int] = None,
+                      job_started: str = "") -> None:
+    """Overwrite the lock file with the drain's current state — called once right after the lock is taken,
+    again each time the drain moves onto a new job (and once more to clear the job fields when that job
+    finishes), so the bytes always reflect what the holder is doing right now. A second `run` that finds
+    the lock held reads this to name the holder; a `run` that takes a just-freed lock reads it to tell a
+    leftover live job (the previous holder died mid-job) from a clean handoff."""
+    lock_f.seek(0)
+    lock_f.truncate()
+    lock_f.write(json.dumps({"pid": os.getpid() if holder_pid is None else holder_pid, "job": job,
+                             "job_pid": job_pid, "job_started": job_started}))
+    lock_f.flush()
+
+
 def _kill_tree(root: int, grace: float = 2.0) -> None:
     """SIGTERM, then (after `grace` seconds) SIGKILL, every process descended from `root` — a job's
     `sh <job>` and everything it forked (git, gh, a hung `sleep` two levels down) — children before
@@ -545,7 +643,7 @@ def _kill_tree(root: int, grace: float = 2.0) -> None:
             pass
 
 
-def run_job(j: Job, verbose: bool, dry: bool) -> Dict[str, str]:
+def run_job(j: Job, verbose: bool, dry: bool, lock_f=None) -> Dict[str, str]:
     LOGS.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env.update(GIT_PAGER="cat", PAGER="cat", GIT_EDITOR="true", GIT_SEQUENCE_EDITOR="true",
@@ -571,6 +669,10 @@ def run_job(j: Job, verbose: bool, dry: bool) -> Dict[str, str]:
         log.write(f"\n===== {now_z()} run {j.name}\n")
         p = subprocess.Popen(["sh", str(j.path)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, env=env, bufsize=1, stdin=subprocess.DEVNULL)
+        if lock_f is not None:
+            # the job stays in this drain's session (see _kill_tree), so Ctrl-C stops both. A drain killed
+            # outright still leaves the job running: the lock file names its process for the next `run`.
+            _write_lock_state(lock_f, job=j.name, job_pid=p.pid, job_started=_pid_start(p.pid))
         timer = threading.Timer(JOB_TIMEOUT, _on_timeout, args=(p.pid,))
         timer.start()
         tail: List[str] = []
@@ -638,28 +740,49 @@ def resolve_pr_after_push(j: Job) -> None:
     j.meta.update(pr_of(j.g("repo"), j.g("branch")))
 
 
+# a previous drain died (SIGKILL, …) while its job kept running; this `run` took the lock but refuses to
+# start a second job on top of it.
+# Non-zero on purpose: the queue is not drained and someone must look at the still-running job.
+EXIT_STALE_JOB = 2
+
+
 def cmd_run(argv: List[str]) -> int:
     verbose = "-v" in argv or "--verbose" in argv
     dry = "--dry-run" in argv
-    # the exclusive lock guards the whole drain, acquired before anything else runs (including the
-    # job listing that follows) — a second concurrent `run` must see nothing but this one line, never
-    # a header or table it has no business printing. LOCK_NB: never block, just say so and leave.
+    # the exclusive lock guards the whole drain, acquired before anything else runs — including the
+    # legacy migration and the job listing that follow — so a second concurrent `run` sees nothing but
+    # one line naming the current holder (its pid and the job it is on), never a header or table it has
+    # no business printing. LOCK_NB: never block, just say so and leave.
     Q.mkdir(parents=True, exist_ok=True)
     lock_f = open(LOCK, "a+")
     try:
         fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        print(dim("sign queue: another drain already holds the lock — exiting"))
+        print(dim(f"sign queue: {_holder(lock_f)} already holds the lock — exiting"))
         lock_f.close()
         return 0
     try:
-        return _drain(verbose, dry)
+        # the lock is ours, but its bytes may still describe the PREVIOUS holder: a recorded job pid
+        # that is still alive (and still the same process, by start time — PID reuse guard) means that
+        # holder died mid-job rather than finishing cleanly, and its job runs on. Starting a new job on
+        # top of it would be a second drain in practice, just serialised through a dead holder's lock.
+        prior = _read_lock_state(lock_f)
+        job_pid = prior.get("job_pid")
+        if isinstance(job_pid, int) and _job_still_alive(job_pid, str(prior.get("job_started") or "")):
+            job_name = str(prior.get("job") or "a job")
+            print(red(f"sign queue: a previous drain died, but its job {job_name} (pid {job_pid}) is "
+                      "still running — exiting without starting a job"))
+            return EXIT_STALE_JOB
+        _write_lock_state(lock_f)
+        if not dry:
+            migrate_legacy()  # under the lock, before any job loads; a dry run moves nothing
+        return _drain(verbose, dry, lock_f)
     finally:
         fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
         lock_f.close()
 
 
-def _drain(verbose: bool, dry: bool) -> int:
+def _drain(verbose: bool, dry: bool, lock_f=None) -> int:
     jobs = load_jobs()
     pending = [j for j in jobs if not j.parked]
     parked = [j for j in jobs if j.parked]
@@ -679,7 +802,9 @@ def _drain(verbose: bool, dry: bool) -> int:
             print(dim(f"  skipped {j.name} — job file disappeared mid-drain"))
             continue
         print(job_card(i, len(pending), j))
-        r = run_job(j, verbose, dry)
+        r = run_job(j, verbose, dry, lock_f=lock_f)
+        if lock_f is not None:
+            _write_lock_state(lock_f)  # back to idle
         if r["status"] == "pushed":
             try:
                 j.path.unlink()
@@ -778,12 +903,40 @@ def cmd_meta(argv: List[str]) -> int:
     return 0
 
 
-def migrate_legacy(legacy: Path = LEGACY_Q, q: Path = Q) -> int:
-    """Move jobs and logs a pre-#7 kit queued under the kit dir into the workspace queue; returns how many files
-    moved. Never overwrites a job already in the new queue (it stays in place and is named). Explicit only —
-    called from the `migrate-legacy` subcommand (`make sign` / `make sign_list` run it first), never as a side effect of
-    another subcommand: a checkout that still holds a legacy `sign-queue/logs/` must not lose it to whatever
-    queue the current process happens to resolve just because someone ran `list` or `meta`."""
+def _own_legacy_queue() -> Optional[Path]:
+    """The kit's own pre-workspace queue dir, or None when its jobs are not this workspace's to take. A kit
+    that sits in a workspace hands its old queue to that workspace only: pointed at another workspace or
+    store (SIGN_QUEUE_ROOT, CONTEXT_ROOT, a test fixture) it leaves the jobs where they are. A plugin install
+    sits in no workspace — every workspace that used the plugin queued there, and a plugin update deletes
+    the directory — so the workspace it drains takes the jobs."""
+    if KIT.parent.resolve() == ROOT.resolve() or kit_profile.install_mode(KIT) == "plugin":
+        return LEGACY_Q
+    return None
+
+
+def _name_jobs_left_behind() -> None:
+    """One stderr line when the kit's old queue holds jobs this workspace does not take: nothing else says
+    they are still there."""
+    if not LEGACY_Q.is_dir():
+        return
+    n = len([*LEGACY_Q.glob("*.sh"), *LEGACY_Q.glob("*.sh.failed")])
+    if n:
+        print(f"sign-queue: {n} job(s) left in {LEGACY_Q} — not the old queue of the workspace {ROOT}; "
+              f"drain them from the workspace that kit sits in, or move them by hand", file=sys.stderr)
+
+
+def migrate_legacy(legacy: Optional[Path] = None, q: Optional[Path] = None) -> int:
+    """Move jobs and logs a pre-workspace-queue kit queued under the kit dir into the workspace queue; returns
+    how many files moved. Never overwrites a job already in the new queue (it stays in place and is named).
+    Called from exactly two places, never as a side effect of `list`/`show`/`meta`: `run`, before it loads a
+    job, and the `migrate-legacy` subcommand. The move is a queue write, so the caller holds the drain lock.
+    With no `legacy` given it is the kit's own old queue, and only when `_own_legacy_queue()` names one."""
+    q = Q if q is None else q
+    if legacy is None:
+        legacy = _own_legacy_queue()
+        if legacy is None:
+            _name_jobs_left_behind()
+            return 0
     if "SIGN_QUEUE_DIR" in os.environ or not legacy.is_dir() or legacy.resolve() == q.resolve():
         return 0
     moved = 0
@@ -801,12 +954,34 @@ def migrate_legacy(legacy: Path = LEGACY_Q, q: Path = Q) -> int:
 
 
 def cmd_migrate_legacy(args: List[str]) -> int:
-    """`-q`: say something only when files moved (the `make sign` entry points run it before every drain)."""
-    moved = migrate_legacy()
+    """`-q`: say something only when files moved or jobs are left behind (`make sign_list` runs it before
+    every overview). Takes the drain lock for the move; while a drain holds it nothing moves, and without
+    `-q` the line says so."""
+    quiet = "-q" in args
+    legacy = _own_legacy_queue()
+    if legacy is None:
+        _name_jobs_left_behind()
+    if legacy is None or not legacy.is_dir():
+        if not quiet:
+            print("nothing to migrate" if legacy is not None else
+                  f"nothing to migrate — {LEGACY_Q} is not the old queue of the workspace {ROOT}")
+        return 0
+    Q.mkdir(parents=True, exist_ok=True)
+    with open(LOCK, "a+") as lock_f:
+        try:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            if not quiet:
+                print(f"nothing moved — {_holder(lock_f)} holds the queue lock; run it again afterwards")
+            return 0
+        try:
+            moved = migrate_legacy(legacy)
+        finally:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
     if moved:
-        print(f"moved {moved} file(s) from {LEGACY_Q} to {Q}")
-    elif "-q" not in args:
-        print("nothing to migrate" if not LEGACY_Q.is_dir() else f"{LEGACY_Q} and {Q} already the same directory, or nothing new to move")
+        print(f"moved {moved} file(s) from {legacy} to {Q}")
+    elif not quiet:
+        print(f"{legacy} and {Q} already the same directory, or nothing new to move")
     return 0
 
 
