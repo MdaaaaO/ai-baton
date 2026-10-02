@@ -2,14 +2,22 @@
 # tests/hermetic.sh — the git isolation every sh fixture that spawns git needs, sourced by setup_sh_scenarios.sh
 # (tests/__init__.py's hermetic_env() gives the Python suite the same shape). A host's own commit.gpgsign,
 # gpg.format or system git config must never reach a throw-away fixture repo: `sh -e`, POSIX only, no bashisms.
+# Config only: GIT_DIR and the other per-repository GIT_* variables of the caller are left as they are.
 #
 #   . "$(dirname "$0")/hermetic.sh"; hermetic_git_env "$some_tmp_dir"
 
-hermetic_git_env() {  # hermetic_git_env <home-dir> → exports HOME/TMPDIR and disables inherited git config
+hermetic_git_env() {  # hermetic_git_env <home-dir> (absolute) → exports HOME/TMPDIR, keeps the host's git config
+  # out, and turns git's background housekeeping off: `git commit`, and the receive-pack of a push into a local
+  # origin, can start a detached `git maintenance run --auto` that still writes into .git while the fixture is
+  # removed. The two switches sit in a global config file under <home-dir>, not in GIT_CONFIG_COUNT entries:
+  # git drops those before it starts receive-pack.
+  mkdir -p "$1"  # a caller may name a home that does not exist yet; the config file below needs it
   export HOME="$1"
   export TMPDIR="$1"
-  export GIT_CONFIG_GLOBAL=/dev/null
+  printf '[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n' > "$1/.hermetic-gitconfig"
+  export GIT_CONFIG_GLOBAL="$1/.hermetic-gitconfig"
   export GIT_CONFIG_NOSYSTEM=1
+  unset GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS  # each would outrank or replace the lines above
   export GIT_TERMINAL_PROMPT=0
   export GIT_AUTHOR_NAME=t
   export GIT_AUTHOR_EMAIL=t@example.invalid

@@ -6,6 +6,7 @@ main: any `git commit` that inherits it fails at once. Stdlib unittest. Run: mak
 from __future__ import annotations
 import ast
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -116,6 +117,116 @@ class HermeticEnvTrustParameter(unittest.TestCase):
         env = hermetic_env("/tmp/wherever")
         self.assertNotIn("GIT_CONFIG_COUNT", env)
         self.assertNotIn("GIT_CONFIG_KEY_0", env)
+
+
+_HOUSEKEEPING_OFF = ["0", "false"]  # gc.auto, maintenance.auto
+_SHOW_SWITCHES = "git config --get gc.auto; git config --get maintenance.auto"
+
+
+def _origin_that_records_its_config(tmp: Path) -> tuple[Path, Path]:
+    """Where a bare origin goes and the file its post-receive hook writes: the two housekeeping switches as the
+    receive-pack process of a push reads them. Call _record_config_on_push() once the origin exists."""
+    return tmp / "origin.git", tmp / "seen-by-receive-pack.txt"
+
+
+def _record_config_on_push(origin: Path, seen: Path) -> None:
+    hooks = origin / "hooks"
+    hooks.mkdir(exist_ok=True)
+    hook = hooks / "post-receive"
+    hook.write_text(f"#!/bin/sh\n{{ {_SHOW_SWITCHES}; }} > {shlex.quote(str(seen))}\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+
+class HermeticEnvTurnsGitHousekeepingOff(unittest.TestCase):
+    """git's background housekeeping (a detached `git maintenance run --auto`) must stay off in a fixture: it can
+    still be writing into .git when the fixture is removed. hermetic_env() turns it off in the global config
+    file it points git at, so the switches also reach the receive-pack of a push into a local origin — git
+    drops GIT_CONFIG_COUNT entries before it starts that process."""
+
+    def test_a_fixture_repo_reads_both_switches(self):
+        for trust in (False, True):
+            with self.subTest(trust=trust), tempfile.TemporaryDirectory() as tmp:
+                env = hermetic_env(tmp, trust=tmp if trust else None)
+                subprocess.run(["git", "init", "-q", f"{tmp}/repo"], check=True, env=env, capture_output=True)
+                seen = [subprocess.run(["git", "-C", f"{tmp}/repo", "config", "--get", key], check=True, env=env,
+                                       capture_output=True, text=True).stdout.strip()
+                        for key in ("gc.auto", "maintenance.auto")]
+                self.assertEqual(seen, _HOUSEKEEPING_OFF)
+
+    def test_a_commit_starts_no_background_maintenance(self):
+        """The effect, read from git's own trace. A git too old to start either command passes trivially."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**hermetic_env(tmp), "GIT_TRACE": "1"}
+            repo = Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env, capture_output=True)
+            (repo / "f").write_text("x\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "f"], check=True, env=env, capture_output=True)
+            r = subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "x"],
+                               check=True, env=env, capture_output=True, text=True)
+        self.assertNotIn("maintenance run", r.stderr)
+        self.assertNotIn("gc --auto", r.stderr)
+
+    def test_a_push_into_a_local_origin_carries_both_switches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = hermetic_env(tmp)
+            origin, seen = _origin_that_records_its_config(Path(tmp))
+            repo = Path(tmp) / "repo"
+            subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, env=env, capture_output=True)
+            _record_config_on_push(origin, seen)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env, capture_output=True)
+            (repo / "f").write_text("x\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "f"], check=True, env=env, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "x"], check=True, env=env,
+                           capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "push", "-q", str(origin), "HEAD:refs/heads/pushed"],
+                           check=True, env=env, capture_output=True)
+            self.assertEqual(seen.read_text(encoding="utf-8").split(), _HOUSEKEEPING_OFF)
+
+    def test_no_fixture_points_git_at_another_global_config(self):
+        """A fixture that sets GIT_CONFIG_GLOBAL itself drops the switches for every git call it makes."""
+        owners = {"__init__.py", "hermetic.sh", Path(__file__).name}
+        others = [p.name for p in sorted(HERE.iterdir())
+                  if p.suffix in (".py", ".sh") and p.name not in owners
+                  and "GIT_CONFIG_GLOBAL" in p.read_text(encoding="utf-8")]
+        self.assertEqual(others, [])
+
+
+class HermeticShTurnsGitHousekeepingOff(unittest.TestCase):
+    """The same for tests/hermetic.sh's hermetic_git_env(), which the sh scenarios source."""
+
+    def _run(self, tmp: str, body: str, **extra_env) -> list[str]:
+        script = f'set -eu\n. "{HERE / "hermetic.sh"}"\nhermetic_git_env "$1"\ncd "$1"\n{body}\n'
+        r = subprocess.run(["sh", "-c", script, "_", tmp], env={**os.environ, **extra_env},
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.split()
+
+    def test_a_fixture_repo_reads_both_switches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._run(tmp, f"git init -q repo; cd repo; {_SHOW_SWITCHES}"), _HOUSEKEEPING_OFF)
+
+    def test_a_home_dir_that_does_not_exist_yet_still_gets_both_switches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "home")
+            self.assertEqual(self._run(home, f"git init -q repo; cd repo; {_SHOW_SWITCHES}"), _HOUSEKEEPING_OFF)
+
+    def test_config_inherited_through_the_environment_does_not_outrank_them(self):
+        inherited = {"GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "gc.auto", "GIT_CONFIG_VALUE_0": "6700",
+                     "GIT_CONFIG_KEY_1": "maintenance.auto", "GIT_CONFIG_VALUE_1": "true",
+                     "GIT_CONFIG_PARAMETERS": "'gc.auto'='6700'"}
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self._run(tmp, f"git init -q repo; cd repo; {_SHOW_SWITCHES}", **inherited),
+                             _HOUSEKEEPING_OFF)
+
+    def test_a_push_into_a_local_origin_carries_both_switches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            origin, seen = _origin_that_records_its_config(Path(tmp))
+            body = (f"git init -q --bare {shlex.quote(str(origin))}\n"
+                    "git init -q repo; cd repo; echo x > f; git add f; git commit -q -m x\n")
+            self._run(tmp, body)
+            _record_config_on_push(origin, seen)
+            self._run(tmp, f"cd repo; git push -q {shlex.quote(str(origin))} HEAD:refs/heads/pushed")
+            self.assertEqual(seen.read_text(encoding="utf-8").split(), _HOUSEKEEPING_OFF)
 
 
 _ALLOWLIST_MARKER = "hermetic-exempt:"
