@@ -11,7 +11,7 @@
       "source": {
         "source": "github",
         "repo": "MdaaaaO/ai-baton",
-        "ref": "v0.7.0"
+        "ref": "v0.8.0"
       },
       "description": "Capability-gated skills and agents, the env fact store, the context DB engine and kit-health.",
       "category": "productivity"
