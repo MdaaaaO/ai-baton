@@ -30,8 +30,10 @@
   earliest `cost.phases` start, else 365 days back — pass it explicitly for a longer history. gh ≥ 2.4x
   reports merged PRs as state `merged` (older versions `closed`); both are handled. The `github.sandbox_token_prefix`
   placeholder is honoured via `kit_profile.py gh-env`.
-- The two printed queries use `DATE_TRUNC`, `TO_CHAR(…, 'IYYY-"W"IW')` and `DAYOFWEEKISO`; a warehouse that
-  rejects one of them gets the equivalent by hand — `ingest` only needs the column aliases, not the dialect.
+- The two printed queries use no engine-specific function (no `DATE_TRUNC`/`TO_CHAR` week-format, no
+  `DAYOFWEEKISO`): ISO-week bucketing and the weekdays-only filter both happen in `ingest`, in Python, from
+  a plain daily `GROUP BY`. A warehouse rejecting a plain `CAST(… AS DATE)` or `SUM`/`GROUP BY` would be
+  unusual — `ingest` only needs the column aliases, not the dialect.
 - MCP query results that exceed the tool's size limit come back truncated; page by month in the SQL
   (`BETWEEN`) and concatenate the JSON arrays before `ingest`.
 - Transcript timestamps are UTC; `collect-private` buckets them into the owner's calendar day (`kit_profile.tz`,

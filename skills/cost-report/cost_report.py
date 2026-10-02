@@ -42,6 +42,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -52,11 +53,14 @@ KIT = HERE.parent.parent
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
 import fsutil  # noqa: E402  (atomic_write — the engine's torn-write-free JSON writer)
 import kit_profile as profile  # noqa: E402
-import session_stats  # noqa: E402  (price_for, DEFAULT_PRICES)
+import session_stats  # noqa: E402  (price_for, prices)
 import transcripts  # noqa: E402  (the shared transcript reader)
 
-FIXED = session_stats.DEFAULT_PRICES  # (in, cache_write, cache_read, out) $/Mtok — the habit basis
+FIXED = session_stats.prices()[:4]  # (in, cache_write, cache_read, out) $/Mtok — the habit basis; honours
+# SESSION_STATS_PRICES the same way session_stats.py's own CLI does, instead of always the built-in table
 CHEAP = ("sonnet", "haiku")
+RESERVED_BUCKET_NAMES = {"prior-7d", "rolling-7d"}  # the rolling-7 pair `report` always builds itself; a
+# `--phase`/`cost.phases` entry reusing one of these names would silently merge into (or overwrite) it
 COLUMN_KEYS = ("date", "email", "model", "cost", "input", "output", "cache_read", "cache_write")
 # Org mode has NO default column names or row filter: every warehouse has its own schema, and a default
 # would silently build SQL for one environment's table. cost.columns + cost.filters are required there.
@@ -216,6 +220,8 @@ def cmd_propose_columns(a) -> int:
 
 # ----------------------------------------------------------------------------- org: SQL + ingest
 def cmd_sql(a) -> int:
+    if (rc := _check_since_until(a)) is not None:
+        return rc
     m = resolve_mode()
     if m["mode"] != "org":
         print("not org mode: set cost.spend_table (kb.py config-set cost '{...}') and systems.datalake true", file=sys.stderr)
@@ -234,11 +240,6 @@ def cmd_sql(a) -> int:
     if bad:
         print("not a plain SQL identifier (letters, digits, _ $ . only; quoted identifiers are not supported): " + ", ".join(bad), file=sys.stderr)
         return 2
-    for k in ("since", "until"):
-        v = getattr(a, k)
-        if v and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
-            print(f"--{k} wants YYYY-MM-DD, got {v!r}", file=sys.stderr)
-            return 2
     email = m["email"].replace("'", "''")
     since = a.since or "2000-01-01"
     until = a.until or date.today().isoformat()
@@ -255,15 +256,15 @@ GROUP BY 1, 2 ORDER BY 1, 2;"""
 -- Deliberately a plain date GROUP BY, not a week bucket: an engine's week-format function (ISO
 -- year/week format elements in TO_CHAR, on some engines) can silently produce the same literal key for every row instead of
 -- erroring, which collapses every week into one and passes a broken control through undetected. `ingest`
--- does the ISO-week bucketing itself, in Python, from this daily grain.
--- (DAYOFWEEKISO: swap for your engine's equivalent if it rejects it)
+-- does the ISO-week bucketing itself, in Python, from this daily grain. Weekdays-only is filtered there too
+-- (Python's own `date.isoweekday()`), not here — no engine-specific weekday function for this query to swap.
 SELECT CAST({col['date']} AS DATE) AS d,
        COUNT(DISTINCT {col['email']}) AS users,
        SUM({col['cost']}) AS usd, SUM({col['input']}) AS inp, SUM({col['cache_read']}) AS cached,
        SUM({col['cache_write']}) AS cwrite, SUM({col['output']}) AS outp,
        SUM(CASE WHEN LOWER({col['model']}) LIKE '%sonnet%' OR LOWER({col['model']}) LIKE '%haiku%' THEN {col['output']} ELSE 0 END) AS cheap_outp
 FROM {m['spend_table']}
-WHERE {where} AND LOWER({col['email']}) <> LOWER('{email}') AND DAYOFWEEKISO({col['date']}) <= 5
+WHERE {where} AND LOWER({col['email']}) <> LOWER('{email}')
 GROUP BY 1 ORDER BY 1;"""
     print(own)
     print()
@@ -277,18 +278,69 @@ def _lower_keys(rows: list) -> list[dict]:
     return [{str(k).lower(): v for k, v in r.items()} if isinstance(r, dict) else {} for r in rows]
 
 
-def _num(v) -> float:
+class StrictParseError(ValueError):
+    """`_num`/`_day` could not parse a value a row claims is a number or a date. A ValueError subclass so the
+    one pre-existing `except ValueError` (`_control_week_key`'s soft skip for a malformed control-row date)
+    keeps working unchanged; everywhere else this propagates up to `main()`, which turns it into one clean
+    stderr line + exit 2 — never a silent 0.0 and never a traceback."""
+
+
+def _parse_error(row: int | None, col: str | None, value, expected: str) -> StrictParseError:
+    where = f"row {row}" if row is not None else "a row"
+    which = f", column {col!r}" if col else ""
+    return StrictParseError(f"{where}{which}: cannot parse {value!r} as {expected}")
+
+
+# "$1,234.50", "1,234", "-$12.00 ", "12.5€" — a currency sign and/or thousands separators, explicitly accepted
+# on top of whatever plain `float()` already parses; anything else that reaches here is a real parse failure.
+_CURRENCY_RE = re.compile(r"^(?P<sign>[+-]?)(?:[$€£]\s*)?(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?:\s*[$€£])?$")
+
+
+def _num(v, *, row: int | None = None, col: str | None = None) -> float:
     if v in (None, ""):
         return 0.0
-    try:
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
         return float(v)
-    except (TypeError, ValueError):
-        return 0.0
+    s = str(v).strip()
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    m = _CURRENCY_RE.match(s)
+    if m:
+        sign = -1.0 if m.group("sign") == "-" else 1.0
+        return sign * float(m.group("num").replace(",", ""))
+    raise _parse_error(row, col, v, "a number")
 
 
-def _day(v) -> str:
+_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _day(v, *, row: int | None = None, col: str | None = None) -> str:
     s = str(v)
+    if not _DAY_RE.match(s):
+        raise _parse_error(row, col, v, "a YYYY-MM-DD date")
+    try:
+        date.fromisoformat(s[:10])
+    except ValueError:
+        raise _parse_error(row, col, v, "a YYYY-MM-DD date") from None
     return s[:10]
+
+
+def _check_since_until(a) -> int | None:
+    """`--since`/`--until`, as real `YYYY-MM-DD` dates — one shared check so every subcommand that defines
+    either flag fails the same way; a subcommand without one of the two (`getattr(..., None)`) just skips it.
+    Returns 2 (the caller returns it straight on) on a bad value, else None."""
+    for k in ("since", "until"):
+        v = getattr(a, k, None)
+        if not v:
+            continue
+        try:
+            date.fromisoformat(v)
+        except ValueError:
+            print(f"--{k} wants YYYY-MM-DD, got {v!r}", file=sys.stderr)
+            return 2
+    return None
 
 
 WK_RE = re.compile(r"^\d{4}-W\d{2}$")
@@ -319,12 +371,14 @@ def cmd_ingest(a) -> int:
         rows = _lower_keys(json.load(fh))
     daily = []
     skipped = 0
-    for r in rows:
+    for i, r in enumerate(rows):
         if not r.get("d"):
             skipped += 1
             continue
-        daily.append({"d": _day(r["d"]), "model": str(r.get("model") or ""), "usd": _num(r.get("usd")), "inp": _num(r.get("inp")),
-                       "cached": _num(r.get("cached")), "cwrite": _num(r.get("cwrite")), "outp": _num(r.get("outp")), "billed": True})
+        daily.append({"d": _day(r["d"], row=i, col="d"), "model": str(r.get("model") or ""),
+                       "usd": _num(r.get("usd"), row=i, col="usd"), "inp": _num(r.get("inp"), row=i, col="inp"),
+                       "cached": _num(r.get("cached"), row=i, col="cached"), "cwrite": _num(r.get("cwrite"), row=i, col="cwrite"),
+                       "outp": _num(r.get("outp"), row=i, col="outp"), "billed": True})
     fsutil.atomic_write(a.out, json.dumps(daily, indent=0))
     msg = f"{len(daily)} daily rows → {a.out} ({min(r['d'] for r in daily)} .. {max(r['d'] for r in daily)})" if daily else "0 rows"
     print(msg + (f"; {skipped} row(s) skipped (no date column)" if skipped else ""))
@@ -341,7 +395,7 @@ def cmd_ingest(a) -> int:
         weekly: dict[str, dict] = {}
         cskipped = 0
         bad_wk: list[str] = []
-        for r in crow:
+        for i, r in enumerate(crow):
             wk = _control_week_key(r)
             if not wk:
                 cskipped += 1
@@ -349,13 +403,20 @@ def cmd_ingest(a) -> int:
             if not WK_RE.fullmatch(wk):
                 bad_wk.append(wk)
                 continue
-            u = int(_num(r.get("users")))
+            # Weekdays only: the SQL carries no weekday predicate of its own (no engine-specific function to
+            # swap), so a row that arrived daily (its own `d`, not a pre-bucketed `wk`) is filtered here, the
+            # same `_is_wday` test `report`'s buckets already use. A row that already arrived as `wk` (an
+            # engine-specific weekly query the user wrote) has no single day left to check and stays as is.
+            d_raw = str(r.get("d") or "").strip()
+            if d_raw and not str(r.get("wk") or "").strip() and not _is_wday(_day(d_raw, row=i, col="d")):
+                continue
+            u = int(_num(r.get("users"), row=i, col="users"))
             acc = weekly.setdefault(wk, {"wk": wk, "users": 0, "user_days": 0, "usd": 0.0, "inp": 0.0,
                                           "cached": 0.0, "cwrite": 0.0, "outp": 0.0, "cheap_outp": 0.0})
             acc["users"] = max(acc["users"], u)
-            acc["user_days"] += int(_num(r["user_days"])) if "user_days" in r else u
+            acc["user_days"] += int(_num(r["user_days"], row=i, col="user_days")) if "user_days" in r else u
             for k in ("usd", "inp", "cached", "cwrite", "outp", "cheap_outp"):
-                acc[k] += _num(r.get(k))
+                acc[k] += _num(r.get(k), row=i, col=k)
         if bad_wk:
             print("control row(s) with a week key that isn't YYYY-Wnn (a dialect's week-format function "
                   "didn't do what was expected — see the comment in `sql`'s control query): " +
@@ -391,12 +452,29 @@ def _local_day(ts: str, zone: ZoneInfo) -> str:
     return dt.astimezone(zone).date().isoformat()
 
 
+def _since_cutoff_ts(since: str | None) -> float | None:
+    """`--since` day minus one day, as a UTC epoch floor — a file last written before this cannot hold a
+    record on or after `since` in ANY timezone (one day of slack covers the owner's zone running ahead of
+    or behind UTC); conservative on purpose, so a file is only ever skipped, never a record missed."""
+    if not since:
+        return None
+    d = date.fromisoformat(since) - timedelta(days=1)
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp()
+
+
 def collect_private(since: str | None, until: str | None) -> tuple[list[dict], dict]:
     agg: dict[tuple[str, str], dict] = {}
     seen: set[str] = set()
     n_files = n_req = 0
     zone, zone_label = _owner_zone()
+    cutoff = _since_cutoff_ts(since)
     for path in _iter_transcripts():
+        if cutoff is not None:
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    continue  # too old to hold anything on/after --since: never opened, never counted
+            except OSError:
+                pass  # can't stat it — fall through and let usage_records's own OSError handling decide
         n_files += 1
         for o, m, u, _rid in transcripts.usage_records(path, seen):
             ts = _local_day(str(o.get("timestamp") or ""), zone)
@@ -426,18 +504,18 @@ def read_csv(path: str) -> list[dict]:
                 keymap[h] = CSV_ALIASES[norm]
         if "d" not in keymap.values():
             raise SystemExit(f"{path}: no date column recognised (accepted: {sorted(set(k for k, v in CSV_ALIASES.items() if v == 'd'))})")
-        for r in rd:
+        for i, r in enumerate(rd):
             row = {"d": "", "model": "unknown", "usd": None, "inp": 0.0, "cached": 0.0, "cwrite": 0.0, "outp": 0.0}
             for h, f in keymap.items():
                 v = r.get(h)
                 if f == "d":
-                    row["d"] = _day(v)
+                    row["d"] = _day(v, row=i, col=h)
                 elif f == "model":
                     row["model"] = str(v or "csv")
                 elif f == "usd":
-                    row["usd"] = _num(v) if v not in (None, "") else None
+                    row["usd"] = _num(v, row=i, col=h) if v not in (None, "") else None
                 else:
-                    row[f] = _num(v)
+                    row[f] = _num(v, row=i, col=h)
             if row["usd"] is None:
                 p = session_stats.price_for(row["model"])
                 row["usd"] = (row["inp"] * p[0] + row["cwrite"] * p[1] + row["cached"] * p[2] + row["outp"] * p[3]) / 1e6
@@ -449,6 +527,8 @@ def read_csv(path: str) -> list[dict]:
 
 
 def cmd_collect_private(a) -> int:
+    if (rc := _check_since_until(a)) is not None:
+        return rc
     rows, stats = collect_private(a.since, a.until)
     src = {"transcripts": stats}
     if a.csv:
@@ -469,16 +549,43 @@ def cmd_collect_private(a) -> int:
 
 
 # ----------------------------------------------------------------------------- work units
-def _gh(args: list[str]) -> str:
-    env = profile.gh_env(dict(os.environ))
+# A `gh search`/`gh api` call that hits GitHub's primary or secondary rate limit fails outright (gh does not
+# retry on its own); gh's stderr names it one of these ways depending on which limit and which gh version.
+GH_RATE_LIMIT_RE = re.compile(r"(^|[^0-9])(403|429)([^0-9]|$)|rate limit", re.IGNORECASE)
+GH_RATE_LIMIT_ATTEMPTS = 3  # small and bounded: a scope/month that keeps failing should surface, not hang
+
+
+def _gh_retry_delay() -> float:
+    """Base backoff (seconds) before retrying a rate-limited `gh` call; COST_REPORT_RETRY_DELAY overrides it
+    — docs/env-vars.md § cost-report. Test-only: production runs on the default, tests set it near 0."""
     try:
-        r = subprocess.run(["gh", *args], capture_output=True, text=True, env=env, timeout=60)
-    except subprocess.TimeoutExpired:
-        print(f"gh {' '.join(args[:3])} timed out after 60s", file=sys.stderr)
-        raise SystemExit(2)
-    if r.returncode != 0:
-        raise SystemExit(f"gh {' '.join(args[:3])} failed ({r.returncode}): {r.stderr.strip()[:300]}")
-    return r.stdout
+        return float(os.environ.get("COST_REPORT_RETRY_DELAY", "2"))
+    except ValueError:
+        return 2.0
+
+
+def _gh(args: list[str], *, context: str = "") -> str:
+    """Run `gh`. A rate-limited call (403/429 or "rate limit" in stderr) gets GH_RATE_LIMIT_ATTEMPTS tries
+    total, waiting `attempt * delay` seconds between them (increasing, not flat) before giving up. Any other
+    failure (bad query, auth, timeout) is not retried. `context` names the scope/month/repo being fetched so
+    the final error is specific, never a bare "gh failed"."""
+    env = profile.gh_env(dict(os.environ))
+    delay = _gh_retry_delay()
+    r = None
+    for attempt in range(1, GH_RATE_LIMIT_ATTEMPTS + 1):
+        try:
+            r = subprocess.run(["gh", *args], capture_output=True, text=True, env=env, timeout=60)
+        except subprocess.TimeoutExpired:
+            print(f"gh {' '.join(args[:3])} timed out after 60s" + (f" ({context})" if context else ""), file=sys.stderr)
+            raise SystemExit(2)
+        if r.returncode == 0:
+            return r.stdout
+        if attempt < GH_RATE_LIMIT_ATTEMPTS and GH_RATE_LIMIT_RE.search(r.stderr or ""):
+            time.sleep(attempt * delay)
+            continue
+        break
+    where = f" for {context}" if context else ""
+    raise SystemExit(f"gh {' '.join(args[:3])} failed{where} ({r.returncode}): {r.stderr.strip()[:300]}")
 
 
 def _default_since() -> str:
@@ -507,6 +614,8 @@ def _pr_row(repo: str, number: int, created_raw: str, closed_raw: str, state: st
 
 
 def cmd_work_prs(a) -> int:
+    if (rc := _check_since_until(a)) is not None:
+        return rc
     m = resolve_mode()
     login = m["github_login"]
     if not login:
@@ -526,7 +635,8 @@ def cmd_work_prs(a) -> int:
         # and a full page is an error, never a smaller count.
         for lo, hi in _months(since, until):
             q = f"author:{login} is:pr {scope} created:{lo}..{hi}"
-            out = _gh(["search", "prs", *q.split(), "--limit", "1000", "--json", "repository,number,createdAt,closedAt,state,isDraft,url"])
+            ctx = f"{scope} {lo}..{hi}"
+            out = _gh(["search", "prs", *q.split(), "--limit", "1000", "--json", "repository,number,createdAt,closedAt,state,isDraft,url"], context=ctx)
             hits = json.loads(out or "[]")
             if len(hits) >= 1000:
                 raise SystemExit(f"search cap hit for {scope} {lo}..{hi} (1000 rows) — PR counts would be truncated; "
@@ -534,9 +644,11 @@ def cmd_work_prs(a) -> int:
             merged_set: set[tuple[str, int]] = set()
             if any(r.get("state") == "closed" for r in hits):
                 # older gh reports "closed" for merged PRs too: one is:merged search per scope-month settles it
-                mout_ = _gh(["search", "prs", *q.split(), "is:merged", "--limit", "1000", "--json", "repository,number"])
+                mout_ = _gh(["search", "prs", *q.split(), "is:merged", "--limit", "1000", "--json", "repository,number"], context=ctx)
                 merged_set = {(r["repository"]["nameWithOwner"], r["number"]) for r in json.loads(mout_ or "[]")}
             for r in hits:
+                if r.get("isDraft"):
+                    continue  # a draft is not opened work yet — it cannot be merged without leaving draft first
                 key = (r["repository"]["nameWithOwner"], r["number"])
                 if key in seen:
                     continue
@@ -559,6 +671,8 @@ def _ticket_row(repo: str, number: int, created_raw: str, closed_raw: str, label
 
 
 def cmd_work_tickets(a) -> int:
+    if (rc := _check_since_until(a)) is not None:
+        return rc
     kind = profile.get("tracker.kind", "none")
     if kind != "github":
         print(f"tracker.kind is {kind}: run the tracker query through its tool and save a TSV "
@@ -575,7 +689,7 @@ def cmd_work_tickets(a) -> int:
     rows = []
     for repo in repos:
         out = _gh(["search", "issues", f"repo:{repo}", f"assignee:{login}", "is:issue", f"closed:{since}..{until}",
-                   "--limit", "1000", "--json", "number,createdAt,closedAt,labels"])
+                   "--limit", "1000", "--json", "number,createdAt,closedAt,labels"], context=repo)
         hits = json.loads(out or "[]")
         if len(hits) >= 1000:
             raise SystemExit(f"search cap hit for {repo} (1000 rows) — ticket counts would be truncated; pass --since")
@@ -715,6 +829,8 @@ def num(x, nd=0) -> str:
 
 
 def cmd_report(a) -> int:
+    if (rc := _check_since_until(a)) is not None:
+        return rc
     rows, source = load_daily(a.daily)
     if not rows:
         raise SystemExit("daily file has no rows")
@@ -731,6 +847,10 @@ def cmd_report(a) -> int:
     if a.view in ("rolling7", "all"):
         buckets += [Bucket("prior-7d", p7s, p7e), Bucket("rolling-7d", r7s, last)]
     phases = [parse_phase(p) for p in (a.phase or [])] or [(str(p["name"]), str(p["start"]), str(p.get("end") or "")) for p in mode["phases"] if isinstance(p, dict) and p.get("name") and p.get("start")]
+    collide = sorted({n for n, _, _ in phases} & RESERVED_BUCKET_NAMES)
+    if collide:
+        print(f"phase name(s) {', '.join(collide)} collide with the reserved bucket names ({', '.join(sorted(RESERVED_BUCKET_NAMES))})", file=sys.stderr)
+        return 2
     if a.view in ("phases", "all") and phases:
         buckets += [Bucket(n, s, e if e else last) for n, s, e in phases]
     if a.view in ("phases", "all") and not phases:
@@ -747,15 +867,16 @@ def cmd_report(a) -> int:
                 weeks[wk] = Bucket(wk, mon.isoformat(), min((mon + timedelta(days=6)).isoformat(), last))
             weeks[wk].add(r)
     allb = buckets + [weeks[k] for k in sorted(weeks)]
-    # --- work overlay, capped at the last spend day
+    # --- work overlay, capped at BOTH the first and the last spend day — a PR opened before the data starts
+    # (or after it ends) inflates $/PR the same way in either direction, not only on the "after" side.
     prs = read_tsv(a.prs) if a.prs else []
     tks = read_tsv(a.tickets) if a.tickets else []
     for p in prs:
         c, mg = p.get("created", ""), p.get("merged", "")
         for b in allb:
-            if c and c <= last and b.contains(c):
+            if c and first <= c <= last and b.contains(c):
                 b.pr_open += 1; b.repos.add(p.get("repo", ""))
-            if mg and mg <= last and b.contains(mg):
+            if mg and first <= mg <= last and b.contains(mg):
                 b.pr_merged += 1
     for t in tks:
         rs = t.get("resolved", "")
@@ -796,7 +917,7 @@ def cmd_report(a) -> int:
         "source": source or None, "window": f"{first} .. {last}", "rates": "every rate and ratio is weekday-only (ISO 1–5): $/wday, Mout/wday, in/out, $/Mout, cheap%; only the $ total column includes weekends, so $/wday × volume × habit × routing is an exact identity",
         "fixed_prices_usd_per_mtok": mode["fixed_prices"],
         "control": (f"{len(control)} weeks, anonymous aggregate per user-day" if control else "none"),
-        "prs": (f"{len(prs)} PRs from GitHub search (author:{mode['github_login'] or '?'}), capped at {last}" if prs else "not supplied"),
+        "prs": (f"{len(prs)} PRs from GitHub search (author:{mode['github_login'] or '?'}), capped at {first}..{last}" if prs else "not supplied"),
         "tickets": (f"{len(tks)} tickets ({mode['tracker']}), closed by resolution date, capped at {last}" if tks else "not supplied"),
         "phases": [{"name": n, "start": s, "end": e} for n, s, e in phases] or "none (rolling 7 days vs the prior 7)",
         "skipped": ["lines changed as a denominator (never)", "per-epic billed cost (not attributable from billing)"]
@@ -878,8 +999,13 @@ def main(argv: list[str]) -> int:
     a = ap.parse_args(argv)
     if a.cmd == "mode":
         print(json.dumps(resolve_mode(), indent=1)); return 0
-    return {"sql": cmd_sql, "propose-columns": cmd_propose_columns, "ingest": cmd_ingest, "collect-private": cmd_collect_private, "work-prs": cmd_work_prs,
-            "work-tickets": cmd_work_tickets, "report": cmd_report}[a.cmd](a)
+    try:
+        return {"sql": cmd_sql, "propose-columns": cmd_propose_columns, "ingest": cmd_ingest, "collect-private": cmd_collect_private, "work-prs": cmd_work_prs,
+                "work-tickets": cmd_work_tickets, "report": cmd_report}[a.cmd](a)
+    except StrictParseError as e:
+        # a row claimed a value was a number/date and it was not: one clean line, exit 2, never a traceback
+        print(str(e), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
