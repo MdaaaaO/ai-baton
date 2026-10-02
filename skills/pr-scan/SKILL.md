@@ -16,8 +16,10 @@ effort: low
 # pr-scan — one pass over the user's review queue
 
 Working directory: the workspace root. Config `.context/state/pr-review/config.json`; ledger
-`.context/state/pr-review/ledger.jsonl` (the script appends to it — you never edit it by hand). You are
-read-only on GitHub; the only side effect you cause is the script's `--mark` ledger append.
+`.context/state/pr-review/ledger.jsonl`. You are read-only on GitHub **and** on the ledger — this fork
+never writes it. The one write this skill causes (`--mark-only`, appending `surfaced` rows via
+`ledger-append.sh`) happens outside the fork, in the main session's own step after it reads your brief
+(§ Steps, step 3).
 
 ## Steps
 
@@ -28,7 +30,7 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
    for a main session invoking `pr-scan.sh` directly, outside this fork; nothing in this skill currently
    does that.)
    ```sh
-   bash $BATON/skills/pr-scan/pr-scan.sh --mark $ARGUMENTS
+   bash $BATON/skills/pr-scan/pr-scan.sh $ARGUMENTS
    ```
    It prints a ranked table and a `summary:` line, and exits **non-zero when any `gh` call failed after
    its retry** (`errors=<n>`; `retries=` counts calls that needed the second attempt, `failed=` the PRs
@@ -54,10 +56,14 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
    ledger, and the section it renders in below.
 3. Decide **NO-OP vs brief**: if the summary says `new=0`, answer with the single word `NO-OP` — nothing
    else. `new` counts the **shown** rows that were not surfaced before on this head with this kind
-   (`--mark` records exactly those), so a follow-up or an `A` row that was already reported is not new
+   (`--mark-only` records exactly those), so a follow-up or an `A` row that was already reported is not new
    again; a new head, a new author reply, or a first-time `A` flag is. A prio-6 row is never new — the
    user's own review is no reason for a brief; it only rides along when something else is. Otherwise answer
-   with the brief below.
+   with the brief below. Once this fork returns, the main session — never this fork — runs
+   `bash $BATON/skills/pr-scan/pr-scan.sh --mark-only` on the same run (the `out=` dir from step 1, via its
+   `latest` symlink) to record the shown rows as surfaced; a second `--mark-only` on the same run is a safe
+   no-op (a `.marked` stamp beside `queue.json` guards it), so the main session can call it even when unsure
+   whether it already did.
 
 ## Answer (exactly this shape — real markdown, NO code fence, so the terminal draws the table)
 

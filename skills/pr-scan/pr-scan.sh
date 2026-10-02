@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
-# pr-scan.sh [--days N] [--limit N] [--repo owner/name]... [--mark] [--quiet]
+# pr-scan.sh [--days N] [--limit N] [--repo owner/name]... [--quiet]
+# pr-scan.sh --mark-only
 # --limit N caps how many candidates get enriched (the 3 per-candidate gh calls below), not how many
 # rows are shown or counted new — `max_rows` in config.json trims the table itself.
 # Builds the user's review queue: direct requests > team (CODEOWNERS) requests > sweep of configured repos.
-# Read-only against GitHub. Writes candidates.jsonl + queue.json under a fresh $OUT run dir (latest symlink
-# next to it); with --mark appends `surfaced` rows to the ledger so the next run can say what is new.
+# Read-only against GitHub AND against the ledger — the sweep writes only candidates.jsonl + queue.json
+# under a fresh $OUT run dir (latest symlink next to it); it never appends to the ledger itself
+# (`skills/pr-scan/SKILL.md` documents the fork this runs in as read-only, so the sweep path must not write).
+#
+# `--mark-only` is the separate, non-sweeping step that does the one write this skill causes: it takes no
+# `gh` call, reads the existing `$BASE_OUT/latest/queue.json` (the most recent sweep's output, read-only)
+# and appends `surfaced` ledger rows for the shown rows not surfaced yet, via `ledger-append.sh`. The main
+# session runs this itself, after the fork returns a brief and it is not NO-OP — never inside the fork
+# (`skills/pr-scan/SKILL.md` § Steps says exactly where). A run dir marks at most once: a `.marked` stamp
+# beside `queue.json` makes a second `--mark-only` on the same sweep a safe no-op, not a double append.
 #
 # kind: new = never reviewed by us; re_review = we reviewed an older head; follow_up = same head we reviewed,
 # but a thread WE opened has a reply we have not answered (last comment not ours). Our own open-but-unanswered
@@ -13,11 +22,13 @@
 # open PR, and once for a review the kit posted (ledger `reviewed` / `auto_commented`); everything else drops.
 # new (summary) = shown rows not yet `surfaced` on this (head, kind), `done` rows aside; NO-OP for the fork = new=0.
 # errors= counts gh calls that failed after a retry (a failed call is never an empty queue); retries= the ones
-# that recovered. Concurrency: one scan at a time (.scan.lock); every ledger append takes .ledger.lock.
+# that recovered. Concurrency: one scan at a time (.scan.lock); `--mark-only`'s ledger append takes its own
+# lock (`ledger-append.sh` — `.ledger.lock`), never `.scan.lock`: it only reads candidates.jsonl/queue.json.
 set -uo pipefail
 KIT=$(cd "$(dirname "$0")/../.." && pwd)
 # shellcheck source=../_lib/portable.sh
-. "$KIT/skills/_lib/portable.sh"  # epoch_to_iso, with_lock — GNU/Linux and macOS/BSD alike
+. "$KIT/skills/_lib/portable.sh"  # epoch_to_iso, with_lock, claim_owner — GNU/Linux and macOS/BSD alike
+LEDGER_APPEND=$(dirname "$0")/../pr-review/scripts/ledger-append.sh
 # the workspace's .context/ (#74) the way every kit script finds it (kit_profile.py context), never from this
 # script's location: on a plugin install that is Claude Code's plugin cache, wiped on update. PR_REVIEW_HOME overrides.
 CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
@@ -28,8 +39,6 @@ CFG=$ROOT/config.json; LEDGER=$ROOT/ledger.jsonl; touch "$LEDGER"
 # below only mean something in a directory shared across sweeps. PR_SCAN_OUT overrides.
 BASE_OUT=${PR_SCAN_OUT:-$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" scratch --stable pr-scan)} || { echo "pr-scan: cannot resolve the output dir (kit_profile.py scratch failed)" >&2; exit 2; }
 [ -n "$BASE_OUT" ] || { echo "pr-scan: empty output dir" >&2; exit 2; }; mkdir -p "$BASE_OUT"
-find "$BASE_OUT" -mindepth 1 -maxdepth 1 -type d -name 'run.*' -mtime +7 -exec rm -rf {} + 2>/dev/null
-OUT=$(mktemp -d "$BASE_OUT/run.$(date -u +%Y%m%dT%H%M%SZ).XXXX"); ln -sfn "$OUT" "$BASE_OUT/latest"
 ME=$(jq -r .login "$CFG"); OWNER=$(jq -r .owner "$CFG")
 DAYS=$(jq -r .days "$CFG"); CAP=$(jq -r .enrich_cap "$CFG"); MAXROWS=$(jq -r .max_rows "$CFG")
 DEEP=$(jq -r .deep_lines "$CFG"); BOTS=$(jq -c .bots "$CFG")
@@ -48,12 +57,46 @@ ROW_STATE=$(dirname "$0")/row-state.py
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 REPOS=()
 while IFS= read -r _repo; do REPOS+=("$_repo"); done < <(jq -r '.sweep_repos[]' "$CFG")  # a loop, not a bash-4-only array builtin — macOS ships bash 3.2
-MARK=0; QUIET=0; REPO_OVERRIDE=()
+MARK_ONLY=0; QUIET=0; REPO_OVERRIDE=()
 while [ $# -gt 0 ]; do case $1 in
   --days) DAYS=$2; shift 2;; --limit) CAP=$2; shift 2;; --repo) REPO_OVERRIDE+=("$2"); shift 2;;
-  --mark) MARK=1; shift;; --quiet) QUIET=1; shift;;
-  *) echo "usage: pr-scan.sh [--days N] [--limit N] [--repo o/r]... [--mark] [--quiet]" >&2; exit 2;; esac; done
+  --mark-only) MARK_ONLY=1; shift;; --quiet) QUIET=1; shift;;
+  *) echo "usage: pr-scan.sh [--days N] [--limit N] [--repo o/r]... [--quiet] | pr-scan.sh --mark-only" >&2; exit 2;; esac; done
 [ ${#REPO_OVERRIDE[@]} -gt 0 ] && REPOS=("${REPO_OVERRIDE[@]}")
+
+if [ "$MARK_ONLY" = 1 ]; then
+  # the main session's step (never the forked, read-only sweep — skills/pr-scan/SKILL.md § Steps 1/3):
+  # mark the most recent sweep's shown-but-unsurfaced rows, from its queue.json alone — no gh call.
+  DIR=$BASE_OUT/latest
+  [ -L "$DIR" ] && [ -d "$DIR" ] || { echo "pr-scan --mark-only: no sweep run at $DIR — run pr-scan.sh first" >&2; exit 5; }
+  Q=$DIR/queue.json
+  [ -f "$Q" ] || { echo "pr-scan --mark-only: $Q missing — the sweep that wrote $DIR did not finish" >&2; exit 5; }
+  # claim_owner is the same exclusive-create primitive with_lock uses for its lock dir: the first
+  # --mark-only call on this run dir wins, a second (a re-armed loop tick firing twice, a retry after
+  # success) is a no-op instead of a double append.
+  if ! claim_owner "$DIR/.marked"; then
+    [ "$QUIET" = 1 ] || echo "pr-scan --mark-only: $DIR already marked"
+    exit 0
+  fi
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  rows=$(jq -c --arg ts "$ts" --argjson m "$MAXROWS" '.[:$m][] | select(.surfaced|not) | {repo, pr, head, status:"surfaced", ts:$ts, src, kind, auto:(.auto.eligible // false)}' "$Q") \
+    || { echo "pr-scan --mark-only: could not render the surfaced rows from $Q" >&2; rm -f "$DIR/.marked"; exit 5; }
+  if [ -z "$rows" ]; then
+    [ "$QUIET" = 1 ] || echo "pr-scan --mark-only: nothing new to mark"
+    exit 0
+  fi
+  printf '%s\n' "$rows" | bash "$LEDGER_APPEND" "$LEDGER"; rc=$?
+  if [ "$rc" != 0 ]; then
+    rm -f "$DIR/.marked"   # the append failed — a retry must be allowed to try again, not read as "already marked"
+    echo "pr-scan --mark-only: ledger-append.sh failed (rc=$rc) — see its stderr above" >&2
+  else
+    [ "$QUIET" = 1 ] || echo "pr-scan --mark-only: marked $(wc -l <<<"$rows" | tr -d ' ') row(s)"
+  fi
+  exit $rc
+fi
+
+find "$BASE_OUT" -mindepth 1 -maxdepth 1 -type d -name 'run.*' -mtime +7 -exec rm -rf {} + 2>/dev/null
+OUT=$(mktemp -d "$BASE_OUT/run.$(date -u +%Y%m%dT%H%M%SZ).XXXX"); ln -sfn "$OUT" "$BASE_OUT/latest"
 ERR=$OUT/errors.txt; : > "$ERR"; : > "$ERR.raw"
 # epoch arithmetic + epoch_to_iso, not `date -d "-N days"` (GNU-only — BSD `date` has no `-d`)
 since=$(epoch_to_iso "$(( $(date -u +%s) - DAYS * 86400 ))")
@@ -244,7 +287,7 @@ while IFS= read -r row; do
       mine:$mine, prio:$prio}' >> "$OUT/candidates.jsonl"
 done < "$OUT/union.jsonl"
 
-# 4. rank + present — `new` and `auto` are counted over the SHOWN rows, which are exactly the rows --mark records
+# 4. rank + present — `new` and `auto` are counted over the SHOWN rows, which are exactly the rows --mark-only records
 jq -s 'sort_by([.prio, (.updated|explode|map(-.))])' "$OUT/candidates.jsonl" > "$OUT/queue.json"
 # one `state` (+ `section`, `state_label`) per row from the row's own kind / review and the ledger's entries
 # for that PR — no extra gh call, the brief renders by `.section` instead of inventing the grouping itself.
@@ -270,18 +313,5 @@ if [ "$QUIET" = 0 ]; then
   echo "-- * = not surfaced before on this head; ! = over deep threshold ($DEEP lines); A = trivial-PR auto-approve eligible (mode=$AUTO_MODE); C = unattended auto-COMMENT eligible (mode=$AUTOC_MODE); ? = review state unavailable (see errors); LINES/F = added+deleted / files; HUMANS = last state per human reviewer; STATE = brief section (SKILL.md § Answer)"
 fi
 echo "summary: union=$total candidates=$cand shown=$shown new=$newc auto=$autoc auto_mode=$AUTO_MODE auto_comment=$autocmt auto_comment_mode=$AUTOC_MODE dropped(bots=$dropped_bot draft=$dropped_draft stale>${DAYS}d=$dropped_stale done=$dropped_done skipped=$dropped_skip approved=$dropped_approved cap=$dropped_cap failed=$dropped_fail) degraded=$degraded errors=$FAILS retries=$RETRIES out=$OUT"
-if [ "$MARK" = 1 ] && [ "$newc" -gt 0 ]; then
-  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  # the ledger is shared with pr-review's writers: flock where the host has it; without it (macOS/BSD) the
-  # rows are rendered first and land in ONE append, which a concurrent appender cannot interleave into
-  rows=$(jq -c --arg ts "$ts" --argjson m "$MAXROWS" '.[:$m][] | select(.surfaced|not) | {repo, pr, head, status:"surfaced", ts:$ts, src, kind, auto:(.auto.eligible // false)}' "$OUT/queue.json") \
-    || { echo "error: could not render the surfaced rows for $LEDGER" >&2; FAILS=$((FAILS+1)); rows=""; }
-  if [ -n "$rows" ]; then
-    if command -v flock >/dev/null 2>&1; then
-      ( flock 9; printf '%s\n' "$rows" >> "$LEDGER" ) 9>"$ROOT/.ledger.lock"
-    else
-      printf '%s\n' "$rows" >> "$LEDGER"
-    fi
-  fi
-fi
+# the sweep itself never writes the ledger — run `pr-scan.sh --mark-only` as a separate step (see header)
 [ "$FAILS" -eq 0 ]
