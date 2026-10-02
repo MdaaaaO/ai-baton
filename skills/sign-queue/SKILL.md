@@ -136,21 +136,16 @@ Only one drain runs at a time: `make sign` holds an exclusive lock on the queue 
 overlap. A job file removed by hand while a drain is already in progress is skipped with one line; the rest
 of the drain and its summary still run.
 
-`run` also moves jobs a pre-workspace-queue kit left under the kit dir (`migrate-legacy`) itself, once it
-holds that same lock, before loading any job — `make sign` calls `run` and nothing else. `make sign_list`
-only reads the queue: it never migrates, so an overview can never race that move against a drain holding
-the lock. (`signq.py migrate-legacy` still exists as its own subcommand for a manual one-off outside a
-drain.)
+Jobs a pre-workspace-queue kit left under the kit dir are moved under that same lock: `run` moves them itself
+before it loads a job (`make sign` calls `run` only), and `make sign_list` runs `signq.py migrate-legacy`
+first, which takes the lock for the move and moves nothing while a drain holds it.
 
-Each job runs in its own session (detached from the drain's), so it keeps running even if the drain process
-itself is killed outright (a `kill -9`, a closed terminal) mid-job. The lock file carries the holder's pid
-and the job it is currently on, updated as the drain moves from job to job; a `run` that takes a just-freed
-lock and finds that recorded job's process still alive (guarded against pid reuse by comparing `ps -o
-lstart=`, the same check `sync.sh` uses for its own lock) prints that job's name and pid and exits 2
-*without starting a new job* — the queue is not drained and the still-running job needs a look. A recorded
-job pid that has exited is cleared and the drain proceeds normally. Not covered: two different machines (or
-containers) racing the same NFS-mounted queue with colliding pids, and a `ps` too old/minimal to print
-`lstart=` (then the check falls back to a plain liveness test, same as `sync.sh`).
+A job stays in the drain's terminal session — signing may need the terminal for a passphrase, and Ctrl-C
+stops the drain and its job together. A drain that is killed outright (`kill -9`) can still leave its job
+running, so the lock file records the holder's pid and the job it is on. The next `run` that finds that job's
+process alive (same pid and same start time by `ps -o lstart=`, so a reused pid does not count) names the job
+and its pid and exits 2 without starting a job; once that process is gone, `run` drains as usual. Not covered:
+two machines sharing one queue directory.
 
 ## Why
 

@@ -34,14 +34,14 @@ V   ?=
 _SIGN_GATE_SC = sge="$$(mktemp)"; sc="$$(python3 "$(KIT)/context-db/bin/kit_profile.py" get systems.signed_commits 2>"$$sge")"; sgrc=$$?; sgerr="$$(cat "$$sge")"; rm -f "$$sge"; if [ "$$sgrc" -ge 2 ]; then echo "sign-queue: systems.signed_commits could not be read — $$sgerr" >&2; exit 2; fi
 _SIGN_NA = echo "sign-queue: not applicable here — signed_commits is false"
 
-# `run` moves jobs a pre-workspace-queue kit left under the kit dir itself, once it holds the drain lock,
-# before loading any job — `sign` calls it and nothing else. `sign_list` only reads the queue: it never
-# migrates anything, so an overview never runs that move unlocked while a drain might be holding the lock.
+# jobs a pre-workspace-queue kit left under the kit dir move under the drain lock: `run` moves them itself
+# before it loads a job, so `sign` calls `run` only; `sign_list` runs `migrate-legacy` first, which takes the
+# same lock and moves nothing while a drain holds it
 sign:
 	@$(_SIGN_GATE_SC); if [ "$$sc" != "true" ]; then $(_SIGN_NA); else $(_SIGNQ) run $(if $(V),-v,); fi
 
 sign_list:
-	@$(_SIGN_GATE_SC); if [ "$$sc" != "true" ]; then $(_SIGN_NA); else $(_SIGNQ) list; fi
+	@$(_SIGN_GATE_SC); if [ "$$sc" != "true" ]; then $(_SIGN_NA); else $(_SIGNQ) migrate-legacy -q && $(_SIGNQ) list; fi
 
 sign_show sign_log sign_retry sign_drop:
 	@$(_SIGN_GATE_SC); if [ "$$sc" != "true" ]; then $(_SIGN_NA); elif [ -z "$(JOB)" ]; then echo "usage: make $@ JOB=<index|topic>  (see make sign_list)"; exit 1; else $(_SIGNQ) $(patsubst sign_%,%,$@) "$(JOB)"; fi

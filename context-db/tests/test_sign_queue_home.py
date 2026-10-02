@@ -196,8 +196,9 @@ def _seed_repo(root: Path) -> Path:
 
 class LegacyMigrationIsExplicit(unittest.TestCase):
     """the migration a pre-workspace-queue kit needs (jobs/logs it queued under the kit dir) must never run as a
-    side effect of some other subcommand — only an explicit `migrate-legacy` moves anything. A checkout that still
-    holds a legacy `sign-queue/logs/` must not lose it to whatever queue a plain `overview`/`list` happens to resolve."""
+    side effect of an overview — only an explicit `migrate-legacy`, or a `run` under its lock, moves anything. A
+    checkout that still holds a legacy `sign-queue/logs/` must not lose it to whatever queue a plain
+    `overview`/`list` happens to resolve."""
 
     @staticmethod
     def _kit(tmp: Path):
@@ -399,16 +400,12 @@ class RunJobTimeout(unittest.TestCase):
             sq._kill_tree(10, grace=0)
         self.assertEqual(sent[:4], [21, 12, 11, 10])
 
-    def test_run_job_detaches_into_its_own_session_and_process_group(self):
-        # a job now runs detached (start_new_session, i.e. setsid) into its own session/process group,
-        # not the drain's — so it keeps running even if the drain itself is killed outright, which is
-        # what lets a later `run` tell a leftover live job apart from a clean handoff (see
-        # test_sign_queue_drain.py). The accepted cost: a job step needing the controlling terminal
-        # (ssh-keygen -Y sign prompting for a passphrase on /dev/tty) can no longer reach one — no
-        # regression in practice, since GIT_TERMINAL_PROMPT=0 already refuses an interactive credential
-        # prompt in this unattended drain. This greps the actual Popen call, not just behaviour, so a
-        # future edit that quietly drops the detachment (or switches to the equivalent `process_group`
-        # Popen kwarg without updating this test) fails here.
+    def test_run_job_never_starts_a_new_session_or_process_group(self):
+        # a job may need the controlling terminal for ssh-keygen -Y sign / ssh to prompt for a
+        # passphrase; start_new_session (or any setpgrp/preexec_fn=os.setsid) would take that tty
+        # away and turn a passphrase prompt into a silent SIGTTIN hang instead — worse than the bug
+        # this file fixes. This greps the actual Popen call, not just behaviour, so a future edit
+        # that re-adds either one fails here even before it can change run_job's observable timing.
         with tempfile.TemporaryDirectory() as tmp:
             ctx = Path(tmp) / "ws" / ".context"
             ctx.mkdir(parents=True)
@@ -417,7 +414,7 @@ class RunJobTimeout(unittest.TestCase):
                 sq = load_signq()
         import inspect
         src = inspect.getsource(sq.run_job)
-        self.assertIn("start_new_session=True", src)
+        self.assertNotIn("start_new_session", src)
         self.assertNotIn("process_group", src)
         self.assertNotIn("preexec_fn", src)
 
