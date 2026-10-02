@@ -2,8 +2,9 @@
 # ledger-append.sh <ledger-path> [--lock <lock-path>]
 # Appends one or more rows to the shared `.context/state/pr-review/ledger.jsonl` under a lock — the
 # single writer every caller shares, so a model walked through "append a ledger row" (`reference/runner.md`
-# § `--auto` / `--unattended`) or a script that marks rows (`pr-scan.sh --mark-only`, `submit-review.sh`,
-# `reply-threads.sh`) never hand-rolls its own `flock`/`jq` append again.
+# § `--auto` / `--unattended`) or a script that marks rows (`pr-scan.sh --mark-only --run <dir>`) never
+# hand-rolls its own `flock`/`jq` append again. `submit-review.sh` and `reply-threads.sh` still append
+# their own ledger rows inline (their own `flock`/`jq`, not this script) — not callers of this one.
 #
 # Rows come from stdin: one or more lines, each a single-line, compact JSON object (JSONL) — exactly the
 # shape every row in the ledger already has (`{"repo","pr","head","status","ts",...}`; this script does

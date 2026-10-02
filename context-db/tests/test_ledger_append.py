@@ -1,6 +1,7 @@
 """ledger-append.sh: the single writer for `.context/state/pr-review/ledger.jsonl`, shared by every
-caller that used to hand-roll its own `flock` + `jq` append (`pr-scan.sh --mark-only`, `submit-review.sh`,
-`reply-threads.sh`, and the main session per `pr-review/reference/runner.md`). Covers: a basic append,
+caller that uses it (`pr-scan.sh --mark-only --run <dir>`, and the main session per
+`pr-review/reference/runner.md`) instead of hand-rolling its own `flock` + `jq` append — `submit-review.sh`
+and `reply-threads.sh` still append their own rows inline, not through this script. Covers: a basic append,
 that concurrent callers never interleave or lose a row, that one bad line on stdin writes nothing and
 exits 1, that an empty stdin is a no-op (exit 0), usage errors (exit 2), and that a caller who cannot get
 the lock within its timeout gets exit 3 with nothing written. No network. Stdlib unittest, no `jq`-less

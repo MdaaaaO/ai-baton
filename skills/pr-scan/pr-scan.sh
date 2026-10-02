@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # pr-scan.sh [--days N] [--limit N] [--repo owner/name]... [--quiet]
-# pr-scan.sh --mark-only
+# pr-scan.sh --mark-only --run <dir>
 # --limit N caps how many candidates get enriched (the 3 per-candidate gh calls below), not how many
 # rows are shown or counted new — `max_rows` in config.json trims the table itself.
 # Builds the user's review queue: direct requests > team (CODEOWNERS) requests > sweep of configured repos.
@@ -8,12 +8,16 @@
 # under a fresh $OUT run dir (latest symlink next to it); it never appends to the ledger itself
 # (`skills/pr-scan/SKILL.md` documents the fork this runs in as read-only, so the sweep path must not write).
 #
-# `--mark-only` is the separate, non-sweeping step that does the one write this skill causes: it takes no
-# `gh` call, reads the existing `$BASE_OUT/latest/queue.json` (the most recent sweep's output, read-only)
-# and appends `surfaced` ledger rows for the shown rows not surfaced yet, via `ledger-append.sh`. The main
-# session runs this itself, after the fork returns a brief and it is not NO-OP — never inside the fork
-# (`skills/pr-scan/SKILL.md` § Steps says exactly where). A run dir marks at most once: a `.marked` stamp
-# beside `queue.json` makes a second `--mark-only` on the same sweep a safe no-op, not a double append.
+# `--mark-only --run <dir>` is the separate, non-sweeping step that does the one write this skill causes: it
+# takes no `gh` call, reads the NAMED run's `queue.json` (read-only) and appends `surfaced` ledger rows for
+# the shown rows not surfaced yet, via `ledger-append.sh`. `--run` is required — no `latest`-symlink fallback:
+# a sweep started after a brief was shown but before this runs must never mark rows the user never saw. The
+# dir must resolve inside $BASE_OUT (a path escaping it is refused) and hold a finished `queue.json` (exit 5
+# otherwise, same as a dir that does not exist). The main session runs this itself, via the self-executing
+# `MARK` trailer the fork's own answer ends with when it is not NO-OP — never inside the fork
+# (`skills/pr-scan/SKILL.md` § Answer carries the trailer's exact shape). A run dir marks at most once: a
+# `.marked` stamp beside `queue.json` makes a second `--mark-only --run` on the same run a safe no-op, not a
+# double append.
 #
 # kind: new = never reviewed by us; re_review = we reviewed an older head; follow_up = same head we reviewed,
 # but a thread WE opened has a reply we have not answered (last comment not ours). Our own open-but-unanswered
@@ -57,18 +61,25 @@ ROW_STATE=$(dirname "$0")/row-state.py
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 REPOS=()
 while IFS= read -r _repo; do REPOS+=("$_repo"); done < <(jq -r '.sweep_repos[]' "$CFG")  # a loop, not a bash-4-only array builtin — macOS ships bash 3.2
-MARK_ONLY=0; QUIET=0; REPO_OVERRIDE=()
+MARK_ONLY=0; QUIET=0; MARK_RUN=""; REPO_OVERRIDE=()
 while [ $# -gt 0 ]; do case $1 in
   --days) DAYS=$2; shift 2;; --limit) CAP=$2; shift 2;; --repo) REPO_OVERRIDE+=("$2"); shift 2;;
-  --mark-only) MARK_ONLY=1; shift;; --quiet) QUIET=1; shift;;
-  *) echo "usage: pr-scan.sh [--days N] [--limit N] [--repo o/r]... [--quiet] | pr-scan.sh --mark-only" >&2; exit 2;; esac; done
+  --mark-only) MARK_ONLY=1; shift;; --run) MARK_RUN=$2; shift 2;; --quiet) QUIET=1; shift;;
+  *) echo "usage: pr-scan.sh [--days N] [--limit N] [--repo o/r]... [--quiet] | pr-scan.sh --mark-only --run <dir>" >&2; exit 2;; esac; done
 [ ${#REPO_OVERRIDE[@]} -gt 0 ] && REPOS=("${REPO_OVERRIDE[@]}")
 
 if [ "$MARK_ONLY" = 1 ]; then
-  # the main session's step (never the forked, read-only sweep — skills/pr-scan/SKILL.md § Steps 1/3):
-  # mark the most recent sweep's shown-but-unsurfaced rows, from its queue.json alone — no gh call.
-  DIR=$BASE_OUT/latest
-  [ -L "$DIR" ] && [ -d "$DIR" ] || { echo "pr-scan --mark-only: no sweep run at $DIR — run pr-scan.sh first" >&2; exit 5; }
+  # the main session's step (never the forked, read-only sweep — skills/pr-scan/SKILL.md § Steps/Answer):
+  # mark the NAMED run's shown-but-unsurfaced rows, from its queue.json alone — no gh call. --run is
+  # required (no `latest` fallback): a sweep started after the brief was shown but before this runs must
+  # never mark rows the user never saw.
+  [ -n "$MARK_RUN" ] || { echo "pr-scan --mark-only: --run <dir> is required (the exact run dir the brief came from, not 'latest')" >&2; exit 2; }
+  BASE_REAL=$(cd "$BASE_OUT" 2>/dev/null && pwd -P) || { echo "pr-scan --mark-only: cannot resolve $BASE_OUT" >&2; exit 2; }
+  DIR=$(cd "$MARK_RUN" 2>/dev/null && pwd -P) || { echo "pr-scan --mark-only: no such dir: $MARK_RUN" >&2; exit 5; }
+  case "$DIR" in
+    "$BASE_REAL"/*) ;;
+    *) echo "pr-scan --mark-only: $MARK_RUN resolves outside $BASE_OUT — refusing" >&2; exit 2 ;;
+  esac
   Q=$DIR/queue.json
   [ -f "$Q" ] || { echo "pr-scan --mark-only: $Q missing — the sweep that wrote $DIR did not finish" >&2; exit 5; }
   # claim_owner is the same exclusive-create primitive with_lock uses for its lock dir: the first

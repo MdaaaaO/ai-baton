@@ -169,8 +169,12 @@ class ScanHarness:
 
     def mark_only(self, env: dict):
         """Marks the most recent sweep's shown rows as surfaced — the main session's step, run separately
-        from the (read-only) sweep itself."""
-        return subprocess.run(["bash", str(PR_SCAN), "--mark-only"], env=env, capture_output=True, text=True, timeout=60)
+        from the (read-only) sweep itself, against the exact run dir `run_scan` just wrote (`--run` is
+        required; no `latest`-fallback in the script itself, but nothing newer has run in these tests, so
+        `latest` still names that same run)."""
+        run_dir = str(self.tmp / "scanout" / "latest")
+        return subprocess.run(["bash", str(PR_SCAN), "--mark-only", "--run", run_dir], env=env,
+                              capture_output=True, text=True, timeout=60)
 
     def queue(self):
         latest = self.tmp / "scanout" / "latest"
