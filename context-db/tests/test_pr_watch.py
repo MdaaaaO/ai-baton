@@ -949,5 +949,19 @@ class PrWatchStub(unittest.TestCase):
             self.assertFalse((self.state_dir() / name).exists(), name)
 
 
+class ArmExamplesNameTheWorktree(unittest.TestCase):
+    """The arm examples the skills print carry PR_WATCH_WORKTREE: without it every push of the session's own reads
+    as a real HEAD MOVED and wakes it."""
+
+    def test_every_arm_example_sets_the_worktree(self):
+        for skill in ("pr-watch", "pr-open", "session-register"):
+            with self.subTest(skill=skill):
+                text = (KIT / "skills" / skill / "SKILL.md").read_text()
+                examples = [line for line in text.splitlines() if "pr-watch.sh <" in line]
+                self.assertTrue(examples, "no arm example found")
+                for line in examples:
+                    self.assertIn("PR_WATCH_WORKTREE=<", line)
+
+
 if __name__ == "__main__":
     unittest.main()
