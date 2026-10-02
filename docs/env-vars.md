@@ -61,7 +61,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 
 | Name | Default | Read by | Purpose | Scope |
 |---|---|---|---|---|
-| `SIGN_QUEUE_BY` | `WORKSPACE_USER`, else `?` | `skills/sign-queue/enqueue.sh` | who a queued commit job is attributed to | user-facing |
+| `SIGN_QUEUE_BY` | none — required (or pass `--by`) | `skills/sign-queue/enqueue.sh` | who a queued commit job is attributed to; neither this nor `--by` set exits 2 with a usage message | user-facing |
 | `SIGN_QUEUE_SKIP_STYLE` | `0` | `skills/sign-queue/enqueue.sh` | `1` skips the commit-style check for one deliberate one-off enqueue | user-facing |
 | `SIGN_QUEUE_JOB_TIMEOUT` | `300` (seconds) | `skills/sign-queue/signq.py` | how long `run_job` lets one job's `git`/`gh` chain run before killing its whole process group | user-facing |
 | `SIGN_QUEUE_ROOT` | unset | `skills/sign-queue/signq.py` | override the workspace root the queue resolves everything else from (a plugin install's own workaround) | internal |
@@ -88,8 +88,8 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `PR_WATCH_SELF` | the resolved GitHub identity (`gh api user`, else `WORKSPACE_GITHUB_LOGIN`) | `skills/pr-watch/pr-watch.sh` | override this session's own GitHub login | user-facing |
 | `PR_WATCH_SYNC` | `1` | `skills/pr-watch/pr-watch.sh` | `0` disables keeping a waiting PR's branch synced with its base | user-facing |
 | `PR_WATCH_SYNC_COOLDOWN` | `3600` (seconds) | `skills/pr-watch/pr-watch.sh` | how often a fast-moving base may re-trigger CI on the PR | user-facing |
-| `PR_WATCH_KNOWN_RED` | empty | `skills/pr-watch/pr-watch.sh` | extended regex of failing-check names to mute as already-known-red | user-facing |
-| `PR_WATCH_REPLAY` | `0` | `skills/pr-watch/pr-watch.sh` | `1` re-emits the current bot verdict / CHECK NOT GREEN on start even when already reported | user-facing |
+| `PR_WATCH_KNOWN_RED` | empty | `skills/pr-watch/pr-watch.sh` | extended regex over the failure annotations of a PR's failing check runs, to mute a CHECK NOT GREEN as already-known-red (a mute that suppressed one expires on the next green) | user-facing |
+| `PR_WATCH_REPLAY` | `0` | `skills/pr-watch/pr-watch.sh` | `1` re-emits the current bot verdict / CHECK NOT GREEN on start even when already reported, and clears the record of a used or expired `PR_WATCH_KNOWN_RED` mute | user-facing |
 | `PR_WATCH_WORKTREE` | empty | `skills/pr-watch/pr-watch.sh` | path to this session's local checkout; a head move is tracked silently (not `HEAD MOVED`) when its committer is the configured login AND the sha is already a git object there — unset it and every push reads as a real move | user-facing |
 | `PR_WATCH_RETRY_DELAY` | `2` (seconds) | `skills/pr-watch/pr-watch.sh` | delay between the 3 attempts a `gh` read gets before it is reported as `LOOKUP FAILED` (tests set it near 0) | user-facing |
 | `PR_WATCH_BACKOFF_MAX` | `86400` (seconds) | `skills/pr-watch/pr-watch.sh` | cap on the interval between two repeats of the same alarm (an unresolved `CHECK NOT GREEN` on an unchanged head, a `LOOKUP FAILED` that lasts) | user-facing |
@@ -102,7 +102,7 @@ itself — settings.local.json env or a shell export); full spec `docs/packaging
 
 | Name | Default | Read by | Purpose | Scope |
 |---|---|---|---|---|
-| `WORKSPACE_USER` | empty | `kit_profile.identity()` (sign-queue, cost-report, self-assessment ledger, kit-health) | the user's display name | user-facing |
+| `WORKSPACE_USER` | empty | `kit_profile.identity()` (cost-report, self-assessment ledger, kit-health) | the user's display name | user-facing |
 | `WORKSPACE_GITHUB_LOGIN` | empty | `kit_profile.identity()` (pr-watch, cost-report, kit-health) | the user's GitHub login | user-facing |
 | `WORKSPACE_TZ` | `tz_default` from the env store, else UTC | `kit_profile.identity()` / `kit_profile.tz()` (session registry, session-stats, self-assessment) | the IANA zone timestamps render in | user-facing |
 | `WORKSPACE_SLACK_SELF_DM` | empty | `kit_profile.identity()` (slack-draft) | the user's own chat DM channel id, where drafts park | user-facing |
