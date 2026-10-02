@@ -830,42 +830,45 @@ class SecKitSyncDedup(unittest.TestCase):
         self.assertIn("store behind", warn_lines[0])
 
 
-GOOD_SHA = "ab" * 20  # a made-up 40-hex commit sha, not a real ctx-store commit — only its shape matters here
-OTHER_SHA = "cd" * 20
+GOOD_SHA = "ab" * 32  # a made-up 64-hex wheel sha256, not a real ctx-store wheel's — only its shape matters here
+OTHER_SHA = "cd" * 32
+GOOD_PIN = f"version 0.4.0\nwheel ctx_store-0.4.0-py3-none-any.whl\nsha256 {GOOD_SHA}"
 
 
 class CtxPinCheck(unittest.TestCase):
     """§ 5 also checks the ctx AT THE PIN, not just whether `.context/` is adopted: `where` finds the pinned
     executable (never installs it), then `<ctx> --version` is run directly and compared against the API
     `ctx_adapter.py version`'s second line names — no adopted store is needed for either call. Once the api
-    matches, `ctx_adapter.py pin` reports the sha the install at the pin verified — also read-only, no
-    second clone — and is folded into the same single finding."""
+    matches, `ctx_adapter.py pin` reports the release and wheel digest the install at the pin recorded — also
+    read-only, no second download — and is folded into the same single finding."""
 
     def check(self, **answers) -> tuple[str, str]:
         kh = load_kit_health()
 
         def fake_sh(cmd, **kw):
             if cmd[-1] == "version":
-                return answers.get("adapter_version", (0, f"v0.4.0\napi 1\nsha {GOOD_SHA}", ""))
+                return answers.get("adapter_version", (0, f"0.4.0\napi 1\nsha256 {GOOD_SHA}", ""))
             if cmd[-1] == "where":
                 return answers.get("where", (0, "/opt/ctx", ""))
             if cmd[-1] == "--version":
                 return answers.get("ctx_version", (0, "ctx 0.4.0 (api 1)", ""))
             if cmd[-1] == "pin":
-                return answers.get("pin", (0, f"pinned_sha {GOOD_SHA}\ncloned_sha {GOOD_SHA}\nverified true", ""))
+                return answers.get("pin", (0, GOOD_PIN, ""))
             raise AssertionError(cmd)
 
         r = kh.Report()
-        with mock.patch.object(kh, "sh", fake_sh):
+        with mock.patch.object(kh, "sh", fake_sh), mock.patch.dict(os.environ, {"KIT_CTX": ""}):
+            if "kit_ctx" in answers:
+                os.environ["KIT_CTX"] = answers["kit_ctx"]
             kh.ctx_pin_check(r)
         [level] = [k for k, n in r.counts.items() if n]
         return level, r.lines[-1]
 
-    def test_matching_api_is_ok(self):
+    def test_a_matching_install_is_ok(self):
         level, line = self.check()
         self.assertEqual(level, "OK")
         self.assertIn("api 1", line)
-        self.assertIn(f"sha {GOOD_SHA} verified", line)
+        self.assertIn(f"0.4.0 wheel sha256 {GOOD_SHA} verified", line)
 
     def test_pin_missing_is_a_warning_with_the_fix(self):
         level, line = self.check(where=(1, "", "not installed"))
@@ -874,8 +877,7 @@ class CtxPinCheck(unittest.TestCase):
         self.assertIn("ctx_adapter.py adopt`", line)
 
     def test_a_different_api_is_a_warning_naming_both(self):
-        with mock.patch.dict(os.environ, {"KIT_CTX": ""}):
-            level, line = self.check(ctx_version=(0, "ctx 0.3.0 (api 0)", ""))
+        level, line = self.check(ctx_version=(0, "ctx 0.3.0 (api 0)", ""))
         self.assertEqual(level, "WARN")
         self.assertIn("api 0", line)
         self.assertIn("expects api 1", line)
@@ -883,8 +885,7 @@ class CtxPinCheck(unittest.TestCase):
         self.assertIn("ctx_adapter.py adopt`", line)
 
     def test_a_different_api_under_kit_ctx_names_the_override(self):
-        with mock.patch.dict(os.environ, {"KIT_CTX": "/opt/other/ctx"}):
-            level, line = self.check(ctx_version=(0, "ctx 9.0.0 (api 2)", ""))
+        level, line = self.check(kit_ctx="/opt/other/ctx", ctx_version=(0, "ctx 9.0.0 (api 2)", ""))
         self.assertEqual(level, "WARN")
         self.assertIn("`KIT_CTX` points at it", line)
         self.assertNotIn("install &&", line)  # install would not clear it: KIT_CTX overrides the pin
@@ -894,40 +895,37 @@ class CtxPinCheck(unittest.TestCase):
         self.assertEqual(level, "WARN")
         self.assertIn("api none", line)
 
-    def test_matching_api_under_kit_ctx_skips_the_sha_check(self):
-        # the pin status describes the pinned cache, not whatever KIT_CTX points at — irrelevant here
-        with mock.patch.dict(os.environ, {"KIT_CTX": "/opt/other/ctx"}):
-            level, line = self.check(pin=(1, "", "should not be called"))
+    def test_matching_api_under_kit_ctx_skips_the_digest_check(self):
+        # the install record describes the pinned cache, not whatever KIT_CTX points at — irrelevant here
+        level, line = self.check(kit_ctx="/opt/other/ctx", pin=(1, "", "should not be called"))
         self.assertEqual(level, "OK")
-        self.assertNotIn("sha", line)
+        self.assertNotIn("sha256", line)
 
-    def test_no_sha_record_is_a_warning_the_install_predates_the_check(self):
-        level, line = self.check(pin=(1, "", "no sha record"))
+    def test_no_record_is_a_warning_the_install_predates_the_check(self):
+        level, line = self.check(pin=(1, "", "no install record"))
         self.assertEqual(level, "WARN")
         self.assertIn("api 1", line)
-        self.assertIn("sha not recorded", line)
+        self.assertIn("no wheel digest recorded", line)
         self.assertIn("remove `/opt`", line)  # `install` alone returns the copy at the pin untouched
         self.assertIn("ctx_adapter.py adopt`", line)
 
-    def test_an_unverified_sha_is_a_warning(self):
-        level, line = self.check(pin=(0, f"pinned_sha {GOOD_SHA}\ncloned_sha \nverified false", ""))
+    def test_a_stale_digest_is_a_warning_naming_both(self):
+        level, line = self.check(pin=(0, GOOD_PIN.replace(GOOD_SHA, OTHER_SHA), ""))
         self.assertEqual(level, "WARN")
-        self.assertIn("sha unverified at install", line)
-        self.assertNotIn("offline", line)  # an offline install fails at the clone and records nothing
+        self.assertIn(f"sha256 {OTHER_SHA}", line)
+        self.assertIn(f"now pins 0.4.0 with sha256 {GOOD_SHA}", line)
         self.assertIn("remove `/opt`", line)
 
-    def test_a_pin_stale_against_the_current_adapter_sha_is_a_warning(self):
-        level, line = self.check(pin=(0, f"pinned_sha {OTHER_SHA}\ncloned_sha {OTHER_SHA}\nverified true", ""))
+    def test_a_stale_version_is_a_warning_too(self):
+        level, line = self.check(pin=(0, GOOD_PIN.replace("version 0.4.0", "version 0.3.9"), ""))
         self.assertEqual(level, "WARN")
-        self.assertIn(f"verified sha {OTHER_SHA}", line)
-        self.assertIn(f"now expects {GOOD_SHA}", line)
+        self.assertIn("this install is 0.3.9", line)
         self.assertIn("remove `/opt`", line)
 
-    def test_an_adapter_without_a_sha_pin_names_the_constant_not_a_reinstall(self):
-        level, line = self.check(adapter_version=(0, "v0.4.0\napi 1\nsha ", ""),
-                                 pin=(0, "pinned_sha \ncloned_sha \nverified false", ""))
+    def test_an_adapter_without_a_digest_pin_names_the_constant_not_a_reinstall(self):
+        level, line = self.check(adapter_version=(0, "0.4.0\napi 1\nsha256 ", ""), pin=(1, "", "not called"))
         self.assertEqual(level, "WARN")
-        self.assertIn("`CTX_SHA` is empty", line)
+        self.assertIn("`CTX_WHEEL_SHA256` is empty", line)
         self.assertNotIn("install &&", line)  # no fetch can verify against a pin that is not there
 
 

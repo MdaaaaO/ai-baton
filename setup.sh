@@ -44,7 +44,7 @@
 #      an existing machine by itself: `--refresh-seeds` prints the diff between each seeded copy and its
 #      template (kit-health warns when a copy predates its template), you merge what you want by hand.
 #      Removes the bytecode caches and empty directories git never tracks (what a removed skill leaves behind).
-#   5. Fetches the pinned ctx-store tag (`ctx_adapter.py install`, a network git clone) when it is not already
+#   5. Fetches the pinned ctx-store release (`ctx_adapter.py install`, a PyPI wheel download) when it is not already
 #      installed, then adopts .context/ as a ctx-store store (`ctx_adapter.py adopt`; it never overwrites) and, on a
 #      clone, adds the ctx MCP server to the workspace .mcp.json. KIT_NO_CTX_FETCH=1 skips the fetch (offline runs,
 #      the setup tests) and only prints the manual install command, as before; an install that fails (offline,
@@ -510,7 +510,7 @@ echo
 echo "== ctx-store =="
 # Adopt the content root as a ctx store (ctx_adapter.py adopt runs `ctx init --upgrade` with the kit's store settings
 # and type schemas: idempotent; a kit update replaces its own earlier files, and one edited here is kept, rc 5).
-# When the pinned ctx is missing, fetch it first (ctx_adapter.py install: a network git clone of the pinned tag) —
+# When the pinned ctx is missing, fetch it first (ctx_adapter.py install: a PyPI download of the pinned wheel) —
 # unless KIT_NO_CTX_FETCH=1 (offline runs, the setup tests), which keeps the old print-only behaviour. An
 # install failure (offline, network down) falls back to printing the manual commands and setup continues either way
 # — it must not fail offline. A clone also gets the ctx MCP server in the workspace .mcp.json (a plugin install
@@ -521,7 +521,7 @@ if ! python3 "$ADAPTER" where >/dev/null 2>&1; then
   if [ "${KIT_NO_CTX_FETCH:-}" = 1 ]; then
     echo "$MANUAL_CTX_INSTALL"
   else
-    echo "  ctx-store not installed — fetching the pinned tag (network; KIT_NO_CTX_FETCH=1 skips this and only prints the commands)"
+    echo "  ctx-store not installed — fetching the pinned release (network; KIT_NO_CTX_FETCH=1 skips this and only prints the commands)"
     if out="$(python3 "$ADAPTER" install 2>&1)"; then
       printf '%s\n' "$out" | sed 's/^/  /'
       echo "  installed"

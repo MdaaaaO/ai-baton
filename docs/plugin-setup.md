@@ -47,7 +47,7 @@ step 3 fills your identity and your repos without a question.
    `.context/` with its README and index, the memory symlink, `.context/state/pr-review/config.json`,
    `<root>/.claude/settings.local.json` and a root `CLAUDE.md` that imports `.context/reference/environment.md`. It
    writes no `Makefile` and no `@.claude/WORKSPACE.md` import. When the pinned ctx-store is not already installed, it
-   fetches it itself (`python3 $BATON/context-db/bin/ctx_adapter.py install`, a network git clone of the pinned tag,
+   fetches it itself (`python3 $BATON/context-db/bin/ctx_adapter.py install`, a network download of the pinned release's wheel from PyPI, checked against its pinned sha256,
    printing what it did) and then adopts `.context/` as a ctx store (`ctx_adapter.py adopt`), after which writes to
    `.context/` docs go through the plugin's `ctx` MCP tools; a failed fetch (offline) falls back to printing the two
    commands to run by hand, and setup still succeeds. `KIT_NO_CTX_FETCH=1` skips the fetch outright and always just

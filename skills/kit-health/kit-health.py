@@ -1556,17 +1556,18 @@ def ctx_pin_check(r: Report) -> None:
     deny, `validate --changed --adopt`) assume without kit-health ever saying so. Read-only: `where` finds the
     pinned executable (never installs it), then `<ctx> --version` is run directly — no adopted store needed.
 
-    Once the api matches, the sha `install` pinned this copy against (`ctx_adapter.py pin`, read from the record
-    beside the pinned `ctx` — never a second clone, so this stays offline too): unverified at install time (no
-    network, or the clone's commit could not be read) warns rather than passing silently, and a copy whose
-    recorded sha no longer matches `version`'s third line (the pin was bumped — the tag moved, or just re-pinned
-    — since this was fetched) warns to reinstall. Skipped under `KIT_CTX`: that record describes the pinned
-    cache, not whatever override is actually in use."""
+    Once the api matches, the release and wheel digest `install` recorded for this copy (`ctx_adapter.py pin`, read
+    from the record beside the pinned `ctx` — never a second download, so this stays offline too) must equal
+    `version`'s first line and its `sha256` line: a copy with no record (fetched before this check, or by hand)
+    or with another version or digest (the pin was bumped since this was fetched) warns to reinstall. Skipped
+    under `KIT_CTX`: that record describes the pinned cache, not whatever override is actually in use."""
     adapter = "python3 $BATON/context-db/bin/ctx_adapter.py"
     fix = f"`{adapter} install && {adapter} adopt`"
     rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "version"])
-    want = next((ln.split(" ", 1)[1] for ln in out.splitlines() if ln.startswith("api ")), "")
-    want_sha = next((ln.split(" ", 1)[1] for ln in out.splitlines() if ln.startswith("sha ")), "")
+    lines = out.splitlines()
+    want_version = lines[0].strip() if rc == 0 and lines else ""
+    want = next((ln.split(" ", 1)[1] for ln in lines if ln.startswith("api ")), "")
+    want_sha = next((ln.split(" ", 1)[1].strip() for ln in lines if ln.startswith("sha256 ")), "")
     if rc != 0 or not want:
         r.add(ERR, "engine", f"`{adapter} version` failed: {both(out, err)[-300:]}")
         return
@@ -1594,26 +1595,25 @@ def ctx_pin_check(r: Report) -> None:
     if os.environ.get("KIT_CTX", "").strip():
         r.add(OK, "engine", base)
         return
+    if not want_sha:
+        r.add(WARN, "engine", f"{base}; the adapter pins no wheel digest (`CTX_WHEEL_SHA256` is empty), so no "
+                              "install can be verified — set it beside `CTX_VERSION` in ctx_adapter.py")
+        return
     # `install` returns a usable pinned copy untouched (no new fetch, no new record): removing it comes first
     refetch = f"remove `{Path(ctx_path).parent}` (the copy at the pin), then {fix}"
     rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "pin"])
     if rc != 0:
-        r.add(WARN, "engine", f"{base}; sha not recorded for this install (older than this check) — {refetch}")
+        r.add(WARN, "engine", f"{base}; no wheel digest recorded for this install (fetched before this check) — "
+                              f"{refetch}")
         return
     info = dict(ln.split(" ", 1) for ln in out.splitlines() if " " in ln)
-    verified = info.get("verified") == "true"
-    pinned_sha = info.get("pinned_sha", "")
-    if not want_sha:
-        r.add(WARN, "engine", f"{base}; the adapter pins no sha (`CTX_SHA` is empty), so no install can be "
-                              "verified — set it beside `CTX_VERSION` in ctx_adapter.py")
-    elif not verified:
-        r.add(WARN, "engine", f"{base}; sha unverified at install (the clone's commit could not be read, or the "
-                              f"adapter pinned no sha then) — {refetch}")
-    elif pinned_sha != want_sha:
-        r.add(WARN, "engine", f"{base}; this install verified sha {pinned_sha}, the adapter now expects "
-                              f"{want_sha} — {refetch}")
+    got_version, got_sha = info.get("version", "").strip(), info.get("sha256", "").strip()
+    if (got_version, got_sha) != (want_version, want_sha):
+        r.add(WARN, "engine", f"{base}; this install is {got_version or '?'} from a wheel with sha256 "
+                              f"{got_sha or '?'}, the adapter now pins {want_version} with sha256 {want_sha} — "
+                              f"{refetch}")
     else:
-        r.add(OK, "engine", f"{base}, sha {pinned_sha} verified")
+        r.add(OK, "engine", f"{base}, {got_version} wheel sha256 {got_sha} verified")
 
 
 def store_behind_warn(adapter: str) -> str:

@@ -377,39 +377,31 @@ The kit talks to ctx through its verbs only: it never reads or writes the store'
 `.ctx/`, `.audit/`), and `CTX_STORE` is an opaque locator it passes through, never a path it inspects. Whether a
 store exists is ctx's answer (`NO_STORE`), not a file test here. The one exception is `adopt` (below).
 
-Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against. It is
-fetched, not vendored: `install` clones exactly that tag (`git clone --depth 1 --branch <tag>`) into a per-user
-cache directory whose path carries the tag, so a bumped pin never picks up an older copy. `CTX_SHA` beside it
-names the commit that tag resolves to right now: `install` reads the clone's detached HEAD and refuses to apply
-a clone whose commit disagrees (naming both shas) — a tag repointed at another commit after the kit was pinned
-to it is exactly what this catches, not a network failure. When the clone's own commit cannot be read at all
-(no git on PATH mid-clone, a corrupted checkout), the fetch is applied anyway and recorded unverified rather than
-blocked — a verify that cannot run is not the same as one that ran and disagreed. `install` writes what it found
-next to the pinned `ctx` (`pin status`, below); `kit-health`'s ctx pin line reads it back, offline, so a moved tag
-or a cache installed before a pin bump is reported without a second clone.
+Pin — `CTX_VERSION` below is the one place the kit names the ctx-store release it is written against, as its PyPI
+version. It is fetched, not vendored: `install` reads PyPI's JSON for exactly that release, takes its
+`py3-none-any` wheel and unzips it into a per-user cache directory whose path carries the version, so a bumped pin
+never picks up an older copy; a `ctx` shim beside it runs `python3 -m ctxstore` on that directory (the wheel is
+pure Python with no dependencies: no pip, no venv, no git). `CTX_WHEEL_SHA256` beside the version is the wheel's
+sha256, taken from the file itself when the pin was bumped, never from PyPI's JSON (the same server as the file):
+`install` hashes what it downloaded and refuses a wheel whose digest differs, naming both, before anything is
+unpacked — a file replaced upstream after the kit was pinned to it is exactly what this catches. A wheel member
+whose path is absolute or escapes the directory is refused too. `install` writes the version and digest it
+installed next to the pinned `ctx` (`pin status`, below); `kit-health`'s ctx pin line reads it back, offline, so a
+cache installed before a pin bump is reported without a second download.
 
 Resolver — `$KIT_CTX` (a ctx executable; set but unusable means "not installed", never a silent fallback), else the
-pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/ctx`, else not installed.
+pinned install `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<version>/ctx`, else not installed.
 
 Adopt — makes the content root a store and keeps its settings and type schemas at the kit's: `ctx init` hands over
 `context-db/ctx-store/` with `--upgrade` (idempotent: a store file still holding what the last `init` wrote takes the
 kit's new copy; one someone edited is kept and reported, exit 5, until `adopt --replace` takes the kit's), then
 `ctx migrate --apply` (the docs of a type the kit moved to a new schema version, e.g. the chronological Session
 log), `ctx validate` (findings printed) and `ctx validate --changed --adopt` (records every doc as it is). `--check`
-is the read-only probe kit-health runs. The kit never writes a store file itself — except `ctx-store.json`'s `mcp`
-key (`_strip_mcp_for_upgrade`/`_apply_mcp_setting`, below): the pinned ctx's own `init` does not accept it in
-`--settings` yet (ctx-store#66/#71), though every other ctx entry point reads it straight from the file. Every other
-key follows `init`'s own kept rule above; `mcp` does not — a local edit to it is not supported, because the kit owns
-this key (its `actors` pattern is `session.py`'s own NAME_RE — a local pattern would break session writes), so
-`adopt` always replaces it with the kit's value, never silently: `updated: ctx-store.json mcp — the kit owns this
-key (session.py's name pattern); the previous value was replaced` prints (exit code unaffected: a kit release that
-changes its own pattern looks the same as a local edit, and neither is a `kept` file) whenever the value replaced
-was not already the kit's; an equal value prints nothing. `--upgrade` decides
-`kept` vs `written` by the marker's digest, not its content (ctx-store#73), so before it runs the adapter strips its
-own last `mcp` patch off the marker (the digest then matches what `init` last wrote) and puts the kit's `mcp` value
-back once `init` is done, reporting the swap as above. The marker is written atomically (`_write_marker`, a temp
-file in the same directory then `os.replace`) and, if it does not parse, `adopt` says so and stops before `init`
-runs rather than skip the problem.
+is the read-only probe kit-health runs. The kit never writes a store file itself: `ctx-store.json` goes to `init`
+whole, its `mcp` key included, so that key follows the same kept rule as every other. (A store adopted by an older
+kit carries an `mcp` that kit wrote in itself: the next `adopt` finds it unchanged, but `init`'s own record of the
+marker predates that write, so the first kit settings change after it reports `ctx-store.json` kept once —
+`adopt --replace` takes the kit's and the record lines up from then on.)
 
 Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
 — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes
@@ -477,10 +469,12 @@ or found, or when anything in the adapter itself fails, so a machine that has no
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
-  python3 ctx_adapter.py version          # the pinned tag, `api <CTX_API>` on a second line, `sha <CTX_SHA>` on a third
+  python3 ctx_adapter.py version          # the pinned version, `api <CTX_API>` on a second line, `sha256
+                                           # <CTX_WHEEL_SHA256>` on a third
   python3 ctx_adapter.py where            # the ctx executable; exit 1 when not installed
-  python3 ctx_adapter.py install          # fetch the pinned tag into the pinned location (no-op when present)
-  python3 ctx_adapter.py pin              # the sha `install` found at the pinned location, and whether it verified;
+  python3 ctx_adapter.py install          # fetch the pinned release from PyPI into the pinned location (no-op when
+                                           # present); exit 2, nothing installed, on a digest mismatch or no network
+  python3 ctx_adapter.py pin              # the version and wheel sha256 `install` recorded at the pinned location;
                                            # exit 1 when nothing is installed or the copy predates this check
   python3 ctx_adapter.py adopt [--check [--no-validate]] [--replace]  # ctx init with the kit's settings; --check
                                            # only reports; --check --no-validate skips the whole-store `ctx
@@ -509,11 +503,12 @@ A hook always exits 0. Stdlib only.
 
 positional arguments:
   {version,where,install,pin,adopt,mcp,mcp-json,ctx,hook}
-    version             print the pinned ctx-store tag
+    version             print the pinned ctx-store version
     where               print the ctx executable; exit 1 when not installed
-    install             fetch the pinned tag into the pinned location
-    pin                 report the sha `install` found at the pinned location,
-                        and whether it verified
+    install             fetch the pinned release from PyPI into the pinned
+                        location
+    pin                 report the version and wheel sha256 `install` recorded
+                        at the pinned location
     adopt               make the content root a ctx store with the kit's
                         settings (ctx init)
     mcp                 run the ctx MCP server on the store (stdio)

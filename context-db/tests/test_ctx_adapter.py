@@ -8,14 +8,21 @@ the end-to-end ones use the pinned install when this machine has it and skip cle
 and scratch path is a temp dir. Session ids and paths are assembled at run time. Stdlib unittest.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import hashlib
+import http.server
+import io
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 import uuid
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -31,7 +38,7 @@ FAKE_CTX = f"""#!{sys.executable}
 import json, os, sys
 argv = sys.argv[1:]
 settings = None
-if "--settings" in argv:  # read it now: adopt's temp file (_settings_for_init) is gone by the time a test looks
+if "--settings" in argv:  # what `adopt` handed `init`, read at call time
     try:
         with open(argv[argv.index("--settings") + 1], encoding="utf-8") as sf:
             settings = sf.read()
@@ -80,22 +87,67 @@ class Base(unittest.TestCase):
         return subprocess.run([sys.executable, str(ADAPTER), *args], input=stdin, env={**self.env, **env},
                               capture_output=True, text=True, cwd=self.t, timeout=60)
 
-    def repo(self, tag: str, reports: str) -> str:
-        """A throw-away git repo with one commit (a fake `ctx` reporting `reports`), tagged `tag` — the fixture
-        `install()` clones in these tests; never the network, never the real ctx-store."""
-        src = self.t / f"upstream-{uuid.uuid4().hex[:8]}"
-        src.mkdir()
-        (src / "ctx").write_text(f"#!{sys.executable}\nprint('ctx {reports} (api 1)')\n", encoding="utf-8")
-        (src / "ctx").chmod(0o755)
-        env = hermetic_env(self.t)
-        for cmd in (["init", "-q"], ["add", "ctx"], ["commit", "-q", "-m", "c"], ["tag", tag]):
-            subprocess.run(["git", "-C", str(src), *cmd], env=env, check=True, capture_output=True)
-        return str(src)
+    def wheel(self, reports: str, extra: dict[str, bytes] | None = None, main: bool = True) -> bytes:
+        """A throw-away wheel shaped like ctx-store's — `ctxstore/__main__.py` printing `ctx <reports> (api 1)` —
+        that `install()` downloads in these tests; never the network, never the real ctx-store."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("ctxstore/__init__.py", "")
+            if main:
+                zf.writestr("ctxstore/__main__.py", f"print('ctx {reports} (api 1)')\n")
+            zf.writestr("ctx_store-0.0.0.dist-info/METADATA", "Name: ctx-store\n")
+            for name, data in (extra or {}).items():
+                zf.writestr(name, data)
+        return buf.getvalue()
 
-    def commit_sha(self, url: str, ref: str = "HEAD") -> str:
-        r = subprocess.run(["git", "-C", url, "rev-parse", ref], capture_output=True, text=True, check=True,
-                            env=hermetic_env(self.t))
-        return r.stdout.strip()
+    def pypi(self, version: str, wheel: bytes | None, filename: str = "") -> str:
+        """Serve one release the way PyPI's JSON API does — `/pypi/ctx-store/<version>/json` listing the file, the
+        file itself under `/files/` — from a local server for this test; returns the `index` template `install`
+        takes. `wheel=None` serves no release at all (404). The JSON lists the served file's own digest, as PyPI's
+        does: `install` must never take it as the pin."""
+        files = self.served = {}
+        if wheel is not None:
+            filename = filename or f"ctx_store-{version}-py3-none-any.whl"
+            files[f"/files/{filename}"] = wheel
+            files[f"/pypi/ctx-store/{version}/json"] = json.dumps({"urls": [{
+                "filename": filename, "packagetype": "bdist_wheel", "url": "{base}/files/" + filename,
+                "digests": {"sha256": hashlib.sha256(wheel).hexdigest()}}]}).encode()
+        self.requests: list[str] = []
+        test = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 — the stdlib's name
+                test.requests.append(self.path)
+                body = test.served.get(self.path)
+                if body is None:
+                    self.send_error(404)
+                    return
+                if self.path.endswith("/json"):
+                    body = body.replace(b"{base}", test.base.encode())
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        self.base = f"http://127.0.0.1:{srv.server_address[1]}"
+        return self.base + "/pypi/ctx-store/{version}/json"
+
+    def local(self) -> None:
+        """os.environ, for the rest of the test, set for an in-process `install()` against the local server: the
+        hermetic env, and no proxy that could intercept a request to 127.0.0.1."""
+        proxies = ("http_proxy", "https_proxy", "all_proxy")
+        env = {k: v for k, v in hermetic_env(self.t).items() if k.lower() not in proxies}
+        p = mock.patch.dict(os.environ, dict(env, NO_PROXY="*", no_proxy="*"))
+        p.start()
+        self.addCleanup(p.stop)
+        for k in [k for k in os.environ if k.lower() in proxies]:
+            del os.environ[k]
 
     def calls(self) -> list[dict]:
         if not self.log.exists():
@@ -107,15 +159,15 @@ class Base(unittest.TestCase):
 
 
 class Pin(Base):
-    def test_version_prints_the_one_pinned_tag(self):
+    def test_version_prints_the_one_pinned_release(self):
         mod = load_adapter()
-        self.assertRegex(mod.CTX_VERSION, r"^v\d+\.\d+\.\d+$")
-        self.assertRegex(mod.CTX_SHA, r"^[0-9a-f]{40}$")
+        self.assertRegex(mod.CTX_VERSION, r"^\d+\.\d+\.\d+$")  # PyPI's version: no leading `v`
+        self.assertRegex(mod.CTX_WHEEL_SHA256, r"^[0-9a-f]{64}$")
         r = self.adapter("version")
         lines = r.stdout.splitlines()
         self.assertEqual((r.returncode, lines[0]), (0, mod.CTX_VERSION))
         self.assertEqual(lines[1], f"api {mod.CTX_API}")
-        self.assertEqual(lines[2], f"sha {mod.CTX_SHA}")
+        self.assertEqual(lines[2], f"sha256 {mod.CTX_WHEEL_SHA256}")
 
     def test_the_tag_is_named_in_one_place(self):
         """No other kit file pins a ctx-store version of its own: a second copy would drift from CTX_VERSION."""
@@ -126,11 +178,10 @@ class Pin(Base):
                       and p.name != "CHANGELOG.md" and pin.search(p.read_text(encoding="utf-8", errors="replace")))
         self.assertEqual(hits, ["context-db/bin/ctx_adapter.py"])
 
-    def test_the_pinned_location_carries_the_tag(self):
+    def test_the_pinned_location_carries_the_version(self):
         with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.t / "cache")}):
             mod = load_adapter()
             self.assertEqual(mod.pinned_dir(), self.t / "cache" / "ai-baton-kit" / "ctx-store" / mod.CTX_VERSION)
-
 
 class Resolver(Base):
     def test_not_installed_is_exit_1_with_one_line(self):
@@ -167,146 +218,156 @@ class Resolver(Base):
 
 
 class Install(Base):
-    """The pinned fetch: a shallow clone of exactly the tag, checked against `ctx --version`, renamed into place."""
+    """The pinned fetch: PyPI's JSON names the release's py3-none-any wheel, the wheel's own sha256 must equal the
+    pin, it is unzipped beside a `ctx` shim, checked against `ctx --version`, and renamed into place."""
 
-    def test_install_fetches_the_tag_and_is_idempotent(self):
-        mod = load_adapter()
-        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
-        dest = self.t / "cache" / "pinned"
-        with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            got = mod.install(url=url, sha="", dest=dest)
-            self.assertEqual(got, dest)
-            self.assertTrue(os.access(dest / "ctx", os.X_OK))
-            self.assertFalse((dest / ".git").exists())
-            self.assertEqual(mod.install(url="/nonexistent/repo", sha="", dest=dest), dest)  # present: no second fetch
-        self.assertEqual(sorted(p.name for p in dest.parent.iterdir()), ["pinned"])  # no temp dir left behind
+    def setUp(self):
+        super().setUp()
+        self.mod = load_adapter()
+        self.v = self.mod.CTX_VERSION
+        self.dest = self.t / "cache" / "pinned"
+        self.local()
 
-    def test_a_copy_reporting_another_version_is_refused(self):
-        mod = load_adapter()
-        url = self.repo(mod.CTX_VERSION, "0.0.1")
-        dest = self.t / "cache" / "pinned"
-        with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            with self.assertRaises(OSError):
-                mod.install(url=url, dest=dest)
-        self.assertFalse(dest.exists())
-        self.assertEqual(list(dest.parent.iterdir()), [])
+    def install(self, wheel: bytes | None, sha256: str | None = None, **kw) -> Path:
+        index = self.pypi(self.v, wheel, **kw)
+        pin = hashlib.sha256(wheel).hexdigest() if sha256 is None and wheel is not None else (sha256 or "")
+        return self.mod.install(version=self.v, sha256=pin, dest=self.dest, index=index)
 
-    def test_a_missing_tag_is_an_error_not_a_half_copy(self):
-        mod = load_adapter()
-        url = self.repo("v0.0.0-other", "0.0.0")
-        dest = self.t / "cache" / "pinned"
-        with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            with self.assertRaises(OSError):
-                mod.install(url=url, dest=dest)
-        self.assertFalse(dest.exists())
+    def assertNothingInstalled(self):
+        self.assertFalse(self.dest.exists())
+        self.assertEqual(list(self.dest.parent.iterdir()), [])  # no temp dir left behind either
 
+    def test_a_matching_digest_installs_a_working_ctx_and_is_recorded(self):
+        wheel = self.wheel(self.v)
+        self.assertEqual(self.install(wheel), self.dest)
+        shim = self.dest / "ctx"
+        self.assertTrue(os.access(shim, os.X_OK))
+        r = subprocess.run([str(shim), "--version"], capture_output=True, text=True, timeout=30, cwd=self.t)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, f"ctx {self.v} (api 1)"))
+        self.assertTrue((self.dest / "ctxstore" / "__main__.py").is_file())
+        self.assertEqual(self.mod.pin_status(self.dest), {"version": self.v, "sha256": hashlib.sha256(wheel).hexdigest(),
+                                                          "wheel": f"ctx_store-{self.v}-py3-none-any.whl"})
+        self.assertEqual(sorted(p.name for p in self.dest.parent.iterdir()), ["pinned"])
 
-    def test_a_stalled_clone_times_out_without_prompting(self):
-        # setup.sh fetches unattended: a black-holed network or a credential prompt must fail, never hang
-        mod = load_adapter()
-        mod.INSTALL_TIMEOUT = 1
-        bindir, seen = self.t / "fakebin", self.t / "seen"
-        bindir.mkdir()
-        (bindir / "git").write_text(f"#!/bin/sh\necho \"prompt=$GIT_TERMINAL_PROMPT\" > '{seen}'\n"
-                                   f"[ -t 0 ] && echo tty >> '{seen}'\nsleep 30\n", encoding="utf-8")
-        (bindir / "git").chmod(0o755)
-        dest = self.t / "cache" / "pinned"
-        env = dict(hermetic_env(self.t), PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
-        with mock.patch.dict(os.environ, env):
-            with self.assertRaisesRegex(OSError, "did not finish within 1s"):
-                mod.install(url="https://example.invalid/r", dest=dest)
-        self.assertEqual(seen.read_text(encoding="utf-8").split(), ["prompt=0"])  # no prompt, stdin not a tty
-        self.assertFalse(dest.exists())
+    def test_the_shim_works_from_a_path_with_a_space_and_through_a_symlink(self):
+        self.dest = self.t / "cache dir" / "pinned"
+        self.install(self.wheel(self.v))
+        link = self.t / "bin" / "ctx-link"
+        link.symlink_to(self.dest / "ctx")
+        for exe in (self.dest / "ctx", link):
+            r = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=30, cwd=self.t)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, f"ctx {self.v} (api 1)"), r.stderr)
 
+    def test_already_installed_is_returned_untouched_with_no_fetch(self):
+        self.dest.mkdir(parents=True)
+        (self.dest / "ctx").write_text("#!/bin/sh\necho mine\n", encoding="utf-8")
+        (self.dest / "ctx").chmod(0o755)
+        self.assertEqual(self.install(self.wheel("9.9.9"), sha256="0" * 64), self.dest)
+        self.assertEqual(self.requests, [])
+        self.assertEqual((self.dest / "ctx").read_text(encoding="utf-8"), "#!/bin/sh\necho mine\n")
+        self.assertIsNone(self.mod.pin_status(self.dest))  # no new record written either
 
-class InstallShaPin(Base):
-    """`install`'s sha check: the clone's own commit must match the pin — a mismatch (the tag now resolves
-    elsewhere, whether retagged after the fact or simply pinned wrong) installs nothing and names both shas; a
-    commit that cannot be read at all is applied anyway, recorded unverified (owner decision, 2026-10-01: a
-    verify that cannot run is not the same as one that ran and disagreed)."""
-
-    def test_a_matching_sha_installs_and_is_recorded_verified(self):
-        mod = load_adapter()
-        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
-        sha = self.commit_sha(url, mod.CTX_VERSION)
-        dest = self.t / "cache" / "pinned"
-        with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            got = mod.install(url=url, sha=sha, dest=dest)
-        self.assertEqual(got, dest)
-        status = mod.pin_status(dest)
-        self.assertEqual(status, {"pinned_sha": sha, "cloned_sha": sha, "verified": True})
-
-    def test_a_mismatched_sha_installs_nothing_and_names_both(self):
-        mod = load_adapter()
-        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
-        actual = self.commit_sha(url, mod.CTX_VERSION)
-        wrong = "f" * 40
-        dest = self.t / "cache" / "pinned"
-        with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            with self.assertRaisesRegex(OSError, f"{actual}.*{wrong}|{wrong}.*{actual}") as cm:
-                mod.install(url=url, sha=wrong, dest=dest)
+    def test_a_mismatched_digest_installs_nothing_and_names_both(self):
+        wheel = self.wheel(self.v)
+        actual, wrong = hashlib.sha256(wheel).hexdigest(), "f" * 64
+        with self.assertRaises(OSError) as cm:
+            self.install(wheel, sha256=wrong)
         self.assertIn(actual, str(cm.exception))
         self.assertIn(wrong, str(cm.exception))
-        self.assertFalse(dest.exists())
-        self.assertEqual(list(dest.parent.iterdir()), [])  # nothing left behind — not even the pinned dir
+        self.assertNothingInstalled()
 
-    def test_a_tag_moved_after_the_pin_is_caught_as_a_mismatch(self):
-        """The pin recorded the tag's original commit; upstream then force-moved the tag to a second commit — the
-        same case the design calls out: a release tag that can later point somewhere else."""
-        mod = load_adapter()
-        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
-        original = self.commit_sha(url, mod.CTX_VERSION)
-        (Path(url) / "extra").write_text("moved\n", encoding="utf-8")
-        env = hermetic_env(self.t)
-        subprocess.run(["git", "-C", url, "add", "extra"], env=env, check=True, capture_output=True)
-        subprocess.run(["git", "-C", url, "commit", "-q", "-m", "moved"], env=env, check=True, capture_output=True)
-        subprocess.run(["git", "-C", url, "tag", "-f", mod.CTX_VERSION], env=env, check=True, capture_output=True)
-        moved = self.commit_sha(url, mod.CTX_VERSION)
-        self.assertNotEqual(original, moved)
-        dest = self.t / "cache" / "pinned"
-        with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            with self.assertRaises(OSError) as cm:
-                mod.install(url=url, sha=original, dest=dest)  # the pin still names the tag's old commit
-        self.assertIn(original, str(cm.exception))
-        self.assertIn(moved, str(cm.exception))
-        self.assertFalse(dest.exists())
+    def test_a_wheel_replaced_on_pypi_is_refused_though_its_json_lists_the_new_digest(self):
+        """The pin recorded the original wheel; the index now serves another one and advertises that one's digest —
+        the case the pin exists for: the JSON's digest is the server vouching for itself."""
+        original, replaced = self.wheel(self.v), self.wheel(self.v, extra={"ctxstore/evil.py": b"x = 1\n"})
+        self.assertNotEqual(hashlib.sha256(original).digest(), hashlib.sha256(replaced).digest())
+        with self.assertRaises(OSError) as cm:
+            self.install(replaced, sha256=hashlib.sha256(original).hexdigest())
+        self.assertIn(hashlib.sha256(replaced).hexdigest(), str(cm.exception))
+        self.assertNothingInstalled()
 
-    def test_an_unreadable_clone_commit_installs_unverified_not_blocked(self):
-        mod = load_adapter()
-        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
-        mod._clone_commit_sha = lambda src: None  # the owner decision this encodes: never block on this alone
-        dest = self.t / "cache" / "pinned"
-        with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            got = mod.install(url=url, sha="deadbeef" * 5, dest=dest)
-        self.assertEqual(got, dest)
-        self.assertTrue(os.access(dest / "ctx", os.X_OK))
-        status = mod.pin_status(dest)
-        self.assertEqual(status, {"pinned_sha": "deadbeef" * 5, "cloned_sha": None, "verified": False})
+    def test_zip_slip_members_are_refused_before_anything_is_written(self):
+        for bad in ("../escaped.py", "/abs/escaped.py", "ctxstore/../../escaped.py"):
+            with self.subTest(member=bad):
+                wheel = self.wheel(self.v, extra={bad: b"x = 1\n"})
+                with self.assertRaisesRegex(OSError, "absolute or escapes"):
+                    self.install(wheel)
+                self.assertNothingInstalled()
+                self.assertFalse((self.t / "cache" / "escaped.py").exists())
+                self.assertFalse((self.t / "escaped.py").exists())
 
-    def test_no_sha_pin_set_is_unverified_not_an_error(self):
-        mod = load_adapter()
-        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
-        dest = self.t / "cache" / "pinned"
-        with mock.patch.dict(os.environ, hermetic_env(self.t)):
-            got = mod.install(url=url, sha="", dest=dest)
-        self.assertEqual(got, dest)
-        status = mod.pin_status(dest)
-        self.assertEqual(status["verified"], False)
-        self.assertEqual(status["pinned_sha"], "")
+    def test_no_py3_none_any_wheel_is_a_clear_error(self):
+        with self.assertRaisesRegex(OSError, "lists no py3-none-any.whl wheel"):
+            self.install(self.wheel(self.v), filename=f"ctx_store-{self.v}-cp312-cp312-linux_x86_64.whl")
+        self.assertNothingInstalled()
+
+    def test_a_release_pypi_does_not_have_is_an_error_not_a_half_copy(self):
+        with self.assertRaisesRegex(OSError, "404"):
+            self.install(None, sha256="0" * 64)
+        self.assertNothingInstalled()
+
+    def test_a_wheel_reporting_another_version_is_refused(self):
+        with self.assertRaisesRegex(OSError, "0.0.1"):
+            self.install(self.wheel("0.0.1"))
+        self.assertNothingInstalled()
+
+    def test_a_wheel_without_ctxstore_is_refused(self):
+        with self.assertRaisesRegex(OSError, "not a ctx-store wheel"):
+            self.install(self.wheel(self.v, main=False))
+        self.assertNothingInstalled()
+
+    def test_no_digest_pinned_refuses_without_fetching(self):
+        with self.assertRaisesRegex(OSError, "no wheel digest is pinned"):
+            self.install(self.wheel(self.v), sha256="")
+        self.assertEqual(self.requests, [])
+        self.assertFalse(self.dest.exists())
+
+    def test_a_stalled_download_times_out(self):
+        # setup.sh fetches unattended: a black-holed network must fail, never hang — a socket that accepts the
+        # connection and never answers
+        self.mod.INSTALL_TIMEOUT = 1
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        self.addCleanup(sock.close)
+        index = f"http://127.0.0.1:{sock.getsockname()[1]}/pypi/ctx-store/{{version}}/json"
+        start = time.monotonic()
+        with self.assertRaisesRegex(OSError, "did not finish within 1s"):
+            self.mod.install(version=self.v, sha256="0" * 64, dest=self.dest, index=index)
+        self.assertLess(time.monotonic() - start, 15)
+        self.assertNothingInstalled()
+
+    def test_a_concurrent_install_that_wins_the_rename_stands(self):
+        real = self.mod._write_pin_status
+
+        def and_then_another_install_lands(dest, **kw):
+            real(dest, **kw)
+            self.dest.mkdir(parents=True)  # the other run's rename lands first
+            (self.dest / "ctx").write_text("#!/bin/sh\necho theirs\n", encoding="utf-8")
+            (self.dest / "ctx").chmod(0o755)
+        self.mod._write_pin_status = and_then_another_install_lands
+        self.assertEqual(self.install(self.wheel(self.v)), self.dest)
+        self.assertEqual((self.dest / "ctx").read_text(encoding="utf-8"), "#!/bin/sh\necho theirs\n")
+        self.assertEqual(sorted(p.name for p in self.dest.parent.iterdir()), ["pinned"])
 
     def test_pin_status_is_none_before_any_install(self):
-        mod = load_adapter()
-        self.assertIsNone(mod.pin_status(self.t / "cache" / "nowhere"))
+        self.assertIsNone(self.mod.pin_status(self.t / "cache" / "nowhere"))
+
+    def test_a_record_without_a_wheel_digest_reads_as_none(self):
+        self.dest.mkdir(parents=True)  # what a clone-era install left: no `sha256` key
+        (self.dest / self.mod.PIN_STATUS_NAME).write_text(json.dumps(
+            {"pinned_sha": "a" * 40, "cloned_sha": "a" * 40, "verified": True}), encoding="utf-8")
+        self.assertIsNone(self.mod.pin_status(self.dest))
 
     def test_the_pin_cli_reports_the_record(self):
-        mod = load_adapter()
-        url = self.repo(mod.CTX_VERSION, mod.CTX_VERSION.lstrip("v"))
-        sha = self.commit_sha(url, mod.CTX_VERSION)
-        with mock.patch.dict(os.environ, dict(hermetic_env(self.t), XDG_CACHE_HOME=str(self.t / "cache"))):
-            mod.install(url=url, sha=sha, dest=mod.pinned_dir())
+        wheel = self.wheel(self.v)
+        index = self.pypi(self.v, wheel)
+        with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.t / "cache")}):
+            self.mod.install(version=self.v, sha256=hashlib.sha256(wheel).hexdigest(), index=index)
         r = self.adapter("pin", XDG_CACHE_HOME=str(self.t / "cache"))
-        self.assertEqual(r.returncode, 0)
-        self.assertEqual(r.stdout, f"pinned_sha {sha}\ncloned_sha {sha}\nverified true\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, f"version {self.v}\nwheel ctx_store-{self.v}-py3-none-any.whl\n"
+                                   f"sha256 {hashlib.sha256(wheel).hexdigest()}\n")
 
     def test_the_pin_cli_is_exit_1_when_nothing_is_installed(self):
         r = self.adapter("pin", XDG_CACHE_HOME=str(self.t / "cache"))
@@ -780,18 +841,13 @@ class Adopt(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         data = KIT / "context-db" / "ctx-store"
         calls = self.calls()
-        settings_path = calls[0]["argv"][4]  # argv == ["--store", root, "init", "--settings", <path>, "--types", …]
         self.assertEqual([c["argv"][2:] for c in calls],
-                         [["init", "--settings", settings_path, "--types", str(data / "types"), "--upgrade"],
+                         [["init", "--settings", str(data / "ctx-store.json"), "--types", str(data / "types"),
+                           "--upgrade"],
                           ["migrate", "--apply"], ["validate"], ["validate", "--changed", "--adopt"]])
         self.assertEqual({c["argv"][1] for c in calls}, {str(self.root)})
-        # ctx-store v0.6.0's `init` does not accept `mcp` in `--settings` yet (ctx-store#66/#71): adopt hands it
-        # a temp file with everything else, never the kit's own ctx-store.json (`_settings_for_init`).
-        self.assertNotEqual(settings_path, str(data / "ctx-store.json"))
-        canonical = json.loads((data / "ctx-store.json").read_text(encoding="utf-8"))
-        del canonical["mcp"]
-        self.assertEqual(json.loads(calls[0]["settings"]), canonical)
-        self.assertFalse(Path(settings_path).exists())  # cleaned up once `init` has read it
+        # the kit's own settings file, `mcp` included: `init` takes every key itself, the kit edits none of them
+        self.assertIn("mcp", json.loads(calls[0]["settings"]))
         self.assertFalse((self.root / "ctx-store.json").exists())
         self.assertFalse((self.root / ".ctx").exists())
 
@@ -845,100 +901,128 @@ class Adopt(Base):
         self.assertEqual((self.root / ".ctx" / "types" / "log.json").read_text(encoding="utf-8"),
                          self.data()[".ctx/types/log.json"])
 
-    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
-    def test_a_kit_settings_change_reaches_an_already_mcp_patched_store(self):
-        """`_apply_mcp_setting`'s own earlier patch must not itself look like a hand edit to the next
-        `init --upgrade` (ctx-store#73): a later kit settings change still reaches the store without --replace,
-        and the marker keeps carrying `mcp`."""
+    def marker(self) -> dict:
+        return json.loads((self.root / "ctx-store.json").read_text(encoding="utf-8"))
+
+    def kit_settings(self) -> dict:
+        return json.loads((KIT / "context-db" / "ctx-store" / "ctx-store.json").read_text(encoding="utf-8"))
+
+    def adopt_with_settings(self, settings: dict, *args: str) -> tuple[int, str]:
+        """`adopt` in-process against a copy of the kit's store data whose settings are `settings` — a kit release
+        that changed them, without touching the repo's own copy."""
         import contextlib
-        import io
         import shutil
-        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
-        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
-        marker = self.root / "ctx-store.json"
-        self.assertIn("mcp", json.loads(marker.read_text(encoding="utf-8")))
-        changed = self.t / "changed-kit-data"
+        changed = self.t / f"kit-data-{uuid.uuid4().hex[:8]}"
         shutil.copytree(KIT / "context-db" / "ctx-store", changed)
-        settings = json.loads((changed / "ctx-store.json").read_text(encoding="utf-8"))
-        settings["maintain"]["keep_log"] = 5  # a kit settings change with nothing to do with mcp
         (changed / "ctx-store.json").write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n",
                                                  encoding="utf-8")
         mod = load_adapter()
         mod.STORE_DATA = changed
         out = io.StringIO()
-        with mock.patch.dict(os.environ, {**env, "CONTEXT_ROOT": str(self.root)}), contextlib.redirect_stdout(out):
-            rc = mod.adopt()
-        self.assertEqual(rc, 0, out.getvalue())
-        self.assertNotIn("differs:", out.getvalue())
-        self.assertNotIn("updated:", out.getvalue())  # mcp itself did not change, only an unrelated setting
-        after = json.loads(marker.read_text(encoding="utf-8"))
-        self.assertEqual(after["maintain"], {"keep_log": 5})
-        self.assertEqual(after["mcp"], settings["mcp"])
+        env = {"KIT_CTX": str(REAL_CTX), "CTX_NO_WALK": "1", "CONTEXT_ROOT": str(self.root)}
+        with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out):
+            rc = mod.adopt(replace="--replace" in args)
+        return rc, out.getvalue()
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
-    def test_a_hand_edited_marker_still_reports_kept_and_keeps_mcp(self):
-        """A marker someone genuinely edited — not this adapter's own `mcp` patch — still reports `kept`/`differs`,
-        exit 5, and the adapter still restores `mcp` on top of whatever `init` left there (ctx-store#73)."""
+    def test_init_writes_mcp_and_a_kit_settings_change_reaches_the_store(self):
+        """The kit's whole settings file, `mcp` included, goes through `ctx init` — the marker carries it with no
+        kit-side write, so a later kit settings change is an upgrade `init` itself recognises, not a hand edit."""
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
-        marker = self.root / "ctx-store.json"
-        data = json.loads(marker.read_text(encoding="utf-8"))
-        data["maintain"]["keep_log"] = 99  # a hand edit to a real value, not the adapter's own mcp patch
-        marker.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self.assertEqual(self.marker()["mcp"], self.kit_settings()["mcp"])
+        settings = self.kit_settings()
+        settings["maintain"]["keep_log"] = 5  # a kit settings change with nothing to do with mcp
+        rc, out = self.adopt_with_settings(settings)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("differs:", out)
+        self.assertEqual(self.marker()["maintain"], {"keep_log": 5})
+        self.assertEqual(self.marker()["mcp"], settings["mcp"])
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_hand_edited_marker_reports_kept_and_keeps_mcp(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        data = self.marker()
+        data["maintain"]["keep_log"] = 99  # a hand edit to a real value
+        (self.root / "ctx-store.json").write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         r = self.adapter("adopt", **env)
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
         self.assertIn("differs: ctx-store.json", r.stdout)
         self.assertIn("adopt --replace", r.stdout)
-        self.assertNotIn("updated:", r.stdout)  # mcp itself was not the hand edit, only maintain.keep_log
-        after = json.loads(marker.read_text(encoding="utf-8"))
-        self.assertEqual(after["maintain"], {"keep_log": 99})
-        self.assertIn("mcp", after)
+        self.assertEqual(self.marker()["maintain"], {"keep_log": 99})
+        self.assertEqual(self.marker()["mcp"], self.kit_settings()["mcp"])
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
-    def test_a_differing_mcp_is_replaced_with_a_line_not_an_exit_code(self):
-        """The kit owns `mcp` (`session.py`'s own NAME_RE): unlike every other key, a local edit to it is not
-        supported. `adopt` replaces it with the kit's value (it must — a local `actors` pattern would break
-        session writes), never silently: an `updated:` line prints. The exit code stays 0 — a kit release that
-        changes its own pattern is indistinguishable from a local edit, and neither is a `kept` file that
-        `adopt --replace` could do anything about."""
+    def test_a_differing_mcp_is_kept_like_any_edit_until_replace(self):
+        """`mcp` follows the same kept rule as every other key: a local edit is reported (exit 5), never
+        overwritten behind the user's back, and `adopt --replace` takes the kit's."""
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
-        marker = self.root / "ctx-store.json"
-        data = json.loads(marker.read_text(encoding="utf-8"))
-        data["mcp"] = {"actors": "^nobody-writes-through-this-pattern$"}  # a local edit to the one owned key
-        marker.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        data = self.marker()
+        data["mcp"] = {"actors": "^nobody-writes-through-this-pattern$"}  # a local edit
+        (self.root / "ctx-store.json").write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("differs: ctx-store.json", r.stdout)
+        self.assertEqual(self.marker()["mcp"], data["mcp"])
+        r = self.adapter("adopt", "--replace", **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("updated: ctx-store.json mcp", r.stdout)
-        self.assertNotIn("differs: ctx-store.json", r.stdout)  # only mcp moved; every other key still matches init's
-        kit_mcp = json.loads((KIT / "context-db" / "ctx-store" / "ctx-store.json").read_text(encoding="utf-8"))["mcp"]
-        after = json.loads(marker.read_text(encoding="utf-8"))
-        self.assertEqual(after["mcp"], kit_mcp)
+        self.assertEqual(self.marker()["mcp"], self.kit_settings()["mcp"])
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_an_unchanged_mcp_prints_nothing(self):
-        """The ordinary idempotent case (no local edit at all): `mcp` still matches the kit's, so nothing about it
-        is reported — `updated:` is for a value actually being swapped, not routine bookkeeping."""
+        """The ordinary idempotent case: a second `adopt` reports nothing about the marker."""
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
         r = self.adapter("adopt", **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("differs:", r.stdout)
         self.assertNotIn("updated:", r.stdout)
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
-    def test_an_unparsable_marker_stops_before_init_runs(self):
-        """A marker that does not parse — the non-atomic write e28beb1 shipped could leave exactly this behind on
-        an interrupted write — is never skipped silently: `adopt` reports it on stderr and exits 2 before `ctx
-        init` runs, leaving the file exactly as broken as it found it."""
+    def test_an_unparsable_marker_is_left_untouched_and_reported(self):
+        """A marker that does not parse is never skipped silently and never rewritten: `ctx` reports it (exit 3,
+        a finding) and the file is left exactly as broken as it was found."""
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
-        marker = self.root / "ctx-store.json"
         broken = '{"mcp": {"actors": "x"'  # truncated — not valid JSON
-        marker.write_text(broken, encoding="utf-8")
+        (self.root / "ctx-store.json").write_text(broken, encoding="utf-8")
         r = self.adapter("adopt", **env)
-        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
-        self.assertIn("ctx_adapter.py adopt: ctx-store.json does not parse", r.stderr)
-        self.assertEqual(marker.read_text(encoding="utf-8"), broken)  # untouched: init never ran
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertRegex(r.stdout + r.stderr, r"SCHEMA_VIOLATION ctx-store\.json")
+        self.assertEqual((self.root / "ctx-store.json").read_text(encoding="utf-8"), broken)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_store_an_older_kit_mcp_patched_adopts_clean(self):
+        """Migration: an older kit ran `init` without `mcp`, then wrote `mcp` into the marker itself. The new kit's
+        `adopt` finds the marker equal to its settings (exit 0, nothing differs); `init`'s record of the marker
+        predates that write, so the first kit settings change after it reports the marker kept, once — `adopt
+        --replace` takes the kit's, and the record lines up from then on (the module docstring's note)."""
+        old_settings = self.kit_settings()
+        mcp = old_settings.pop("mcp")
+        old = self.t / "old-kit-settings.json"
+        old.write_text(json.dumps(old_settings), encoding="utf-8")
+        subprocess.run([str(REAL_CTX), "--store", str(self.root), "init", "--settings", str(old), "--types",
+                        str(KIT / "context-db" / "ctx-store" / "types")], check=True, capture_output=True,
+                       env=dict(os.environ, CTX_NO_WALK="1"))
+        patched = dict(self.marker(), mcp=mcp)  # what the older kit's own write left
+        (self.root / "ctx-store.json").write_text(json.dumps(patched, indent=2) + "\n", encoding="utf-8")
+        r = self.adapter("adopt", KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("differs:", r.stdout)
+        settings = self.kit_settings()
+        settings["maintain"]["keep_log"] = 5
+        rc, out = self.adopt_with_settings(settings)
+        self.assertEqual(rc, 5, out)  # the once
+        self.assertIn("differs: ctx-store.json", out)
+        rc, out = self.adopt_with_settings(settings, "--replace")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.marker()["maintain"], {"keep_log": 5})
+        settings["maintain"]["keep_log"] = 7
+        rc, out = self.adopt_with_settings(settings)
+        self.assertEqual(rc, 0, out)  # lined up: the next change goes straight through
+        self.assertEqual(self.marker()["maintain"], {"keep_log": 7})
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_adopt_migrates_a_newest_first_session_log_to_chronological(self):
@@ -978,8 +1062,8 @@ class Adopt(Base):
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         # an invalid epic cannot take the schema step: validate names the doc, migrate names the violation
         self.assertRegex(r.stdout, r"(?m)^finding: MIGRATION_PENDING d/bad")
-        self.assertRegex(r.stdout, r"(?m)^finding: migrate: SCHEMA_VIOLATION d/bad status")  # ctx-store v0.6.0
-        # names the doc that blocks the step (ctx-store#63/#65), not just the field
+        self.assertRegex(r.stdout, r"(?m)^finding: migrate: SCHEMA_VIOLATION d/bad status")  # the doc that
+        # blocks the step, not just the field
         self.assertTrue((self.root / "ctx-store.json").exists())
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
@@ -1021,8 +1105,8 @@ class Adopt(Base):
         """The kit's own `maintain.keep_log` (6, session-handoff's "~6 max") and the `log` type's body-level,
         newest-first order (#393): an oversized epic keeps its newest entries, oldest-first, and the rest move
         to the archive doc `maintain` names by default (`archive/{slug}-log`), newest-first, no `## Log` section.
-        The archive doc is created first (session-handoff's own instruction): `maintain`'s fallback for a
-        missing one only fills in title/type/updated, short of what the `log` type's domain/status require."""
+        No archive doc exists beforehand: `maintain` creates it with every field the `log` type requires, so the
+        store still validates clean after it."""
         env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
         (self.root / "d").mkdir()
         # 8 entries, oldest-first, padded well past the 30KB size guard so `maintain` actually trims this doc.
@@ -1031,11 +1115,8 @@ class Adopt(Base):
                 "## Goal\n\ng\n\n## Key decisions & gotchas\n\n## Remaining work\n\n## Session log\n\n"
                 + "\n".join(entries) + "\n")
         (self.root / "d" / "a.md").write_text(body, encoding="utf-8")
-        (self.root / "archive").mkdir()
-        (self.root / "archive" / "a-log.md").write_text(
-            "---\ntitle: Log of d/a\ntype: log\ndomain: d\nstatus: active\nupdated: 2026-01-01\n---\n\n"
-            "# Log of d/a\n", encoding="utf-8")
         self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        self.assertFalse((self.root / "archive" / "a-log.md").exists())
         r = self.adapter("ctx", "maintain", **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("archived: 2 log entries of d/a", r.stdout)
@@ -1048,7 +1129,8 @@ class Adopt(Base):
         self.assertEqual(archived, list(reversed(entries[:2])))  # the 2 oldest, moved newest-first
         self.assertNotIn("## Log", archive.read_text(encoding="utf-8"))  # no section: the body-level dated list
         self.assertEqual(self.adapter("ctx", "maintain", **env).returncode, 0)  # a second run changes nothing
-        self.assertEqual(self.adapter("ctx", "validate", **env).returncode, 0)
+        r = self.adapter("ctx", "validate", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)  # the archive doc `maintain` made validates too
 
 
 class AdoptBehind(Base):
