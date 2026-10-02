@@ -756,6 +756,7 @@ class PrWatchStub(unittest.TestCase):
         self.assertNotIn("CHECK NOT GREEN", r1.stdout)
         self.assertIn(f"PR {PR} CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED", r1.stderr)
         self.assertEqual((self.state_dir() / "known_red_used").read_text().strip(), regex)
+        self.assertEqual((self.state_dir() / "known_red_checks").read_text().split(), ["unit-tests"])
 
         # cycle 2: checks settle green — the mute expires, one stderr note naming the PR and head
         r2 = self.run_watch(rollup=green, **kwargs)
@@ -764,6 +765,7 @@ class PrWatchStub(unittest.TestCase):
         self.assertIn(f"PR {PR} PR_WATCH_KNOWN_RED mute expired — checks are green on {HEAD9}", r2.stderr)
         self.assertEqual((self.state_dir() / "known_red_expired").read_text().strip(), regex)
         self.assertFalse((self.state_dir() / "known_red_used").exists())
+        self.assertFalse((self.state_dir() / "known_red_checks").exists())
 
         # cycle 2b: still green — the note is not repeated
         r2b = self.run_watch(rollup=green, **kwargs)
@@ -857,6 +859,47 @@ class PrWatchStub(unittest.TestCase):
         self.assertNotIn("check-runs", self.calls()[len(before):])
         self.assertEqual((self.state_dir() / "known_red_used").read_text().strip(), regex)
 
+    def test_a_live_mute_does_not_repeat_a_reported_red_inside_its_backoff_window(self):
+        # an earlier head was muted, this head is red for another reason and already has its line: the read
+        # the live mute forces each cycle must neither repeat that line nor look the annotations up again.
+        regex = "known flaky timeout"
+        last = 1_800_000_000
+        self.seed_state(head=HEAD9, notgreen=FULL, notgreen_bad="unit-tests: FAILURE;",
+                        notgreen_last=str(last), notgreen_step="3600", known_red_used=regex)
+        bad = json.dumps([self.check_run("unit-tests", "FAILURE")])
+        anns = self.failing_annotations("an assertion nobody has seen before")
+        r1 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns,
+                            identity_env={"PR_WATCH_SELF": "tester"},
+                            extra_env={"PR_WATCH_KNOWN_RED": regex, "PR_WATCH_NOW": str(last + 600)})
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r1.stdout + r1.stderr)
+        self.assertNotIn("check-runs", self.calls())
+        self.assertEqual((self.state_dir() / "notgreen_step").read_text().strip(), "3600")
+        self.assertEqual((self.state_dir() / "notgreen_last").read_text().strip(), str(last))
+        # once the window has passed, the line repeats as it would without a mute
+        r2 = self.run_watch(rollup=bad, checkruns=self.FAILING_RUN, annotations=anns,
+                            identity_env={"PR_WATCH_SELF": "tester"},
+                            extra_env={"PR_WATCH_KNOWN_RED": regex, "PR_WATCH_NOW": str(last + 3601)})
+        self.assertIn(f"PR {PR} CHECK NOT GREEN: unit-tests: FAILURE;", r2.stdout)
+        self.assertEqual((self.state_dir() / "notgreen_step").read_text().strip(), "10800")
+
+    def test_a_green_rollup_without_the_muted_check_does_not_expire_the_mute(self):
+        # checks register one by one after a push: the first green entry is not the suite the mute was about
+        regex = "known flaky timeout"
+        self.seed_state(head=HEAD9, known_red_used=regex, known_red_checks="unit-tests")
+        kwargs = dict(identity_env={"PR_WATCH_SELF": "tester"}, extra_env={"PR_WATCH_KNOWN_RED": regex})
+        r1 = self.run_watch(rollup=json.dumps([self.check_run("lint", "SUCCESS")]), **kwargs)
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        self.assertNotIn("mute expired", r1.stderr)
+        self.assertEqual((self.state_dir() / "known_red_used").read_text().strip(), regex)
+        self.assertFalse((self.state_dir() / "known_red_expired").exists())
+        r2 = self.run_watch(rollup=json.dumps([self.check_run("lint", "SUCCESS"),
+                                               self.check_run("unit-tests", "SUCCESS")]), **kwargs)
+        self.assertIn(f"PR {PR} PR_WATCH_KNOWN_RED mute expired — checks are green on {HEAD9}", r2.stderr)
+        self.assertEqual((self.state_dir() / "known_red_expired").read_text().strip(), regex)
+        self.assertFalse((self.state_dir() / "known_red_used").exists())
+        self.assertFalse((self.state_dir() / "known_red_checks").exists())
+
     def test_a_rollup_with_no_entry_does_not_expire_a_used_mute(self):
         # right after a push no check has registered: nothing pending and nothing red is not a green
         regex = "known flaky timeout"
@@ -893,6 +936,17 @@ class PrWatchStub(unittest.TestCase):
         self.assertNotIn("CHECK NOT GREEN", r.stdout)
         self.assertIn(f"PR {PR} CHECK NOT GREEN muted by PR_WATCH_KNOWN_RED", r.stderr)
         self.assertFalse((self.state_dir() / "known_red_expired").exists())
+
+    def test_replay_clears_the_record_of_a_used_mute_with_its_check_names(self):
+        regex = "known flaky timeout"
+        self.seed_state(head=HEAD9, known_red_used=regex, known_red_checks="unit-tests")
+        r = self.run_watch(rollup=json.dumps([self.check_run("lint", "SUCCESS")]),
+                           identity_env={"PR_WATCH_SELF": "tester"},
+                           extra_env={"PR_WATCH_KNOWN_RED": regex, "PR_WATCH_REPLAY": "1"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("mute expired", r.stderr)
+        for name in ("known_red_used", "known_red_checks", "known_red_expired"):
+            self.assertFalse((self.state_dir() / name).exists(), name)
 
 
 if __name__ == "__main__":

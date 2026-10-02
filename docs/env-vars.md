@@ -89,7 +89,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `PR_WATCH_SYNC` | `1` | `skills/pr-watch/pr-watch.sh` | `0` disables keeping a waiting PR's branch synced with its base | user-facing |
 | `PR_WATCH_SYNC_COOLDOWN` | `3600` (seconds) | `skills/pr-watch/pr-watch.sh` | how often a fast-moving base may re-trigger CI on the PR | user-facing |
 | `PR_WATCH_KNOWN_RED` | empty | `skills/pr-watch/pr-watch.sh` | extended regex over the failure annotations of a PR's failing check runs, to mute a CHECK NOT GREEN as already-known-red (a mute that suppressed one expires on the next green) | user-facing |
-| `PR_WATCH_REPLAY` | `0` | `skills/pr-watch/pr-watch.sh` | `1` re-emits the current bot verdict / CHECK NOT GREEN on start even when already reported | user-facing |
+| `PR_WATCH_REPLAY` | `0` | `skills/pr-watch/pr-watch.sh` | `1` re-emits the current bot verdict / CHECK NOT GREEN on start even when already reported, and clears the record of a used or expired `PR_WATCH_KNOWN_RED` mute | user-facing |
 | `PR_WATCH_WORKTREE` | empty | `skills/pr-watch/pr-watch.sh` | path to this session's local checkout; a head move is tracked silently (not `HEAD MOVED`) when its committer is the configured login AND the sha is already a git object there — unset it and every push reads as a real move | user-facing |
 | `PR_WATCH_RETRY_DELAY` | `2` (seconds) | `skills/pr-watch/pr-watch.sh` | delay between the 3 attempts a `gh` read gets before it is reported as `LOOKUP FAILED` (tests set it near 0) | user-facing |
 | `PR_WATCH_BACKOFF_MAX` | `86400` (seconds) | `skills/pr-watch/pr-watch.sh` | cap on the interval between two repeats of the same alarm (an unresolved `CHECK NOT GREEN` on an unchanged head, a `LOOKUP FAILED` that lasts) | user-facing |
