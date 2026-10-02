@@ -100,14 +100,37 @@ A file you edit under `$BATON` is lost on the next update; a kit change is a PR 
 
 ## Updating
 
-The plugin moves with each release, not with each merge:
+The plugin moves with each release, not with each merge. [`SECURITY.md`](../SECURITY.md#verifying-a-release) §
+Verifying a release has what the release manifest and its attestation check prove.
 
-```sh
-claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@ai-baton-kit
-```
+### Updating a plugin install safely
 
-Then restart Claude Code and run `/kit-health`: it re-stamps `HEALTH-<env>.md` with the new `kit_version`, and § 6
-lists the units that changed. `/kit-health` also warns when a newer release is out and prints the command above.
+1. Run `/kit-health` before you update, not after. Its § 1 checks the plugin cache against the installed
+   release's attested manifest (`manifest_check`; an installed release up to v0.7.0 has no manifest, and § 1
+   says it cannot check). When a newer release is out, it warns with the update command and the release notes
+   (`release_check`) and lists the files the update would change (`pending_update_check`). All three functions
+   are in `skills/kit-health/kit-health.py`.
+2. Verify the release named in that warning yourself ([`SECURITY.md`](../SECURITY.md#verifying-a-release) §
+   Verifying a release):
+
+   ```sh
+   gh release download <tag> --repo MdaaaaO/ai-baton --pattern manifest.txt
+   gh attestation verify manifest.txt --repo MdaaaaO/ai-baton \
+     --signer-workflow MdaaaaO/ai-baton/.github/workflows/release.yml
+   ```
+
+   A pass proves that release's manifest came from the release workflow. Whether the files the update
+   installs match that manifest is what step 4 checks.
+3. Update:
+
+   ```sh
+   claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@ai-baton-kit
+   ```
+
+   Then restart Claude Code.
+4. Run `/kit-health` again: it re-stamps `HEALTH-<env>.md` with the new `kit_version`, checks the cache against
+   the newly installed release's own attested manifest, and § 6 lists the units that changed.
+
 `setup.sh` needs no re-run; the step 3 line with `--refresh-seeds` added shows how your seeded files differ from
 the current templates. The exception: an update that moves the ctx-store pin (and the first update that brought
 ctx-store in) needs `python3 $BATON/context-db/bin/ctx_adapter.py install && python3 $BATON/context-db/bin/ctx_adapter.py adopt`
