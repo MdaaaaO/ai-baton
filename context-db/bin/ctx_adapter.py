@@ -85,12 +85,17 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        <session_id>` re-budgeted by this adapter — its frontmatter cut to
                        `session`/`epic`/`working_on`/`responsibilities` (`stats`, `heartbeat`, `session_id`,
                        `ref`, `updated` and the `sections` summary dropped outright, the fields a 2026-10-01
-                       gap report found eating the budget before the body) and its `##` sections led by
-                       `SECTION_PRIORITY` when present — within `BRIEF_BUDGET`. Both are written and flushed to
+                       gap report found eating the budget before the body), its preamble (the `# Session:
+                       <name>` title and the template's HTML comment, when that is all the preamble is — real
+                       text there is kept) dropped, and its `##` sections led by `SECTION_PRIORITY` when
+                       present, each priority section given its heading and head (`SECTION_HEAD_LINES`) before
+                       any of them gets more — within `BRIEF_BUDGET`. Both are written and flushed to
                        stdout before any context-doc lookup is even attempted: only once they are on stdout
                        does this try to resolve the context doc the `epic:` field names through the store's
                        own `resolve` rule, then — when one resolved — fetch its key and the head of its
-                       *Remaining work*, within a separate `EPIC_BUDGET`. The whole hook has `COMPACT_DEADLINE`
+                       *Remaining work*, within a separate `EPIC_BUDGET`. Any of this adapter's own text cut to
+                       fit a budget ends with a marker naming the doc to read for the rest, not a `--budget`
+                       flag the hook's own reader has no way to raise. The whole hook has `COMPACT_DEADLINE`
                        seconds (under the hooks' own 10s `timeout`); the context-doc lookups (`resolve`/
                        `get`) run only while more than 1.5s of it remain before each one starts, every
                        one of them capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` recomputed right before
@@ -168,6 +173,10 @@ RESPONSIBILITIES_MAX = 160  # characters of a kept `responsibilities` field a co
 SECTION_PRIORITY = ("Open PRs", "Open decisions", "Assumptions", "Owns", "Worktrees")  # a compact brief's body
                     # leads with these `##` sections, in this order, when present; every other section (there may
                     # be none) keeps its original relative order after them
+SECTION_HEAD_LINES = 4  # non-blank lines of a priority section a compact brief's first pass gives every one of
+                        # them that is present, heading included, before its second pass spends whatever budget
+                        # is left filling in further lines — the fix for a long first section spending a cut
+                        # brief's whole budget before a later priority section ever got to show anything
 SESSION_FM_LINE_KEYS = {"session", "session_id", "ref", "status", "epic", "repos", "working_on",
                         "responsibilities", "stats", "heartbeat", "updated", "sections"}  # every line `ctx brief`
     # prints between a session doc's header and its body: its frontmatter fields plus the derived `sections: …`
@@ -831,23 +840,31 @@ def _session_id(payload: dict) -> str:
     return sid.strip() if isinstance(sid, str) else ""
 
 
-def _fit_lines(lines: list[str], budget: int) -> list[str]:
+def _cut_marker(rest: int, doc: str) -> str:
+    """The trailing line `_fit_lines` (and `_fit_sections`, for one priority section's own further lines) uses
+    for `rest` lines that did not fit: `doc`, given, names the doc a hook's own reader can go re-read for them
+    instead — `raise --budget` is not something that reader can act on; left empty, the marker keeps that
+    older wording for a caller whose reader can."""
+    return f"… {rest} more lines — read {doc}" if doc else f"… {rest} more lines, raise --budget"
+
+
+def _fit_lines(lines: list[str], budget: int, doc: str = "") -> list[str]:
     """`lines` kept within `budget` bytes, ctx's own `brief`/`get` tail convention (its `_fit`, reimplemented here:
     this adapter re-budgets text ctx already answered, it does not call back into ctx for it): a trailing
-    "… n more lines, raise --budget" marker for whatever does not fit, backing out already-kept lines if the
-    marker itself would not fit otherwise."""
+    cut marker (`_cut_marker`, `doc` named or not) for whatever does not fit, backing out already-kept lines
+    if the marker itself would not fit otherwise."""
     kept: list[str] = []
     used = 0
     for index, line in enumerate(lines):
         size = len(line.encode("utf-8")) + 1
         rest = len(lines) - index
-        marker_len = len(f"… {rest} more lines, raise --budget".encode("utf-8"))
+        note = _cut_marker(rest, doc)
+        marker_len = len(note.encode("utf-8"))
         if used + size + (marker_len + 1 if index < len(lines) - 1 else 0) > budget:
-            note = f"… {rest} more lines, raise --budget"
             while kept and used + len(note.encode("utf-8")) + 1 > budget:
                 used -= len(kept.pop().encode("utf-8")) + 1
                 rest += 1
-                note = f"… {rest} more lines, raise --budget"
+                note = _cut_marker(rest, doc)
             return kept + [note]
         kept.append(line)
         used += size
@@ -905,6 +922,103 @@ def _reorder_sections(body: str) -> str:
     return preamble + "".join(h + (t if t.endswith("\n") else t + "\n") for _, (h, t) in ordered)
 
 
+def _strip_preamble(body: str) -> str:
+    """`body`'s preamble — everything before its first `## ` heading — dropped when that preamble is only the
+    `# Session: <name>` title line and/or the template's HTML comment block (`session.py`'s `DEFAULT_BODY`):
+    the owner line already names the session, and the comment is boilerplate instructions for a person
+    editing the doc, not something a budget-starved brief should spend bytes on. Any other text there (a real
+    note someone wrote above the first heading) is real content, not noise, so the whole preamble — title and
+    comment included — is kept rather than only carving the noise out of it. A `body` with no `## ` heading at
+    all is returned unchanged: there is nothing to separate a preamble from."""
+    parts = re.split(r"(?m)^(## .+)$", body, maxsplit=1)
+    if len(parts) < 2:
+        return body
+    preamble, heading, tail = parts
+    noise = re.sub(r"(?m)^#[^\n]*$", "", preamble)
+    noise = re.sub(r"(?s)<!--.*?-->", "", noise)
+    if noise.strip():
+        return body
+    return heading + tail
+
+
+def _fit_sections(body: str, budget: int, doc: str) -> list[str]:
+    """`body` (already `_reorder_sections`-led, so any `SECTION_PRIORITY` sections lead, contiguous, in that
+    order) fit within `budget` bytes in two passes: pass one gives every leading priority section its heading
+    and its first `SECTION_HEAD_LINES` non-blank lines, guaranteed regardless of how much an earlier one's own
+    further lines would otherwise take — the fix for a long first section spending a cut brief's whole budget
+    before a later priority section ever showed anything. Pass two, in the same order, spends whatever budget
+    pass one left filling in each priority section's further lines, right after its own head so a section's
+    lines stay together in their original document order; one whose further lines do not fully fit ends with
+    its own cut marker naming `doc`, and sections after it get nothing more (the shared pool pass two spends
+    from is empty by then). The non-priority sections that follow keep today's behaviour: no guaranteed head,
+    appended through the same `_fit_lines` with whatever is left of `budget` once every priority section's
+    pass one and two are done — lines only when there is budget for them. Anything before the first `##`
+    heading (real preamble text `_strip_preamble` chose to keep) is carried over unconditionally, same as the
+    heads. A `body` with no `## ` heading at all is returned as its own lines, unbudgeted here (the caller's
+    own top-level `_fit_lines` still caps the whole brief)."""
+    parts = re.split(r"(?m)^(## .+)$", body)
+    if len(parts) < 3:
+        return body.split("\n") if body.strip() else []
+    preamble = parts[0]
+    pairs = list(zip(parts[1::2], parts[2::2]))
+    split = 0
+    while split < len(pairs) and pairs[split][0][3:].strip() in SECTION_PRIORITY:
+        split += 1
+    priority, trailing = pairs[:split], pairs[split:]
+
+    def size(line: str) -> int:
+        return len(line.encode("utf-8")) + 1
+
+    def section_lines(heading: str, text: str) -> list[str]:
+        # `heading + text` is exactly the substring `body` carried for this section (`text` opens with the
+        # newline that followed the heading) — split that once, together, so the blank line between them is
+        # not counted twice the way splitting `text` alone and prepending `heading` to it would
+        return (heading + text).split("\n")
+
+    out: list[str] = []
+    if preamble.strip():
+        out.extend(preamble.split("\n"))
+
+    heads: list[list[str]] = []
+    rests: list[list[str]] = []
+    for heading, text in priority:
+        lines = section_lines(heading, text)
+        content = lines[1:]  # lines[0] is the heading itself
+        count = 0
+        cut = len(content)
+        for i, line in enumerate(content):
+            if line.strip():
+                count += 1
+                if count == SECTION_HEAD_LINES:
+                    cut = i + 1
+                    break
+        heads.append([heading, *content[:cut]])
+        rests.append(content[cut:])
+
+    # every priority section's heading + head (and the kept preamble, if any) is reserved, as a whole, before
+    # pass two spends anything — the guarantee pass one makes — and so is one cut marker for every section
+    # that has further lines, and one for the trailing sections: a marker is a line too, and one that was not
+    # paid for would push a later section's head over the budget. What is left over is a single pool pass two
+    # spends section by section, in order.
+    tail_lines = [line for heading, text in trailing for line in section_lines(heading, text)]
+    markers = [size(_cut_marker(len(rest), doc)) if rest else 0 for rest in rests]
+    tail_marker = size(_cut_marker(len(tail_lines), doc)) if tail_lines else 0
+    reserved = sum(size(line) for line in out) + sum(size(line) for head in heads for line in head)
+    rest_budget = budget - reserved - sum(markers) - tail_marker
+
+    for head, rest, marker in zip(heads, rests, markers):
+        out.extend(head)
+        if rest:
+            # the section's own marker is already paid for: it is handed back for this one call
+            fitted = _fit_lines(rest, max(rest_budget, 0) + marker, doc)
+            out.extend(fitted)
+            rest_budget += marker - sum(size(line) for line in fitted)
+
+    if tail_lines:
+        out.extend(_fit_lines(tail_lines, max(rest_budget, 0) + tail_marker, doc))
+    return out
+
+
 def _resolve_epic_doc(ctx: Path, store: list[str], epic_key: str, remaining: Callable[[], float]) -> str | None:
     """The context doc `epic_key` (a session's `epic:` frontmatter field) names, through the store's own
     `resolve` rule (`ctx resolve`) — None when there is no key, the store sets no `resolve.key_regex`, the key
@@ -955,22 +1069,26 @@ def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
     <key>`, the session row's own `epic:` frontmatter value verbatim, or `and no context doc` when the
     row carries no `epic:` field at all), then this session's brief with `BRIEF_BUDGET` spent on the body
     rather than on frontmatter the owner cannot act on — `ctx brief`'s own `--budget` has no way to drop
-    frontmatter keys or reorder sections (ctx-store's own `brief` would need a field allow-list for that), so
-    this re-budgets ctx's full answer itself. The owner line and the session brief are written and flushed to
-    stdout before any context-doc lookup is even attempted, not merely before the slowest of them: neither
-    needs anything beyond this session's own frontmatter, so a harness kill that lands during the slower
-    lookups below still leaves both of these on stdout. Only once they are flushed does this try to resolve
-    the context doc the `epic:` field names — up to two more ctx calls (`resolve`, `get`), each
-    against a per-call deadline recomputed right before it, not one `min(EPIC_LOOKUP_TIMEOUT, remaining)`
-    computed once and handed to two calls in a row (see `_resolve_epic_doc`/`_epic_remaining_head`). When a
-    context doc resolved, its key and the head of its *Remaining work* follow in a separate `EPIC_BUDGET` —
-    but only while more than 1.5s of the deadline remain before either group of lookups starts; skipped for
-    lack of time, or cut off by a call that still timed out, one line `context doc: skipped (hook deadline)`
-    stands in for that tail instead. The whole call has `COMPACT_DEADLINE` seconds, measured from entry; the
-    session brief call itself gets `min(HOOK_TIMEOUT, remaining)`. Prints nothing when there is no session id
-    on the hook payload, the deadline is already spent, or the session brief call itself fails or times out —
-    a ctx call that times out never raises past this function, so whatever was already printed stays
-    printed."""
+    frontmatter keys, drop the preamble or reorder sections (ctx-store's own `brief` would need a field
+    allow-list for that), so this re-budgets ctx's full answer itself: the preamble stripped (`_strip_preamble`),
+    the body's `##` sections led by `SECTION_PRIORITY` when present (`_reorder_sections`), then fit
+    (`_fit_sections`) so every leading priority section gets its own heading and head before any of them gets
+    more. The owner line and the session brief are written and flushed to stdout before any context-doc
+    lookup is even attempted, not merely before the slowest of them: neither needs anything beyond this
+    session's own frontmatter, so a harness kill that lands during the slower lookups below still leaves both
+    of these on stdout. Only once they are flushed does this try to resolve the context doc the `epic:` field
+    names — up to two more ctx calls (`resolve`, `get`), each against a per-call deadline recomputed right
+    before it, not one `min(EPIC_LOOKUP_TIMEOUT, remaining)` computed once and handed to two calls in a row
+    (see `_resolve_epic_doc`/`_epic_remaining_head`). When a context doc resolved, its key and the head of its
+    *Remaining work* follow in a separate `EPIC_BUDGET` — but only while more than 1.5s of the deadline remain
+    before either group of lookups starts; skipped for lack of time, or cut off by a call that still timed
+    out, one line `context doc: skipped (hook deadline)` stands in for that tail instead. Anything this
+    function cuts to fit a budget ends with a marker naming the doc to read for the rest (`doc_key`, or the
+    resolved `epic_doc` for that tail) rather than `raise --budget`, which this hook's own reader cannot act
+    on. The whole call has `COMPACT_DEADLINE` seconds, measured from entry; the session brief call itself gets
+    `min(HOOK_TIMEOUT, remaining)`. Prints nothing when there is no session id on the hook payload, the
+    deadline is already spent, or the session brief call itself fails or times out — a ctx call that times
+    out never raises past this function, so whatever was already printed stays printed."""
     start = time.monotonic()
 
     def remaining() -> float:
@@ -992,11 +1110,19 @@ def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
     doc_key = header.split(" (", 1)[0].strip()
     epic_key = fm.get("epic", "")
     owner = f"compacted — re-grounded from {doc_key} and " + (f"epic {epic_key}" if epic_key else "no context doc")
-    brief_lines = [header, *_filtered_frontmatter(fm)]
-    reordered = _reorder_sections(body)
+    header_fm = [header, *_filtered_frontmatter(fm)]
+    reordered = _reorder_sections(_strip_preamble(body))
+    body_lines: list[str] = []
     if reordered.strip():
-        brief_lines += ["", *reordered.split("\n")]
-    sys.stdout.write("\n".join([owner, *_fit_lines(brief_lines, BRIEF_BUDGET)]) + "\n")
+        header_fm_bytes = sum(len(line.encode("utf-8")) + 1 for line in header_fm)
+        body_budget = max(BRIEF_BUDGET - header_fm_bytes - 1, 0)  # -1: the blank line ahead of the body
+        body_lines = _fit_sections(reordered, body_budget, doc_key)
+    brief_lines = header_fm + (["", *body_lines] if body_lines else [])
+    if sum(len(line.encode("utf-8")) + 1 for line in brief_lines) > BRIEF_BUDGET:
+        # only a brief whose reserved heads alone are over the budget gets here; one that fits is printed as
+        # fitted (the line-by-line cut keeps room for a marker until the last line, so it would cut again)
+        brief_lines = _fit_lines(brief_lines, BRIEF_BUDGET, doc_key)
+    sys.stdout.write("\n".join([owner, *brief_lines]) + "\n")
     sys.stdout.flush()
 
     epic_doc: str | None = None
@@ -1019,7 +1145,7 @@ def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
         else:
             skipped = True
     if tail:
-        sys.stdout.write("\n" + "\n".join(_fit_lines(tail, EPIC_BUDGET)) + "\n")
+        sys.stdout.write("\n" + "\n".join(_fit_lines(tail, EPIC_BUDGET, epic_doc)) + "\n")
         sys.stdout.flush()
     elif skipped:
         sys.stdout.write("\ncontext doc: skipped (hook deadline)\n")

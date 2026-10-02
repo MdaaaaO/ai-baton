@@ -451,12 +451,17 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        <session_id>` re-budgeted by this adapter — its frontmatter cut to
                        `session`/`epic`/`working_on`/`responsibilities` (`stats`, `heartbeat`, `session_id`,
                        `ref`, `updated` and the `sections` summary dropped outright, the fields a 2026-10-01
-                       gap report found eating the budget before the body) and its `##` sections led by
-                       `SECTION_PRIORITY` when present — within `BRIEF_BUDGET`. Both are written and flushed to
+                       gap report found eating the budget before the body), its preamble (the `# Session:
+                       <name>` title and the template's HTML comment, when that is all the preamble is — real
+                       text there is kept) dropped, and its `##` sections led by `SECTION_PRIORITY` when
+                       present, each priority section given its heading and head (`SECTION_HEAD_LINES`) before
+                       any of them gets more — within `BRIEF_BUDGET`. Both are written and flushed to
                        stdout before any context-doc lookup is even attempted: only once they are on stdout
                        does this try to resolve the context doc the `epic:` field names through the store's
                        own `resolve` rule, then — when one resolved — fetch its key and the head of its
-                       *Remaining work*, within a separate `EPIC_BUDGET`. The whole hook has `COMPACT_DEADLINE`
+                       *Remaining work*, within a separate `EPIC_BUDGET`. Any of this adapter's own text cut to
+                       fit a budget ends with a marker naming the doc to read for the rest, not a `--budget`
+                       flag the hook's own reader has no way to raise. The whole hook has `COMPACT_DEADLINE`
                        seconds (under the hooks' own 10s `timeout`); the context-doc lookups (`resolve`/
                        `get`) run only while more than 1.5s of it remain before each one starts, every
                        one of them capped at `min(EPIC_LOOKUP_TIMEOUT, remaining)` recomputed right before

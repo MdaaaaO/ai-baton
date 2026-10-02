@@ -475,6 +475,54 @@ class SessionStart(Base):
                          FAKE_CTX_OUT="partial", FAKE_CTX_ERR="NO_SUCH_DOC x: no such doc\n")
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
 
+    def test_a_long_first_priority_section_still_shows_the_head_of_the_others(self):
+        brief = (
+            "sessions/lane-topic (session, 500 bytes)\nsession: lane-topic\n\n"
+            "# Session: lane-topic\n\n<!-- What this session is doing right now, what it OWNS, and what\n"
+            "     another session must coordinate with it on. Override this whenever that changes. -->\n\n"
+            "## Open PRs\n\n" + "\n\n".join(
+                f"acme/widgets#{i} — waits on a flaky nightly test unrelated to this change, not a real failure"
+                for i in range(1, 60)
+            ) + "\n\n"
+            "## Open decisions\n\n- keep the retry logic in the adapter, not ctx-store\n- revisit the lock timeout later\n\n"
+            "## Assumptions\n\n- ctx is already installed on CI\n- no one edits sessions/ by hand\n\n"
+            "## Owns\n\n- the lane end to end\n")
+        r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), FAKE_CTX_OUT=brief)
+        self.assertEqual(r.returncode, 0)
+        out = r.stdout
+        self.assertIn("## Open decisions", out)
+        self.assertIn("- keep the retry logic in the adapter, not ctx-store", out)
+        self.assertIn("## Assumptions", out)
+        self.assertIn("- ctx is already installed on CI", out)
+        self.assertIn("## Owns", out)
+        self.assertIn("- the lane end to end", out)
+        # the long first section's own cut names the session doc, not a budget flag its reader cannot raise
+        self.assertIn("more lines — read sessions/lane-topic", out)
+        self.assertNotIn("raise --budget", out)
+        mod = load_adapter()
+        owner_bytes = len(out.splitlines()[0].encode("utf-8")) + 1
+        self.assertLessEqual(len(out.encode("utf-8")) - owner_bytes, mod.BRIEF_BUDGET)
+
+    def test_a_short_session_prints_whole_minus_the_preamble(self):
+        brief = ("sessions/lane-topic (session, 80 bytes)\nsession: lane-topic\n\n"
+                 "# Session: lane-topic\n\n<!-- override this whenever responsibilities change -->\n\n"
+                 "## Notes\n\nshort note\n")
+        r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), FAKE_CTX_OUT=brief)
+        self.assertEqual(r.returncode, 0)
+        out = r.stdout
+        self.assertIn("## Notes", out)
+        self.assertIn("short note", out)
+        self.assertNotIn("# Session: lane-topic", out)
+        self.assertNotIn("<!--", out)
+
+    def test_a_preamble_with_real_text_is_kept(self):
+        brief = ("sessions/lane-topic (session, 80 bytes)\nsession: lane-topic\n\n"
+                 "# Session: lane-topic\n\nSomething this session actually wrote above its first heading.\n\n"
+                 "## Notes\n\nshort note\n")
+        r = self.adapter("hook", "brief-session", stdin=self.payload(source="compact"), FAKE_CTX_OUT=brief)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("Something this session actually wrote above its first heading.", r.stdout)
+
 
 class CompactBriefHelpers(unittest.TestCase):
     """The compact brief's own post-processing of a `ctx brief --session` answer — pure functions, no store, no
@@ -539,6 +587,60 @@ class CompactBriefHelpers(unittest.TestCase):
         body = "## Zebra\nz\n\n## Apple\na\n\n## Open PRs\np\n"
         out = mod._reorder_sections(body)
         self.assertEqual(re.findall(r"(?m)^## (.+)$", out), ["Open PRs", "Zebra", "Apple"])
+
+    def test_fit_lines_names_the_doc_instead_of_raise_budget_when_given_one(self):
+        mod = load_adapter()
+        lines = [f"line {i}" for i in range(50)]
+        kept = mod._fit_lines(lines, 80, "sessions/lane-topic")
+        self.assertTrue(kept[-1].startswith("… "), kept[-1])
+        self.assertIn("more lines — read sessions/lane-topic", kept[-1])
+        self.assertNotIn("raise --budget", kept[-1])
+        self.assertLessEqual(sum(len(ln.encode("utf-8")) + 1 for ln in kept), 80)
+
+    def test_strip_preamble_drops_the_title_and_html_comment(self):
+        mod = load_adapter()
+        body = "# Session: foo\n\n<!-- override this\n     whenever responsibilities change -->\n\n## Notes\nhi\n"
+        self.assertEqual(mod._strip_preamble(body), "## Notes\nhi\n")
+
+    def test_strip_preamble_keeps_real_text(self):
+        mod = load_adapter()
+        body = "# Session: foo\n\nA note the session actually wrote here.\n\n## Notes\nhi\n"
+        self.assertEqual(mod._strip_preamble(body), body)
+
+    def test_strip_preamble_without_any_heading_is_unchanged(self):
+        mod = load_adapter()
+        self.assertEqual(mod._strip_preamble("just a title\n"), "just a title\n")
+
+    def test_fit_sections_gives_every_priority_section_its_head_before_any_gets_more(self):
+        mod = load_adapter()
+        body = ("## Open PRs\n\n" + "\n".join(f"- pr {i}" for i in range(1, 20)) + "\n\n"
+                "## Open decisions\n\n- dec 1\n- dec 2\n\n"
+                "## Assumptions\n\n- assume 1\n")
+        out = mod._fit_sections(body, 140, "sessions/lane-topic")
+        text = "\n".join(out)
+        self.assertIn("## Open decisions", text)
+        self.assertIn("- dec 1", text)
+        self.assertIn("## Assumptions", text)
+        self.assertIn("- assume 1", text)
+        self.assertIn("more lines — read sessions/lane-topic", text)
+        self.assertNotIn("- pr 19", text)  # the long first section's tail did not all fit
+
+    def test_fit_sections_stays_within_the_budget_when_every_priority_section_is_cut(self):
+        mod = load_adapter()
+        body = "".join(f"## {name}\n\n" + "\n".join(f"- {name} line {i}" for i in range(1, 30)) + "\n\n"
+                       for name in mod.SECTION_PRIORITY) + "## Notes\n\n" + "\n".join(["a note"] * 20) + "\n"
+        budget = 900
+        out = mod._fit_sections(body, budget, "sessions/lane-topic")
+        self.assertLessEqual(sum(len(line.encode("utf-8")) + 1 for line in out), budget)
+        text = "\n".join(out)
+        for name in mod.SECTION_PRIORITY:
+            self.assertIn(f"- {name} line {mod.SECTION_HEAD_LINES}", text)
+        self.assertEqual(text.count("more lines — read sessions/lane-topic"), len(mod.SECTION_PRIORITY) + 1)
+
+    def test_fit_sections_prints_a_short_body_whole(self):
+        mod = load_adapter()
+        body = "## Notes\n\nhi\n"
+        self.assertEqual(mod._fit_sections(body, 2048, "sessions/lane-topic"), body.split("\n"))
 
 
 class Wiring(unittest.TestCase):
