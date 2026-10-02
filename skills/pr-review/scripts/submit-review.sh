@@ -15,6 +15,8 @@
 #          bare Jira key that is not a link — the workspace rules for every external surface.
 set -uo pipefail
 KIT="$(cd "$(dirname "$0")/../../.." && pwd)"
+# shellcheck source=../../_lib/portable.sh
+. "$KIT/skills/_lib/portable.sh"  # claim_owner — the digest lock below needs exclusive create, not a plain `mkdir`
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 # the workspace's .context/ (#74) the way every kit script finds it (kit_profile.py context), never from this
 # script's location: on a plugin install that is Claude Code's plugin cache, wiped on update. PR_REVIEW_HOME overrides.
@@ -133,7 +135,11 @@ fi
 # 4. submit
 [ "$confirm" = "$digest" ] || { echo "error: --confirm does not match current digest $digest (request or head changed since preview)" >&2; exit 4; }
 lock="$ROOT/.submitted/$digest"; mkdir -p "$ROOT/.submitted"
-mkdir "$lock" 2>/dev/null || { echo "error: this exact review was already submitted (lock $lock). Inspect GitHub before retrying." >&2; exit 5; }
+# two gates, both must hold. `mkdir "$lock"` refuses a digest dir that already exists — an earlier
+# submit of this review, whether or not it left a `claimed` file. It is not a safe exclusivity check on
+# every host, though: two concurrent submits can both get a yes. So the holder is whoever also creates
+# $lock/claimed with the shell's own exclusive create (claim_owner, portable.sh).
+{ mkdir "$lock" 2>/dev/null && claim_owner "$lock/claimed"; } || { echo "error: this exact review was already submitted (lock $lock). Inspect GitHub before retrying." >&2; exit 5; }
 resp=$(printf '%s' "$payload" | gh api -X POST "repos/$repo/pulls/$pr/reviews" --input - 2>"$lock/stderr") ; rc=$?
 printf '%s' "$resp" > "$lock/response.json"
 if [ $rc -ne 0 ] || ! jq -e '.id' <<<"$resp" >/dev/null 2>&1; then

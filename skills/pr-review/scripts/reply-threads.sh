@@ -7,6 +7,8 @@
 # written only when at least one reply actually landed. Bodies get the same local-path / bare-Jira-key lint as reviews.
 set -uo pipefail
 KIT="$(cd "$(dirname "$0")/../../.." && pwd)"
+# shellcheck source=../../_lib/portable.sh
+. "$KIT/skills/_lib/portable.sh"  # claim_owner — the digest lock below needs exclusive create, not a plain `mkdir`
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 # the workspace's .context/ (#74) the way every kit script finds it (kit_profile.py context), never from this
 # script's location: on a plugin install that is Claude Code's plugin cache, wiped on update. PR_REVIEW_HOME overrides.
@@ -86,7 +88,10 @@ if [ "$cmd" = preview ] || [ "$bad" != 0 ]; then
   echo "digest: $digest"; echo "submit with: reply-threads.sh submit --repo $repo --pr $pr --head $head --request $req --confirm $digest"; exit 0
 fi
 [ "$confirm" = "$digest" ] || { echo "error: --confirm does not match current digest $digest" >&2; exit 4; }
-lock="$ROOT/.submitted/reply-$digest"; mkdir -p "$ROOT/.submitted"; mkdir "$lock" 2>/dev/null || { echo "error: this exact batch was already submitted ($lock)" >&2; exit 5; }
+lock="$ROOT/.submitted/reply-$digest"; mkdir -p "$ROOT/.submitted"
+# the same two gates as submit-review.sh: an existing dir refuses (a batch submitted earlier), and of
+# two concurrent submits only the one that creates $lock/claimed holds the lock.
+{ mkdir "$lock" 2>/dev/null && claim_owner "$lock/claimed"; } || { echo "error: this exact batch was already submitted ($lock)" >&2; exit 5; }
 mrep='mutation($t:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$t,body:$b}){comment{databaseId url}}}'
 mres='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{isResolved}}}'
 ok=0; failed=0
