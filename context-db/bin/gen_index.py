@@ -3,7 +3,10 @@
 
 Walks every *.md doc under the content root (except the engine files), reads its
 YAML frontmatter "row" (title/type/domain/tags/status/updated), and emits a
-grouped, sorted catalog. INDEX.md is generated — never hand-edit it; the kit's
+grouped, sorted catalog. A domain's table holds only its active rows; its
+`status: archived` rows are folded into one summary line (count + the `make find`
+command that lists them) so the catalog stays flat as a store accumulates history.
+INDEX.md is generated — never hand-edit it; the kit's
 PostToolUse hook (ctx_adapter.py post-tool-use-async) reruns this after every change
 under the content root, and `make -C $BATON/context-db index` runs it by hand.
 
@@ -95,30 +98,27 @@ def render(rows: list[dict]) -> str:
     out.append("")
 
     for domain in sorted(domains):
-        docs = sorted(
-            domains[domain],
-            key=lambda r: (r.get("status") == "archived", r.get("updated", "")),
-            reverse=False,
-        )
-        # active first (updated desc), archived last
-        active = sorted([d for d in docs if d.get("status") != "archived"],
+        active = sorted([d for d in domains[domain] if d.get("status") != "archived"],
                         key=lambda r: r.get("updated", ""), reverse=True)
-        archived = sorted([d for d in docs if d.get("status") == "archived"],
-                          key=lambda r: r.get("updated", ""), reverse=True)
-        docs = active + archived
+        archived = [d for d in domains[domain] if d.get("status") == "archived"]
 
         out.append(f"## {domain}")
         out.append("")
-        out.append("| Doc | Title | Type | Status | Tags | Updated |")
-        out.append("|---|---|---|---|---|---|")
-        for r in docs:
-            tags = " ".join(f"`{t}`" for t in r["_tags"])
-            title = r.get("title", "").replace("|", "\\|")
-            out.append(
-                f"| [`{r['_path']}`]({r['_path']}) | {title} | {r.get('type','')} "
-                f"| {r.get('status','')} | {tags} | {r.get('updated','')} |"
-            )
-        out.append("")
+        if active:
+            out.append("| Doc | Title | Type | Status | Tags | Updated |")
+            out.append("|---|---|---|---|---|---|")
+            for r in active:
+                tags = " ".join(f"`{t}`" for t in r["_tags"])
+                title = r.get("title", "").replace("|", "\\|")
+                out.append(
+                    f"| [`{r['_path']}`]({r['_path']}) | {title} | {r.get('type','')} "
+                    f"| {r.get('status','')} | {tags} | {r.get('updated','')} |"
+                )
+            out.append("")
+        if archived:
+            # folded, not listed: an archived row stays queryable (`make find`), not re-read by default
+            out.append(f"_{len(archived)} archived — `make -C $BATON/context-db find DOMAIN={domain}` lists them_")
+            out.append("")
     return "\n".join(out)
 
 

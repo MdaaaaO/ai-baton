@@ -132,6 +132,78 @@ class IndexAndVerify(ContextRoot):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("sessions/live.md", r.stderr)
 
+    def test_archived_rows_are_folded_not_listed(self):
+        # a domain's table holds only its active rows; archived rows fold into one summary
+        # line (count + the `make find` command that lists them) instead of staying in the table
+        self.doc("repos/old.md", title="Old thing", type="repo", domain="repos", status="archived")
+        r = run(self.root, "gen_index.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("9 docs across 2 domains", r.stdout)  # the header count still counts every doc, archived too
+        index = (self.root / "INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("repos/kit.md", index)  # active row: present
+        self.assertNotIn("repos/old.md", index)  # archived row: absent from the table
+        self.assertIn("_1 archived — `make -C $BATON/context-db find DOMAIN=repos` lists them_", index)
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        # the folded line's command really lists the archived doc (and the active one, same domain)
+        m = subprocess.run(["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "DOMAIN=repos"],
+                            env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(m.returncode, 0, m.stderr)
+        self.assertIn("repos/old.md", m.stdout)
+        self.assertIn("repos/kit.md", m.stdout)
+
+    def test_all_archived_domain_has_fold_line_and_no_table(self):
+        # repos/ starts with exactly one doc (kit.md, active); flip it archived so every doc
+        # in the domain is archived — the heading must still show, with no empty table markup
+        self.doc("repos/kit.md", title="The kit", type="repo", domain="repos", status="archived")
+        r = run(self.root, "gen_index.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        index = (self.root / "INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("## repos", index)
+        start = index.index("## repos")
+        rest = index[start:]
+        nxt = rest.find("\n## ", 1)
+        section = rest[:nxt] if nxt != -1 else rest
+        self.assertNotIn("| Doc | Title |", section)  # no table header
+        self.assertNotIn("|---|", section)  # no table rule either
+        self.assertIn("_1 archived — `make -C $BATON/context-db find DOMAIN=repos` lists them_", section)
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+
+
+class IndexSizeBudget(ContextRoot):
+    """verify.py's INDEX_SIZE_WARN budget (10KB, the same figure as SESSION_INDEX_WARN). A row's
+    `title` is unescaped ASCII (besides `|`), so padding it by N bytes grows INDEX.md by exactly
+    N bytes — the 10240/10241-byte boundary is reachable precisely, without patching the constant."""
+
+    BUDGET = 10 * 1024
+
+    def test_no_warning_at_the_budget_and_a_warning_one_byte_over(self):
+        index_path = self.root / "INDEX.md"
+        run(self.root, "gen_index.py")
+        self.doc("repos/pad.md", title="X", type="repo", domain="repos", status="active")
+        run(self.root, "gen_index.py")
+        with_one_char_title = index_path.stat().st_size
+        # every other byte in INDEX.md is fixed by setUp's docs; growing this title by one byte
+        # grows the file by exactly one byte, so the target length is reachable by arithmetic
+        length_at_budget = 1 + (self.BUDGET - with_one_char_title)
+        self.assertGreater(length_at_budget, 0)
+
+        self.doc("repos/pad.md", title="X" * length_at_budget, type="repo", domain="repos", status="active")
+        run(self.root, "gen_index.py")
+        self.assertEqual(index_path.stat().st_size, self.BUDGET)
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.assertNotIn("INDEX.md is", v.stderr)  # exactly at budget: no warning
+
+        self.doc("repos/pad.md", title="X" * (length_at_budget + 1), type="repo", domain="repos", status="active")
+        run(self.root, "gen_index.py")
+        self.assertEqual(index_path.stat().st_size, self.BUDGET + 1)
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)  # non-fatal — a warning, not a FAIL
+        self.assertIn(f"INDEX.md is {self.BUDGET // 1024}KB (> {self.BUDGET // 1024}KB)", v.stderr)
+        self.assertIn("archive finished docs", v.stderr)
+
 
 class LedgerWarnings(ContextRoot):
     """verify.py's decision-ledger check (docs/carousel.md § After the answer): a line under Key

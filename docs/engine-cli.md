@@ -632,7 +632,10 @@ Generate INDEX.md — the materialized catalog of the context DB.
 
 Walks every *.md doc under the content root (except the engine files), reads its
 YAML frontmatter "row" (title/type/domain/tags/status/updated), and emits a
-grouped, sorted catalog. INDEX.md is generated — never hand-edit it; the kit's
+grouped, sorted catalog. A domain's table holds only its active rows; its
+`status: archived` rows are folded into one summary line (count + the `make find`
+command that lists them) so the catalog stays flat as a store accumulates history.
+INDEX.md is generated — never hand-edit it; the kit's
 PostToolUse hook (ctx_adapter.py post-tool-use-async) reruns this after every change
 under the content root, and `make -C $BATON/context-db index` runs it by hand.
 
@@ -654,7 +657,8 @@ Checks every content doc for:
   - the required keys (title/type/domain/status/updated),
   - `type` and `status` drawn from the allowed vocabularies,
   - an ISO `updated` date that parses,
-  - INDEX.md being up to date (regenerate and diff).
+  - INDEX.md being up to date (regenerate and diff),
+  - INDEX.md staying under its size budget (non-fatal — see INDEX_SIZE_WARN below).
 
 Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & gotchas*
 (`docs/carousel.md` § After the answer) — a line that is ledger-shaped (starts with a bare date,
