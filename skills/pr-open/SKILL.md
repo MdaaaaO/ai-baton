@@ -79,8 +79,7 @@ only where the environment has Slack (`systems.slack`); everything else holds in
       unlabelled and never wait for someone to name one. Reuse order, where to create it, and recording the
       new name for next time: `reference/labels.md`.
    Dependabot's `dependencies` / `python` / `github_actions` are automatic — never add them by hand.
-4. **Watch**: arm `/pr-watch` on the head sha, naming the worktree so your own pushes stay silent
-   (`PR_WATCH_WORKTREE=<worktree> bash $BATON/skills/pr-watch/pr-watch.sh <o/r> <n> <head>`).
+4. **Watch**: arm `/pr-watch` on the head (`PR_WATCH_WORKTREE=<worktree> bash $BATON/skills/pr-watch/pr-watch.sh <o/r> <n> <head>`).
 5. **Tracker**: comment the PR link on the ticket (`ticket-update`). Where `tracker.kind` is `jira` and the
    PR is the ticket's deliverable, move it to *In Review* (`tracker.transitions.in_review`). Where it is
    `github`, the `Closes #<n>` in the body is the link; add the issue's in-review label if the repo uses one.
