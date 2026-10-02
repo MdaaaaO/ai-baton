@@ -210,10 +210,10 @@ eval-check:
 #
 # ALLOW_TOOLS (default Bash) is the operator's `--allow-tools` grant on this one invocation; the CLI computes
 # each case's actually-available tools as the intersection of ALLOW_TOOLS and that case's own `allowed_tools`
-# (checked against the CLI binary, 2.1.287), so a case that does not list Bash in its own
-# `allowed_tools` never gets it, no matter what ALLOW_TOOLS says — one invocation already grants Bash per case,
-# never as a blanket, with no separate loop needed. Set ALLOW_TOOLS= empty to grant nothing beyond a case's own
-# defaults.
+# (read from the CLI binary; the pinned 2.1.283 ran --scaffold, --allow-tools and --json in an evals run), so a
+# case that does not list Bash in its own `allowed_tools` never gets it, no matter what ALLOW_TOOLS says — one
+# invocation already grants Bash per case, never as a blanket, with no separate loop needed. Set ALLOW_TOOLS=
+# empty to grant nothing beyond a case's own defaults.
 ABLATION ?= none
 JUDGE ?= sonnet
 MODEL ?= sonnet
