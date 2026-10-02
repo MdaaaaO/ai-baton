@@ -194,7 +194,7 @@ eval-check:
 	@cd $(ENGINE).. && $(PY) $(BIN)/eval_check.py $(if $(REQUIRE_ALL),--require-all,)
 
 # make eval [SKILL=<name>] [CASE=<glob>] [MODEL=<id>] [RUNS=<n>] [JUDGE=<model>] [JOBS=<1..8>]
-#           [ABLATION=none|with-without] [THRESHOLD=<0..1>] [MAX_COST=<usd>] [TRUST=1] [SCAFFOLD=] [JSON_DIR=<dir>]
+#           [ABLATION=none|with-without] [THRESHOLD=<0..1>] [MAX_COST=<usd>] [TRUST=1] [SCAFFOLD=] [ALLOW_TOOLS=Bash] [JSON_DIR=<dir>]
 #           — `claude plugin eval` on this plugin. It SPENDS TOKENS on your credential; CI runs it only through
 # the manual `evals` workflow. SKILL narrows to evals/<skill>-*; ABLATION=none (the default here) scores every
 # grader, which is what a trigger suite measures. JUDGE is the model the `llm` graders vote with — sonnet here,
@@ -204,34 +204,28 @@ eval-check:
 # blanket raise for every case to cover a weaker default model. JOBS runs that many agent runs at once (one
 # credential, one rate limit). SCAFFOLD (on by default, `SCAFFOLD=` turns it off) runs each case's own
 # `context.scaffold_script`, e.g. the fixture a case ships alongside its prompt. JSON_DIR, if set, also writes
-# each invocation's aggregate result as JSON under it (<dir>/main.json, plus <dir>/<case>.json per Bash-case
-# invocation below) — the evals workflow uses this to upload the run as a job artifact. Results land in
-# evals/results/ (git-ignored) and the report stays local (--no-publish). TRUST=1 answers the first-run trust
-# prompt (CI only).
+# the run's aggregate result as JSON under it (<dir>/result.json) — the evals workflow uses this to upload the
+# run as a job artifact. Results land in evals/results/ (git-ignored) and the report stays local (--no-publish).
+# TRUST=1 answers the first-run trust prompt (CI only).
 #
-# A case whose prompt.md lists Bash in `allowed_tools` gets it only in its own, separate invocation below:
-# `--allow-tools Bash` applies to every case in the invocation it is passed to, so granting it on the main
-# invocation above would hand Bash to every other case in scope too, not just the one that declared it.
-# eval_bash_cases.py answers "which cases in this scope declare Bash" the same way eval_check.py reads a
-# case's frontmatter, so the two never disagree about which case this grants Bash to.
+# ALLOW_TOOLS (default Bash) is the operator's `--allow-tools` grant on this one invocation; the CLI computes
+# each case's actually-available tools as the intersection of ALLOW_TOOLS and that case's own `allowed_tools`
+# (the runner's `nr(q.execution.allowed_tools, r.allowTools)`), so a case that does not list Bash in its own
+# `allowed_tools` never gets it, no matter what ALLOW_TOOLS says — one invocation already grants Bash per case,
+# never as a blanket, with no separate loop needed. Set ALLOW_TOOLS= empty to grant nothing beyond a case's own
+# defaults.
 ABLATION ?= none
 JUDGE ?= sonnet
 MODEL ?= sonnet
 SCAFFOLD ?= 1
+ALLOW_TOOLS ?= Bash
 eval:
 	@command -v claude >/dev/null 2>&1 || { echo "eval: needs the claude CLI"; exit 2; }
 	@cd $(ENGINE).. && claude plugin eval . --no-publish --ablation $(ABLATION) $(if $(JUDGE),--judge-model '$(JUDGE)',) \
 	  $(if $(CASE),--case '$(CASE)',$(if $(SKILL),--case '$(SKILL)-*',)) \
 	  $(if $(MODEL),--model '$(MODEL)',) $(if $(RUNS),--runs $(RUNS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),) \
 	  $(if $(JOBS),--concurrency $(JOBS),) $(if $(MAX_COST),--max-cost-usd $(MAX_COST),) $(if $(TRUST),--trust-plugin,) \
-	  $(if $(SCAFFOLD),--scaffold,) $(if $(JSON_DIR),--json '$(JSON_DIR)/main.json',)
-	@cd $(ENGINE).. && for c in $$($(PY) $(BIN)/eval_bash_cases.py $(if $(CASE),--case '$(CASE)',$(if $(SKILL),--skill '$(SKILL)',))); do \
-	  echo "eval: $$c declares Bash — granting it in its own run"; \
-	  claude plugin eval . --no-publish --ablation $(ABLATION) --case "$$c" --allow-tools Bash \
-	    $(if $(JUDGE),--judge-model '$(JUDGE)',) $(if $(MODEL),--model '$(MODEL)',) $(if $(RUNS),--runs $(RUNS),) \
-	    $(if $(THRESHOLD),--threshold $(THRESHOLD),) $(if $(MAX_COST),--max-cost-usd $(MAX_COST),) $(if $(TRUST),--trust-plugin,) \
-	    $(if $(SCAFFOLD),--scaffold,) $(if $(JSON_DIR),--json '$(JSON_DIR)/$$c.json',) || exit 1; \
-	done
+	  $(if $(SCAFFOLD),--scaffold,) $(if $(ALLOW_TOOLS),--allow-tools $(ALLOW_TOOLS),) $(if $(JSON_DIR),--json '$(JSON_DIR)/result.json',)
 
 # The relative Markdown links of every tracked *.md resolve; templates seeded elsewhere are skipped.
 check-links:

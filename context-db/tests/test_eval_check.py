@@ -92,6 +92,17 @@ class ThisKit(unittest.TestCase):
     def test_results_stay_ignored(self):
         self.assertIn("evals/results/", (KIT / ".gitignore").read_text(encoding="utf-8").splitlines())
 
+    def test_every_case_yaml_names_itself_after_its_directory(self):
+        # the runner's case.yaml schema requires a non-empty `name` on the whole merged object, including a
+        # "mixed" case.yaml + prompt.md case — a case.yaml with no `name:` fails to load with
+        # "invalid case.yaml: name: Required" (#489); this pins it the same way for every case.yaml the kit ships
+        for case_yaml in sorted(eval_check.eval_dir(KIT).glob("*/case.yaml")):
+            text = case_yaml.read_text(encoding="utf-8")
+            m = re.search(r"(?m)^name:\s*(.+?)\s*$", text)
+            self.assertIsNotNone(m, f"{case_yaml}: no `name:` key")
+            self.assertEqual(m.group(1).strip('"\''), case_yaml.parent.name,
+                             f"{case_yaml}: `name:` must equal its directory name")
+
 
 class Suites(unittest.TestCase):
     def setUp(self):
@@ -362,14 +373,12 @@ class Wiring(unittest.TestCase):
             self.assertIn(part, cmd)
 
     def test_make_target_without_arguments_runs_every_case(self):
-        # the second recipe line (the per-case Bash-grant loop, #489) always spells out --case/--allow-tools in
-        # its own static text, so only the main invocation (everything before it) answers "no scope given"
         out = self.make_n("eval")
-        main = out.split("eval_bash_cases.py", 1)[0]
-        cmd = " ".join(main.split())
+        cmd = " ".join(out.split())
         self.assertIn("claude plugin eval . --no-publish --ablation none", cmd)
         self.assertIn("--model 'sonnet'", cmd)  # MODEL ?= sonnet (#489)
         self.assertIn("--scaffold", cmd)  # SCAFFOLD ?= 1 (#489)
+        self.assertIn("--allow-tools Bash", cmd)  # ALLOW_TOOLS ?= Bash (#489)
         for flag in ("--case", "--trust-plugin", "--runs", "--concurrency", "--json"):
             self.assertNotIn(flag, cmd)
 
@@ -390,21 +399,18 @@ class Wiring(unittest.TestCase):
         self.assertIn("--scaffold", " ".join(self.make_n("eval").split()))
         self.assertNotIn("--scaffold", " ".join(self.make_n("eval", "SCAFFOLD=").split()))
 
-    def test_json_dir_writes_a_main_result_and_a_per_bash_case_result(self):
+    def test_json_dir_writes_one_result_file(self):
         out = " ".join(self.make_n("eval", "JSON_DIR=evals/results/run").split())
-        self.assertIn("--json 'evals/results/run/main.json'", out)
-        self.assertIn("--json 'evals/results/run/$c.json'", out)
+        self.assertIn("--json 'evals/results/run/result.json'", out)
         self.assertNotIn("--json", " ".join(self.make_n("eval").split()))
 
-    def test_bash_case_loop_is_scoped_the_same_way_as_the_main_invocation(self):
-        self.assertIn("eval_bash_cases.py --skill 'pr-open'", " ".join(self.make_n("eval", "SKILL=pr-open").split()))
-        self.assertIn("eval_bash_cases.py --case 'foo-*'", " ".join(self.make_n("eval", "CASE=foo-*").split()))
-        self.assertIn("eval_bash_cases.py", " ".join(self.make_n("eval").split()))
-
-    def test_bash_case_loop_grants_bash_only_to_that_one_case(self):
-        cmd = " ".join(self.make_n("eval").split())
-        loop = cmd.split("eval_bash_cases.py", 1)[1]
-        self.assertIn('--case "$c" --allow-tools Bash', loop)
+    def test_allow_tools_defaults_to_bash_and_can_be_emptied(self):
+        # #489: the CLI grants each case the intersection of this flag and the case's own `allowed_tools`
+        # (`nr(q.execution.allowed_tools, r.allowTools)`), so one invocation with ALLOW_TOOLS ?= Bash already
+        # grants Bash per case, never as a blanket — no separate per-case loop needed.
+        self.assertIn("--allow-tools Bash", " ".join(self.make_n("eval").split()))
+        self.assertNotIn("--allow-tools", " ".join(self.make_n("eval", "ALLOW_TOOLS=").split()))
+        self.assertIn("--allow-tools Bash,Read", " ".join(self.make_n("eval", "ALLOW_TOOLS=Bash,Read").split()))
 
     def test_ci_runs_the_static_check(self):
         mk = (KIT / "context-db" / "Makefile").read_text(encoding="utf-8")

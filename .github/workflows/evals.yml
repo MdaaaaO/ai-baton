@@ -134,7 +134,9 @@ jobs:
           # inside a run. This scrubs a Bash-tool subprocess down to a safe list (PATH, HOME, USER, SHELL, TERM,
           # LANG) via bubblewrap, which the CLI install step above already installs; it fails OPEN (runs
           # unisolated, with a warning) if bubblewrap is ever missing, so the bwrap check right below is the
-          # backstop that turns a silent "ran unisolated" into a loud job failure instead.
+          # backstop that turns a silent "ran unisolated" into a loud job failure instead. The CLI already turns
+          # this on by default when GITHUB_ACTIONS is set (true for every step here) — the explicit "1" pins that
+          # default so it keeps applying even if the CLI's default ever changes, rather than relying on it silently.
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
         shell: bash
         run: |
