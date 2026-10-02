@@ -24,8 +24,9 @@ Sections:
                   symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell,
                   the auto-compact backstop (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`),
                   free disk on `/`/`$HOME`/the scratch root with the usual build/package caches named above
-                  DISK_WARN_PCT; one legacy line: a leftover `.claude/profiles/` clone (the layer retired
-                  2026-09-25) → delete it
+                  DISK_WARN_PCT; a stale `$CLAUDE_ENV_FILE` (a `BATON`/`CLAUDE_PROJECT_DIR` path that no longer
+                  exists, or an `export BATON=` line outside the session-env block); one legacy line: a leftover
+                  `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
                   scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
                   and the pinned `ctx --version` answers the API the adapter expects; an environment's
@@ -43,6 +44,7 @@ import functools
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1257,12 +1259,79 @@ def sandbox_detected(markers: list) -> bool:
     return False
 
 
+_ENV_FILE_ASSIGN_RE = re.compile(r"^(?:export\s+)?(BATON|CLAUDE_PROJECT_DIR)=(.*)$")
+
+
+def _env_file_path(raw: str) -> str | None:
+    """The path an assignment's right-hand side names, or `None` when only a shell could tell: a line that
+    does not split (an unbalanced quote), an empty value, a value a shell would expand (`$`, a backtick, a
+    leading `~`) or a relative path. Only a literal absolute path is ever judged — or printed."""
+    try:
+        lex = shlex.shlex(raw, posix=True, punctuation_chars=True)  # `;`/`&&` end the value, `#` starts a comment
+        lex.whitespace_split = True
+        value = next(iter(lex), "")
+    except ValueError:
+        return None
+    if not value.startswith("/") or "$" in value or "`" in value:
+        return None
+    return value
+
+
+def env_file_wiring(r: Report) -> None:
+    """`$CLAUDE_ENV_FILE` gone stale. Inside the `kit_profile.SESSION_ENV_BEGIN`/`SESSION_ENV_END` block the
+    SessionStart hook replaces: a `BATON`/`CLAUDE_PROJECT_DIR` line whose path no longer exists (a workspace or
+    install that moved or was removed since the hook last wrote it) — the next session start repairs it. Outside
+    the block, which the hook never touches: any `BATON` line, and a `CLAUDE_PROJECT_DIR` line whose path is
+    gone or that sits after the block (the file is sourced top to bottom, so it overrides the hook's value) —
+    only deleting the line repairs those, so each gets that advice and no other. A begin marker without its end
+    marker is no block: the hook does not replace what follows it. The file is `$CLAUDE_ENV_FILE`, else
+    `$BATON_ENV_FILE` — the path the block itself exports (`kit_profile.SESSION_ENV_FILE_VAR`), because the
+    Bash tool does not get the harness variable. Neither set, or the file missing or unreadable: no finding.
+    A finding prints a value only when it is a literal absolute path (`_env_file_path`), never the rest of a
+    line or the file's other content, which may hold secrets."""
+    path = (os.environ.get("CLAUDE_ENV_FILE", "").strip()
+            or os.environ.get("BATON_ENV_FILE", "").strip())
+    if not path:
+        return
+    try:
+        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return
+    in_block: set[int] = set()
+    begin, block_end = None, -1
+    for i, line in enumerate(lines):
+        if begin is None and line == kit_profile.SESSION_ENV_BEGIN:
+            begin = i
+        elif begin is not None and line == kit_profile.SESSION_ENV_END:
+            in_block.update(range(begin, i))
+            begin, block_end = None, i
+    for i, line in enumerate(lines):
+        m = _ENV_FILE_ASSIGN_RE.match(line.strip())
+        if not m:
+            continue
+        var, value = m.group(1), _env_file_path(m.group(2))
+        shown = f"{var}={value}" if value else f"{var}=…"
+        gone = value is not None and not Path(value).exists()
+        if i in in_block:
+            if gone:
+                r.add(WARN, "machine", f"the session env file `{path}` exports `{shown}`, which does not exist "
+                      "— start a new session to let the SessionStart hook refresh it")
+            continue
+        overrides = 0 <= block_end < i
+        if var == "BATON" or gone or overrides:
+            r.add(WARN, "machine", f"the session env file `{path}` carries `{shown}` outside the session-env "
+                  "block" + (", and the path does not exist" if gone else "")
+                  + (", after the block, so it overrides the hook's value" if overrides else "")
+                  + " — delete the stray line, the hook only replaces the block")
+
+
 def sec_machine(r: Report) -> str:
     r.h("4 · This machine — wiring")
     envname = kit_profile.name()
     identity_wiring(r)
     seed_wiring(r)
     autocompact_wiring(r)
+    env_file_wiring(r)
     if not (ENV / "config.json").is_file():
         r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):

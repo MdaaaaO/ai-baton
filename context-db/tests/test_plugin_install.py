@@ -213,7 +213,8 @@ class WorkspaceRules(unittest.TestCase):
             for f in (KIT / "context-db" / "bin").glob("*.py"):
                 (broken / "context-db" / "bin" / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
             r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(broken), "CLAUDE_PROJECT_DIR": str(ws),
-                                                      "CONTEXT_ROOT": "/nonexistent/.context", "KIT_SCRATCH": str(Path(tmp) / "scratch")},
+                                                      "CLAUDE_ENV_FILE": str(Path(tmp) / "env2"), "CONTEXT_ROOT": "/nonexistent/.context",
+                                                      "KIT_SCRATCH": str(Path(tmp) / "scratch")},
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 0)
             self.assertIn("could not load WORKSPACE.md", r.stdout)
