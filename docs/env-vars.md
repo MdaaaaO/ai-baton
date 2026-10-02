@@ -86,6 +86,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `PR_REVIEW_FETCH_CONCURRENCY` | `6` | `skills/pr-review/scripts/fetch-context.sh` | how many blob fetches `fetch-context.sh` runs at once | user-facing |
 | `PR_REVIEW_FETCH_RETRY_DELAY` | `2` (seconds) | `skills/pr-review/scripts/fetch-context.sh` | base backoff before retrying a rate-limited blob fetch (tests set it near 0) | test-only |
 | `PR_SCAN_OUT` | `kit_profile.py scratch --stable pr-scan` | `skills/pr-scan/pr-scan.sh` | override pr-scan's output directory (shared across sweeps by default) | internal |
+| `LEDGER_APPEND_TIMEOUT` | `10` (seconds) | `skills/pr-review/scripts/ledger-append.sh` | how long to poll for the ledger lock before giving up (exit 3) — tests set it low to exercise the timeout quickly | test-only |
 
 ## `pr-watch`
 

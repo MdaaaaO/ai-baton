@@ -2,7 +2,7 @@
 name: pr-scan
 description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs in configured repos minus bots, drafts, stale, already-reviewed heads. Returns a ≤8-row brief in 5 ordered sections by per-row State (Needs you, New, Handled this tick, Follow-up, Watching) or exactly NO-OP. Arm with `/loop 2h /pr-scan`; hand a row to `pr-review`."
 metadata:
-  version: "19"
+  version: "20"
   updated: "2026-10-02"
   reviewed: "2026-09-27"
   facts: "github.display_names"
@@ -16,8 +16,12 @@ effort: low
 # pr-scan — one pass over the user's review queue
 
 Working directory: the workspace root. Config `.context/state/pr-review/config.json`; ledger
-`.context/state/pr-review/ledger.jsonl` (the script appends to it — you never edit it by hand). You are
-read-only on GitHub; the only side effect you cause is the script's `--mark` ledger append.
+`.context/state/pr-review/ledger.jsonl`. You are read-only on GitHub **and** on the ledger — this fork
+never writes it. The one write this skill causes (`--mark-only --run <dir>`, appending `surfaced` rows via
+`ledger-append.sh`) happens outside the fork, in the main session's own step — triggered by the
+self-executing `MARK` trailer this fork's own answer ends with, never by prose in this file reaching the
+main session directly (`context: fork` means only this fork ever reads anything below this paragraph;
+§ Steps step 3 and § Answer carry the trailer's exact shape).
 
 ## Steps
 
@@ -28,7 +32,7 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
    for a main session invoking `pr-scan.sh` directly, outside this fork; nothing in this skill currently
    does that.)
    ```sh
-   bash $BATON/skills/pr-scan/pr-scan.sh --mark $ARGUMENTS
+   bash $BATON/skills/pr-scan/pr-scan.sh $ARGUMENTS
    ```
    It prints a ranked table and a `summary:` line, and exits **non-zero when any `gh` call failed after
    its retry** (`errors=<n>`; `retries=` counts calls that needed the second attempt, `failed=` the PRs
@@ -54,12 +58,30 @@ read-only on GitHub; the only side effect you cause is the script's `--mark` led
    ledger, and the section it renders in below.
 3. Decide **NO-OP vs brief**: if the summary says `new=0`, answer with the single word `NO-OP` — nothing
    else. `new` counts the **shown** rows that were not surfaced before on this head with this kind
-   (`--mark` records exactly those), so a follow-up or an `A` row that was already reported is not new
+   (`--mark-only` records exactly those), so a follow-up or an `A` row that was already reported is not new
    again; a new head, a new author reply, or a first-time `A` flag is. A prio-6 row is never new — the
    user's own review is no reason for a brief; it only rides along when something else is. Otherwise answer
-   with the brief below.
+   with the brief below, always ending in the self-executing `MARK` trailer (§ Answer): `context: fork`
+   means the main session never reads this file, so the instruction to mark has to travel inside the
+   fork's own returned text, not as prose here. Write the real `out=` dir from step 1's summary line into
+   the trailer (never the literal placeholder) — that is the exact run this brief came from, not whatever
+   `latest` happens to point at by the time the main session gets to it. The main session then runs the
+   trailer verbatim as one shell command; a run dir marks at most once (a `.marked` stamp beside
+   `queue.json` makes a second `--mark-only --run` on the same run a safe no-op), so it can run the trailer
+   even when unsure whether a prior tick already did.
 
 ## Answer (exactly this shape — real markdown, NO code fence, so the terminal draws the table)
+
+A brief always ends with one self-executing `MARK` trailer line — the only place this skill's one write
+(`--mark-only --run <dir>`) gets triggered, since `context: fork` means the main session never reads
+anything above this line. Write the real `out=` value from step 1's summary line into it (never the
+literal `<out dir>` shown below), single-quoted — run dirs are `mktemp -d` output under `$BASE_OUT`, so
+quoting is for shell-safety, not because the value is untrusted:
+```
+MARK — run: bash $BATON/skills/pr-scan/pr-scan.sh --mark-only --run '<out dir>'
+```
+(shown with a placeholder here only to name the shape; what you return has the real path.) `NO-OP` carries
+no trailer — nothing was shown, so there is nothing to mark.
 
 **PR QUEUE** · YYYY-MM-DD HH:MM UTC · 16 candidates · 10 new · dropped: 33 bots · 1 draft · 49 stale · 9 done · 9 approved · errors 0
 
@@ -97,6 +119,7 @@ user's APPROVE or REQUEST_CHANGES stands on this head and the PR is still open: 
 **Auto** (shadow) · none
 **AUTO-COMMENT** (off) · none
 **Next** · `/pr-review <org>/<repo> <pr>` for the row you pick · errors 0
+MARK — run: bash $BATON/skills/pr-scan/pr-scan.sh --mark-only --run '<out dir>'
 
 Column rules (same meaning in every section):
 - `#` — row number, counting across sections (not restarting per section); `PR` — always a `[repo#n](url)`
@@ -119,7 +142,7 @@ Column rules (same meaning in every section):
 - Trailing lines: `**Auto**` repeats the gate facts only (`class`, `packages`, CI, threads from `queue.json .auto`) or `none`;
   `**AUTO-COMMENT**` is `(<auto_comment_mode>) · ` then every eligible row as a `[repo#n](url)` link (comma-joined) or `none` —
   read `.auto_comment.eligible` off `queue.json`, never recompute the gate here; `**Next**` carries the errors count. Nothing
-  before the header line and nothing after `**Next**`.
+  before the header line; the `MARK` trailer (above) is the only thing after `**Next**`.
 
 Rules: `Why now` is fact from the data, never an opinion on the PR's value. Author names follow the map
 in the column rules. Every PR is a clickable link. Do not read PR bodies or diffs — that is `pr-review`'s
