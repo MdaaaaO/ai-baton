@@ -121,13 +121,15 @@ through.
 shape as `.sync-rejected`: one line, `<commit-sha> <reason>`) remembers the commit a release was applied
 to without the manifest check being able to run. Unlike `.sync-status`, a later plain run does not
 overwrite it: `kit-health` § 1 reads this file, not `.sync-status`, so the warning survives past the one
-session that applied the release. It is cleared once `HEAD` no longer matches the commit it names — a
-later fast-forward, verified or not, or anything else that moved `HEAD` — or once a later
+session that applied the release. It is cleared once `main` no longer points at the commit it names — a
+later fast-forward, verified or not, or anything else that moved the branch — or once a later
 `sh .claude/sync.sh --accept` on that same, still-current commit gets a verified answer (`gh` now
 installed or authenticated, say); a check that still cannot run refreshes the stored reason and reports
-`ok … unverified (<reason>)` again, and one that runs and fails reports `error` (exit 1) and writes the
-rejection into the mark — the release stays applied, nothing is rolled back, and `kit-health` § 1 warns
-with that reason from then on.
+`ok … unverified (<reason>)` again, and one that runs and fails reports `error` (exit 1) and rewrites the
+mark as `<commit-sha> rejected (<reason>)` — the release stays applied, nothing is rolled back, and
+`kit-health` § 1 reports an error with that reason from then on (the status line goes back to `ok` at the
+next plain run; the mark does not). The mark follows `main`, not `HEAD`: a run made while the checkout is
+detached or on another branch refuses to sync and leaves the mark alone.
 
 A contributor who wants the old behaviour — always track `origin/main`, no hold — opts out with:
 

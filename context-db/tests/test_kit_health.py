@@ -1414,9 +1414,23 @@ class CloneChannelReport(unittest.TestCase):
 
     def test_a_mark_for_another_commit_never_warns(self):
         # HEAD moved without a sync run since: the mark says nothing about the commit checked out now
-        kh, r = self.run_report(describe="v0.3.0", unverified_text="abc1234 unverified (offline, no gh)\n",
-                                head="def5678")
+        mark = "abc1234 unverified (offline, no gh)\n"
+        kh, r = self.run_report(describe="v0.3.0", unverified_text=mark, head="abc1234")
+        self.assertEqual(r.counts[kh.WARN], 1, "the same mark warns while HEAD is the commit it names")
+        kh, r = self.run_report(describe="v0.3.0", unverified_text=mark, head="def5678")
         self.assertEqual(r.counts[kh.WARN], 0, r.lines)
+
+    def test_a_rejected_mark_is_an_error(self):
+        # a later check ran on the applied release and failed: louder than "could not check"
+        text = "abc1234 rejected (attestation verify rejected it: HTTP 404)\n"
+        kh, r = self.run_report(describe="v0.3.0", unverified_text=text)
+        self.assertEqual((r.counts[kh.ERR], r.counts[kh.WARN]), (1, 0), r.lines)
+        finding = r.findings[0][2]
+        self.assertIn("failed a later manifest check (attestation verify rejected it: HTTP 404)", finding)
+        self.assertIn("still applied", finding)
+        self.assertIn("gh attestation verify", finding)
+        kh, r = self.run_report(describe="v0.3.0", unverified_text=text, head="def5678")
+        self.assertEqual(r.counts[kh.ERR], 0, "a rejected mark for another commit says nothing either")
 
     def test_a_mark_still_warns_when_head_cannot_be_read(self):
         kh, r = self.run_report(describe="v0.3.0", unverified_text="abc1234 unverified (offline, no gh)\n", head="")

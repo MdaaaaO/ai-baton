@@ -859,12 +859,33 @@ class SyncSh(unittest.TestCase):
         self.assertNotIn("nothing applied", line)
         self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha, "nothing is rolled back")
         mark = self.unverified_file.read_text()
-        self.assertTrue(mark.startswith(f"{tag_sha} unverified (a later check rejected it: "), mark)
+        self.assertTrue(mark.startswith(f"{tag_sha} rejected ("), mark)
         self.assertFalse(self.rejected_file.exists(), "no rejection record: that file is for a release held back")
 
         r = self.sync()
         self.assertEqual(self.status()[1], "ok", "a plain run does not repeat the error")
         self.assertEqual(self.unverified_file.read_text(), mark, "and leaves the mark as it is")
+
+    def test_unverified_mark_survives_a_run_made_off_main(self):
+        self.origin_commit("a")
+        self.origin_commit("b")
+        self.seed_tag("v0.1.0")
+        self.sync()
+        self.sync(env=_env(self.tmp, path=self.path_without("gh")), args=["--accept"])
+        tag_sha = self.rev_parse("v0.1.0^{commit}", cwd=self.seed)
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
+        mark = self.unverified_file.read_text()
+        self.assertTrue(mark.startswith(f"{tag_sha} unverified ("), mark)
+
+        self.git("checkout", "-q", "--detach", "HEAD~1", cwd=self.kit)
+        self.sync()
+        self.assertEqual(self.status()[1], "error", "a detached checkout is refused")
+        self.assertEqual(self.unverified_file.read_text(), mark, "main still points at the marked release")
+
+        self.git("checkout", "-q", "main", cwd=self.kit)
+        self.assertEqual(self.rev_parse("HEAD", cwd=self.kit), tag_sha)
+        self.sync()
+        self.assertEqual(self.unverified_file.read_text(), mark, "back on the unverified release, still marked")
 
     def test_unverified_mark_cleared_once_head_moves_outside_a_release_apply(self):
         self.origin_commit("a")

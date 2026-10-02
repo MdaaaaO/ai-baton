@@ -82,10 +82,14 @@
 # .sync-unverified (ignored; one line: `<commit-sha> <reason>`, the same "unverified (<reason>)" text
 # `.sync-status` carries for that one run) is the durable mark of an applied-but-unverified release: it
 # stays, unlike `.sync-status`, past the run that wrote it, so `kit-health` § 1 keeps warning until a
-# later --accept verifies the release or HEAD moves to another commit. Written when --accept applies a release the manifest check
-# could not run on; removed once HEAD no longer matches the commit it names (a later fast-forward —
-# verified or not — or anything else that moves HEAD, checked once at the end of every run) or once a
-# later --accept on that same, still-current commit gets a verified answer (sync_release below).
+# later --accept verifies the release or `main` moves to another commit. Written when --accept
+# applies a release the manifest check could not run on (a later --accept whose check runs and
+# rejects that commit rewrites it as `<commit-sha> rejected (<reason>)`); removed once `main` no
+# longer points at the commit it names (a later fast-forward, verified or not, or anything else
+# that moves the branch — checked once at the end of every run) or once a later --accept on that
+# same, still-current commit gets a verified answer (sync_release below). The branch is compared,
+# not HEAD: a run made while the checkout is detached or on another branch refuses to sync and
+# must not drop the mark of the release `main` still points at.
 set -u
 FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-60}"  # seconds; Claude Code does not enforce an async hook's `timeout` (docs/sync.md)
 LOCK_WAIT="${SYNC_LOCK_WAIT:-30}"          # seconds to wait for another sync.sh's flock
@@ -310,8 +314,9 @@ verify_release() {
 # this exact commit unverified — then the manifest is checked again (the user is asking on purpose,
 # e.g. after fixing `gh`), so a release that now verifies can clear its own mark. A check that still
 # cannot run refreshes the stored reason and says `unverified` in this run's status again; one that
-# runs and fails reports `error` (exit 1) and writes the rejection into the mark — the release stays
-# applied, nothing is rolled back, and `kit-health` § 1 warns with that reason from then on.
+# runs and fails reports `error` (exit 1) and rewrites the mark as `<commit-sha> rejected (<reason>)`
+# — the release stays applied, nothing is rolled back, and `kit-health` § 1 reports an error with
+# that reason from then on (the status line's `error` only lasts until the next plain run).
 sync_release() {
   local tag=$1 target before verify_suffix rej_line rej_tag mark_line mark_sha
   target="$(git rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)"
@@ -336,7 +341,7 @@ sync_release() {
         else
           # verify_release words its failure for a release that was held back; this one is applied
           FAIL="kit: release $tag is applied but failed verification: $REJECT_REASON"
-          printf '%s unverified (a later check rejected it: %s)\n' "$before" "$REJECT_REASON" >"$UNVERIFIED"
+          printf '%s rejected (%s)\n' "$before" "$REJECT_REASON" >"$UNVERIFIED"
           return 1
         fi
       fi
@@ -552,13 +557,17 @@ fi
 
 sync_kit
 
-# .sync-unverified is only good for the exact commit it was written against: once HEAD no longer
-# matches — a later fast-forward, verified or not, moved it on, or anything else changed it outside
-# this script — the mark is stale and must stop warning about a commit that is no longer current.
+# .sync-unverified is only good for the exact commit it was written against: once `main` no longer
+# points at it — a later fast-forward, verified or not, moved it on, or anything else changed it
+# outside this script — the mark is stale and must stop warning about a commit that is no longer
+# current. `main` is read, not HEAD: this also runs after sync_kit refused a checkout that is
+# detached or on another branch, and switching back to `main` returns to the marked release. A
+# branch that cannot be read proves nothing, so the mark stays.
 if [ -f "$UNVERIFIED" ]; then
   unv_line=""
   IFS= read -r unv_line <"$UNVERIFIED" 2>/dev/null || true
-  [ "${unv_line%% *}" = "$(git -C "$HERE" rev-parse HEAD 2>/dev/null)" ] || rm -f "$UNVERIFIED"
+  main_sha="$(git -C "$HERE" rev-parse -q --verify refs/heads/main 2>/dev/null)" || main_sha=""
+  [ -z "$main_sha" ] || [ "${unv_line%% *}" = "$main_sha" ] || rm -f "$UNVERIFIED"
 fi
 
 if [ -n "$FAIL" ]; then

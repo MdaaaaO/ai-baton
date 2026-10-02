@@ -283,24 +283,26 @@ def install_mode_check(r: Report, mode: str) -> None:
               + "re-run `sh $BATON/setup.sh` (it records the mode and re-checks the wiring)")
 
 
-UNVERIFIED = re.compile(r"\bunverified\b(?:\s*\((.*)\))?")
+UNVERIFIED = re.compile(r"\b(unverified|rejected)\b(?:\s*\((.*)\))?")
 
 
-def unverified_mark() -> str:
-    """The reason text from `.sync-unverified` (sync.sh's durable mark — one line, `<commit-sha> unverified
-    (<reason>)` — written when `--accept` applies a release without being able to check its manifest, and kept
-    past that one run: cleared only once `HEAD` moves off that commit or a later `--accept` on it verifies).
-    `""` when the file is missing, empty, carries no `unverified` word, or names a commit that is not `HEAD`
-    any more (sync.sh removes such a mark at its next run; until then it says nothing about this checkout)."""
+def unverified_mark() -> tuple[str, str]:
+    """`(kind, reason)` from `.sync-unverified` (sync.sh's durable mark — one line, `<commit-sha> unverified
+    (<reason>)`, written when `--accept` applies a release without being able to check its manifest, or
+    `<commit-sha> rejected (<reason>)` once a later `--accept` ran the check on that applied release and it
+    failed; kept past that one run and cleared only once `main` moves off that commit or a later `--accept`
+    on it verifies). `kind` is `"unverified"` or `"rejected"`; `("", "")` when the file is missing, empty,
+    carries neither word, or names a commit that is not `HEAD` (it says nothing about the commit checked out
+    now)."""
     try:
         detail = (KIT / ".sync-unverified").read_text(encoding="utf-8").strip()
     except OSError:
-        return ""
+        return "", ""
     rc, head, _ = sh(["git", "-C", str(KIT), "rev-parse", "HEAD"])
     if rc == 0 and head.strip() and detail.split(" ", 1)[0] != head.strip():
-        return ""
+        return "", ""
     m = UNVERIFIED.search(detail)
-    return (m.group(1) or "no reason given").strip() if m else ""
+    return (m.group(1), (m.group(2) or "no reason given").strip()) if m else ("", "")
 
 
 def clone_channel_report(r: Report) -> None:
@@ -316,7 +318,8 @@ def clone_channel_report(r: Report) -> None:
     have its manifest checked (e.g. offline or no `gh` — sync.sh writes the file, not this skill), and durably so
     — the mark outlives the run, unlike `.sync-status`. sync-check.sh does not warn on it, so this is kit-health's
     own WARN, naming the quoted reason and the `gh attestation verify …` command (docs/contributing.md §
-    Releases) to check by hand."""
+    Releases) to check by hand. A mark that says `rejected` — a later check ran on the applied release and
+    failed — is an ERR instead: the status line only says `error` for the one run that rejected it."""
     rc, out, _ = sh(["git", "-C", str(KIT), "config", "--get", "kit.channel"])
     channel = "`main` (tracks origin/main directly)" if rc == 0 and out.strip() == "main" else "release tags (default)"
     installed = installed_release_clone()
@@ -330,8 +333,8 @@ def clone_channel_report(r: Report) -> None:
         if first:
             line += f"; {first}"
     r.raw(line)
-    reason = unverified_mark()
-    if reason:
+    kind, reason = unverified_mark()
+    if kind:
         repo = kit_repo()
         tag = installed or "<tag>"
         cmd = (f"gh release download {tag} --repo {repo} --pattern manifest.txt && "
@@ -339,9 +342,14 @@ def clone_channel_report(r: Report) -> None:
                f"--signer-workflow {repo}/.github/workflows/release.yml") if repo else \
               ("gh release download <tag> --pattern manifest.txt && gh attestation verify manifest.txt "
                "--repo <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yml")
-        r.add(WARN, "kit", f"last sync applied an update unverified ({reason}) — verify by hand: `{cmd}` "
-              "(docs/contributing.md § Releases); `make claude_sync` checks it again and drops this warning "
-              "once it verifies")
+        if kind == "rejected":
+            r.add(ERR, "kit", f"the installed release failed a later manifest check ({reason}) and is still "
+                  f"applied — check it by hand: `{cmd}` (docs/contributing.md § Releases); `make claude_sync` "
+                  "checks it again and drops this error once it verifies")
+        else:
+            r.add(WARN, "kit", f"last sync applied an update unverified ({reason}) — verify by hand: `{cmd}` "
+                  "(docs/contributing.md § Releases); `make claude_sync` checks it again and drops this warning "
+                  "once it verifies")
 
 
 def semver(tag: str) -> tuple[int, ...] | None:
