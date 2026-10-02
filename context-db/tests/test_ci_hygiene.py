@@ -196,13 +196,12 @@ class EvalsHygiene(unittest.TestCase):
         self.assertIn('${model:+"MODEL=$model"}', run_line)
         self.assertNotRegex(run_line, r'(?<![+"])MODEL="')
 
-    def test_bash_tool_subprocesses_are_scrubbed_of_the_eval_credential(self):
-        # a case's own Bash runs with the step's environment, which carries CLAUDE_CODE_OAUTH_TOKEN — the cases
-        # are the kit's own, the answers are not, so that credential must never be readable from inside a run
+    def test_the_eval_sandbox_is_probed_and_no_second_scrub_is_nested(self):
+        # #489: `claude plugin eval` sandboxes each tool call with bwrap itself and keeps the credential out of the
+        # agent's environment; CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on top nested a second bwrap that could not mask the
+        # run's `.eval-artifacts` in its read-only cwd, so every case's Bash failed in the second measured run
+        self.assertNotIn("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB:", self.TEXT)
         step = self.TEXT.split("name: Run the suite", 1)[1].split("\n      - ", 1)[0]
-        self.assertIn('CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"', step)
-        # the scrub fails OPEN (runs unisolated, silently, if bubblewrap is missing) rather than closed — an
-        # explicit presence check turns that silent failure into a loud job failure instead
         self.assertIn("command -v bwrap", step)
         # an installed bwrap that cannot start (ubuntu-24.04's AppArmor userns restriction) failed every case's
         # Bash in the first measured run; the probe starts bwrap once before any case spends the credential
