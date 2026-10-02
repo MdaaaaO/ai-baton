@@ -679,11 +679,11 @@ class ReadOnlyRun(unittest.TestCase):
 
     def test_a_warning_of_a_passing_verify_is_a_warn_row(self):
         # verify exits 0 on an oversized active doc and says so on stderr only; a WARN row is what turns the
-        # verdict AMBER, and it keeps the fix the warning names
+        # verdict AMBER, and it keeps the fix the warning names and the doc verify lists under it
         with tempfile.TemporaryDirectory() as tmp:
             report = self.engine_section(self.verified_store(tmp, "x" * 40_000))
             self.assertIn("- ✅ `make verify`", report)
-            self.assertRegex(report, r"(?m)^- ⚠️ 1 active doc\(s\) over .*trim to keep re-reads cheap")
+            self.assertRegex(report, r"(?m)^- ⚠️ 1 active doc\(s\) over .*trim to keep re-reads cheap.* repos/a\.md: \d+KB$")
 
     def test_a_passing_verify_without_warnings_adds_no_warn_row(self):
         with tempfile.TemporaryDirectory() as tmp:

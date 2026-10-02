@@ -1501,10 +1501,18 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
     problems = [ln.strip()[2:] for ln in tail.splitlines() if ln.strip().startswith("- ")]
     if rc == 0:
         r.add(OK, "engine", "`make verify` on the live `.context/`: " + (out.splitlines()[-1] if out else "OK"))
-        # verify passes with warnings on stderr (a doc or an index over its budget): one WARN row per `⚠` line
-        for ln in err.splitlines():
-            if ln.strip().startswith("⚠ "):
-                r.add(WARN, "engine", ln.strip()[2:].strip())
+        # verify passes with warnings on stderr (a doc or an index over its budget): one WARN row per `⚠` line,
+        # with the `  - <path>: …` lines under it folded in — the row names what to trim
+        lines = err.splitlines()
+        for i, ln in enumerate(lines):
+            if not ln.startswith("⚠ "):
+                continue
+            items = []
+            for nxt in lines[i + 1:]:
+                if not nxt.startswith("  - "):
+                    break
+                items.append(nxt[4:].strip())
+            r.add(WARN, "engine", ln[2:].strip() + (" " + "; ".join(items) if items else ""))
     elif problems and all("INDEX.md is stale" in p for p in problems):
         r.add(WARN, "engine", "`.context/INDEX.md` is stale — `make -C $BATON/context-db index`" +
               (" (this run re-indexes after the stamp)" if stamping else " (a `--stamp` run does it; a plain run never writes the DB)"))
