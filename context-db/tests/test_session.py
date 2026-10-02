@@ -278,6 +278,25 @@ class NoSilentLoss(unittest.TestCase):
         # this test (an empty --working leaves the stored focus alone) is unaffected
         self.assertIn('working_on: "on #1"\n', (self.root / "sessions" / "t-w.md").read_text(encoding="utf-8"))
 
+    def test_working_if_empty_never_overwrites_an_existing_focus(self):
+        # heartbeat.sh's own first touch hands its short positional focus argument through this flag —
+        # it must never clobber a detailed working_on someone already registered.
+        run("session.py", "register", "--name", "t-wie", "--no-stats", "--working", "on something detailed",
+            root=self.root)
+        r = run("session.py", "touch", "--name", "t-wie", "--no-stats", "--working-if-empty", "short focus",
+                root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = (self.root / "sessions" / "t-wie.md").read_text(encoding="utf-8")
+        self.assertIn("working_on: on something detailed\n", text)
+        self.assertNotIn("short focus", text)
+
+    def test_working_if_empty_fills_a_blank_focus(self):
+        run("session.py", "register", "--name", "t-wie2", "--no-stats", root=self.root)
+        run("session.py", "touch", "--name", "t-wie2", "--no-stats", "--working-if-empty", "short focus",
+            root=self.root)
+        text = (self.root / "sessions" / "t-wie2.md").read_text(encoding="utf-8")
+        self.assertIn("working_on: short focus\n", text)
+
     def test_a_fenced_heading_is_not_a_section(self):
         spec = importlib.util.spec_from_file_location("session_fence", BIN / "session.py")
         sys.path.insert(0, str(BIN))
@@ -537,11 +556,22 @@ class RenameSubcommand(unittest.TestCase):
                                 repos="", working=working, resp="", note="", next="")
         self.mod.cmd_register(a)
 
+    def test_rename_hands_the_callers_session_id_to_the_heartbeat_restart_not_the_rows(self):
+        # Two sessions registered under one name share the row, and the id on it is the id of whichever
+        # registered last. The session that renames must stop and restart its own loop, not that one's.
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "sess-registered-last"}):
+            self._register("t-old-id", working="on something")
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": "sess-caller"}), \
+             unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
+            self.mod.cmd_rename(argparse.Namespace(old="t-old-id", new="kit-real-id"))
+        rh.assert_called_once_with("t-old-id", "kit-real-id", "on something", "sess-caller")
+
     def test_rename_moves_the_file_and_rewrites_frontmatter_and_title(self):
         self._register("t-old-lane", working="on something")
-        with unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": ""}), \
+             unittest.mock.patch.object(self.mod, "_restart_heartbeat", return_value=True) as rh:
             self.mod.cmd_rename(argparse.Namespace(old="t-old-lane", new="kit-real-topic"))
-        rh.assert_called_once_with("t-old-lane", "kit-real-topic", "on something")
+        rh.assert_called_once_with("t-old-lane", "kit-real-topic", "on something", "")
         self.assertFalse((self.root / "sessions" / "t-old-lane.md").exists())
         doc = (self.root / "sessions" / "kit-real-topic.md").read_text(encoding="utf-8")
         self.assertIn("session: kit-real-topic", doc)
@@ -601,6 +631,54 @@ class HeartbeatRestartHelpers(unittest.TestCase):
         with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
             self.assertFalse(self.mod._kill_heartbeat("t-stale"))
         self.assertFalse(pidfile.exists())
+
+    def test_kill_heartbeat_finds_a_pidfile_keyed_by_the_session_id(self):
+        # heartbeat.sh keys its pidfile by the harness session id when it has one; a rename knows the
+        # session by name and by the id on its row, and must stop that loop too.
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            pidfile = Path(self.tmp.name) / "heartbeat-sess-1234.pid"
+            pidfile.write_text(str(proc.pid), encoding="utf-8")
+            with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+                self.assertFalse(self.mod._kill_heartbeat("t-by-id"), "the name alone has no pidfile")
+                self.assertTrue(self.mod._kill_heartbeat("t-by-id", "sess-1234"))
+            proc.wait(timeout=5)
+            self.assertFalse(pidfile.exists())
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
+    def _loop_under_the_name(self, name: str, started_by: str) -> tuple:
+        """A live process with a pidfile under `name` and a log whose start line names `started_by`."""
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        pidfile = Path(self.tmp.name) / f"heartbeat-{name}.pid"
+        pidfile.write_text(str(proc.pid), encoding="utf-8")
+        pidfile.with_suffix(".log").write_text(
+            f"2026-01-01 start name={name} owner=1 interval=21600 session={started_by}\n", encoding="utf-8")
+        return proc, pidfile
+
+    def test_kill_heartbeat_leaves_a_loop_under_the_name_that_another_session_started(self):
+        proc, pidfile = self._loop_under_the_name("t-shared", "sess-other")
+        with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+            self.assertFalse(self.mod._kill_heartbeat("t-shared", "sess-mine"))
+        self.assertIsNone(proc.poll(), "another session's loop must keep running")
+        self.assertTrue(pidfile.exists())
+
+    def test_kill_heartbeat_stops_a_loop_under_the_name_that_the_callers_session_started(self):
+        proc, pidfile = self._loop_under_the_name("t-legacy", "sess-mine")
+        with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
+            self.assertTrue(self.mod._kill_heartbeat("t-legacy", "sess-mine"))
+        proc.wait(timeout=5)
+        self.assertFalse(pidfile.exists())
+
+    def test_restart_heartbeat_does_not_report_a_start_that_was_a_no_op(self):
+        done = subprocess.CompletedProcess([], 0, "heartbeat for kit-x already running (pid 4242)", "")
+        with unittest.mock.patch.object(self.mod, "_kill_heartbeat", return_value=True), \
+             unittest.mock.patch.object(self.mod.subprocess, "run", return_value=done):
+            self.assertFalse(self.mod._restart_heartbeat("old", "kit-x", "focus"))
 
     def test_kill_heartbeat_with_no_pidfile_is_a_noop(self):
         with unittest.mock.patch.object(self.mod, "_baton_tmp", return_value=self.tmp.name):
