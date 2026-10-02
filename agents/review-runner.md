@@ -72,9 +72,10 @@ so you spend them on judgment, not on fetching.
    `python3 $BATON/skills/pr-review/scripts/security-surface.py $CTX` (no model call, reads only
    `bundle.json`/`diff.patch`). `SURFACE <reason>[, <reason>…]` → the lens set is the usual three **plus**
    a fourth, **security**, whose scope line is the printed reasons verbatim. `NONE` → the usual three. A
-   non-zero exit (unreadable bundle) → the usual three, and name the failure (its stderr line) in the
-   sheet's `lenses:` line — never a lens skipped in silence. Spawn the lens set as parallel `Agent` calls,
-   `subagent_type: general-purpose`, `model: opus`, each with this brief and nothing more:
+   non-zero exit (unreadable bundle, or added lines it could not read) → the usual three, and name the
+   failure (its stderr line) in the sheet's `lenses:` line — never a lens skipped in silence. Spawn the
+   lens set as parallel `Agent` calls, `subagent_type: general-purpose`, `model: opus`, each with this
+   brief and nothing more:
    ```
    Lens <design & contracts | failure modes | verification & maintainability | security> for <repo>#<pr>.
    [security lens only:] Scope: <the SURFACE reasons, verbatim>. Read for security alone: does the diff
@@ -130,7 +131,7 @@ tracker key into a proposed `comment` — link keys as `[KEY-n](<tracker.url_tem
 ```
 REVIEW SHEET <repo>#<pr> @ <head7> · mode <mode> · <author> · <title> · +A/-D F files
 bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits>)
-[lenses: <the lenses that ran>[, security (<reasons>)][ · security gate failed: <reason>]]   ← only on `--deep`
+[lenses: design, failure modes, verification[, security (<reasons>)][ · security gate failed: <reason>]]   ← only on `--deep`
 | # | sev | class | file:line | finding (one line) |
 …
 RECOMMEND: COMMENT | REQUEST_CHANGES | APPROVE-if-user-agrees

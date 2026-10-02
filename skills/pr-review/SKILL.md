@@ -130,7 +130,7 @@ Numbers are assigned once and never change — the user refers to "#3" later.
 ```
 REVIEW SHEET <repo>#<pr> @ <head7> · mode <mode> · <author> · <title> · +A/-D F files
 bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits>)
-[lenses: <the lenses that ran>[, security (<reasons>)][ · security gate failed: <reason>]]   ← only on `--deep`
+[lenses: design, failure modes, verification[, security (<reasons>)][ · security gate failed: <reason>]]   ← only on `--deep`
 [<System> enrichment: n/a in this environment]   ← one per skipped gate
 | # | sev | class | file:line | finding (one line) |
 …
