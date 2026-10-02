@@ -165,8 +165,7 @@ class IndexAndVerify(ContextRoot):
         self.assertEqual(m.stdout.split(), [])
 
     def test_find_tag_matches_frontmatter_only(self):
-        # a doc with a tag only in the body (not frontmatter) should not be listed
-        doc_with_tag_in_body = """---
+        (self.root / "repos" / "body-tags.md").write_text("""---
 title: Body tags
 type: repo
 domain: repos
@@ -175,25 +174,17 @@ status: active
 updated: 2026-09-26
 ---
 
-# Body tags
-
-Some documentation here.
 tags: [internal]
-
-This doc has tags in the body, but should not match when searching for 'internal'.
-"""
-        (self.root / "repos" / "body-tags.md").write_text(doc_with_tag_in_body, encoding="utf-8")
+""", encoding="utf-8")
         run(self.root, "gen_index.py")
 
-        # Search for the 'internal' tag
         find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "TAG=internal"]
         m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
         self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertEqual(m.stdout.split(), [], f"Expected no matches for 'internal' tag, got: {m.stdout.split()}")
+        self.assertEqual(m.stdout.split(), [])
 
     def test_find_domain_matches_frontmatter_only(self):
-        # a doc with a domain only in the body should not be listed
-        doc_with_domain_in_body = """---
+        (self.root / "repos" / "body-domain.md").write_text("""---
 title: Body domain
 type: repo
 domain: repos
@@ -202,25 +193,43 @@ status: active
 updated: 2026-09-26
 ---
 
-# Body domain
-
-Some documentation here.
 domain: projects
-
-This doc has domain in the body, but should not match when searching for 'projects'.
-"""
-        (self.root / "repos" / "body-domain.md").write_text(doc_with_domain_in_body, encoding="utf-8")
+""", encoding="utf-8")
         run(self.root, "gen_index.py")
 
-        # Search for the 'projects' domain
         find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "DOMAIN=projects"]
         m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
         self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertEqual(m.stdout.split(), [], f"Expected no matches for 'projects' domain, got: {m.stdout.split()}")
+        self.assertEqual(m.stdout.split(), [])
 
-    def test_find_status_matches_frontmatter_only(self):
-        # a doc with a status only in the body should not be listed when using DOMAIN + STATUS filter
-        doc_with_status_in_body = """---
+    def test_find_tag_matches_exactly(self):
+        (self.root / "repos" / "with-kit.md").write_text("""---
+title: With kit
+type: repo
+domain: repos
+tags: [kit-health]
+status: active
+updated: 2026-09-26
+---
+""", encoding="utf-8")
+        (self.root / "repos" / "kit-only.md").write_text("""---
+title: Kit only
+type: repo
+domain: repos
+tags: [kit]
+status: active
+updated: 2026-09-26
+---
+""", encoding="utf-8")
+        run(self.root, "gen_index.py")
+
+        find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "TAG=kit"]
+        m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(m.returncode, 0, m.stderr)
+        self.assertEqual(m.stdout.split(), ["repos/kit-only.md"])
+
+    def test_find_status_filter_only_in_frontmatter(self):
+        (self.root / "repos" / "body-status.md").write_text("""---
 title: Body status
 type: repo
 domain: repos
@@ -229,25 +238,9 @@ status: active
 updated: 2026-09-26
 ---
 
-# Body status
-
-Some documentation here.
 status: archived
-
-This doc has status in the body, but should not match when searching for 'archived'.
-"""
-        (self.root / "repos" / "body-status.md").write_text(doc_with_status_in_body, encoding="utf-8")
-        run(self.root, "gen_index.py")
-
-        # Search for 'archived' status in repos domain (body text should be ignored)
-        find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "DOMAIN=repos", "STATUS=archived"]
-        m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
-        self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertEqual(m.stdout.split(), [], f"Expected no matches for 'archived' status, got: {m.stdout.split()}")
-
-    def test_find_status_filter_works_correctly(self):
-        # ensure STATUS filter still works correctly with frontmatter-only matching
-        doc_archived = """---
+""", encoding="utf-8")
+        (self.root / "repos" / "really-archived.md").write_text("""---
 title: Real archived
 type: repo
 domain: repos
@@ -255,19 +248,13 @@ tags: []
 status: archived
 updated: 2026-09-26
 ---
-
-# Real archived
-
-Archived doc.
-"""
-        (self.root / "repos" / "really-archived.md").write_text(doc_archived, encoding="utf-8")
+""", encoding="utf-8")
         run(self.root, "gen_index.py")
 
-        # Search for 'archived' status in repos domain
         find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "DOMAIN=repos", "STATUS=archived"]
         m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
         self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertEqual(m.stdout.split(), ["repos/really-archived.md"], f"Expected repos/really-archived.md, got: {m.stdout.split()}")
+        self.assertEqual(m.stdout.split(), ["repos/really-archived.md"])
 
     def test_all_archived_domain_has_fold_line_and_no_table(self):
         # repos/ starts with exactly one doc (kit.md, active); flip it archived so every doc

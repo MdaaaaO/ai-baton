@@ -248,10 +248,10 @@ review-evidence:
 # make find TAG=foo   |   make find DOMAIN=bar   — STATUS=<status> keeps only the docs in that status
 find:
 ifdef TAG
-	@$(PY) $(BIN)/find_frontmatter.py "$(CONTEXT)" TAG "$(TAG)" $(if $(STATUS),STATUS "$(STATUS)",) || true
+	@$(PY) $(BIN)/find_frontmatter.py "$(CONTEXT)" TAG "$(TAG)" $(if $(STATUS),STATUS "$(STATUS)",)
 endif
 ifdef DOMAIN
-	@$(PY) $(BIN)/find_frontmatter.py "$(CONTEXT)" DOMAIN "$(DOMAIN)" $(if $(STATUS),STATUS "$(STATUS)",) || true
+	@$(PY) $(BIN)/find_frontmatter.py "$(CONTEXT)" DOMAIN "$(DOMAIN)" $(if $(STATUS),STATUS "$(STATUS)",)
 endif
 ifeq ($(TAG)$(DOMAIN),)
 	@echo "usage: make find TAG=<tag> [STATUS=<status>]  |  make find DOMAIN=<domain> [STATUS=<status>]"
