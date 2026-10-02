@@ -204,6 +204,10 @@ class EvalsHygiene(unittest.TestCase):
         # the scrub fails OPEN (runs unisolated, silently, if bubblewrap is missing) rather than closed — an
         # explicit presence check turns that silent failure into a loud job failure instead
         self.assertIn("command -v bwrap", step)
+        # an installed bwrap that cannot start (ubuntu-24.04's AppArmor userns restriction) failed every case's
+        # Bash in the first measured run; the probe starts bwrap once before any case spends the credential
+        self.assertIn("bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all true", step)
+        self.assertIn("kernel.apparmor_restrict_unprivileged_userns=0", self.TEXT.split("name: Install the Claude Code CLI", 1)[1].split("\n      - ", 1)[0])
 
     def test_the_result_json_is_uploaded_as_an_artifact_even_on_failure(self):
         step = self.TEXT.split("name: Upload the result JSON", 1)[1].split("\n      - ", 1)[0]

@@ -106,13 +106,16 @@ jobs:
           fi
 
       # Same pinned CLI as ci.yml — one pin, .github/versions.env, sourced rather than repeated; bubblewrap + socat
-      # so the runner can sandbox the eval's tool calls on Linux.
+      # so the runner can sandbox the eval's tool calls on Linux. Ubuntu 24.04's AppArmor lets an unprivileged user
+      # namespace exist but strips its capabilities, so bwrap fails at its first privileged step (bringing up the
+      # loopback in a new network namespace: "loopback: Failed RTM_NEWADDR") and every Bash call in a case dies.
       - if: steps.token.outputs.enabled == 'true'
         name: Install the Claude Code CLI
         working-directory: .claude
         run: |
           . .github/versions.env
           sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat >/dev/null
+          sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
           npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
 
       - if: steps.token.outputs.enabled == 'true'
@@ -133,15 +136,18 @@ jobs:
           # cases are the kit's own, but the answers are not, so that credential must never be readable from
           # inside a run. This scrubs a Bash-tool subprocess down to a safe list (PATH, HOME, USER, SHELL, TERM,
           # LANG) via bubblewrap, which the CLI install step above already installs; it fails OPEN (runs
-          # unisolated, with a warning) if bubblewrap is ever missing, so the bwrap check right below is the
-          # backstop that turns a silent "ran unisolated" into a loud job failure instead. The CLI already turns
-          # this on by default when GITHUB_ACTIONS is set (true for every step here) — the explicit "1" pins that
-          # default so it keeps applying even if the CLI's default ever changes, rather than relying on it silently.
+          # unisolated, with a warning) if bubblewrap is ever missing, so the bwrap probe right below is the
+          # backstop that turns a silent "ran unisolated" into a loud job failure instead. The probe starts
+          # bwrap, not just `command -v`: a bwrap that is installed but cannot start fails every case's Bash,
+          # and the suite would spend the credential measuring that. The CLI turns the scrub on only when this
+          # is set, and it then forces each agent's permission mode to default, so a case runs with exactly the
+          # tools its allowed_tools declares.
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
         shell: bash
         run: |
           set -o pipefail
           command -v bwrap >/dev/null 2>&1 || { echo "::error::bwrap is missing — CLAUDE_CODE_SUBPROCESS_ENV_SCRUB would silently run Bash unisolated"; exit 1; }
+          bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all true || { echo "::error::bwrap is installed but cannot start a sandbox — every case's Bash would fail, so nothing is spent"; exit 1; }
           rc=0
           for model in ${MODELS:-default}; do
             [ "$model" = default ] && model=""
