@@ -164,97 +164,34 @@ class IndexAndVerify(ContextRoot):
         self.assertEqual(m.returncode, 0, m.stderr)
         self.assertEqual(m.stdout.split(), [])
 
-    def test_find_tag_matches_frontmatter_only(self):
-        (self.root / "repos" / "body-tags.md").write_text("""---
-title: Body tags
-type: repo
-domain: repos
-tags: []
-status: active
-updated: 2026-09-26
----
-
-tags: [internal]
-""", encoding="utf-8")
-        run(self.root, "gen_index.py")
-
-        find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "TAG=internal"]
-        m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+    def find(self, *args: str) -> "list[str]":
+        m = subprocess.run(["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", *args],
+                           env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
         self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertEqual(m.stdout.split(), [])
+        return m.stdout.split()
 
-    def test_find_domain_matches_frontmatter_only(self):
-        (self.root / "repos" / "body-domain.md").write_text("""---
-title: Body domain
-type: repo
-domain: repos
-tags: []
-status: active
-updated: 2026-09-26
----
+    def test_find_reads_the_frontmatter_never_the_body(self):
+        # a body line shaped like a frontmatter key (a pasted example, a quoted doc) is not the doc's own key
+        p = self.doc("repos/quoting.md", title="Quoting", type="repo", domain="repos", status="active")
+        p.write_text(p.read_text(encoding="utf-8") + "\ntags: [internal]\ndomain: projects\nstatus: archived\n",
+                     encoding="utf-8")
+        self.doc("repos/old.md", title="Old thing", type="repo", domain="repos", status="archived")
+        self.assertEqual(self.find("TAG=internal"), [])
+        self.assertEqual(self.find("DOMAIN=projects"), [])
+        self.assertEqual(self.find("DOMAIN=repos", "STATUS=archived"), ["repos/old.md"])
+        self.assertEqual(self.find("TAG=alpha", "STATUS=archived"), ["repos/old.md"])
 
-domain: projects
-""", encoding="utf-8")
-        run(self.root, "gen_index.py")
+    def test_find_matches_a_tag_as_a_whole_entry(self):
+        for name, tags in (("health", "[kit-health]"), ("kit", "[kit, other]")):
+            p = self.doc(f"repos/{name}.md", title=name, type="repo", domain="repos", status="active")
+            p.write_text(p.read_text(encoding="utf-8").replace('[alpha, "beta"]', tags), encoding="utf-8")
+        self.assertEqual(self.find("TAG=kit"), ["repos/kit.md"])
+        self.assertEqual(self.find("TAG=kit-health"), ["repos/health.md"])
 
-        find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "DOMAIN=projects"]
-        m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
-        self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertEqual(m.stdout.split(), [])
-
-    def test_find_tag_matches_exactly(self):
-        (self.root / "repos" / "with-kit.md").write_text("""---
-title: With kit
-type: repo
-domain: repos
-tags: [kit-health]
-status: active
-updated: 2026-09-26
----
-""", encoding="utf-8")
-        (self.root / "repos" / "kit-only.md").write_text("""---
-title: Kit only
-type: repo
-domain: repos
-tags: [kit]
-status: active
-updated: 2026-09-26
----
-""", encoding="utf-8")
-        run(self.root, "gen_index.py")
-
-        find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "TAG=kit"]
-        m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
-        self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertEqual(m.stdout.split(), ["repos/kit-only.md"])
-
-    def test_find_status_filter_only_in_frontmatter(self):
-        (self.root / "repos" / "body-status.md").write_text("""---
-title: Body status
-type: repo
-domain: repos
-tags: []
-status: active
-updated: 2026-09-26
----
-
-status: archived
-""", encoding="utf-8")
-        (self.root / "repos" / "really-archived.md").write_text("""---
-title: Real archived
-type: repo
-domain: repos
-tags: []
-status: archived
-updated: 2026-09-26
----
-""", encoding="utf-8")
-        run(self.root, "gen_index.py")
-
-        find = ["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", "DOMAIN=repos", "STATUS=archived"]
-        m = subprocess.run(find, env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
-        self.assertEqual(m.returncode, 0, m.stderr)
-        self.assertEqual(m.stdout.split(), ["repos/really-archived.md"])
+    def test_find_skips_what_the_index_skips(self):
+        # a session file is no row of the index, so `find` does not list it either
+        self.doc("sessions/lane-topic.md", title="A session", type="repo", domain="repos", status="active")
+        self.assertNotIn("sessions/lane-topic.md", self.find("DOMAIN=repos"))
 
     def test_all_archived_domain_has_fold_line_and_no_table(self):
         # repos/ starts with exactly one doc (kit.md, active); flip it archived so every doc
