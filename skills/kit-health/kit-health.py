@@ -8,7 +8,10 @@ skill's Sonnet fork). Prints a markdown report; exit 0 = green, 1 = warnings onl
 
 Sections:
   1. kit        — kit_verify (frontmatter + env store), stale units, install mode vs the recorded one (#34),
-                  git state (sync-check), newer kit release (#33)
+                  git state (sync-check), newer kit release (#33); clone install: release channel, installed
+                  tag, a held preview, a WARN on an unverified last sync; plugin install: the cache checked
+                  against the installed release's attested manifest, and the files a pending update would
+                  change when a newer release is out
   2. leaks      — environment-specific values anywhere in the kit (every skill, agent, engine file, doc,
                   `.github/`): generic SHAPES (Slack ids, custom-field ids, ticket keys, account ids, hosts,
                   tz literals, memory-note pointers) plus every literal VALUE this environment has configured
@@ -56,6 +59,7 @@ import kit_profile  # noqa: E402
 import kb  # noqa: E402
 import frontmatter as fmt  # noqa: E402
 import leak_shapes  # noqa: E402
+import release_manifest as relman  # noqa: E402
 import type_template  # noqa: E402
 
 CTX: Path | None = None   # overrides for a caller (a test) that names the workspace outright; None = resolve per call
@@ -237,9 +241,14 @@ def sec_kit(r: Report, stale: int) -> None:
               "line below); env store up to date")
     else:
         r.add(OK, "kit", "sync: in step with origin, tree clean")
-    release_check(r, plugin, mode)
+    if plugin is None and mode == "clone":
+        clone_channel_report(r)
+    installed, latest, newer = release_check(r, plugin, mode)
     if plugin is not None:
         cache_wiring(r, plugin)
+        manifest_check(r, plugin, installed, lookup_ok=latest is not None)
+        if newer:
+            pending_update_check(r, plugin, installed, latest)
     review_ratio(r)
 
 
@@ -272,6 +281,62 @@ def install_mode_check(r: Report, mode: str) -> None:
               "switched install mode; " + (f"the old clone's wiring is still there ({', '.join(left)}) — remove what "
                                            f"`{mode}` does not use, then " if left else "")
               + "re-run `sh $BATON/setup.sh` (it records the mode and re-checks the wiring)")
+
+
+def sync_status() -> tuple[str, str, str]:
+    """(ts, state, detail) from `.sync-status` (sync.sh's `status()` — one line `<ts> <state> <detail>`), each
+    `""` when the file is missing, empty, or has fewer than three words (no sync has run yet)."""
+    try:
+        line = (KIT / ".sync-status").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "", "", ""
+    parts = line.split(" ", 2) + ["", "", ""]
+    return parts[0], parts[1], parts[2]
+
+
+UNVERIFIED = re.compile(r"\bunverified\b(?:\s*\((.*)\))?")
+
+
+def clone_channel_report(r: Report) -> None:
+    """§ 1, clone install only: the release channel (`git config kit.channel` — `main` opts out to track
+    origin/main directly, else the release-tag channel sync.sh and sync-check.sh both default to), the installed
+    release tag (`installed_release_clone`, the same tag choice sync.sh/sync-check.sh make), and a held preview
+    when `.sync-preview` exists — its own first line already names the tag and the apply command (sync.sh's
+    `write_preview()`), so it is shown verbatim rather than re-derived. Informational, never a WARN of its own:
+    sync-check.sh already WARNs on a waiting release from its own independent computation.
+
+    Also reads `.sync-status` for a state kit-health has no other way to learn: an `ok` sync whose detail names
+    itself `unverified (reason)` means the last sync applied a release without being able to check its manifest
+    (e.g. offline or no `gh` — sync.sh writes that word, not this skill). sync.sh says so once, in the output of the
+    run that applied it, and sync-check.sh does not warn on it, so this is kit-health's own WARN, naming the quoted
+    reason and the `gh attestation verify …` command (docs/contributing.md § Releases) to check by hand."""
+    rc, out, _ = sh(["git", "-C", str(KIT), "config", "--get", "kit.channel"])
+    channel = "`main` (tracks origin/main directly)" if rc == 0 and out.strip() == "main" else "release tags (default)"
+    installed = installed_release_clone()
+    line = f"- channel: {channel}; installed release: `{installed or 'none yet'}`"
+    preview = KIT / ".sync-preview"
+    if preview.is_file():
+        try:
+            first = preview.read_text(encoding="utf-8", errors="replace").splitlines()[0]
+        except (OSError, IndexError):
+            first = ""
+        if first:
+            line += f"; {first}"
+    r.raw(line)
+    _, state, detail = sync_status()
+    if state == "ok":
+        m = UNVERIFIED.search(detail)
+        if m:
+            reason = (m.group(1) or "no reason given").strip()
+            repo = kit_repo()
+            tag = installed or "<tag>"
+            cmd = (f"gh release download {tag} --repo {repo} --pattern manifest.txt && "
+                   f"gh attestation verify manifest.txt --repo {repo} "
+                   f"--signer-workflow {repo}/.github/workflows/release.yml") if repo else \
+                  ("gh release download <tag> --pattern manifest.txt && gh attestation verify manifest.txt "
+                   "--repo <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yml")
+            r.add(WARN, "kit", f"last sync applied an update unverified ({reason}) — verify by hand: `{cmd}` "
+                  "(docs/contributing.md § Releases)")
 
 
 def semver(tag: str) -> tuple[int, ...] | None:
@@ -326,11 +391,14 @@ def plugin_names() -> tuple[str, str]:
     return names[0], names[1]
 
 
-def release_check(r: Report, plugin: dict | None, mode: str) -> None:
+def release_check(r: Report, plugin: dict | None, mode: str) -> tuple[str, dict | None, bool]:
     """§ 1: is a newer kit release out than the one installed (#33)? Newer → WARN with the update command for this
     install mode (`kit_profile.MODES`, #34); unreadable → an informational `latest release unknown` line, never a ✅
     (a failed lookup is not "up to date"); otherwise ✅. A plugin install asks GitHub, a checkout (clone or dev
-    checkout) asks its origin's tags."""
+    checkout) asks its origin's tags. Returns `(installed, latest, newer)` — `latest` is the `{tag, published,
+    url}` dict (or None when the lookup failed), `newer` is True only when both versions parsed and a comparison
+    found one actually newer — so callers (the plugin cache manifest check, the pending-update file list) reuse
+    this one lookup instead of asking GitHub again."""
     if plugin is not None:
         installed = f"v{plugin['version']}" if plugin.get("version") else ""
         latest, why = latest_release_plugin(plugin.get("repo", ""))
@@ -341,17 +409,19 @@ def release_check(r: Report, plugin: dict | None, mode: str) -> None:
     how = kit_profile.mode_hint("update", mode, KIT, plugin=name, market=market) + ", re-run /kit-health"
     if latest is None:
         r.raw(f"- ❔ release: latest release unknown — {why}; installed {installed or 'unknown'}")
-        return
+        return installed, None, False
     have, want = semver(installed), semver(latest["tag"])
     if have is None or want is None:  # a pre-release or non-version tag on either side: say so, never crash
         r.raw(f"- ❔ release: latest is {latest['tag']}, installed {installed or 'unknown'} — cannot compare")
-    elif want > have:
+        return installed, latest, False
+    if want > have:
         when = f", published {latest['published']}" if latest["published"] else ""
         notes = f" — release notes: {latest['url']}" if latest["url"] else ""
         r.add(WARN, "kit", f"release: {latest['tag']} available (installed {installed}{when}) — run {how}{notes}")
-    else:
-        r.add(OK, "kit", f"release: {installed} = latest release" if want == have
-              else f"release: {installed} is ahead of the latest release {latest['tag']}")
+        return installed, latest, True
+    r.add(OK, "kit", f"release: {installed} = latest release" if want == have
+          else f"release: {installed} is ahead of the latest release {latest['tag']}")
+    return installed, latest, False
 
 
 def cache_runtime(parts: tuple[str, ...]) -> bool:
@@ -388,6 +458,179 @@ def cache_wiring(r: Report, plugin: dict) -> None:
         r.add(OK, "kit", "plugin cache: no kit file changed since the install")
     else:
         r.raw("- plugin cache: edit check skipped — `installed_plugins.json` records no install time for this path")
+
+
+GH_NO_ANSWER = re.compile(r"could not resolve (?:host|hostname)|temporary failure in name resolution|name or service not known"
+                          r"|failed to connect|network is unreachable|no route to host|connection (?:refused|timed out)"
+                          r"|operation timed out|no such host|dial tcp|i/o timeout|tls handshake timeout|error connecting to"
+                          r"|gh auth login|bad credentials|rate limit|HTTP (?:401|403|429|5\d\d)", re.I)
+GH_NO_ASSET = re.compile(r"no assets (?:to download|match)", re.I)
+MANIFESTS: dict[tuple[str, str], tuple[bytes | None, str]] = {}  # one download per (repo, tag) and run
+GH_SILENT: list[str] = []  # why `gh` got no answer, once it did not: later downloads in this run do not ask again
+
+
+def download_manifest(repo: str, tag: str, timeout: int = 30) -> tuple[bytes | None, str]:
+    """The bytes of the `manifest.txt` asset of `repo`'s `tag` (`gh release download`), or (None, why). The why
+    covers every cannot-run cause `manifest_check`/`pending_update_check` must turn into a WARN, never a slow or
+    flaky ERR: no repo slug, no `gh`, offline/unauthenticated (gh's own exit), or a release without the asset (gh
+    exits 1 with `no assets …`). Bounded by `timeout` like every other `gh` call here; a (repo, tag) is asked for
+    once per run, and after one call that got no answer (`GH_NO_ANSWER`, a timeout) no further one is made."""
+    if not repo:
+        return None, "no repo slug known for this install (plugin.json names no `repository`)"
+    if not tag:
+        return None, "no release tag known"
+    if not shutil.which("gh"):
+        return None, "`gh` not installed"
+    if (repo, tag) in MANIFESTS:
+        return MANIFESTS[(repo, tag)]
+    if GH_SILENT:
+        return None, GH_SILENT[0]
+    with tempfile.TemporaryDirectory(prefix="kit-health-manifest-") as tmp:
+        rc, out, err = sh(["gh", "release", "download", tag, "-R", repo, "--pattern", "manifest.txt", "--dir", tmp],
+                           env=kit_profile.gh_env(), timeout=timeout)
+        asset = Path(tmp) / "manifest.txt"
+        no_asset = f"`{tag}` has no `manifest.txt` release asset (a release cut before the manifest existed)"
+        if rc != 0:
+            why = (f"`gh release download {tag}` failed: "
+                   f"{(err or out).splitlines()[-1] if (err or out) else f'exit {rc}'}")
+            if GH_NO_ASSET.search(both(out, err)):
+                why = no_asset
+            elif rc == 127 or GH_NO_ANSWER.search(both(out, err)):
+                GH_SILENT.append(why)
+            got: tuple[bytes | None, str] = (None, why)
+        elif not asset.is_file():
+            got = (None, no_asset)
+        else:
+            got = (asset.read_bytes(), "")
+    MANIFESTS[(repo, tag)] = got
+    return got
+
+
+def attest_verify(repo: str, manifest_path: Path, timeout: int = 30) -> tuple[str, str]:
+    """`gh attestation verify` a downloaded manifest against `repo`'s release workflow (docs/contributing.md §
+    Releases) — proves the manifest's own provenance before `manifest_check` trusts its hashes. Three answers, the
+    same split sync.sh makes: ("ok", "") verified; ("failed", why) the check ran and said no; ("cannot", why) it
+    never got an answer — a `gh` from before `gh attestation` existed, a timeout, a network error, a rate limit
+    or server error, or an unauthenticated `gh` (`GH_NO_ANSWER`, gh's own wording). An error text this does not
+    recognise counts as failed: the strict reading is the safe one."""
+    gh_env = kit_profile.gh_env()
+    rc, _, err = sh(["gh", "attestation", "verify", "--help"], env=gh_env, timeout=timeout)
+    if rc == 127:
+        return "cannot", f"`gh` did not run: {err}"
+    if rc != 0:
+        return "cannot", "this `gh` has no `attestation` command — update `gh`"
+    rc, out, err = sh(["gh", "attestation", "verify", str(manifest_path), "--repo", repo,
+                        "--signer-workflow", f"{repo}/.github/workflows/release.yml"],
+                       env=gh_env, timeout=timeout)
+    if rc == 0:
+        return "ok", ""
+    why = (err or out).splitlines()[-1] if (err or out) else f"exit {rc}"
+    if rc == 127 or GH_NO_ANSWER.search(both(out, err)):
+        return "cannot", f"`gh attestation verify` got no answer: {why}"
+    return "failed", why
+
+
+def manifest_check(r: Report, plugin: dict, installed: str, lookup_ok: bool = True) -> None:
+    """§ 1, plugin install: the plugin cache checked against the installed release's own attested manifest —
+    `gh release download` the `manifest.txt` asset, `gh attestation verify` it (proves provenance), then
+    `release_manifest.verify_no_git` it against the live cache (proves the cache's own files match). The repo slug
+    is `plugin['repo']` — the same source `release_check` already asked GitHub with, never a hardcoded slug (a
+    fork's manifest lives in the fork's own releases).
+
+    Outcomes: verified and matching → OK; an attestation or hash failure → ERR naming the first few differing
+    files (this is the one case this check can actually prove wrong); anything that stops it from running at all
+    (no `gh` or one too old, unauthenticated, offline, no manifest asset on this release) → WARN naming why, never an ERR — a
+    cannot-run is not a cache that is wrong. Files present but unlisted by the manifest are a note on the OK line,
+    not a failure: `verify_no_git` cannot tell a hand edit from a file simply never tracked without a git checkout
+    to ask (docs/packaging.md). `lookup_ok` False — `release_check`'s own lookup just failed with `gh` installed —
+    is the same WARN without asking GitHub a second time."""
+    repo = plugin.get("repo", "")
+    if not installed:
+        r.raw("- plugin cache vs manifest: skipped — installed release unknown")
+        return
+    if not lookup_ok and shutil.which("gh"):
+        r.add(WARN, "kit", "plugin cache vs manifest: cannot check — the release lookup above failed, so GitHub "
+              "was not asked again")
+        return
+    data, why = download_manifest(repo, installed)
+    if data is None:
+        r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — {why}")
+        return
+    with tempfile.TemporaryDirectory(prefix="kit-health-manifest-") as tmp:
+        manifest_file = Path(tmp) / "manifest.txt"
+        manifest_file.write_bytes(data)
+        state, why = attest_verify(repo, manifest_file)
+        if state == "cannot":
+            r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — {why}")
+            return
+        if state == "failed":
+            r.add(ERR, "kit", f"plugin cache vs manifest: attestation FAILED — {why}")
+            return
+        try:
+            problems, notes = relman.verify_no_git(manifest_file.read_text(encoding="utf-8"), KIT)
+        except (OSError, ValueError) as e:
+            r.add(WARN, "kit", f"plugin cache vs manifest: cannot check — malformed manifest ({e})")
+            return
+        if problems:
+            shown = ", ".join(f"`{p}`" for p in problems[:3])
+            more = f" (+{len(problems) - 3} more)" if len(problems) > 3 else ""
+            r.add(ERR, "kit", f"plugin cache vs manifest: {len(problems)} file(s) differ from the attested "
+                  f"`{installed}` manifest: {shown}{more}")
+            return
+        commit_note = next((n for n in notes if n.startswith("commit not checked")), "")
+        msg = f"plugin cache vs manifest: matches the attested `{installed}` manifest" + (f" ({commit_note})" if commit_note else "")
+        untracked = [n.split(": ", 1)[1] for n in notes if n.startswith("untracked by the manifest:")]
+        if untracked:
+            shown = ", ".join(f"`{u}`" for u in untracked[:3])
+            more = f", +{len(untracked) - 3} more" if len(untracked) > 3 else ""
+            msg += f" — note: {len(untracked)} file(s) present but not in the manifest, not a failure: {shown}{more}"
+        r.add(OK, "kit", msg)
+
+
+def pending_update_check(r: Report, plugin: dict, installed: str, latest: dict) -> None:
+    """§ 1, plugin install, only when `release_check` found a newer release out: the files a pending update
+    would change — a path-level diff (added/removed/changed) between the installed and the newer release's
+    manifests, so the warning above says what `claude plugin update` would actually touch. Reuses `release_check`'s
+    already-fetched `latest` (never asks GitHub twice for the tag) and `download_manifest` (same timeout bound, and
+    the installed release's manifest `manifest_check` already fetched):
+    cannot fetch either manifest → one line saying so, never a failure — this is extra detail on an
+    already-reported warning, not a check of its own."""
+    repo, tag = plugin.get("repo", ""), latest.get("tag", "")
+    if not (installed and tag and repo):
+        r.raw("- pending update: files changed not listed — installed version or repo unknown")
+        return
+    texts = []
+    for t in (installed, tag):
+        data, why = download_manifest(repo, t)
+        if data is None:
+            r.raw(f"- pending update {tag}: files changed not listed — {why}")
+            return
+        texts.append(data)
+    try:
+        _, old_files = relman.parse(texts[0].decode("utf-8"))
+        _, new_files = relman.parse(texts[1].decode("utf-8"))
+    except ValueError as e:  # UnicodeDecodeError is one
+        r.raw(f"- pending update {tag}: files changed not listed — malformed manifest ({e})")
+        return
+    added = sorted(set(new_files) - set(old_files))
+    removed = sorted(set(old_files) - set(new_files))
+    changed = sorted(p for p in (set(old_files) & set(new_files)) if old_files[p] != new_files[p])
+    total = len(added) + len(removed) + len(changed)
+    if not total:
+        r.raw(f"- pending update {tag}: no tracked file changed (metadata-only release)")
+        return
+    cap = 10
+    parts: list[str] = []
+    for label, items in (("added", added), ("removed", removed), ("changed", changed)):
+        for p in items:
+            if len(parts) >= cap:
+                break
+            parts.append(f"{label} `{p}`")
+        if len(parts) >= cap:
+            break
+    more = total - len(parts)
+    text = "; ".join(parts) + (f", +{more} more" if more > 0 else "")
+    r.raw(f"- pending update {tag}: {total} file(s) changed — {text}")
 
 
 # ── review findings ────────────────────────────────

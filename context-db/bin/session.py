@@ -67,7 +67,7 @@ LEDGER_HEADER = """# Session ledger — one row per ended session (stats for gee
 
 > Appended by `session.py end`; figures come from each session's transcript via
 > `session_stats.py` (list-price estimate per model; `~$` = total (main+subagents) since
-> 2026-09-22 — earlier rows are main-session only). Cross-session cost analysis: `.context/reference/claude-cost-tracking.md`.
+> 2026-09-22 — earlier rows are main-session only).
 
 | Ended | Session | Epic | Turns | Hours | Ctx peak | Cache-read | Out | ~$ | Compactions | PRs | Tickets | Sign jobs | Drafts |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -400,7 +400,12 @@ def cmd_touch(a) -> None:
                  f"`make -C $BATON/context-db session-register NAME={a.name} …` first")
     meta["session"] = meta.get("session") or a.name  # a field-less doc must not be written back with a blank one
     if a.status:              meta["status"] = a.status
-    if a.working is not None: meta["working_on"] = a.working
+    if a.working is not None:
+        meta["working_on"] = a.working
+    elif a.working_if_empty and not meta.get("working_on"):
+        # heartbeat.sh's own first touch: its short positional focus argument fills a blank
+        # working_on, never overwrites one already on file.
+        meta["working_on"] = a.working_if_empty
     nxt = _next_prompt(a)
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
@@ -497,11 +502,39 @@ def _baton_tmp() -> str:
     return os.path.join(os.environ.get("TMPDIR") or "/tmp", f"ai-baton-{os.getuid()}")
 
 
-def _kill_heartbeat(name: str) -> bool:
-    """Stop a live heartbeat.sh for `name` (SIGTERM on the pid its pidfile names) and remove the
-    pidfile. Returns whether one was found running — a stale pidfile (process already gone, e.g. the
-    session crashed) is just cleaned up, silently."""
-    pidfile = os.path.join(_baton_tmp(), f"heartbeat-{name}.pid")
+def _kill_heartbeat(name: str, session_id: str = "") -> bool:
+    """Stop the CALLER's live heartbeat.sh for `name` (SIGTERM on the pid its pidfile names) and remove
+    the pidfile. Returns whether one was found running — a stale pidfile (process already gone, e.g. the
+    session crashed) is just cleaned up, silently. `session_id` is the caller's own harness session id:
+    heartbeat.sh keys its pidfile by it, and by the name when there is none. A pidfile under the name is
+    the caller's when the caller has no session id, or when that loop's log names the caller's id (a loop
+    an older kit started under the bare name). Any other loop under the name belongs to another session
+    registered under the same name, and is left running."""
+    tmp = _baton_tmp()
+    alive = False
+    if session_id and _kill_pidfile(os.path.join(tmp, f"heartbeat-{session_id}.pid")):
+        alive = True
+    by_name = os.path.join(tmp, f"heartbeat-{name}.pid")
+    if not session_id or _loop_session(by_name) == session_id:
+        alive = _kill_pidfile(by_name) or alive
+    return alive
+
+
+def _loop_session(pidfile: str):
+    """The harness session id a heartbeat loop was started with, read from the last start line of the
+    log beside its pidfile: "" when the loop had none, None when the log does not say."""
+    try:
+        with open(pidfile[:-len(".pid")] + ".log", encoding="utf-8", errors="replace") as f:
+            starts = [line for line in f if " start name=" in line]
+    except OSError:
+        return None
+    m = re.search(r" session=(\S+)", starts[-1]) if starts else None
+    if not m:
+        return None
+    return "" if m.group(1) == "none" else m.group(1)
+
+
+def _kill_pidfile(pidfile: str) -> bool:
     alive = False
     try:
         with open(pidfile, encoding="utf-8") as f:
@@ -523,19 +556,21 @@ def _kill_heartbeat(name: str) -> bool:
     return alive
 
 
-def _restart_heartbeat(old_name: str, new_name: str, working: str) -> bool:
-    """Stop the old name's heartbeat (if any) and, only when one was actually running, start a fresh one
-    for the new name with the same focus. An ended (or archived, `restore_from_archive`-brought-back)
+def _restart_heartbeat(old_name: str, new_name: str, working: str, session_id: str = "") -> bool:
+    """Stop the caller's heartbeat for the old name (if any) and, only when one was actually running, start
+    a fresh one for the new name with the same focus. `session_id` is the caller's own harness session id,
+    never the one on the row: two sessions registered under one name share that row, and its id is the id
+    of whichever registered last. An ended (or archived, `restore_from_archive`-brought-back)
     session, or someone else's, has no heartbeat of its own to restart — starting one anyway would attach
     heartbeat.sh to the CALLER's `claude` process and `CLAUDE_CODE_SESSION_ID`, so every touch would write
     the caller's transcript stats into the renamed row, and the caller's own session-end would later end
     an entry that was never theirs. Best-effort otherwise: heartbeat.sh needs a `claude`/`node` ancestor
     process to attach to — a bare CLI invocation (no owning session, e.g. this being run outside a Claude
     session) fails that lookup; the failure is reported to stderr and never fails the rename itself."""
-    was_running = _kill_heartbeat(old_name)
+    was_running = _kill_heartbeat(old_name, session_id)
     if not was_running:
-        print(f"session.py: no heartbeat was running for {old_name} — none started for {new_name} either "
-              f"(start one by hand if this session should have one)", file=sys.stderr)
+        print(f"session.py: no heartbeat of this session was running for {old_name} — none started for "
+              f"{new_name} either (start one by hand if this session should have one)", file=sys.stderr)
         return False
     script = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                             "..", "..", "skills", "session-register", "heartbeat.sh"))
@@ -551,6 +586,10 @@ def _restart_heartbeat(old_name: str, new_name: str, working: str) -> bool:
         detail = (r.stderr or r.stdout).strip()
         print(f"session.py: heartbeat restart for {new_name} did not start ({detail or 'no output'})"
               " — the old one was stopped — start it by hand", file=sys.stderr)
+        return False
+    if "already running" in r.stdout:  # exit 0, but nothing was started: a loop of this session is still up
+        print(f"session.py: heartbeat for {new_name} was not started ({r.stdout.strip()})"
+              " — stop that loop and start the new heartbeat by hand", file=sys.stderr)
         return False
     return True
 
@@ -576,7 +615,8 @@ def cmd_rename(a) -> None:
     except FileNotFoundError:
         pass
     record_name(a.new)
-    restarted = _restart_heartbeat(a.old, a.new, working)
+    # the caller's own session id, not the row's: the row may carry another session's (see _restart_heartbeat)
+    restarted = _restart_heartbeat(a.old, a.new, working, os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip())
     print(f"renamed {os.path.relpath(old_path, CTX)} → {os.path.relpath(new_path, CTX)}"
           + (" (heartbeat restarted)" if restarted else " (heartbeat NOT restarted — see above)"))
 
@@ -600,6 +640,10 @@ def main() -> int:
         sp.add_argument("--epic", default="")
         sp.add_argument("--repos", default="")
         sp.add_argument("--working", default=None)   # None = unchanged; "" allowed to clear
+        sp.add_argument("--working-if-empty", default="",
+                        help="set working_on to this only when the registered value is still blank "
+                             "(heartbeat.sh's own first touch, so its short focus argument never clobbers a "
+                             "detailed one already on file)")
         sp.add_argument("--resp", default="")
         sp.add_argument("--note", default="", help="text for the body's `## Notes` section (replaces that section only)")
         sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session "

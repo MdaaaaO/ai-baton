@@ -19,7 +19,10 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    and Read the echoed path (shell variables do not survive between tool calls). Exit 0 GREEN · 1 AMBER ·
    2 RED. Read-only: only `--stamp` writes. Sections 1–6 (kit, leaks, config, machine, engine, stamp); § 1 names
    the install mode (warns when it differs from the one setup.sh recorded) and
-   warns when a newer kit release is out and names the update command; § 5 says whether `.context/` is an
+   warns when a newer kit release is out and names the update command; on a clone, § 1 also names the release
+   channel, the installed tag and a held preview, and warns when the last sync applied an update it could not
+   verify; on a plugin install, it checks the cache against the installed release's attested manifest and, when
+   an update is pending, lists the files it would change; § 5 says whether `.context/` is an
    adopted ctx store (not adopted: `ctx_adapter.py adopt`, once; behind the kit's settings/types: the same
    `adopt` brings it forward); § 6 lists the units changed since the
    last stamp. A stale row in § 3: `/env-init --refresh`, never a hand-dated row.

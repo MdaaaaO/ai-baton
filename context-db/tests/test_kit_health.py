@@ -2,6 +2,7 @@
 tracker-aware ticket shape, anchored allow-list, loader errors reported, a plain run that never writes the DB.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import hashlib
 import importlib.util
 import json
 import os
@@ -706,7 +707,8 @@ class SecKitSyncDedup(unittest.TestCase):
         with mock.patch.object(kh, "sh", fake_sh), \
              mock.patch.object(kh.kit_profile, "plugin_install", lambda *a, **k: None), \
              mock.patch.object(kh, "install_mode_check", lambda *a, **k: None), \
-             mock.patch.object(kh, "release_check", lambda *a, **k: None), \
+             mock.patch.object(kh, "release_check", lambda *a, **k: ("", None, False)), \
+             mock.patch.object(kh, "clone_channel_report", lambda *a, **k: None), \
              mock.patch.object(kh, "review_ratio", lambda *a, **k: None):
             kh.sec_kit(r, 90)
             if adopt_check is not None:
@@ -1279,6 +1281,292 @@ class Release(unittest.TestCase):
         text = r.findings[0][2]
         self.assertIn(f"git -C {kh.KIT} pull --ff-only", text)
         self.assertNotIn("run `make claude_sync`", text)
+
+
+class CloneChannelReport(unittest.TestCase):
+    """A clone install's channel, installed tag and held preview (`.sync-preview`, shown verbatim — it
+    already names the tag and the apply command); an `ok` last sync whose `.sync-status` detail names itself
+    `unverified (reason)` gets its own WARN naming the hand-verify command."""
+
+    def run_report(self, channel_rc=1, channel_out="", describe="v0.3.0", preview_text=None, status_text=None):
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as tmp:
+            kh.KIT = Path(tmp)
+            if preview_text is not None:
+                (kh.KIT / ".sync-preview").write_text(preview_text, encoding="utf-8")
+            if status_text is not None:
+                (kh.KIT / ".sync-status").write_text(status_text, encoding="utf-8")
+            r = kh.Report()
+
+            def fake(cmd, *a, **kw):
+                if "config" in cmd:
+                    return (channel_rc, channel_out, "")
+                if "describe" in cmd:
+                    return (0, describe, "") if describe else (128, "", "no tag")
+                if "remote" in cmd:
+                    return (0, "https://github.com/example/kit.git", "")
+                return (0, "", "")
+            with mock.patch.object(kh, "sh", side_effect=fake):
+                kh.clone_channel_report(r)
+            return kh, r
+
+    def test_channel_tag_and_held_preview_are_shown(self):
+        preview = "release v0.4.0 held — `make claude_sync` applies it (or `sh sync.sh --accept`)\n\ncommits:\n...\n"
+        kh, r = self.run_report(describe="v0.3.0", preview_text=preview)
+        self.assertEqual(len(r.lines), 1, r.lines)
+        line = r.lines[0]
+        self.assertIn("channel: release tags (default)", line)
+        self.assertIn("installed release: `v0.3.0`", line)
+        self.assertIn("release v0.4.0 held", line)
+        self.assertIn("make claude_sync", line)
+
+    def test_main_channel_is_named(self):
+        kh, r = self.run_report(channel_rc=0, channel_out="main", describe="v0.2.0")
+        self.assertIn("`main` (tracks origin/main directly)", r.lines[0])
+
+    def test_no_preview_is_silent_about_holding(self):
+        kh, r = self.run_report(describe="v0.3.0")
+        self.assertNotIn("held", r.lines[0])
+
+    def test_unverified_last_sync_warns_with_the_hand_verify_command(self):
+        kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok unverified (offline, no gh)\n")
+        self.assertEqual(r.counts[kh.WARN], 1, r.lines)
+        text = r.findings[0][2]
+        self.assertIn("unverified (offline, no gh)", text)
+        self.assertIn("gh attestation verify", text)
+        self.assertIn("gh release download", text)
+        self.assertIn("example/kit", text)
+
+    def test_a_plain_ok_sync_never_warns(self):
+        kh, r = self.run_report(describe="v0.3.0", status_text="2026-10-01T00:00:00Z ok kit@abc1234\n")
+        self.assertEqual(r.counts[kh.WARN], 0, r.lines)
+
+
+GH_STUB = """#!/bin/sh
+# stub gh for kit-health's manifest-check tests: only understands the two subcommands manifest_check and
+# pending_update_check call, never touches the network.
+cmd="$1 $2"
+case "$cmd" in
+  "release download")
+    tag="$3"
+    shift 3
+    dir=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --dir) dir="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if [ -n "${GH_STUB_NO_ASSET:-}" ]; then echo "$GH_STUB_NO_ASSET" >&2; exit 1; fi
+    [ "${GH_STUB_EMPTY_DOWNLOAD:-}" = "1" ] && exit 0
+    [ -n "${GH_STUB_CALLS:-}" ] && echo "download $tag" >>"$GH_STUB_CALLS"
+    if [ "${GH_STUB_DOWNLOAD_FAIL:-}" = "1" ]; then echo "${GH_STUB_DOWNLOAD_ERR:-stub: download failed}" >&2; exit 1; fi
+    case "$tag" in
+      v0.3.0) content="${GH_STUB_MANIFEST_OLD:-$GH_STUB_MANIFEST}" ;;
+      v0.4.0) content="${GH_STUB_MANIFEST_NEW:-$GH_STUB_MANIFEST}" ;;
+      *) content="$GH_STUB_MANIFEST" ;;
+    esac
+    printf '%s' "$content" >"$dir/manifest.txt"
+    exit 0
+    ;;
+  "attestation verify")
+    [ "$3" = "--help" ] && exit "${GH_STUB_ATTEST_HELP_RC:-0}"
+    if [ "${GH_STUB_ATTEST_RC:-0}" != "0" ]; then echo "${GH_STUB_ATTEST_ERR:-stub: attestation failed}" >&2; fi
+    exit "${GH_STUB_ATTEST_RC:-0}"
+    ;;
+esac
+exit 0
+"""
+
+
+class ManifestCheck(unittest.TestCase):
+    """A plugin install's cache checked against the installed release's attested manifest — `gh release
+    download` + `gh attestation verify` + `release_manifest.verify_no_git`, a stub `gh` on PATH, never the real
+    `gh`, never the network."""
+
+    PLUGIN = {"repo": "example/kit", "commit": "", "version": "0.3.0", "updated": ""}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp.name)
+        self.cache = self.tmp_path / "cache"
+        self.cache.mkdir()
+        (self.cache / "a.txt").write_text("alpha\n", encoding="utf-8")
+        self.stub_dir = self.tmp_path / "stubbin"
+        self.stub_dir.mkdir()
+        stub = self.stub_dir / "gh"
+        stub.write_text(GH_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        self.manifest_text = "commit cafef00d\n" + hashlib.sha256(b"alpha\n").hexdigest() + "  a.txt\n"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_check(self, installed="v0.3.0", extra_env=None, path=None):
+        kh = load_kit_health()
+        kh.KIT = self.cache
+        r = kh.Report()
+        env = {"PATH": path or f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}", "GH_STUB_MANIFEST": self.manifest_text}
+        if extra_env:
+            env.update(extra_env)
+        with mock.patch.dict(os.environ, env):
+            kh.manifest_check(r, dict(self.PLUGIN), installed)
+        return kh, r
+
+    def test_matching_cache_is_ok(self):
+        kh, r = self.run_check()
+        self.assertEqual((r.counts[kh.OK], r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0, 0), r.lines)
+        self.assertIn("matches the attested `v0.3.0` manifest", r.lines[-1])
+
+    def test_tampered_file_is_err(self):
+        (self.cache / "a.txt").write_text("tampered\n", encoding="utf-8")
+        kh, r = self.run_check()
+        self.assertEqual(r.counts[kh.ERR], 1, r.lines)
+        self.assertIn("hash mismatch: a.txt", r.findings[0][2])
+
+    def test_attestation_failure_is_err(self):
+        kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_RC": "1"})
+        self.assertEqual(r.counts[kh.ERR], 1, r.lines)
+        self.assertIn("attestation FAILED", r.findings[0][2])
+
+    def test_gh_without_attestation_command_is_warn(self):
+        kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_HELP_RC": "1"})
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+        self.assertIn("cannot check", r.findings[0][2])
+        self.assertIn("no `attestation` command", r.findings[0][2])
+
+    def test_attestation_without_an_answer_is_warn(self):
+        for err in ('Post "https://api.github.com/graphql": dial tcp: lookup api.github.com: no such host',
+                    "To get started with GitHub CLI, please run:  gh auth login"):
+            with self.subTest(err=err):
+                kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_RC": "1", "GH_STUB_ATTEST_ERR": err})
+                self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+                self.assertIn("cannot check", r.findings[0][2])
+                self.assertIn("got no answer", r.findings[0][2])
+
+    def test_no_gh_is_warn(self):
+        empty_bin = self.tmp_path / "empty-bin"
+        empty_bin.mkdir()
+        kh, r = self.run_check(path=str(empty_bin))
+        self.assertEqual(r.counts[kh.WARN], 1, r.lines)
+        self.assertIn("`gh` not installed", r.findings[0][2])
+
+    def test_attestation_rate_limit_or_server_error_is_warn(self):
+        for err in ("HTTP 403: API rate limit exceeded for user ID 1 (https://api.github.com/x)",
+                    "HTTP 429: Too Many Requests", "HTTP 502: Bad Gateway", "HTTP 401: Bad credentials"):
+            with self.subTest(err=err):
+                kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_RC": "1", "GH_STUB_ATTEST_ERR": err})
+                self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+                self.assertIn("got no answer", r.findings[0][2])
+
+    def test_attestation_not_found_is_err(self):
+        kh, r = self.run_check(extra_env={"GH_STUB_ATTEST_RC": "1", "GH_STUB_ATTEST_ERR": "HTTP 404: Not Found"})
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (0, 1), r.lines)
+
+    def test_no_manifest_asset_is_warn(self):
+        """`gh release download` exits 1 with one of two wordings when the release has no such asset."""
+        for said in ("no assets match the file pattern", "no assets to download"):
+            with self.subTest(said=said):
+                kh, r = self.run_check(extra_env={"GH_STUB_NO_ASSET": said})
+                self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+                self.assertIn("no `manifest.txt` release asset", r.findings[0][2])
+
+    def test_a_download_that_leaves_no_file_is_warn(self):
+        kh, r = self.run_check(extra_env={"GH_STUB_EMPTY_DOWNLOAD": "1"})
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+        self.assertIn("no `manifest.txt` release asset", r.findings[0][2])
+
+    def test_a_failed_release_lookup_is_warn_without_a_second_ask(self):
+        calls = self.tmp_path / "calls"
+        kh = load_kit_health()
+        kh.KIT = self.cache
+        r = kh.Report()
+        env = {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}", "GH_STUB_MANIFEST": self.manifest_text,
+               "GH_STUB_CALLS": str(calls)}
+        with mock.patch.dict(os.environ, env):
+            kh.manifest_check(r, dict(self.PLUGIN), "v0.3.0", lookup_ok=False)
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+        self.assertIn("release lookup above failed", r.findings[0][2])
+        self.assertFalse(calls.exists(), "gh was asked again")
+
+    def test_the_installed_manifest_is_downloaded_once_per_run(self):
+        calls = self.tmp_path / "calls"
+        kh = load_kit_health()
+        kh.KIT = self.cache
+        r = kh.Report()
+        env = {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}", "GH_STUB_MANIFEST": self.manifest_text,
+               "GH_STUB_CALLS": str(calls)}
+        with mock.patch.dict(os.environ, env):
+            kh.manifest_check(r, dict(self.PLUGIN), "v0.3.0")
+            kh.pending_update_check(r, dict(self.PLUGIN), "v0.3.0", {"tag": "v0.4.0", "published": "", "url": ""})
+        self.assertEqual(calls.read_text(encoding="utf-8").split("\n")[:-1], ["download v0.3.0", "download v0.4.0"])
+
+    def test_no_answer_on_a_download_stops_further_downloads(self):
+        calls = self.tmp_path / "calls"
+        kh = load_kit_health()
+        kh.KIT = self.cache
+        r = kh.Report()
+        env = {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}", "GH_STUB_CALLS": str(calls),
+               "GH_STUB_DOWNLOAD_FAIL": "1", "GH_STUB_DOWNLOAD_ERR": "dial tcp: lookup api.github.com: no such host"}
+        with mock.patch.dict(os.environ, env):
+            kh.manifest_check(r, dict(self.PLUGIN), "v0.3.0")
+            kh.pending_update_check(r, dict(self.PLUGIN), "v0.3.0", {"tag": "v0.4.0", "published": "", "url": ""})
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.ERR]), (1, 0), r.lines)
+        self.assertEqual(calls.read_text(encoding="utf-8").split("\n")[:-1], ["download v0.3.0"])
+
+
+class PendingUpdateCheck(unittest.TestCase):
+    """When a newer release is out, the files a pending update would change — a path-level diff between the
+    installed and the newer release's manifests."""
+
+    PLUGIN = {"repo": "example/kit", "commit": "", "version": "0.3.0", "updated": ""}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp.name)
+        self.cache = self.tmp_path / "cache"
+        self.cache.mkdir()
+        self.stub_dir = self.tmp_path / "stubbin"
+        self.stub_dir.mkdir()
+        stub = self.stub_dir / "gh"
+        stub.write_text(GH_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_check(self, old_manifest, new_manifest, latest_tag="v0.4.0", extra_env=None):
+        kh = load_kit_health()
+        kh.KIT = self.cache
+        r = kh.Report()
+        env = {"PATH": f"{self.stub_dir}{os.pathsep}{os.environ['PATH']}",
+               "GH_STUB_MANIFEST_OLD": old_manifest, "GH_STUB_MANIFEST_NEW": new_manifest}
+        if extra_env:
+            env.update(extra_env)
+        latest = {"tag": latest_tag, "published": "", "url": ""}
+        with mock.patch.dict(os.environ, env):
+            kh.pending_update_check(r, dict(self.PLUGIN), "v0.3.0", latest)
+        return kh, r
+
+    def test_lists_added_removed_and_changed_files(self):
+        old = ("commit aaa\n" + hashlib.sha256(b"alpha\n").hexdigest() + "  a.txt\n"
+               + hashlib.sha256(b"x\n").hexdigest() + "  old.txt\n")
+        new = ("commit bbb\n" + hashlib.sha256(b"ALPHA\n").hexdigest() + "  a.txt\n"
+               + hashlib.sha256(b"y\n").hexdigest() + "  new.txt\n")
+        kh, r = self.run_check(old, new)
+        self.assertEqual(len(r.lines), 1, r.lines)
+        text = r.lines[0]
+        self.assertIn("v0.4.0", text)
+        self.assertIn("3 file(s) changed", text)
+        self.assertIn("added `new.txt`", text)
+        self.assertIn("removed `old.txt`", text)
+        self.assertIn("changed `a.txt`", text)
+
+    def test_cannot_fetch_is_one_line_not_a_failure(self):
+        kh, r = self.run_check("commit a\n", "commit b\n", extra_env={"GH_STUB_DOWNLOAD_FAIL": "1"})
+        self.assertEqual((r.counts[kh.OK], r.counts[kh.WARN], r.counts[kh.ERR]), (0, 0, 0), r.lines)
+        self.assertEqual(len(r.lines), 1, r.lines)
+        self.assertIn("files changed not listed", r.lines[0])
 
 
 class LazyWorkspace(unittest.TestCase):
