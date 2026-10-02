@@ -22,4 +22,4 @@ Loaded from `SKILL.md` § Answer. Same meaning in every section.
 - Trailing lines: `**Auto**` repeats the gate facts only (`class`, `packages`, CI, threads from `queue.json .auto`) or `none`;
   `**AUTO-COMMENT**` is `(<auto_comment_mode>) · ` then every eligible row as a `[repo#n](url)` link (comma-joined) or `none` —
   read `.auto_comment.eligible` off `queue.json`, never recompute the gate here; `**Next**` carries the errors count. Nothing
-  before the header line; the `MARK` trailer (above) is the only thing after `**Next**`.
+  before the header line; the `MARK` trailer (`SKILL.md` § Answer) is the only thing after `**Next**`.

@@ -1,6 +1,6 @@
 ---
 name: pr-open
-description: "Checklist for opening a PR: sizing gate first, body with the diff-derived diagram set, a ## Verified section (a failing run forces --draft), public-text-check and length_check, labels, reviewers, pr-watch, tracker link, and a Slack review draft (never sent). Use when writing a PR body and right after `gh pr create`."
+description: "Checklist for opening a PR: sizing gate first, body with the diff-derived diagram set, a ## Verified section (a failing run forces --draft), public-text-check and length_check, labels, reviewers, pr-watch, tracker link, and a Slack review draft where enabled (never sent). Use when writing a PR body and right after `gh pr create`."
 metadata:
   version: "31"
   updated: "2026-10-02"
