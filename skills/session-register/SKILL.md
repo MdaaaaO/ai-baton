@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`) and keep its heartbeat fresh (each refreshes the row's stats line). Invoke at the start of any session working an epic/feature, when responsibilities change, on every flush, and before ending. Read the registry to see which session owns an epic, PR or worktree."
 metadata:
-  version: "28"
+  version: "29"
   updated: "2026-10-01"
   reviewed: "2026-09-24"
 user-invocable: true
@@ -82,7 +82,7 @@ worktree.
    own backstop heartbeat (below) was actually running for the old name, restarts it under the new name
    with the same focus in one step. Only rename **your own live session** — renaming an ended or someone
    else's entry moves the file but starts no heartbeat (there is none of yours to restart), so do that by
-   hand if it still needs one:
+   hand if it still needs one. A loop another session started under the same name is left running:
    ```sh
    make -C $BATON/context-db session-rename FROM=<old-name> TO=<new-name>
    ```
@@ -144,16 +144,20 @@ Your entry must show a heartbeat within the last 12h or it is treated as stale.
   ```sh
   bash $BATON/skills/session-register/heartbeat.sh <name> "<current focus>"
   ```
-  It finds the `claude` process that owns this session, detaches itself (`skills/_lib/portable.sh`'s
+  It finds the `claude` process that owns this session (the walk also accepts a bare version string as
+  the comm, the shape the desktop app's own binary reports), detaches itself (`skills/_lib/portable.sh`'s
   `detach` — the Bash tool kills its process group after ~10 min otherwise; `setsid` where the host
   has it, a `python3 os.setsid()` re-exec on macOS/BSD, which ship none), touches your row every 6h
   while that process is alive, and marks the row `ended` within a minute of the session dying. So the
   registry never lies about liveness *and* no `/loop` wake-up re-bills the prefix for a heartbeat (the
-  old `/loop 8h` backstop cost one full-prefix turn per tick — retired 2026-09-18). A second start is
-  a no-op (pidfile `$TMPDIR/ai-baton-<uid>/heartbeat-<name>.pid`; log `…heartbeat-<name>.log` beside
-  it — namespaced per user, never a bare `/tmp/heartbeat-<name>.*` shared by everyone on the host).
-  Later focus changes still go
-  through `session-touch … WORKING=` — the script only sets the focus you gave it once.
+  old `/loop 8h` backstop cost one full-prefix turn per tick — retired 2026-09-18). A second start for
+  the SAME session is a no-op, also under another key: the same name and the same owning process is one
+  loop (pidfile `$TMPDIR/ai-baton-<uid>/heartbeat-<key>.pid`; log
+  `…heartbeat-<key>.log` beside it, `<key>` your `$CLAUDE_CODE_SESSION_ID` else your name — namespaced
+  per user and per session, never a bare `/tmp/heartbeat-<name>.*` shared by everyone on the host, nor
+  one name's pidfile mistaken for another live session's). Later focus changes still go
+  through `session-touch … WORKING=` — the script's own first tick only fills a still-blank
+  `working_on`, never overwriting one you already registered.
   Run it from the session's own Bash tool (not a subagent): it captures `$CLAUDE_CODE_SESSION_ID`
   there, which is what the stats line (below) is derived from.
 
@@ -177,7 +181,7 @@ jobs · Slack drafts`
   entry. `NOSTATS=1` skips the refresh; `SESSION_ID=<uuid>` derives stats for another session.
 - On `session-end` the block is written under `## Session stats` in your session file and one row is
   appended to `.context/sessions/_ledger.md` (cross-session ledger; `_`-prefixed files are skipped by
-  the index). The ledger feeds `.context/reference/claude-cost-tracking.md`.
+  the index).
 - The line ends with `split hint: …` once the average prefix over the last `SESSION_STATS_SPLIT_WINDOW`
   turns (default 20) reaches `SESSION_STATS_SPLIT_THRESHOLD` tokens (default 150k) — a sustained fat
   prefix, not one busy turn, and never on the strength of turns from before the last auto-compact. When
