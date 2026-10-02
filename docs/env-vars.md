@@ -45,9 +45,9 @@ listed below for completeness, but their single source of truth is `docs/packagi
 
 | Name | Default | Read by | Purpose | Scope |
 |---|---|---|---|---|
-| `KIT_CTX` | unset (the pinned install under `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<tag>/`) | `context-db/bin/ctx_adapter.py` | a `ctx` executable to use instead of the pinned install; set but not an executable file means "not installed", never a fallback | user-facing |
+| `KIT_CTX` | unset (the pinned install under `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<version>/`) | `context-db/bin/ctx_adapter.py` | a `ctx` executable to use instead of the pinned install; set but not an executable file means "not installed", never a fallback | user-facing |
 | `CTX_STORE` | unset (the hooks name the content root with `--store`) | `context-db/bin/ctx_adapter.py` | ctx-store's own store locator; when set, the hooks leave it to ctx instead of naming the content root | user-facing |
-| `KIT_NO_CTX_FETCH` | unset | `setup.sh` | `1` skips `ctx_adapter.py install`'s network git clone of the pinned ctx-store tag and only prints the manual install/adopt commands, as setup.sh always did before; set by the setup tests so none of them clones from the network | user-facing |
+| `KIT_NO_CTX_FETCH` | unset | `setup.sh` | `1` skips `ctx_adapter.py install`'s network fetch of the pinned ctx-store release (its wheel, from PyPI, checked against the pinned sha256) and only prints the manual install/adopt commands, as setup.sh always did before; set by the setup tests so none of them downloads from the network | user-facing |
 
 ## `context-db/bin/new.sh` (`make new …`)
 
