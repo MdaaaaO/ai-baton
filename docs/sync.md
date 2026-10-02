@@ -61,7 +61,7 @@ refused pull is seen by the next session instead of staying silent:
 |---|---|---|
 | `pending <epoch>` | written just before the fetch (bounded by `timeout 60`, or a shell watchdog where `timeout` is missing); still there = the run was killed | when older than 5 minutes |
 | `ok <kit@sha>` | fetched; fast-forwarded, already in step, or already past the held tag | never |
-| `ok <kit@sha> unverified (<reason>)` | `--accept` applied a release tag whose manifest attestation could not be checked (no `gh` or one too old, not authenticated, a manifest.txt that could not be downloaded for any reason, or the verify call itself got no answer) | not from `sync-check.sh` — the standalone word `unverified` and the reason are in `.sync-status` and in `make claude_sync`'s output; `kit-health` § 1 warns on it and names the command to verify by hand |
+| `ok <kit@sha> unverified (<reason>)` | `--accept` applied a release tag whose manifest attestation could not be checked (no `gh` or one too old, not authenticated, a manifest.txt that could not be downloaded for any reason, or the verify call itself got no answer) | not from `sync-check.sh` — the standalone word `unverified` and the reason are in `.sync-status` and in `make claude_sync`'s output for this run only; the durable mark lives in `.sync-unverified` (see below), which `kit-health` § 1 reads and warns on, naming the command to verify by hand |
 | `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | not from the status line — its kit check names the waiting tag for as long as `HEAD` lacks it (unless `.sync-rejected` already names this tag — see below) |
 | `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
 | `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed, an accepted release tag failed manifest verification, or a previously rejected tag is still waiting | always |
@@ -116,6 +116,22 @@ A later release tag than the rejected one is held as usual (and the stale `.sync
 The file is removed once a release applies, verified or unverified. Re-running `sh .claude/sync.sh --accept` on the rejected tag verifies it again from scratch —
 once the release is fixed (a new manifest, a corrected tag), the check can pass and the release goes
 through.
+
+**An unverified apply stays marked, past the run that applied it.** `.sync-unverified` (ignored, same
+shape as `.sync-rejected`: one line, `<commit-sha> <reason>`) remembers the commit a release was applied
+to without the manifest check being able to run. Unlike `.sync-status`, a later plain run does not
+overwrite it: `kit-health` § 1 reads this file, not `.sync-status`, so the warning survives past the one
+session that applied the release. It is cleared once `main` no longer points at the commit it names — a
+later fast-forward, verified or not, or anything else that moved the branch — or once a later
+`sh .claude/sync.sh --accept` on that same, still-current commit gets a verified answer (`gh` now
+installed or authenticated, say); a check that still cannot run refreshes the stored reason and reports
+`ok … unverified (<reason>)` again, and one that runs and fails reports `error` (exit 1) and rewrites the
+mark as `<commit-sha> rejected (<reason>)` — the release stays applied, nothing is rolled back, and
+`kit-health` § 1 reports an error with that reason from then on (the status line goes back to `ok` at the
+next plain run; the mark does not). A `rejected` mark is never turned back into `unverified`: a later
+`--accept` whose check cannot run leaves it as it is, and only a verified answer or a moved `main`
+removes it. The mark follows `main`, not `HEAD`: a run made while the checkout is
+detached or on another branch refuses to sync and leaves the mark alone.
 
 A contributor who wants the old behaviour — always track `origin/main`, no hold — opts out with:
 

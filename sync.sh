@@ -48,8 +48,10 @@
 #                                  gh's own rejection of the manifest is never read as this, even
 #                                  when its wording overlaps); status `ok …` with the standalone word
 #                                  `unverified` in the detail — the word and the reason live in
-#                                  `.sync-status` and in `make claude_sync`'s output; `sync-check.sh`
-#                                  does not warn on it
+#                                  `.sync-status` and in `make claude_sync`'s output for this run only;
+#                                  `sync-check.sh` does not warn on it. The durable mark is
+#                                  `.sync-unverified` (below) — `kit-health` § 1 reads that, not
+#                                  `.sync-status`, so the warning survives past this one run
 #
 #   sh .claude/sync.sh [--accept]       (from the workspace root, or via `make claude_sync`)
 #
@@ -76,6 +78,18 @@
 # so a later unattended run (no --accept) reports `error` for that tag instead of writing `held
 # <tag>` over the rejection — see the verify_release outcomes above. Removed once a release applies
 # (verified or unverified) or the held tag moves past the one it names.
+#
+# .sync-unverified (ignored; one line: `<commit-sha> <reason>`, the same "unverified (<reason>)" text
+# `.sync-status` carries for that one run) is the durable mark of an applied-but-unverified release: it
+# stays, unlike `.sync-status`, past the run that wrote it, so `kit-health` § 1 keeps warning until a
+# later --accept verifies the release or `main` moves to another commit. Written when --accept
+# applies a release the manifest check could not run on (a later --accept whose check runs and
+# rejects that commit rewrites it as `<commit-sha> rejected (<reason>)`); removed once `main` no
+# longer points at the commit it names (a later fast-forward, verified or not, or anything else
+# that moves the branch — checked once at the end of every run) or once a later --accept on that
+# same, still-current commit gets a verified answer (sync_release below). The branch is compared,
+# not HEAD: a run made while the checkout is detached or on another branch refuses to sync and
+# must not drop the mark of the release `main` still points at.
 set -u
 FETCH_TIMEOUT="${SYNC_FETCH_TIMEOUT:-60}"  # seconds; Claude Code does not enforce an async hook's `timeout` (docs/sync.md)
 LOCK_WAIT="${SYNC_LOCK_WAIT:-30}"          # seconds to wait for another sync.sh's flock
@@ -89,6 +103,7 @@ LOG="$HERE/sync.log"
 STATUS="$HERE/.sync-status"
 PREVIEW="$HERE/.sync-preview"
 REJECTED="$HERE/.sync-rejected"
+UNVERIFIED="$HERE/.sync-unverified"
 FAIL=""; PULLED=""; OFFLINE=""; HELD=""; ERRF=""; VERIFY_SUFFIX=""; VERIFY_FAIL=""
 VERIFY_ERRF=""; VERIFY_DIR=""; REJECT_REASON=""
 
@@ -294,8 +309,18 @@ verify_release() {
 # held as usual, and the stale rejection is cleared); with --accept, verifies the tag's manifest
 # (verify_release above) and fast-forwards to it — unless the check ran and failed, in which case
 # nothing is applied and the rejection is remembered in .sync-rejected for the next unattended run.
+#
+# Already at <tag> and --accept is given: usually a no-op, except when .sync-unverified still marks
+# this exact commit unverified — then the manifest is checked again (the user is asking on purpose,
+# e.g. after fixing `gh`), so a release that now verifies can clear its own mark. A check that still
+# cannot run refreshes the stored reason and says `unverified` in this run's status again; one that
+# runs and fails reports `error` (exit 1) and rewrites the mark as `<commit-sha> rejected (<reason>)`
+# — the release stays applied, nothing is rolled back, and `kit-health` § 1 reports an error with
+# that reason from then on (the status line's `error` only lasts until the next plain run). A
+# `rejected` mark is only ever removed, never turned back into `unverified`: a later check that
+# cannot run leaves it as it is.
 sync_release() {
-  local tag=$1 target before verify_suffix rej_line rej_tag
+  local tag=$1 target before verify_suffix rej_line rej_tag mark_line mark_sha
   target="$(git rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)"
   before="$(git rev-parse HEAD 2>/dev/null)"
   # an unreadable tag must not look like "already there": the ancestor test below fails on an empty target too
@@ -303,6 +328,30 @@ sync_release() {
   rm -f "$PREVIEW"
   if [ "$target" = "$before" ] || ! git merge-base --is-ancestor "$before" "$target" 2>/dev/null; then
     PULLED="kit@$(git rev-parse --short HEAD)"
+    if [ -n "$ACCEPT" ] && [ "$target" = "$before" ] && [ -f "$UNVERIFIED" ]; then
+      mark_line=""
+      IFS= read -r mark_line <"$UNVERIFIED" 2>/dev/null || true
+      mark_sha="${mark_line%% *}"
+      if [ "$mark_sha" = "$before" ]; then
+        if verify_release "$tag" "$before"; then
+          if [ -n "$VERIFY_SUFFIX" ]; then
+            PULLED="$PULLED $VERIFY_SUFFIX"
+            # a check that could not run says nothing new about a release an earlier check rejected
+            case "${mark_line#* }" in
+              rejected*) ;;
+              *) printf '%s %s\n' "$before" "$VERIFY_SUFFIX" >"$UNVERIFIED" ;;
+            esac
+          else
+            rm -f "$UNVERIFIED"
+          fi
+        else
+          # verify_release words its failure for a release that was held back; this one is applied
+          FAIL="kit: release $tag is applied but failed verification: $REJECT_REASON"
+          printf '%s rejected (%s)\n' "$before" "$REJECT_REASON" >"$UNVERIFIED"
+          return 1
+        fi
+      fi
+    fi
     return 0
   fi
   if [ -z "$ACCEPT" ]; then
@@ -327,7 +376,10 @@ sync_release() {
   verify_suffix="$VERIFY_SUFFIX"
   ff_to "refs/tags/$tag" " ($tag)" || return 1
   rm -f "$REJECTED"
-  [ -n "$verify_suffix" ] && PULLED="$PULLED $verify_suffix"
+  if [ -n "$verify_suffix" ]; then
+    PULLED="$PULLED $verify_suffix"
+    printf '%s %s\n' "$target" "$verify_suffix" >"$UNVERIFIED"
+  fi
   return 0
 }
 
@@ -510,6 +562,19 @@ if [ -f "$STATUS" ]; then
 fi
 
 sync_kit
+
+# .sync-unverified is only good for the exact commit it was written against: once `main` no longer
+# points at it — a later fast-forward, verified or not, moved it on, or anything else changed it
+# outside this script — the mark is stale and must stop warning about a commit that is no longer
+# current. `main` is read, not HEAD: this also runs after sync_kit refused a checkout that is
+# detached or on another branch, and switching back to `main` returns to the marked release. A
+# branch that cannot be read proves nothing, so the mark stays.
+if [ -f "$UNVERIFIED" ]; then
+  unv_line=""
+  IFS= read -r unv_line <"$UNVERIFIED" 2>/dev/null || true
+  main_sha="$(git -C "$HERE" rev-parse -q --verify refs/heads/main 2>/dev/null)" || main_sha=""
+  [ -z "$main_sha" ] || [ "${unv_line%% *}" = "$main_sha" ] || rm -f "$UNVERIFIED"
+fi
 
 if [ -n "$FAIL" ]; then
   status "error $FAIL"
