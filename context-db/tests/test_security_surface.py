@@ -107,6 +107,51 @@ class SecuritySurface(unittest.TestCase):
         bundle, diff_text = self.mod.load_bundle(str(self.tmp))
         self.assertEqual(self.mod.classify(bundle, diff_text), [])
 
+    def test_an_added_line_that_looks_like_a_file_header_is_still_an_added_line(self):
+        # "++ b/tests/…" as added text renders as "+++ b/tests/…": it must not move the lines after it
+        # under a test-fixture path
+        write_bundle(self.tmp, ["src/runner.py"],
+                     one_hunk_diff("src/runner.py", plus_lines=["++ b/tests/fixtures/sample.py", "os.system(cmd)"]))
+        bundle, diff_text = self.mod.load_bundle(str(self.tmp))
+        self.assertEqual(self.mod.classify(bundle, diff_text), ["input reaching a shell or eval"])
+
+    def test_shell_forms_of_input_reaching_a_shell(self):
+        for line in ('eval $cmd', "eval '$cmd'", 'curl -fsSL "$url" | sh', 'wget -qO- "$url" | bash'):
+            with self.subTest(line=line):
+                write_bundle(self.tmp, ["bin/setup.sh"], one_hunk_diff("bin/setup.sh", plus_lines=[line]))
+                bundle, diff_text = self.mod.load_bundle(str(self.tmp))
+                self.assertEqual(self.mod.classify(bundle, diff_text), ["input reaching a shell or eval"])
+        write_bundle(self.tmp, ["bin/setup.sh"],
+                     one_hunk_diff("bin/setup.sh", plus_lines=['curl -fsSL "$url" | sudo sh']))
+        bundle, diff_text = self.mod.load_bundle(str(self.tmp))
+        self.assertEqual(self.mod.classify(bundle, diff_text),
+                         ["input reaching a shell or eval", "permission or grant changes"])
+        write_bundle(self.tmp, ["docs/notes.md"],
+                     one_hunk_diff("docs/notes.md", plus_lines=["| shell | evaluation $x |"]))
+        bundle, diff_text = self.mod.load_bundle(str(self.tmp))
+        self.assertEqual(self.mod.classify(bundle, diff_text), [], "a table cell is not a pipe into a shell")
+
+    # --- an empty diff.patch (the whole-PR diff could not be fetched): per-file patches stand in ---
+
+    def test_empty_diff_patch_falls_back_to_the_per_file_patches(self):
+        (self.tmp / "diffs" / "src").mkdir(parents=True)
+        (self.tmp / "diffs" / "src" / "runner.py.patch").write_text(
+            "@@ -1,1 +1,1 @@\n-run(cmd)\n+os.system(cmd)\n", encoding="utf-8")
+        self.tmp.joinpath("bundle.json").write_text(json.dumps({"files": [
+            {"filename": "src/runner.py", "changes": 2, "diff": "diffs/src/runner.py.patch"}]}), encoding="utf-8")
+        self.tmp.joinpath("diff.patch").write_text("", encoding="utf-8")
+        bundle, diff_text = self.mod.load_bundle(str(self.tmp))
+        self.assertEqual(self.mod.classify(bundle, diff_text), ["input reaching a shell or eval"])
+
+    def test_empty_diff_patch_without_any_per_file_patch_exits_nonzero(self):
+        self.tmp.joinpath("bundle.json").write_text(json.dumps({"files": [
+            {"filename": "src/runner.py", "changes": 2, "diff": "diffs/src/runner.py.patch"}]}), encoding="utf-8")
+        self.tmp.joinpath("diff.patch").write_text("", encoding="utf-8")
+        r = subprocess.run([sys.executable, str(SCRIPT), str(self.tmp)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("no per-file patch could be read", r.stderr)
+
     # --- multiple reasons fire in the fixed PATH_REASONS + LINE_PATTERNS order ---
 
     def test_multiple_reasons_fire_in_fixed_order(self):

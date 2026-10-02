@@ -73,7 +73,7 @@ No model call — it reads only `bundle.json`'s changed paths and `diff.patch`'s
 <reason>[, <reason>…]` → spawn a **fourth** lens, **security**, same brief shape as the other three,
 its scope line the printed reasons verbatim. `NONE` → spawn the usual three. A non-zero exit (unreadable
 bundle) → spawn the usual three and report the failure (one line, the script's stderr) in the overview's
-`traps checked` line — never a silent fallback. The 5a overview names which lenses ran either way.
+`lenses:` line — never a silent fallback. The 5a overview names which lenses ran either way.
 
 Each lens is given the bundle dir and returns ≤ 12 lines of `sev · file:line · claim · what in the
 bundle shows it`:

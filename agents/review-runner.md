@@ -73,11 +73,12 @@ so you spend them on judgment, not on fetching.
    `bundle.json`/`diff.patch`). `SURFACE <reason>[, <reason>…]` → the lens set is the usual three **plus**
    a fourth, **security**, whose scope line is the printed reasons verbatim. `NONE` → the usual three. A
    non-zero exit (unreadable bundle) → the usual three, and name the failure (its stderr line) in the
-   sheet instead of a lens you silently skipped. Spawn the resulting lens set as parallel `Agent` calls,
+   sheet's `lenses:` line — never a lens skipped in silence. Spawn the lens set as parallel `Agent` calls,
    `subagent_type: general-purpose`, `model: opus`, each with this brief and nothing more:
    ```
    Lens <design & contracts | failure modes | verification & maintainability | security> for <repo>#<pr>.
-   Scope: <lens description, or the SURFACE reasons verbatim for the security lens>.
+   [security lens only:] Scope: <the SURFACE reasons, verbatim>. Read for security alone: does the diff
+   widen a grant, leak a credential, or let PR-controlled input reach a shell or `eval`?
    Read only under <$CTX>: bundle.json, diff.patch, head/, base/, kb-traps.md. Do not run gh, git or SQL.
    Return ≤ 12 lines: "## Findings" — one per line, `sev · file:line · claim · what in the bundle shows it`.
    Claims only; no fixes, no prose, no SQL. Nothing verified = say "none".
@@ -129,7 +130,7 @@ tracker key into a proposed `comment` — link keys as `[KEY-n](<tracker.url_tem
 ```
 REVIEW SHEET <repo>#<pr> @ <head7> · mode <mode> · <author> · <title> · +A/-D F files
 bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits>)
-[lenses: design & contracts, failure modes, verification & maintainability[, security (<reasons>)] | gate failed — <reason>]   ← only on `--deep`
+[lenses: <the lenses that ran>[, security (<reasons>)][ · security gate failed: <reason>]]   ← only on `--deep`
 | # | sev | class | file:line | finding (one line) |
 …
 RECOMMEND: COMMENT | REQUEST_CHANGES | APPROVE-if-user-agrees
