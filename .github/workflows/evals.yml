@@ -18,7 +18,7 @@ on:
         required: false
         default: ""
       models:
-        description: "Comma-separated model ids to run the suite on, one run per model; empty = the CLI's default"
+        description: "Comma-separated model ids to run the suite on, one run per model; empty = the make target's default (sonnet)"
         required: false
         default: ""
       judge_model:
