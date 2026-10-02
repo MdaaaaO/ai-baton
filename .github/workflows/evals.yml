@@ -44,7 +44,8 @@ jobs:
     # One skill's suite fits 30 minutes: every agent run is bounded by its case's `timeout_seconds`, and four run at
     # once (JOBS=4 below) — the 45 runs of one 15-case suite took 738 s. Every case at once is some 940 agent runs,
     # about 4.3 hours at that rate — hence the larger limit for an empty `skill`; that limit is an estimate from the
-    # one-suite run, not a measurement.
+    # one-suite run, not a measurement. More models or more runs multiply the time: the input check refuses a
+    # combination that does not fit the limit chosen here (keep its two numbers equal to these).
     timeout-minutes: ${{ inputs.skill == '' && 300 || 30 }}
     steps:
       - id: token
@@ -91,6 +92,18 @@ jobs:
             models="$models $m"
           done
           echo "models=${models# }" >> "$GITHUB_OUTPUT"
+          # The job has one time limit and the models run one after another in it. A combination that cannot fit is
+          # refused here, before a token is spent: the runner would stop the job partway, with the tokens gone and
+          # the running model's summary lost. 17 s per agent run is the rate measured at JOBS=4 (45 runs in 738 s);
+          # 3 is the runs per case the cases declare.
+          if [ -n "$SKILL" ]; then limit=30; set -- evals/"$SKILL"-*/; else limit=300; set -- evals/*/; fi
+          cases=$#
+          set -- ${models:-default}
+          minutes=$(( cases * ${RUNS:-3} * $# * 17 / 60 ))
+          if [ "$minutes" -gt "$limit" ]; then
+            echo "::error::$cases case(s) x ${RUNS:-3} run(s) x $# model(s) is about $minutes min, the job stops at $limit: name fewer models, fewer runs or one skill"
+            exit 1
+          fi
 
       # Same pinned CLI as ci.yml — one pin, .github/versions.env, sourced rather than repeated; bubblewrap + socat
       # so the runner can sandbox the eval's tool calls on Linux.

@@ -417,6 +417,36 @@ class Wiring(unittest.TestCase):
         out = self.make_n("eval", "TRUST=1", "JOBS=4", "SKILL=", "MODEL=", "RUNS=", extra_env={n: "" for n in names})
         self.assertIn("--judge-model 'sonnet'", " ".join(out.split()))
 
+    def check_inputs(self, cases: int, **inputs: str) -> "subprocess.CompletedProcess[str]":
+        """The workflow's input check, run as the step runs it, in a kit with `cases` cases of the skill `demo`."""
+        text = (KIT / ".github" / "workflows" / "evals.yml").read_text(encoding="utf-8")
+        step = text.split("name: Check the inputs", 1)[1].split("run: |\n", 1)[1].split("\n\n", 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "skills" / "demo").mkdir(parents=True)
+            (Path(tmp) / "skills" / "demo" / "SKILL.md").write_text("", encoding="utf-8")
+            for n in range(cases):
+                (Path(tmp) / "evals" / f"demo-{n}").mkdir(parents=True)
+            env = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(Path(tmp) / "out"),
+                   "SKILL": "demo", "MODELS": "", "JUDGE_MODEL": "", "RUNS": "", **inputs}
+            return subprocess.run(["bash", "-e", "-c", step], cwd=tmp, env=env, capture_output=True, text=True)
+
+    def test_the_workflow_refuses_inputs_that_cannot_fit_the_time_limit(self):
+        # the models run one after another under one limit, and `runs` multiplies every case: 15 cases at the
+        # default 3 runs fit 30 minutes on one model and on two, not on three, and not at 9 runs
+        self.assertEqual(self.check_inputs(15).returncode, 0)
+        self.assertEqual(self.check_inputs(15, MODELS="sonnet,opus").returncode, 0)
+        three = self.check_inputs(15, MODELS="sonnet,opus,haiku")
+        self.assertEqual(three.returncode, 1)
+        self.assertIn("::error::15 case(s) x 3 run(s) x 3 model(s) is about 38 min, the job stops at 30", three.stdout)
+        self.assertEqual(self.check_inputs(15, RUNS="9").returncode, 1)
+        self.assertEqual(self.check_inputs(15, RUNS="1", MODELS="sonnet,opus,haiku").returncode, 0)
+
+    def test_the_time_limits_of_the_input_check_are_the_job_s(self):
+        text = (KIT / ".github" / "workflows" / "evals.yml").read_text(encoding="utf-8")
+        one, every = re.search(r"timeout-minutes: \$\{\{ inputs\.skill == '' && (\d+) \|\| (\d+) \}\}", text).groups()[::-1]
+        self.assertIn(f"then limit={one}; ", text)
+        self.assertIn(f"else limit={every}; ", text)
+
 
 if __name__ == "__main__":
     unittest.main()
