@@ -258,6 +258,18 @@ class Install(Base):
             r = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=30, cwd=self.t)
             self.assertEqual((r.returncode, r.stdout.strip()), (0, f"ctx {self.v} (api 1)"), r.stderr)
 
+    def test_a_ctxstore_in_the_working_directory_or_on_pythonpath_never_shadows_the_pinned_one(self):
+        """Below 3.11 `python3 -m` puts the working directory first on sys.path, and PYTHONSAFEPATH is ignored there:
+        the shim must not rely on it."""
+        self.install(self.wheel(self.v))
+        for d in ("cwd", "pp"):
+            (self.t / d / "ctxstore").mkdir(parents=True)
+            (self.t / d / "ctxstore" / "__init__.py").write_text("", encoding="utf-8")
+            (self.t / d / "ctxstore" / "__main__.py").write_text('print("SHADOWED")\n', encoding="utf-8")
+        r = subprocess.run([str(self.dest / "ctx"), "--version"], capture_output=True, text=True, timeout=30,
+                           cwd=self.t / "cwd", env={**os.environ, "PYTHONPATH": str(self.t / "pp")})
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, f"ctx {self.v} (api 1)"), r.stderr)
+
     def test_already_installed_is_returned_untouched_with_no_fetch(self):
         self.dest.mkdir(parents=True)
         (self.dest / "ctx").write_text("#!/bin/sh\necho mine\n", encoding="utf-8")

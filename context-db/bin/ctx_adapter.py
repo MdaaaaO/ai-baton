@@ -236,9 +236,10 @@ while [ -h "$p" ]; do
   case $l in /*) p=$l ;; *) p=$(dirname -- "$p")/$l ;; esac
 done
 d=$(CDPATH= cd -P -- "$(dirname -- "$p")" && pwd -P) || exit 127
-PYTHONPATH=$d PYTHONSAFEPATH=1 exec python3 -m ctxstore "$@"
-"""  # PYTHONPATH is this directory only, so no other `ctxstore` can shadow the pinned one; PYTHONSAFEPATH (3.11+)
-     # keeps `-m` from putting the caller's working directory ahead of it
+exec python3 -c 'import runpy, sys; sys.path[0] = sys.argv.pop(1); runpy.run_module("ctxstore", run_name="__main__", alter_sys=True)' "$d" "$@"
+"""  # this directory replaces sys.path[0] (the caller's working directory under `-c`, as under `-m`), so no other
+     # `ctxstore` — one in the working directory, on PYTHONPATH or in site-packages — can shadow the pinned one, on
+     # every Python (PYTHONSAFEPATH would do it only on 3.11+)
 
 
 def _write_pin_status(dest: Path, version: str, wheel: str, sha256: str) -> None:
