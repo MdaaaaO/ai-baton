@@ -210,7 +210,7 @@ eval-check:
 #
 # ALLOW_TOOLS (default Bash) is the operator's `--allow-tools` grant on this one invocation; the CLI computes
 # each case's actually-available tools as the intersection of ALLOW_TOOLS and that case's own `allowed_tools`
-# (the runner's `nr(q.execution.allowed_tools, r.allowTools)`), so a case that does not list Bash in its own
+# (checked against the CLI binary, 2.1.287), so a case that does not list Bash in its own
 # `allowed_tools` never gets it, no matter what ALLOW_TOOLS says — one invocation already grants Bash per case,
 # never as a blanket, with no separate loop needed. Set ALLOW_TOOLS= empty to grant nothing beyond a case's own
 # defaults.
