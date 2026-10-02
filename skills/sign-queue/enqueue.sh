@@ -1,16 +1,26 @@
 #!/bin/sh
 # enqueue.sh — put a commit+push job on the workspace owner's sign queue (run by any Claude session).
 #
-#   enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> [--rebase] [--new-branch] [--files "<paths>" | --all]
+#   enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [--rebase] [--new-branch] [--files <path> [--files <path> ...] | --files "<paths>" | --all]
 #
 #   --rebase       fetch origin <branch> and rebase -S onto FETCH_HEAD before pushing (remote is ahead,
 #                  e.g. after a GitHub "Update branch" click). Default: plain push.
 #   --new-branch   first push of the branch (push -u).
-#   --files        stage only these paths (space separated, relative to the worktree) — the norm; explicit
-#                  paths are always what a commit should carry.
+#   --files        stage this one path, relative to the worktree. Repeat the flag for more than one path:
+#                  each occurrence is staged as exactly the path given (spaces and all) — never split —
+#                  and quoted in the job script as a single argument. Given exactly once, the legacy
+#                  space-separated string still works for existing callers: the whole value is staged as
+#                  one path when it already exists in the worktree or is tracked as such; otherwise it is
+#                  split on whitespace into several paths (the old behaviour). So a lone path containing a
+#                  space is staged as one path either way (one --files, or repeated --files); a *list* of
+#                  paths that happen to contain a space must use one --files per path.
+#                  A path is taken literally — never a glob and never git pathspec magic: `a*.txt` names
+#                  the file called `a*.txt`, not its siblings. An empty value is refused.
 #   --all          stage with `git add -A` on purpose. Exclusive with --files. Neither flag given falls back
 #                  to `git add -A` too, but prints a warning either way — `-A` should never be a silent default.
-#   --by <name>    your session name (as shown by ListAgents) so a failure can be routed back to you.
+#   --by <name>    REQUIRED — your session name (as shown by ListAgents) so a failure can be routed back to
+#                  you. No fallback to a workspace identity: pass --by, or export SIGN_QUEUE_BY, or the
+#                  enqueue exits 2 with a usage message.
 #   --onto <upstream-branch>:<old-base-sha>
 #                  stacked branch: after the commit, fetch origin <upstream-branch> and
 #                  `rebase -S --onto FETCH_HEAD <old-base-sha>`, so every commit after <old-base-sha>
@@ -47,6 +57,12 @@ eval "$idenv"
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 NL='
 '
+# need <flag> <args left>: a value flag given last, with nothing after it, is a usage error — not a
+# "parameter not set" from `set -u`.
+need() { [ "$2" -ge 2 ] || { echo "$1 needs a value" >&2; exit 2; }; }
+# out: one line into the job script, as given. `echo` rewrites a backslash in some shells (dash), which
+# would turn a path like a\tb into something else.
+out() { printf '%s\n' "$1"; }
 no_nl() { case "$2" in *"$NL"*) echo "enqueue.sh: $1 contains a newline — refused" >&2; exit 2;; esac; }
 # the queue lives in the workspace (#7): `<.context>/state/sign-queue/`, never under the kit (a plugin update deletes it)
 if [ -z "${SIGN_QUEUE_DIR:-}" ]; then
@@ -61,21 +77,33 @@ export SIGN_QUEUE_DIR
 [ -n "${SIGN_QUEUE_CONTEXT:-}" ] && export SIGN_QUEUE_CONTEXT
 Q=$SIGN_QUEUE_DIR
 topic=$1; wt=$2; br=$3; msg=$4; shift 4
-rebase=0; newbr=0; files=""; explicit_files=""; all=0; by="${SIGN_QUEUE_BY:-${WORKSPACE_USER:-?}}"; onto=""; lease=""
+rebase=0; newbr=0; files_list=""; files_count=0; explicit_files=""; all=0; by="${SIGN_QUEUE_BY:-}"; onto=""; lease=""
 ticket=""; epic=""; pr=""; summary=""; supersede=0; by_given=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --rebase) rebase=1;; --new-branch) newbr=1;; --files) files=$2; explicit_files=1; shift;; --all) all=1;;
-    --by) by=$2; by_given=1; shift;;
-    --onto) onto=$2; shift;;
-    --force-with-lease) lease=$2; shift;;
-    --ticket) ticket=$2; shift;; --epic) epic=$2; shift;; --pr) pr=$2; shift;; --summary) summary=$2; shift;;
+    --rebase) rebase=1;; --new-branch) newbr=1;;
+    --files)
+      need --files $#
+      no_nl --files "$2"
+      [ -n "$2" ] || { echo "--files needs a path" >&2; exit 2; }
+      files_list="${files_list}${files_list:+$NL}$2"; files_count=$((files_count + 1)); explicit_files=1; shift;;
+    --all) all=1;;
+    --by) need --by $#; by=$2; by_given=1; shift;;
+    --onto) need --onto $#; onto=$2; shift;;
+    --force-with-lease) need --force-with-lease $#; lease=$2; shift;;
+    --ticket) need --ticket $#; ticket=$2; shift;; --epic) need --epic $#; epic=$2; shift;;
+    --pr) need --pr $#; pr=$2; shift;; --summary) need --summary $#; summary=$2; shift;;
     --supersede) supersede=1;;
     *) echo "unknown flag $1" >&2; exit 2;;
   esac; shift
 done
-if [ -n "$files" ] && [ $all = 1 ]; then echo "--files and --all are exclusive" >&2; exit 2; fi
-no_nl worktree "$wt"; no_nl branch "$br"; no_nl "message path" "$msg"; no_nl --files "$files"; no_nl --onto "$onto"; no_nl --by "$by"
+if [ "$files_count" -gt 0 ] && [ $all = 1 ]; then echo "--files and --all are exclusive" >&2; exit 2; fi
+# --by has no fallback (identity, not styling): a parked job with no owner can't be routed back to anyone.
+if [ -z "$by" ]; then
+  echo "usage: enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [...] — --by is required (pass --by, or export SIGN_QUEUE_BY)" >&2
+  exit 2
+fi
+no_nl worktree "$wt"; no_nl branch "$br"; no_nl "message path" "$msg"; no_nl --onto "$onto"; no_nl --by "$by"
 [ -d "$wt/.git" ] || [ -f "$wt/.git" ] || { echo "no worktree at $wt" >&2; exit 2; }
 [ -f "$msg" ] || { echo "no message file at $msg" >&2; exit 2; }
 # commit style (WORKSPACE.md § Rules): Conventional Commits unless the repo overrides it — resolved by
@@ -123,7 +151,7 @@ if [ -z "$(git -C "$wt" status --short)" ]; then
 fi
 case "$msg" in "$wt"/*)
   # the default `add -A` would commit the message file itself if it lives inside the worktree
-  if [ -z "$files" ]; then echo "message file $msg is inside the worktree and no --files given: add -A would commit it. Put it under <workspace root>/.worktrees/ or pass --files" >&2; exit 2; fi;;
+  if [ "$files_count" -eq 0 ]; then echo "message file $msg is inside the worktree and no --files given: add -A would commit it. Put it under <workspace root>/.worktrees/ or pass --files" >&2; exit 2; fi;;
 esac
 case "$topic" in *[!A-Za-z0-9._-]*) echo "topic must be [A-Za-z0-9._-]" >&2; exit 2;; esac
 if [ $supersede = 1 ]; then
@@ -160,7 +188,8 @@ if [ -n "$lease" ]; then
   case "$lease" in *[!0-9a-f]*|"") echo "--force-with-lease expects the remote tip sha" >&2; exit 2;; esac
   [ $newbr = 0 ] || { echo "--force-with-lease and --new-branch are exclusive" >&2; exit 2; }
 fi
-if [ -n "$files" ]; then
+files=""
+if [ "$files_count" -gt 0 ]; then
   # `git add -- <path>` fails ("pathspec did not match") on a deletion that is ALREADY staged (git rm):
   # such paths are in neither worktree nor index. They are already part of the commit, so drop them
   # from the add line; anything else that is neither present nor tracked is a typo -> refuse.
@@ -168,14 +197,42 @@ if [ -n "$files" ]; then
   # read once, with its own exit status: inside a pipe a failed git would read as "not a staged deletion"
   staged_del=$(git -C "$wt" diff --cached --name-only --diff-filter=D) \
     || { echo "enqueue.sh: git diff --cached failed in $wt — cannot tell which paths are staged deletions" >&2; exit 2; }
-  set -f  # a path is a word, never a glob
-  for f in $files; do
-    # sq(): a route dir with \$param or a name with ' stays one literal path in the job script
-    if [ -e "$wt/$f" ] || git -C "$wt" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then kept="$kept $(sq "$f")"
-    elif printf '%s\n' "$staged_del" | grep -qxF -- "$f"; then echo "note: $f is an already-staged deletion, included via the index" >&2
-    else echo "--files: $f is neither in the worktree nor tracked" >&2; exit 2; fi
-  done
-  set +f
+  # is_path: true when $1 already names a real path (worktree entry, tracked, or staged deletion) —
+  # used below to decide, for a single legacy --files value, whether to keep it whole or split it.
+  # --literal-pathspecs: `a*.txt` or `:(glob)x` is a file name here, never a pattern that matches others.
+  is_path() {
+    [ -e "$wt/$1" ] || git --literal-pathspecs -C "$wt" ls-files --error-unmatch -- "$1" >/dev/null 2>&1 \
+      || printf '%s\n' "$staged_del" | grep -qxF -- "$1"
+  }
+  # check_one: $1 is one path, taken literally (never split further). sq(): a route dir with \$param
+  # or a name with ' stays one literal path in the job script.
+  check_one() {
+    if [ -e "$wt/$1" ] || git --literal-pathspecs -C "$wt" ls-files --error-unmatch -- "$1" >/dev/null 2>&1; then kept="$kept $(sq "$1")"
+    elif printf '%s\n' "$staged_del" | grep -qxF -- "$1"; then echo "note: $1 is an already-staged deletion, included via the index" >&2
+    else echo "--files: $1 is neither in the worktree nor tracked" >&2; exit 2; fi
+  }
+  if [ "$files_count" -gt 1 ]; then
+    # --files passed more than once: each occurrence is one literal path, never split on whitespace —
+    # this is the only way to stage two paths where either one contains a space.
+    oldIFS=$IFS
+    set -f  # a path is taken as given, never a glob
+    IFS=$NL
+    for f in $files_list; do
+      IFS=$oldIFS
+      check_one "$f"
+      IFS=$NL
+    done
+    IFS=$oldIFS
+    set +f
+  else
+    # exactly one --files: the legacy space-separated-string shape. Keep it whole when it is already a
+    # real path (so a single path with a space still works); otherwise split on whitespace, same as before.
+    set -f  # a split word is a path, never a glob
+    if is_path "$files_list"; then check_one "$files_list"
+    else for f in $files_list; do check_one "$f"; done
+    fi
+    set +f
+  fi
   files=$kept
 fi
 # one staging rule: explicit paths are the norm (--files); `git add -A` is the fallback, always flagged so it is
@@ -199,6 +256,19 @@ meta=$(python3 "$(dirname "$0")/signq.py" meta "$wt" "$br" "$msg" --topic "$topi
          --epic "$epic" --pr "$pr" --summary "$summary" --flags "${flags#,}" --files "$nfiles") \
   || { echo "enqueue.sh: signq.py meta failed (see above) — fix the flag it rejected and re-run" >&2; exit 2; }
 mkdir -p "$Q"  # the workspace queue dir is created on first use (#7) — nothing ships or seeds it
+# The claim loop below writes `$claim` marker files with `2>/dev/null` (quiet on purpose: two enqueue.sh
+# runs racing for the same name is normal). A queue dir that cannot be written for any OTHER reason (bad
+# permissions, read-only mount, no space left) would otherwise exhaust all 1000 tries silently and get
+# reported as "could not claim a unique job name" — the stop is right, that message names the wrong cause.
+# Check once, up front, with the real error.
+probe="$Q/.enqueue-write-probe.$$"
+probe_err=$(mktemp)
+if ! ( : > "$probe" ) 2>"$probe_err"; then
+  echo "enqueue.sh: queue directory $Q is not writable: $(cat "$probe_err")" >&2
+  rm -f "$probe_err"
+  exit 2
+fi
+rm -f "$probe" "$probe_err"
 # Unique, order-preserving job names: a second-resolution timestamp alone collides when two sessions (or
 # one session, twice) enqueue in the same second — the older one's job file is silently overwritten. A
 # zero-padded sequence number after the timestamp keeps the name lexically sortable (so `load_jobs`' plain
@@ -234,12 +304,13 @@ done
 tmp="$job.tmp.$$"
 {
   echo '#!/bin/sh'
-  echo "# sign-queue job: $topic  (enqueued $(date -u +%FT%TZ) by session $by)"
-  echo "# worktree $wt  branch $br"
-  [ -n "$meta" ] && echo "# META $meta"
+  out "# sign-queue job: $topic  (enqueued $(date -u +%FT%TZ) by session $by)"
+  out "# worktree $wt  branch $br"
+  [ -n "$meta" ] && out "# META $meta"
   echo 'set -eu'
-  echo "WT=$(sq "$wt")"; echo "BR=$(sq "$br")"; echo "MSG=$(sq "$msg")"
-  if [ -n "$files" ]; then echo "git -C \"\$WT\" add -- $files"; elif [ -n "$explicit_files" ]; then echo '# all listed files were already staged'; else echo 'git -C "$WT" add -A'; fi
+  out "WT=$(sq "$wt")"; out "BR=$(sq "$br")"; out "MSG=$(sq "$msg")"
+  # the listed paths are staged literally (see is_path above); nothing after the add line takes a pathspec
+  if [ -n "$files" ]; then echo 'GIT_LITERAL_PATHSPECS=1; export GIT_LITERAL_PATHSPECS'; out "git -C \"\$WT\" add -- $files"; elif [ -n "$explicit_files" ]; then echo '# all listed files were already staged'; else echo 'git -C "$WT" add -A'; fi
   echo 'git -C "$WT" diff --cached --stat'
   echo '# commit only if something is staged (a retry after a failed push must not fail here)'
   echo 'if ! git -C "$WT" diff --cached --quiet; then git -C "$WT" commit -S -F "$MSG"; else echo "(already committed)"; fi'
@@ -254,7 +325,7 @@ tmp="$job.tmp.$$"
     echo 'git -C "$WT" rebase -S -f FETCH_HEAD'
   fi
   if [ -n "$onto" ]; then
-    echo "UP=$(sq "$onto_br")"; echo "OLD_BASE=$(sq "$onto_base")"
+    out "UP=$(sq "$onto_br")"; out "OLD_BASE=$(sq "$onto_base")"
     echo '# stacked branch: replay our commits on the upstream branch'"'"'s pushed tip, dropping the local placeholder'
     echo 'git -C "$WT" fetch origin "$UP"'
     # -f: same trap as --rebase above — a re-stack whose upstream tip has not moved since the last
