@@ -33,6 +33,10 @@ Monitor({
 })
 ```
 
+`<checkout>` is a local checkout of the repo the session pushes from — any of its worktrees does, they share
+one object store. With it set, the session's own pushes are tracked silently instead of waking it as
+`HEAD MOVED`; leave the variable out when the pushes come from another machine.
+
 **Re-arm on expiry = the identical call**, same command, original heads: the state dir makes it silent
 (nothing already reported is replayed, and a head the watcher already followed is kept, not reported
 again), so an expiry costs its one wake-up and nothing more. Never look the heads up again for it.
@@ -64,7 +68,7 @@ committer login + a local git object in `PR_WATCH_WORKTREE`, when set — unset 
 as a real `HEAD MOVED`), and a stale review (`commit_id` not the current head) from the configured
 review bot or a `github.bots` login — a bot re-reviews the new head on its own. A human's stale review
 is still emitted, in every state, marked `(on older head <sha>)`: humans do not automatically re-review
-after a push. Set `<checkout>` to the worktree the session pushes from (any of its worktrees share the object store); leave it unset when pushes come from another machine. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
+after a push. Also filtered out on purpose: your own comments/reviews, the bot's in-thread replies, repeated
 non-green states. The full per-line table: `reference/events.md`.
 
 **A failed lookup is UNKNOWN, never red or green.** Every `gh` read an event depends on (PR info,

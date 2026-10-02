@@ -949,47 +949,18 @@ class PrWatchStub(unittest.TestCase):
             self.assertFalse((self.state_dir() / name).exists(), name)
 
 
-class ArmExamplesPRWatchWorktree(unittest.TestCase):
-    """Verify that all arm examples in pr-watch, pr-open, and session-register SKILL.md files
-    include PR_WATCH_WORKTREE in their pr-watch.sh commands."""
+class ArmExamplesNameTheWorktree(unittest.TestCase):
+    """The arm examples the skills print carry PR_WATCH_WORKTREE: without it every push of the session's own reads
+    as a real HEAD MOVED and wakes it."""
 
-    @staticmethod
-    def get_skill_files():
-        """Return a list of (skill_name, file_path) tuples for the three skills."""
-        kit_root = Path(__file__).resolve().parents[2]
-        return [
-            ("pr-watch", kit_root / "skills" / "pr-watch" / "SKILL.md"),
-            ("pr-open", kit_root / "skills" / "pr-open" / "SKILL.md"),
-            ("session-register", kit_root / "skills" / "session-register" / "SKILL.md"),
-        ]
-
-    def test_all_pr_watch_arm_examples_set_pr_watch_worktree(self):
-        """Every line containing 'pr-watch.sh <' must also contain 'PR_WATCH_WORKTREE='."""
-        for skill_name, skill_path in self.get_skill_files():
-            with self.subTest(skill=skill_name):
-                self.assertTrue(skill_path.exists(), f"{skill_path} does not exist")
-                content = skill_path.read_text()
-                lines = content.splitlines()
-
-                # Find all lines with arm examples (containing 'pr-watch.sh <')
-                arm_example_lines = [
-                    (i, line) for i, line in enumerate(lines, 1)
-                    if "pr-watch.sh <" in line
-                ]
-
-                # Verify at least one arm example exists
-                self.assertGreater(
-                    len(arm_example_lines), 0,
-                    f"{skill_name}: No pr-watch.sh arm examples found (lines with 'pr-watch.sh <')"
-                )
-
-                # Verify each arm example includes PR_WATCH_WORKTREE=
-                for line_num, line in arm_example_lines:
-                    self.assertIn(
-                        "PR_WATCH_WORKTREE=",
-                        line,
-                        f"{skill_name}:{line_num}: pr-watch.sh arm example missing PR_WATCH_WORKTREE=\n{line}"
-                    )
+    def test_every_arm_example_sets_the_worktree(self):
+        for skill in ("pr-watch", "pr-open", "session-register"):
+            with self.subTest(skill=skill):
+                text = (KIT / "skills" / skill / "SKILL.md").read_text()
+                examples = [line for line in text.splitlines() if "pr-watch.sh <" in line]
+                self.assertTrue(examples, "no arm example found")
+                for line in examples:
+                    self.assertIn("PR_WATCH_WORKTREE=<", line)
 
 
 if __name__ == "__main__":
