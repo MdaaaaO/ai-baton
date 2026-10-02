@@ -65,11 +65,25 @@ Extra context from the queue: <pr-scan row: prio, why-now, size, human reviews, 
 
 ## Deep lenses (step 3, `--deep`)
 
+Before spawning, the runner runs the deterministic gate:
+```sh
+python3 $BATON/skills/pr-review/scripts/security-surface.py $CTX
+```
+No model call — it reads only `bundle.json`'s changed paths and `diff.patch`'s added lines. `SURFACE
+<reason>[, <reason>…]` → spawn a **fourth** lens, **security**, same brief shape as the other three,
+its scope line the printed reasons verbatim. `NONE` → spawn the usual three. A non-zero exit (unreadable
+bundle) → spawn the usual three and report the failure (one line, the script's stderr) in the overview's
+`traps checked` line — never a silent fallback. The 5a overview names which lenses ran either way.
+
 Each lens is given the bundle dir and returns ≤ 12 lines of `sev · file:line · claim · what in the
 bundle shows it`:
 - **design & data contracts** — grain, keys, consumers, layer placement rules;
 - **failure modes** — NULLs, timezones, idempotency, backfill races, write-audit-publish routing, secrets/grants;
-- **verification & maintainability** — tests present and meaningful, CI coverage, docs, the slop lens.
+- **verification & maintainability** — tests present and meaningful, CI coverage, docs, the slop lens;
+- **security** (only on `SURFACE`) — reads only for security: the reasons line as scope (a CI workflow
+  or action definition, hook/permission settings, token/credential handling, input reaching a shell or
+  `eval`, a permission or grant change) — does the diff widen a grant, leak a credential, or let PR-
+  controlled input reach a shell/`eval` unsanitized.
 
 The bundle-vs-live-read contract (what the runner may read outside the bundle, and under which named
 exception) is stated once, in `pr-review/SKILL.md` § Contract — read it there, never repeat it here.

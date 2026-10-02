@@ -2,8 +2,8 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, repo trap KB, an Opus review pass, walks findings (Post, Deep dive, Body only, Skip), posts one review after approval, replies in threads; a trivial PR auto-approves via Sonnet. For PRs pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "36"
-  updated: "2026-10-01"
+  version: "37"
+  updated: "2026-10-02"
   reviewed: "2026-09-27"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
@@ -97,10 +97,9 @@ Read, in this order, only the slices you need (`grep -n '^## ' file` first):
 Read `diff.patch` (and `files.json` for per-file stats). Default is one careful pass by this model,
 collecting candidates per `scope.md` classes. `--deep` — **only** when the user passes it or the queue row
 is over `deep_lines` (the `!` marker); a write-audit-publish/layer-placement/grant change is a reason to
-*suggest* `--deep` to the user, not to trigger it — runs three lenses (design & data contracts, failure
-modes, verification & maintainability) **in parallel** as `Agent` calls with `model: opus` spawned by the
+*suggest* `--deep` to the user, not to trigger it — first runs the deterministic `security-surface.py` gate (no model call), then runs three lenses (design & data contracts, failure modes, verification & maintainability), a fourth (security, scoped to the gate's reasons) on `SURFACE`, **in parallel** as `Agent` calls with `model: opus` spawned by the
 runner, each given the bundle dir and one lens, returning ≤ 12 lines of claims only (no SQL, no fixes);
-the exact lens scope for each: `reference/runner.md` § Deep lenses. Then the runner verifies their claims
+the exact lens scope for each, and the gate: `reference/runner.md` § Deep lenses. Then the runner verifies their claims
 in **one** batched pass — a lens finding without evidence you can restate is a question, not a finding.
 
 ## 4. Verify before you repeat *(runner)*
@@ -131,6 +130,7 @@ Numbers are assigned once and never change — the user refers to "#3" later.
 ```
 REVIEW SHEET <repo>#<pr> @ <head7> · mode <mode> · <author> · <title> · +A/-D F files
 bot: <assessment> · humans: <…> · checks: <…> · traps checked: <n> (<hits>)
+[lenses: design & contracts, failure modes, verification & maintainability[, security (<reasons>)] | gate failed — <reason>]   ← only on `--deep`
 [<System> enrichment: n/a in this environment]   ← one per skipped gate
 | # | sev | class | file:line | finding (one line) |
 …
