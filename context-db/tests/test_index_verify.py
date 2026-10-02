@@ -23,8 +23,11 @@ updated: {updated}
 """
 
 
+MAKE_VARS = ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES")  # an outer `make test` must not leak into a make run here
+
+
 def env_for(root: Path, **extra: str) -> dict:
-    env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_TZ"}
+    env = {k: v for k, v in os.environ.items() if k not in ("WORKSPACE_TZ", *MAKE_VARS)}
     return {**env, "CONTEXT_ROOT": str(root), **extra}
 
 
