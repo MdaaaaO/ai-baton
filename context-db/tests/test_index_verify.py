@@ -164,9 +164,12 @@ class IndexAndVerify(ContextRoot):
         self.assertEqual(m.returncode, 0, m.stderr)
         self.assertEqual(m.stdout.split(), [])
 
+    def run_find(self, *args: str) -> "subprocess.CompletedProcess[str]":
+        return subprocess.run(["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", *args],
+                              env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+
     def find(self, *args: str) -> "list[str]":
-        m = subprocess.run(["make", "-s", "-C", str(BIN.parent), "find", f"CONTEXT={self.root}", *args],
-                           env=env_for(self.root), cwd=self.root, capture_output=True, text=True)
+        m = self.run_find(*args)
         self.assertEqual(m.returncode, 0, m.stderr)
         return m.stdout.split()
 
@@ -192,6 +195,14 @@ class IndexAndVerify(ContextRoot):
         # a session file is no row of the index, so `find` does not list it either
         self.doc("sessions/lane-topic.md", title="A session", type="repo", domain="repos", status="active")
         self.assertNotIn("sessions/lane-topic.md", self.find("DOMAIN=repos"))
+
+    def test_find_names_a_file_it_cannot_read_and_lists_the_rest(self):
+        self.doc("repos/kept.md", title="Kept", type="repo", domain="repos", status="active")
+        (self.root / "repos" / "gone.md").symlink_to(self.root / "nowhere.md")
+        m = self.run_find("DOMAIN=repos")
+        self.assertIn("repos/kept.md", m.stdout.split())
+        self.assertIn("find: cannot read repos/gone.md: ", m.stderr)
+        self.assertNotEqual(m.returncode, 0)
 
     def test_all_archived_domain_has_fold_line_and_no_table(self):
         # repos/ starts with exactly one doc (kit.md, active); flip it archived so every doc

@@ -19,19 +19,24 @@ def matches(meta: dict[str, str], key: str, want: str) -> bool:
     return meta.get(key, "").strip() == want
 
 
-def find_docs(root: Path, wanted: dict[str, str]) -> list[str]:
-    """Paths under `root`, sorted, of the docs whose frontmatter matches every key in `wanted`."""
-    hits = []
+def find_docs(root: Path, wanted: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Paths under `root`, sorted, of the docs whose frontmatter matches every key in `wanted`, and one line per
+    file that could not be read (the listing goes on without it)."""
+    hits, unread = [], []
     for dirpath, dirnames, filenames in os.walk(str(root)):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for fn in filenames:
             if not fn.endswith(".md") or fn in SKIP_FILES:
                 continue
             path = Path(dirpath) / fn
-            meta = fm.load_flat(path, errors="replace")
+            try:
+                meta = fm.load_flat(path, errors="replace")
+            except OSError as e:
+                unread.append(f"{path.relative_to(root)}: {e.strerror or e}")
+                continue
             if meta and all(matches(meta, k, v) for k, v in wanted.items()):
                 hits.append(str(path.relative_to(root)))
-    return sorted(hits)
+    return sorted(hits), unread
 
 
 def main(argv: list[str]) -> int:
@@ -46,9 +51,12 @@ def main(argv: list[str]) -> int:
     wanted = {"tags" if args[1] == "TAG" else "domain": args[2]}
     if len(args) == 5:
         wanted["status"] = args[4]
-    for hit in find_docs(root, wanted):
+    hits, unread = find_docs(root, wanted)
+    for hit in hits:
         print(hit)
-    return 0
+    for line in unread:
+        print(f"find: cannot read {line}", file=sys.stderr)
+    return 1 if unread else 0
 
 
 if __name__ == "__main__":
