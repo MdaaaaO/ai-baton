@@ -102,7 +102,7 @@ itself — settings.local.json env or a shell export); full spec `docs/packaging
 
 | Name | Default | Read by | Purpose | Scope |
 |---|---|---|---|---|
-| `WORKSPACE_USER` | empty | `kit_profile.identity()` (sign-queue, cost-report, self-assessment ledger, kit-health) | the user's display name | user-facing |
+| `WORKSPACE_USER` | empty | `kit_profile.identity()` (cost-report, self-assessment ledger, kit-health) | the user's display name | user-facing |
 | `WORKSPACE_GITHUB_LOGIN` | empty | `kit_profile.identity()` (pr-watch, cost-report, kit-health) | the user's GitHub login | user-facing |
 | `WORKSPACE_TZ` | `tz_default` from the env store, else UTC | `kit_profile.identity()` / `kit_profile.tz()` (session registry, session-stats, self-assessment) | the IANA zone timestamps render in | user-facing |
 | `WORKSPACE_SLACK_SELF_DM` | empty | `kit_profile.identity()` (slack-draft) | the user's own chat DM channel id, where drafts park | user-facing |
