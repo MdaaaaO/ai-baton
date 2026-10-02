@@ -92,6 +92,17 @@ class ThisKit(unittest.TestCase):
     def test_results_stay_ignored(self):
         self.assertIn("evals/results/", (KIT / ".gitignore").read_text(encoding="utf-8").splitlines())
 
+    def test_every_case_yaml_names_itself_after_its_directory(self):
+        # the runner's case.yaml schema requires a non-empty `name` on the whole merged object, including a
+        # "mixed" case.yaml + prompt.md case — a case.yaml with no `name:` fails to load with
+        # "invalid case.yaml: name: Required" (#489); this pins it the same way for every case.yaml the kit ships
+        for case_yaml in sorted(eval_check.eval_dir(KIT).glob("*/case.yaml")):
+            text = case_yaml.read_text(encoding="utf-8")
+            m = re.search(r"(?m)^name:\s*(.+?)\s*$", text)
+            self.assertIsNotNone(m, f"{case_yaml}: no `name:` key")
+            self.assertEqual(m.group(1).strip('"\''), case_yaml.parent.name,
+                             f"{case_yaml}: `name:` must equal its directory name")
+
 
 class Suites(unittest.TestCase):
     def setUp(self):
@@ -362,9 +373,13 @@ class Wiring(unittest.TestCase):
             self.assertIn(part, cmd)
 
     def test_make_target_without_arguments_runs_every_case(self):
-        cmd = " ".join(self.make_n("eval").split())
+        out = self.make_n("eval")
+        cmd = " ".join(out.split())
         self.assertIn("claude plugin eval . --no-publish --ablation none", cmd)
-        for flag in ("--case", "--model", "--trust-plugin", "--runs", "--concurrency"):
+        self.assertIn("--model 'sonnet'", cmd)  # MODEL ?= sonnet (#489)
+        self.assertIn("--scaffold", cmd)  # SCAFFOLD ?= 1 (#489)
+        self.assertIn("--allow-tools Bash", cmd)  # ALLOW_TOOLS ?= Bash (#489)
+        for flag in ("--case", "--trust-plugin", "--runs", "--concurrency", "--json"):
             self.assertNotIn(flag, cmd)
 
     def test_make_target_judges_with_sonnet_unless_told_otherwise(self):
@@ -372,6 +387,30 @@ class Wiring(unittest.TestCase):
         self.assertIn("--judge-model 'sonnet'", " ".join(self.make_n("eval").split()))
         self.assertIn("--judge-model 'some-judge'", " ".join(self.make_n("eval", "JUDGE=some-judge").split()))
         self.assertNotIn("--judge-model", " ".join(self.make_n("eval", "JUDGE=").split()))
+
+    def test_make_target_pins_the_model_to_sonnet_unless_told_otherwise(self):
+        # #489: the default (unpinned) model took several turns where sonnet took one and hit a case's
+        # max_turns — the model was the variable to fix, not a blanket max_turns raise
+        self.assertIn("--model 'sonnet'", " ".join(self.make_n("eval").split()))
+        self.assertIn("--model 'some-model'", " ".join(self.make_n("eval", "MODEL=some-model").split()))
+        self.assertNotIn("--model", " ".join(self.make_n("eval", "MODEL=").split()))
+
+    def test_scaffold_runs_by_default_and_can_be_turned_off(self):
+        self.assertIn("--scaffold", " ".join(self.make_n("eval").split()))
+        self.assertNotIn("--scaffold", " ".join(self.make_n("eval", "SCAFFOLD=").split()))
+
+    def test_json_dir_writes_one_result_file(self):
+        out = " ".join(self.make_n("eval", "JSON_DIR=evals/results/run").split())
+        self.assertIn("--json 'evals/results/run/result.json'", out)
+        self.assertNotIn("--json", " ".join(self.make_n("eval").split()))
+
+    def test_allow_tools_defaults_to_bash_and_can_be_emptied(self):
+        # #489: the CLI grants each case the intersection of this flag and the case's own `allowed_tools`
+        # (`nr(q.execution.allowed_tools, r.allowTools)`), so one invocation with ALLOW_TOOLS ?= Bash already
+        # grants Bash per case, never as a blanket — no separate per-case loop needed.
+        self.assertIn("--allow-tools Bash", " ".join(self.make_n("eval").split()))
+        self.assertNotIn("--allow-tools", " ".join(self.make_n("eval", "ALLOW_TOOLS=").split()))
+        self.assertIn("--allow-tools Bash,Read", " ".join(self.make_n("eval", "ALLOW_TOOLS=Bash,Read").split()))
 
     def test_ci_runs_the_static_check(self):
         mk = (KIT / "context-db" / "Makefile").read_text(encoding="utf-8")

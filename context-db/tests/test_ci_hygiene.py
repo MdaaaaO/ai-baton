@@ -188,6 +188,32 @@ class EvalsHygiene(unittest.TestCase):
         code = "\n".join(line for line in self.TEXT.splitlines() if not line.lstrip().startswith("#"))
         self.assertNotIn(".claude/context-db", code)
 
+    def test_model_is_never_passed_unconditionally(self):
+        # #489: the CLI's own default model took several turns where sonnet took one and hit a case's max_turns;
+        # the make target now pins MODEL ?= sonnet, so the workflow must only override it when an input names a
+        # model (the same MODEL="$model" gotcha PR #490 already fixed for JUDGE/JUDGE_MODEL on this line)
+        run_line = next(line for line in self.TEXT.splitlines() if "make -C context-db eval " in line)
+        self.assertIn('${model:+"MODEL=$model"}', run_line)
+        self.assertNotRegex(run_line, r'(?<![+"])MODEL="')
+
+    def test_the_eval_sandbox_is_probed_and_no_second_scrub_is_nested(self):
+        # #489: `claude plugin eval` sandboxes each tool call with bwrap itself and keeps the credential out of the
+        # agent's environment; CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on top nested a second bwrap that could not mask the
+        # run's `.eval-artifacts` in its read-only cwd, so every case's Bash failed in the second measured run
+        self.assertNotIn("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB:", self.TEXT)
+        step = self.TEXT.split("name: Run the suite", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("command -v bwrap", step)
+        # an installed bwrap that cannot start (ubuntu-24.04's AppArmor userns restriction) failed every case's
+        # Bash in the first measured run; the probe starts bwrap once before any case spends the credential
+        self.assertIn("bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all true", step)
+        self.assertIn("kernel.apparmor_restrict_unprivileged_userns=0", self.TEXT.split("name: Install the Claude Code CLI", 1)[1].split("\n      - ", 1)[0])
+
+    def test_the_result_json_is_uploaded_as_an_artifact_even_on_failure(self):
+        step = self.TEXT.split("name: Upload the result JSON", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("always()", self.TEXT.split("name: Upload the result JSON", 1)[0].rsplit("- if:", 1)[1].split("\n", 1)[0])
+        self.assertIn("actions/upload-artifact@", step)
+        self.assertIn("if-no-files-found: ignore", step)
+
 
 class PythonFloorLeg(unittest.TestCase):
     """ci.yml's python-floor job (the 3.9 leg) is a real merge gate, not decoration — auto-merge.yml must wait on

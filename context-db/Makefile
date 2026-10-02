@@ -43,7 +43,7 @@
 #   make -C $BATON/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
 #   make -C $BATON/context-db test [T=test_kb]          # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file
 #   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
-#   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3] [JOBS=4]  # run the eval suite (SPENDS TOKENS)
+#   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=sonnet] [RUNS=3] [JOBS=4] [JSON_DIR=<dir>]  # run the eval suite (SPENDS TOKENS)
 #   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
 #   make -C $BATON/context-db migrate [CONTEXT=<store>] # bring a store forward: kb.py migrate, then ctx_adapter.py adopt —
 #                                                        #   both steps in one call (sync-check.sh and kit-health name each on its own)
@@ -194,21 +194,38 @@ eval-check:
 	@cd $(ENGINE).. && $(PY) $(BIN)/eval_check.py $(if $(REQUIRE_ALL),--require-all,)
 
 # make eval [SKILL=<name>] [CASE=<glob>] [MODEL=<id>] [RUNS=<n>] [JUDGE=<model>] [JOBS=<1..8>]
-#           [ABLATION=none|with-without] [THRESHOLD=<0..1>] [MAX_COST=<usd>] [TRUST=1]  — `claude plugin eval` on this
-# plugin. It SPENDS TOKENS on your credential; CI runs it only through the manual `evals` workflow. SKILL narrows to
-# evals/<skill>-*; ABLATION=none (the default here) scores every grader, which is what a trigger suite measures.
-# JUDGE is the model the `llm` graders vote with — sonnet here, not the CLI's default: the smaller default judge
-# fails this suite's multi-condition criteria on answers that meet them (`JUDGE=` leaves the CLI's default). JOBS
-# runs that many agent runs at once (one credential, one rate limit). Results land in evals/results/ (git-ignored)
-# and the report stays local (--no-publish). TRUST=1 answers the first-run trust prompt (CI only).
+#           [ABLATION=none|with-without] [THRESHOLD=<0..1>] [MAX_COST=<usd>] [TRUST=1] [SCAFFOLD=] [ALLOW_TOOLS=Bash] [JSON_DIR=<dir>]
+#           — `claude plugin eval` on this plugin. It SPENDS TOKENS on your credential; CI runs it only through
+# the manual `evals` workflow. SKILL narrows to evals/<skill>-*; ABLATION=none (the default here) scores every
+# grader, which is what a trigger suite measures. JUDGE is the model the `llm` graders vote with — sonnet here,
+# not the CLI's default: the smaller default judge fails this suite's multi-condition criteria on answers that
+# meet them (`JUDGE=` leaves the CLI's default). MODEL pins the agent to sonnet the same way (`MODEL=` leaves
+# the CLI's default): a case that still hits its max_turns on sonnet gets its own higher max_turns, not a
+# blanket raise for every case to cover a weaker default model. JOBS runs that many agent runs at once (one
+# credential, one rate limit). SCAFFOLD (on by default, `SCAFFOLD=` turns it off) runs each case's own
+# `context.scaffold_script`, e.g. the fixture a case ships alongside its prompt. JSON_DIR, if set, also writes
+# the run's aggregate result as JSON under it (<dir>/result.json) — the evals workflow uses this to upload the
+# run as a job artifact. Results land in evals/results/ (git-ignored) and the report stays local (--no-publish).
+# TRUST=1 answers the first-run trust prompt (CI only).
+#
+# ALLOW_TOOLS (default Bash) is the operator's `--allow-tools` grant on this one invocation; the CLI computes
+# each case's actually-available tools as the intersection of ALLOW_TOOLS and that case's own `allowed_tools`
+# (read from the CLI binary; the pinned 2.1.283 ran --scaffold, --allow-tools and --json in an evals run), so a
+# case that does not list Bash in its own `allowed_tools` never gets it, no matter what ALLOW_TOOLS says — one
+# invocation already grants Bash per case, never as a blanket, with no separate loop needed. Set ALLOW_TOOLS=
+# empty to grant nothing beyond a case's own defaults.
 ABLATION ?= none
 JUDGE ?= sonnet
+MODEL ?= sonnet
+SCAFFOLD ?= 1
+ALLOW_TOOLS ?= Bash
 eval:
 	@command -v claude >/dev/null 2>&1 || { echo "eval: needs the claude CLI"; exit 2; }
 	@cd $(ENGINE).. && claude plugin eval . --no-publish --ablation $(ABLATION) $(if $(JUDGE),--judge-model '$(JUDGE)',) \
 	  $(if $(CASE),--case '$(CASE)',$(if $(SKILL),--case '$(SKILL)-*',)) \
 	  $(if $(MODEL),--model '$(MODEL)',) $(if $(RUNS),--runs $(RUNS),) $(if $(THRESHOLD),--threshold $(THRESHOLD),) \
-	  $(if $(JOBS),--concurrency $(JOBS),) $(if $(MAX_COST),--max-cost-usd $(MAX_COST),) $(if $(TRUST),--trust-plugin,)
+	  $(if $(JOBS),--concurrency $(JOBS),) $(if $(MAX_COST),--max-cost-usd $(MAX_COST),) $(if $(TRUST),--trust-plugin,) \
+	  $(if $(SCAFFOLD),--scaffold,) $(if $(ALLOW_TOOLS),--allow-tools $(ALLOW_TOOLS),) $(if $(JSON_DIR),--json '$(JSON_DIR)/result.json',)
 
 # The relative Markdown links of every tracked *.md resolve; templates seeded elsewhere are skipped.
 check-links:

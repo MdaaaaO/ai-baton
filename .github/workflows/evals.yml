@@ -18,7 +18,7 @@ on:
         required: false
         default: ""
       models:
-        description: "Comma-separated model ids to run the suite on, one run per model; empty = the CLI's default"
+        description: "Comma-separated model ids to run the suite on, one run per model; empty = the make target's default (sonnet)"
         required: false
         default: ""
       judge_model:
@@ -106,13 +106,16 @@ jobs:
           fi
 
       # Same pinned CLI as ci.yml — one pin, .github/versions.env, sourced rather than repeated; bubblewrap + socat
-      # so the runner can sandbox the eval's tool calls on Linux.
+      # so the runner can sandbox the eval's tool calls on Linux. Ubuntu 24.04's AppArmor lets an unprivileged user
+      # namespace exist but strips its capabilities, so bwrap fails at its first privileged step (bringing up the
+      # loopback in a new network namespace: "loopback: Failed RTM_NEWADDR") and every Bash call in a case dies.
       - if: steps.token.outputs.enabled == 'true'
         name: Install the Claude Code CLI
         working-directory: .claude
         run: |
           . .github/versions.env
           sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap socat >/dev/null
+          sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
           npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" >/dev/null && claude --version
 
       - if: steps.token.outputs.enabled == 'true'
@@ -132,19 +135,39 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          # `claude plugin eval` already keeps the credential out of a case: it hands the agent its token through
+          # a file descriptor, builds the agent's environment from an allow-list, and runs each tool call in its
+          # own bubblewrap sandbox. Do not set CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on top: it nests a second bwrap that
+          # cannot create its mask for the run's `.eval-artifacts` in the read-only working directory, so every
+          # case's Bash fails. The probe starts bwrap once first: an installed bwrap that cannot start fails every
+          # case's Bash, and the suite would spend the credential measuring that.
+          command -v bwrap >/dev/null 2>&1 || { echo "::error::bwrap is missing — the eval's tool-call sandbox needs it"; exit 1; }
+          bwrap --ro-bind / / --dev /dev --proc /proc --unshare-all true || { echo "::error::bwrap is installed but cannot start a sandbox — every case's Bash would fail, so nothing is spent"; exit 1; }
           rc=0
           for model in ${MODELS:-default}; do
             [ "$model" = default ] && model=""
-            echo "## evals — ${SKILL:-every case} on ${model:-the default model}, judge ${JUDGE_MODEL:-the make default}" >> "$GITHUB_STEP_SUMMARY"
+            echo "## evals — ${SKILL:-every case} on ${model:-the make default (sonnet)}, judge ${JUDGE_MODEL:-the make default}" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            # an empty JUDGE switches the make target's default judge off, on the command line and from the
-            # environment alike (make reads both): the input lives in JUDGE_MODEL, a name make does not use, and
-            # JUDGE is passed only when the input names a model
-            make -C context-db eval TRUST=1 JOBS=4 SKILL="$SKILL" MODEL="$model" RUNS="$RUNS" ${JUDGE_MODEL:+"JUDGE=$JUDGE_MODEL"} \
+            # an empty MODEL/JUDGE switches the make target's own default off, on the command line and from the
+            # environment alike (make reads both): the inputs live in MODELS/JUDGE_MODEL, names make does not
+            # use, and MODEL/JUDGE are passed only when the input actually names a model
+            make -C context-db eval TRUST=1 JOBS=4 SKILL="$SKILL" RUNS="$RUNS" JSON_DIR="evals/results/$GITHUB_RUN_ID/${model:-default}" ${model:+"MODEL=$model"} ${JUDGE_MODEL:+"JUDGE=$JUDGE_MODEL"} \
               2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           done
           exit $rc
+
+      # The result JSON (--json, wired through the make target's JSON_DIR) survives the job even when a case
+      # fails the run, so a red run's actual scores and criteria votes are still readable afterward — not just
+      # the step summary's text. evals/results/ is git-ignored; this is the only place the JSON leaves the runner.
+      - if: always() && steps.token.outputs.enabled == 'true'
+        name: Upload the result JSON
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: evals-results-${{ github.run_id }}
+          path: .claude/evals/results/${{ github.run_id }}/
+          if-no-files-found: ignore
+          retention-days: 30
 
       # A run with the secret missing skips every step above and would otherwise conclude success — a required
       # check satisfied by a run that evaluated nothing. workflow_dispatch always runs from within this repo (no

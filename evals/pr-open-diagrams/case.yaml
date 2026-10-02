@@ -1,0 +1,4 @@
+schema_version: "1.0"
+name: pr-open-diagrams
+context:
+  scaffold_script: fixture.sh
