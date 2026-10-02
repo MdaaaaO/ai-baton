@@ -173,6 +173,24 @@ class MigrationRunsUnderTheLock(unittest.TestCase):
             self.assertFalse(legacy_job.exists(), "the legacy job must have moved into the workspace queue")
             self.assertIn("pushed", out, "the migrated job must have been picked up and run by the same drain")
 
+    def test_a_dry_run_moves_no_legacy_job(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            legacy_job = _legacy_job(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            real_migrate = sq.migrate_legacy
+            with mock.patch.object(sq, "migrate_legacy",
+                                   side_effect=lambda: real_migrate(legacy_job.parent, sq.Q)) as migrate:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = sq.main(["run", "--dry-run"])
+            self.assertEqual(rc, 0, buf.getvalue())
+            migrate.assert_not_called()
+            self.assertTrue(legacy_job.exists(), "a dry run must leave the legacy job where it is")
+            self.assertEqual(list(sq.Q.glob("*.sh")), [])
+
     def test_a_held_lock_blocks_the_migration_too(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)

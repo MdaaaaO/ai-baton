@@ -137,8 +137,8 @@ overlap. A job file removed by hand while a drain is already in progress is skip
 of the drain and its summary still run.
 
 Jobs a pre-workspace-queue kit left under the kit dir are moved under that same lock: `run` moves them itself
-before it loads a job (`make sign` calls `run` only), and `make sign_list` runs `signq.py migrate-legacy`
-first, which takes the lock for the move and moves nothing while a drain holds it.
+before it loads a job (`make sign` calls `run` only; a `--dry-run` moves nothing), and `make sign_list` runs
+`signq.py migrate-legacy` first, which takes the lock for the move and moves nothing while a drain holds it.
 
 A job stays in the drain's terminal session — signing may need the terminal for a passphrase, and Ctrl-C
 stops the drain and its job together. A drain that is killed outright (`kill -9`) can still leave its job

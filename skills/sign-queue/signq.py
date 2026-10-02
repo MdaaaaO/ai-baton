@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """signq — the sign-queue tool (host side: `make sign`; session side: enqueue.sh calls `meta`).
 
-    signq.py run   [-v] [--dry-run]     take the drain lock, migrate any legacy jobs, then drain every
-                                        pending job, non-interactive, with an overview. A lock already held
-                                        prints its holder's pid and current job, then exits 0. A lock just
-                                        freed by a holder that died mid-job (its job still running) prints
-                                        that job's name + pid and exits 2 without starting anything.
+    signq.py run   [-v] [--dry-run]     take the drain lock, migrate any legacy jobs (not on a dry run),
+                                        then drain every pending job, non-interactive, with an overview.
+                                        A lock already held prints its holder's pid and current job, then
+                                        exits 0. A lock just freed by a holder that died mid-job (its job
+                                        still running) prints that job's name + pid and exits 2 without
+                                        starting anything.
     signq.py list                       overview table of pending + parked jobs (no git runs)
     signq.py show  <job>                print a job's metadata and the script itself
     signq.py log   <job>                print the last drain log of a job
@@ -745,7 +746,8 @@ def cmd_run(argv: List[str]) -> int:
                       "still running — exiting without starting a job"))
             return EXIT_STALE_JOB
         _write_lock_state(lock_f)
-        migrate_legacy()  # under the lock, before any job loads
+        if not dry:
+            migrate_legacy()  # under the lock, before any job loads; a dry run moves nothing
         return _drain(verbose, dry, lock_f)
     finally:
         fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
