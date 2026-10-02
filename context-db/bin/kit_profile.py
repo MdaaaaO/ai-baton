@@ -662,6 +662,9 @@ def session_env(environ: dict | None = None) -> dict[str, str]:
 
 SESSION_ENV_BEGIN = "# ai-baton session-env begin"
 SESSION_ENV_END = "# ai-baton session-env end"
+# the block names the file it sits in: Claude Code hands `CLAUDE_ENV_FILE` to hooks and not to the Bash tool, so a
+# later Bash command (kit-health's stale-env-file check) finds the file through this variable
+SESSION_ENV_FILE_VAR = "BATON_ENV_FILE"
 # non-greedy across the block, one trailing newline eaten with it when present; DOTALL so `.` crosses lines,
 # MULTILINE so `^`/`$` anchor each line rather than the whole file — a file the block does not appear in is
 # returned unchanged
@@ -671,10 +674,14 @@ _SESSION_ENV_BLOCK_RE = re.compile(
 )
 
 
-def session_env_block(environ: dict | None = None) -> str:
+def session_env_block(environ: dict | None = None, env_file: str = "") -> str:
     """The `# ai-baton session-env begin/end` block `update_session_env_file` writes into $CLAUDE_ENV_FILE:
-    one `export VAR=value` per line (see `session_env`), always ending in a newline."""
-    lines = [f"export {var}={shlex.quote(value)}" for var, value in session_env(environ).items()]
+    one `export VAR=value` per line (see `session_env`), always ending in a newline. With `env_file`, the
+    block's last export is that path as `SESSION_ENV_FILE_VAR`."""
+    pairs = dict(session_env(environ))
+    if env_file:
+        pairs[SESSION_ENV_FILE_VAR] = env_file
+    lines = [f"export {var}={shlex.quote(value)}" for var, value in pairs.items()]
     return "\n".join([SESSION_ENV_BEGIN, *lines, SESSION_ENV_END]) + "\n"
 
 
@@ -685,7 +692,8 @@ def update_session_env_file(path: str, environ: dict | None = None) -> None:
     A missing file counts as empty (a brand new $CLAUDE_ENV_FILE); any other read error (permission denied,
     a directory at `path`, undecodable bytes, …) is raised, not swallowed, and nothing is written. The old
     block is dropped wherever it sits, the kept text is given a trailing newline if it lacks one (so the
-    fresh block never glues onto another writer's last line), and the fresh block is appended. The write
+    fresh block never glues onto another writer's last line), and the fresh block is appended; it also
+    exports `path` itself (absolute) as `SESSION_ENV_FILE_VAR`. The write
     itself is `fsutil.atomic_write` (temp file + `os.replace`, same directory, keeps the file's mode) so a
     reader never sees a torn file and a failure here also leaves `path` untouched. `fsutil` is
     imported here, not at module load: most callers of this file never touch `--update`, and a
@@ -700,7 +708,7 @@ def update_session_env_file(path: str, environ: dict | None = None) -> None:
     kept = _SESSION_ENV_BLOCK_RE.sub("", text)
     if kept and not kept.endswith("\n"):
         kept += "\n"
-    atomic_write(path, kept + session_env_block(environ))
+    atomic_write(path, kept + session_env_block(environ, env_file=os.path.abspath(path)))
 
 
 def _workspace_env_root(environ: dict | None = None) -> Path | None:

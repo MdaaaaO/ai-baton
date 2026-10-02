@@ -38,6 +38,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `KIT_SCRATCH` | computed per-session scratch dir | `context-db/bin/kit_profile.py` (`scratch()`) | override the per-session scratch directory outright | user-facing |
 | `XDG_RUNTIME_DIR` | unset (falls back to `TMPDIR`/`/tmp`) | `context-db/bin/kit_profile.py` (`scratch()`) | the standard XDG per-user runtime dir; used as the scratch root's parent when set | internal |
 | `XDG_CACHE_HOME` | `~/.cache` | `context-db/bin/kit_profile.py` (`scratch(stable=True)`), `context-db/bin/ctx_adapter.py` (the pinned ctx-store install) | the standard XDG cache dir; parent of the stable (per-user, cross-session) scratch dir and of the pinned ctx-store copy | internal |
+| `BATON_ENV_FILE` | unset (the SessionStart hook's session-env block exports it on a plugin install) | `skills/kit-health/kit-health.py` | the path of the session env file, for a command the harness does not hand `CLAUDE_ENV_FILE` to; kit-health reads the file's `BATON` / `CLAUDE_PROJECT_DIR` lines through it | internal |
 | `PROJECTS` | the computed workspace root (clone: kit's parent; plugin: `CLAUDE_PROJECT_DIR` or `$PWD`) | `setup.sh` | override the workspace root `setup.sh` installs into | user-facing |
 
 ## ctx-store adapter (`context-db/bin/ctx_adapter.py`)

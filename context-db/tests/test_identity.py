@@ -123,7 +123,7 @@ class ManifestAndHook(unittest.TestCase):
             self.assertEqual((r.returncode, r.stdout), (0, ""))
             self.assertEqual(envfile.read_text(encoding="utf-8"),
                               f"# ai-baton session-env begin\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n"
-                              "# ai-baton session-env end\n")
+                              f"export BATON_ENV_FILE={envfile}\n# ai-baton session-env end\n")
             # a second SessionStart on the same env file replaces the block (not skipped: a persisted
             # env file must still pick up a later CLAUDE_PROJECT_DIR / option change) and still ends
             # with exactly one block
@@ -134,7 +134,7 @@ class ManifestAndHook(unittest.TestCase):
             self.assertEqual((r.returncode, r.stdout), (0, ""))
             self.assertEqual(envfile.read_text(encoding="utf-8"),
                               f"# ai-baton session-env begin\nexport WORKSPACE_GITHUB_LOGIN={LOGIN}\nexport BATON={KIT}\n"
-                              "# ai-baton session-env end\n")
+                              f"export BATON_ENV_FILE={envfile}\n# ai-baton session-env end\n")
             r = subprocess.run(["sh", "-c", cmd], env={**base, "CLAUDE_PLUGIN_ROOT": str(KIT), "CONTEXT_ROOT": "/nonexistent/.context",
                                                       "KIT_SCRATCH": str(scratch)},
                                capture_output=True, text=True)  # no env file (a non-SessionStart caller): a quiet no-op
