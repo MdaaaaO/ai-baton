@@ -109,8 +109,8 @@ are the only work units — lines changed are never a denominator.
 - **Exclude the changeover day** from before/after buckets (`X=<day>..<day>` in `cost.phases`); it is
   neither. Compare a **steady baseline** (post-onboarding weeks) rather than the whole history.
 - **Overlapping phases are not compared** (P0 ⊃ P0b): the decomposition takes non-overlapping pairs only.
-- **A phase name is never `prior-7d`/`rolling-7d`** — those are the rolling pair `report` always builds;
-  reusing one exits 2.
+- **A phase name is never `prior-7d`/`rolling-7d` or a week label (`YYYY-Wnn`)** — the rolling pair `report`
+  always builds and the keys of its week buckets; reusing one exits 2.
 - **Cheap models are Sonnet/Haiku by name**; an org table's `model_family` column is not needed.
 - **Per-epic billed cost does not exist.** The bill has no ticket dimension; the only per-epic view is the
   session ledger estimate (`.context/sessions/_ledger.md`), labelled as such, with its unlabelled share.
