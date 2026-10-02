@@ -16,8 +16,12 @@ of reading everything into context every session.
 - **Each `*.md` doc is a row.** Its YAML frontmatter (`title/type/domain/tags/status/updated`)
   is the row's columns.
 - **[`INDEX.md`](INDEX.md) is the materialized catalog** — generated from all frontmatter,
-  grouped by domain. **Read it first** (it's cheap), then open only the leaf docs your task
-  needs. Never hand-edit it: the kit's hook regenerates it after every change (`make index` by hand).
+  grouped by domain. Each domain's table holds only its active rows; `status: archived` rows
+  fold into one line per domain (count + the `make find DOMAIN=` command that lists them), so
+  the catalog stays flat as a domain accumulates history. **Read it first** (it's cheap), then
+  open only the leaf docs your task needs. Never hand-edit it: the kit's hook regenerates it
+  after every change (`make index` by hand); `make verify` warns past 10 KB (archive finished
+  docs to bring it back under budget).
 - **The `Makefile` is the CLI** (see below). Claude creates, indexes, verifies, finds, and
   archives docs through it, then "manages however it wants" within these conventions. The
   engine (`Makefile` + `bin/` + `_templates/`) lives **outside** this dir, at
@@ -121,7 +125,7 @@ The engine — `Makefile`, `bin/` (index generator, verifier, scaffolder, sessio
 This dir therefore holds only docs, the two generated catalogs (`INDEX.md`, `SESSION_INDEX.md`), the
 `sessions/` registry, the harness auto-memory `memory/` (symlinked from `~/.claude/projects/<slug>/memory`
 by `setup.sh`) and per-user tool state under `state/` (e.g. `state/pr-review/`) — all four
-operational, excluded from `make index`/`verify` (only `SESSION_INDEX.md`'s size is checked — `verify`
-warns past 10 KB). Nothing executable
+operational, excluded from `make index`/`verify` (`SESSION_INDEX.md` and `INDEX.md` are each checked for
+size — `verify` warns past 10 KB). Nothing executable
 lives in `.context/`. The engine finds this dir via `CONTEXT` (default sibling `../../.context`,
 overridable). Don't add knowledge under the engine dir.
