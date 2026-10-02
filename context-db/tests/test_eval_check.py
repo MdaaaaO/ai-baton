@@ -354,17 +354,23 @@ class Wiring(unittest.TestCase):
         return p.stdout
 
     def test_make_target_builds_the_runner_command(self):
-        out = self.make_n("eval", "SKILL=pr-open", "MODEL=some-model", "RUNS=1", "TRUST=1")
+        out = self.make_n("eval", "SKILL=pr-open", "MODEL=some-model", "RUNS=1", "JOBS=2", "TRUST=1")
         cmd = " ".join(out.split())
         for part in ("claude plugin eval .", "--no-publish", "--ablation none", "--case 'pr-open-*'",
-                     "--model 'some-model'", "--runs 1", "--trust-plugin"):
+                     "--model 'some-model'", "--runs 1", "--concurrency 2", "--trust-plugin"):
             self.assertIn(part, cmd)
 
     def test_make_target_without_arguments_runs_every_case(self):
         cmd = " ".join(self.make_n("eval").split())
         self.assertIn("claude plugin eval . --no-publish --ablation none", cmd)
-        for flag in ("--case", "--model", "--trust-plugin", "--runs"):
+        for flag in ("--case", "--model", "--trust-plugin", "--runs", "--concurrency"):
             self.assertNotIn(flag, cmd)
+
+    def test_make_target_judges_with_sonnet_unless_told_otherwise(self):
+        # the CLI's own default judge fails the suite's multi-condition criteria on answers that meet them
+        self.assertIn("--judge-model 'sonnet'", " ".join(self.make_n("eval").split()))
+        self.assertIn("--judge-model 'some-judge'", " ".join(self.make_n("eval", "JUDGE=some-judge").split()))
+        self.assertNotIn("--judge-model", " ".join(self.make_n("eval", "JUDGE=").split()))
 
     def test_ci_runs_the_static_check(self):
         mk = (KIT / "context-db" / "Makefile").read_text(encoding="utf-8")
@@ -382,13 +388,22 @@ class Wiring(unittest.TestCase):
         text = (KIT / ".github" / "workflows" / "evals.yml").read_text(encoding="utf-8")
         triggers = re.split(r"\n(?=\S)", text.split("\non:", 1)[1], maxsplit=1)[0]  # the `on:` block, to the next top-level key
         self.assertEqual(re.findall(r"(?m)^  ([a-z_]+):", triggers), ["workflow_dispatch"])
-        for name in ("skill", "models"):
+        for name in ("skill", "models", "judge_model", "runs"):
             self.assertRegex(triggers, rf"(?m)^      {name}:")
         self.assertIn("secrets.CLAUDE_CODE_OAUTH_TOKEN", text)
         # inputs reach the scripts through env only — never spliced into a `run:` body, where they could inject shell
+        # (the job's `timeout-minutes:` is a workflow key, not a script: it may read an input)
         for line in text.splitlines():
-            if "${{ inputs." in line:
+            if "${{ inputs." in line and not line.lstrip().startswith("timeout-minutes:"):
                 self.assertRegex(line, r"^\s+[A-Z_]+: \$\{\{ inputs\.\w+ \}\}$", line)
+
+    def test_the_workflow_never_passes_an_empty_judge(self):
+        # `JUDGE=` on the make command line switches the target's default judge off; the workflow passes the
+        # variable only when the input names a model
+        text = (KIT / ".github" / "workflows" / "evals.yml").read_text(encoding="utf-8")
+        run_line = next(line for line in text.splitlines() if "make -C context-db eval " in line)
+        self.assertIn('${JUDGE:+"JUDGE=$JUDGE"}', run_line)
+        self.assertNotRegex(run_line, r'(?<![+"])JUDGE="')
 
 
 if __name__ == "__main__":

@@ -160,6 +160,9 @@ class EvalsHygiene(unittest.TestCase):
     def test_timeout_is_not_the_old_90_minutes(self):
         self.assertNotIn("timeout-minutes: 90", self.TEXT)
 
+    def test_no_comment_says_the_credential_was_never_configured(self):
+        self.assertNotIn("has never been configured", self.TEXT)
+
     def test_a_missing_credential_fails_the_job(self):
         # a run with the secret missing must not conclude success — a required check satisfied by a run that
         # evaluated nothing (the earlier shape: every later step guarded and skipped, nothing left to fail)

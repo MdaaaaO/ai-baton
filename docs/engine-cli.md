@@ -56,7 +56,7 @@ Kit / config (env fact store .context/reference/env/):
   make -C $BATON/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
   make -C $BATON/context-db test [T=test_kb]          # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file
   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
-  make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3]  # run the eval suite (SPENDS TOKENS)
+  make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=<id>] [RUNS=3] [JOBS=4]  # run the eval suite (SPENDS TOKENS)
   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
   make -C $BATON/context-db migrate [CONTEXT=<store>] # bring a store forward: kb.py migrate, then ctx_adapter.py adopt —
                                                        #   both steps in one call (sync-check.sh and kit-health name each on its own)

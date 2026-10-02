@@ -14,11 +14,19 @@ on:
   workflow_dispatch:
     inputs:
       skill:
-        description: "Skill whose trigger suite to run (evals/<skill>-*); empty = every case"
+        description: "Skill whose trigger suite to run (evals/<skill>-*); empty = every case (hours, not minutes)"
         required: false
         default: ""
       models:
         description: "Comma-separated model ids to run the suite on, one run per model; empty = the CLI's default"
+        required: false
+        default: ""
+      judge_model:
+        description: "Model the llm graders vote with; empty = the make target's default"
+        required: false
+        default: ""
+      runs:
+        description: "Runs per case (1-9); empty = the CLI's default"
         required: false
         default: ""
 
@@ -33,10 +41,10 @@ jobs:
   evals:
     name: evals
     runs-on: ubuntu-latest
-    # Three short suites, one default model: no run has needed close to this, but none has run at all yet either
-    # (the secret has never been configured) — 30 is an estimate from the suite sizes, not a measurement; tighten
-    # it once real runs exist.
-    timeout-minutes: 30
+    # One skill's suite fits 30 minutes: every agent run is bounded by its case's `timeout_seconds`, and four run at
+    # once (JOBS=4 below). Every case at once is some 940 agent runs, which takes hours — hence the larger limit for
+    # an empty `skill`; that limit is an estimate from the per-skill runs, not a measurement.
+    timeout-minutes: ${{ inputs.skill == '' && 300 || 30 }}
     steps:
       - id: token
         name: Is the eval credential configured?
@@ -63,10 +71,18 @@ jobs:
         env:
           SKILL: ${{ inputs.skill }}
           MODELS: ${{ inputs.models }}
+          JUDGE: ${{ inputs.judge_model }}
+          RUNS: ${{ inputs.runs }}
         run: |
           if [ -n "$SKILL" ]; then
             printf '%s' "$SKILL" | grep -Eq '^[a-z0-9][a-z0-9-]*$' && [ -f "skills/$SKILL/SKILL.md" ] \
               || { echo "::error::skill '$SKILL' is not a skill in this kit"; exit 1; }
+          fi
+          if [ -n "$JUDGE" ]; then
+            printf '%s' "$JUDGE" | grep -Eq '^[A-Za-z0-9._:@-]+(\[[0-9a-z]+\])?$' || { echo "::error::judge model '$JUDGE' is not a model id"; exit 1; }
+          fi
+          if [ -n "$RUNS" ]; then
+            printf '%s' "$RUNS" | grep -Eq '^[1-9]$' || { echo "::error::runs '$RUNS' is not a number from 1 to 9"; exit 1; }
           fi
           models=""
           for m in $(printf '%s' "$MODELS" | tr ',' ' '); do
@@ -97,6 +113,8 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SKILL: ${{ inputs.skill }}
           MODELS: ${{ steps.inputs.outputs.models }}
+          JUDGE: ${{ inputs.judge_model }}
+          RUNS: ${{ inputs.runs }}
         shell: bash
         run: |
           set -o pipefail
@@ -105,7 +123,10 @@ jobs:
             [ "$model" = default ] && model=""
             echo "## evals — ${SKILL:-every case} on ${model:-the default model}" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            make -C context-db eval TRUST=1 SKILL="$SKILL" MODEL="$model" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
+            # an empty JUDGE= on the command line would switch the make target's default judge off, so it is
+            # passed only when the input names one
+            make -C context-db eval TRUST=1 JOBS=4 SKILL="$SKILL" MODEL="$model" RUNS="$RUNS" ${JUDGE:+"JUDGE=$JUDGE"} \
+              2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           done
           exit $rc
