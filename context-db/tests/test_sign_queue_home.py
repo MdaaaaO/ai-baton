@@ -215,7 +215,7 @@ class LegacyMigrationIsExplicit(unittest.TestCase):
             tmp = Path(tmp)
             legacy, ctx, q = self._kit(tmp)
             sq = _load_in(ctx)
-            sq.migrate_legacy.__defaults__ = (legacy, q)  # stand in for the real kit-dir / workspace-queue paths
+            sq._own_legacy_queue = lambda: legacy  # stand in for the kit dir of this workspace
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 rc = sq.main(["list"])  # the overview `make sign_list` runs
@@ -228,7 +228,7 @@ class LegacyMigrationIsExplicit(unittest.TestCase):
             tmp = Path(tmp)
             legacy, ctx, q = self._kit(tmp)
             sq = _load_in(ctx)
-            sq.migrate_legacy.__defaults__ = (legacy, q)
+            sq._own_legacy_queue = lambda: legacy
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 rc = sq.main(["migrate-legacy"])

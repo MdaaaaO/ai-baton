@@ -43,9 +43,15 @@ def load_signq(name: str = "signq_drain_test"):
     return mod
 
 
-def _load_in(ctx: Path):
+def _load_in(ctx: Path, legacy: Path | None = None):
+    """signq.py loaded for the workspace around `ctx`. `legacy`, when given, stands in for the old queue of a
+    kit that sits in that workspace; without it the module judges for itself (and a fixture workspace is
+    never the one this checkout sits in)."""
     with mock.patch.dict(os.environ, _env(ctx, ctx), clear=True):
-        return load_signq()
+        sq = load_signq()
+    if legacy is not None:
+        sq._own_legacy_queue = lambda: legacy
+    return sq
 
 
 def _recipe(target: str) -> str:
@@ -94,17 +100,22 @@ class SignTargetsAndTheMigration(unittest.TestCase):
             legacy_job = _legacy_job(tmp)
             ctx = tmp / "ws" / ".context"
             ctx.mkdir(parents=True)
-            sq = _load_in(ctx)
-            sq.migrate_legacy.__defaults__ = (legacy_job.parent, sq.Q)
+            sq = _load_in(ctx, legacy_job.parent)
             sq.Q.mkdir(parents=True, exist_ok=True)
             held = open(sq.LOCK, "a+")
             fcntl.flock(held.fileno(), fcntl.LOCK_EX)
-            sq._write_lock_state(held, holder_pid=4321, job="KEY-123-p1", job_pid=4322, job_started="then")
+            sq._write_lock_state(held, job="KEY-123-p1", job_pid=4322, job_started="then")
             try:
-                with contextlib.redirect_stdout(io.StringIO()):
+                quiet, loud = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(quiet):
                     rc = sq.main(["migrate-legacy", "-q"])
-                self.assertEqual(rc, 0)
+                with contextlib.redirect_stdout(loud):
+                    rc_loud = sq.main(["migrate-legacy"])
+                self.assertEqual((rc, rc_loud), (0, 0))
                 self.assertTrue(legacy_job.exists(), "the move must wait for the drain that holds the lock")
+                self.assertEqual(quiet.getvalue(), "")
+                self.assertIn(f"nothing moved — another drain (pid {os.getpid()}, on KEY-123-p1) holds the queue lock",
+                              loud.getvalue(), "a locked-out move must say why nothing moved")
                 self.assertEqual(sq._read_lock_state(held).get("job_pid"), 4322,
                                  "the holder's record must survive a locked-out migrate-legacy")
             finally:
@@ -117,8 +128,7 @@ class SignTargetsAndTheMigration(unittest.TestCase):
             legacy_job = _legacy_job(tmp)
             ctx = tmp / "ws" / ".context"
             ctx.mkdir(parents=True)
-            sq = _load_in(ctx)
-            sq.migrate_legacy.__defaults__ = (legacy_job.parent, sq.Q)
+            sq = _load_in(ctx, legacy_job.parent)
             sq.Q.mkdir(parents=True, exist_ok=True)
             # what a drain that was killed mid-job leaves behind: no lock held, a job still on record
             with open(sq.LOCK, "a+") as left:
@@ -141,15 +151,13 @@ class MigrationRunsUnderTheLock(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             legacy_job = _legacy_job(tmp)
-            legacy = legacy_job.parent
             ctx = tmp / "ws" / ".context"
             ctx.mkdir(parents=True)
-            sq = _load_in(ctx)
-            q = sq.Q
+            sq = _load_in(ctx, legacy_job.parent)
             real_migrate = sq.migrate_legacy
             held_while_migrating = []
 
-            def spy(legacy_arg=legacy, q_arg=q):
+            def spy(*args):
                 # a fresh fd on the same lock path: flock is per open file description, so a second one
                 # from this very process still fails to take it while cmd_run's own fd holds it exclusively
                 probe = open(sq.LOCK, "a+")
@@ -161,7 +169,7 @@ class MigrationRunsUnderTheLock(unittest.TestCase):
                     held_while_migrating.append(True)
                 finally:
                     probe.close()
-                return real_migrate(legacy_arg, q_arg)
+                return real_migrate(*args)
 
             with mock.patch.object(sq, "migrate_legacy", side_effect=spy):
                 buf = io.StringIO()
@@ -179,10 +187,8 @@ class MigrationRunsUnderTheLock(unittest.TestCase):
             legacy_job = _legacy_job(tmp)
             ctx = tmp / "ws" / ".context"
             ctx.mkdir(parents=True)
-            sq = _load_in(ctx)
-            real_migrate = sq.migrate_legacy
-            with mock.patch.object(sq, "migrate_legacy",
-                                   side_effect=lambda: real_migrate(legacy_job.parent, sq.Q)) as migrate:
+            sq = _load_in(ctx, legacy_job.parent)
+            with mock.patch.object(sq, "migrate_legacy", wraps=sq.migrate_legacy) as migrate:
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf):
                     rc = sq.main(["run", "--dry-run"])
@@ -197,7 +203,7 @@ class MigrationRunsUnderTheLock(unittest.TestCase):
             legacy_job = _legacy_job(tmp)
             ctx = tmp / "ws" / ".context"
             ctx.mkdir(parents=True)
-            sq = _load_in(ctx)
+            sq = _load_in(ctx, legacy_job.parent)
             sq.Q.mkdir(parents=True, exist_ok=True)
             held = open(sq.LOCK, "a+")
             fcntl.flock(held.fileno(), fcntl.LOCK_EX)
@@ -215,6 +221,40 @@ class MigrationRunsUnderTheLock(unittest.TestCase):
             self.assertTrue(legacy_job.exists(), "a locked-out run must not touch the legacy queue either")
 
 
+class TheOldQueueBelongsToItsWorkspace(unittest.TestCase):
+    """The kit's old queue is moved only into the queue of the workspace the kit sits in. A kit that drains
+    another workspace's queue leaves it alone — a fixture workspace must never pull in, and run, a job that
+    waits in the checkout the suite runs from."""
+
+    def test_a_run_for_another_workspace_leaves_the_kits_old_queue_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            legacy_job = _legacy_job(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            sq.LEGACY_Q = legacy_job.parent  # the kit's old queue; the kit does not sit in tmp/ws
+            self.assertIsNone(sq._own_legacy_queue())
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = sq.main(["run"])
+                rc_cmd = sq.main(["migrate-legacy"])
+            out = buf.getvalue()
+            self.assertEqual((rc, rc_cmd), (0, 0), out)
+            self.assertTrue(legacy_job.exists(), "a job of another workspace must stay where it is")
+            self.assertNotIn("pushed", out, "and must not be run")
+            self.assertEqual(list(sq.Q.glob("*.sh")), [])
+            self.assertIn("is not the old queue of the workspace", out)
+
+    def test_a_kit_in_its_own_workspace_names_its_old_queue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Path(tmp) / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            sq.ROOT = sq.KIT.parent
+            self.assertEqual(sq._own_legacy_queue(), sq.KIT / "sign-queue")
+
+
 class HeldLockNamesTheHolder(unittest.TestCase):
     """A second `run` that finds the lock held prints one line naming the holder's pid and the job it is on,
     and the drain itself is what writes that record: while a job runs the lock file names it, afterwards the
@@ -229,7 +269,7 @@ class HeldLockNamesTheHolder(unittest.TestCase):
             sq.Q.mkdir(parents=True, exist_ok=True)
             held = open(sq.LOCK, "a+")
             fcntl.flock(held.fileno(), fcntl.LOCK_EX)
-            sq._write_lock_state(held, holder_pid=4321, job="KEY-123-p1")
+            sq._write_lock_state(held, job="KEY-123-p1")  # this process is the live holder
             try:
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf):
@@ -238,8 +278,47 @@ class HeldLockNamesTheHolder(unittest.TestCase):
                 fcntl.flock(held.fileno(), fcntl.LOCK_UN)
                 held.close()
             self.assertEqual(rc, 0)
-            self.assertIn("another drain (pid 4321, on KEY-123-p1) already holds the lock — exiting",
+            self.assertIn(f"another drain (pid {os.getpid()}, on KEY-123-p1) already holds the lock — exiting",
                           buf.getvalue())
+
+    def _locked_out_line(self, record: str) -> str:
+        """What a `run` prints when the lock is held and the lock file's bytes are `record`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Path(tmp) / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            sq = _load_in(ctx)
+            sq.Q.mkdir(parents=True, exist_ok=True)
+            sq.LOCK.write_text(record)
+            held = open(sq.LOCK, "a+")
+            fcntl.flock(held.fileno(), fcntl.LOCK_EX)
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf), mock.patch.object(sq.time, "sleep"):
+                    rc = sq.main(["run"])
+            finally:
+                fcntl.flock(held.fileno(), fcntl.LOCK_UN)
+                held.close()
+            self.assertEqual(rc, 0)
+            return buf.getvalue()
+
+    def test_a_record_left_by_a_dead_drain_names_no_pid(self):
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait(timeout=10)
+        out = self._locked_out_line(json.dumps({"pid": gone.pid, "job": "KEY-123-p1", "job_pid": None,
+                                                "job_started": ""}))
+        self.assertIn("another sign-queue process already holds the lock — exiting", out)
+        self.assertNotIn(str(gone.pid), out, "the pid of a drain that is gone must not be named as the holder")
+
+    def test_an_empty_record_names_no_pid(self):
+        out = self._locked_out_line("")
+        self.assertIn("another sign-queue process already holds the lock — exiting", out)
+        self.assertNotIn("?", out)
+
+    def test_a_record_that_is_not_an_object_is_no_record(self):
+        for record in ("[1, 2]", "7", '"text"', "null", "{not json"):
+            with self.subTest(record=record):
+                self.assertIn("another sign-queue process already holds the lock — exiting",
+                              self._locked_out_line(record))
 
 
     def test_a_running_job_is_on_record_and_the_record_is_idle_afterwards(self):
@@ -276,6 +355,76 @@ class HeldLockNamesTheHolder(unittest.TestCase):
             with open(sq.LOCK) as lock_f:
                 state = sq._read_lock_state(lock_f)
             self.assertEqual((state.get("pid"), state.get("job"), state.get("job_pid")), (os.getpid(), "", None))
+
+
+class TheRecordedJobIsJudgedByWhatItIsNow(unittest.TestCase):
+    """Whether the job a dead drain left on record is still running: the same pid with the same start time,
+    read the same way under any time zone; a zombie is gone; a `ps` that cannot answer never turns a live
+    pid into a dead one."""
+
+    @staticmethod
+    def _sq(tmp):
+        ctx = Path(tmp) / "ws" / ".context"
+        ctx.mkdir(parents=True)
+        return _load_in(ctx)
+
+    def test_the_start_time_reads_the_same_under_any_time_zone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._sq(tmp)
+            proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+            try:
+                with mock.patch.dict(os.environ, {"TZ": "UTC-9"}):
+                    recorded = sq._pid_start(proc.pid)
+                with mock.patch.dict(os.environ, {"TZ": "UTC+5"}):
+                    read_later = sq._pid_start(proc.pid)
+                    still = sq._job_still_alive(proc.pid, recorded)
+            finally:
+                proc.kill()
+                proc.wait(timeout=10)
+            self.assertTrue(recorded)
+            self.assertEqual(recorded, read_later)
+            self.assertTrue(still, "a live job must not read as a reused pid under another TZ")
+
+    def test_ps_is_asked_in_utc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._sq(tmp)
+            done = subprocess.CompletedProcess([], 0, stdout=" Thu Jan  1 00:00:00 2026\n", stderr="")
+            with mock.patch.object(sq.subprocess, "run", return_value=done) as run, \
+                    mock.patch.dict(os.environ, {"TZ": "UTC-9", "LC_ALL": "POSIX"}):
+                self.assertEqual(sq._pid_start(4321), "Thu Jan  1 00:00:00 2026")
+            env = run.call_args.kwargs["env"]
+            self.assertEqual((env["TZ"], env["LC_ALL"]), ("UTC", "C"))
+
+    def test_a_zombie_is_gone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._sq(tmp)
+            proc = subprocess.Popen([sys.executable, "-c", "pass"])
+            started = sq._pid_start(proc.pid)
+            try:
+                os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)  # exited, not yet reaped
+                self.assertTrue(sq._alive(proc.pid), "an unreaped child still answers kill(pid, 0)")
+                self.assertFalse(sq._job_still_alive(proc.pid, started), "a zombie runs nothing")
+                self.assertFalse(sq._job_still_alive(proc.pid, ""))
+            finally:
+                proc.wait(timeout=10)
+
+    def test_a_pid_that_exits_between_the_probes_is_gone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._sq(tmp)
+            with mock.patch.object(sq, "_alive", side_effect=[True, False]), \
+                    mock.patch.object(sq, "_ps", return_value=""):
+                self.assertFalse(sq._job_still_alive(4321, "Thu Jan  1 00:00:00 2026"))
+
+    def test_a_ps_that_cannot_answer_leaves_a_live_pid_alive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._sq(tmp)
+            with mock.patch.object(sq, "_alive", return_value=True), mock.patch.object(sq, "_ps", return_value=""):
+                self.assertTrue(sq._job_still_alive(4321, "Thu Jan  1 00:00:00 2026"))
+
+    def test_a_reused_pid_is_gone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._sq(tmp)
+            self.assertFalse(sq._job_still_alive(os.getpid(), "Thu Jan  1 00:00:00 1970"))
 
 
 class StaleJobBlocksTheNextDrain(unittest.TestCase):
