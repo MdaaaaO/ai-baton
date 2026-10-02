@@ -60,6 +60,10 @@ that has not adopted ctx-store sees nothing. The adapter names the store with `C
 missing), `… install` fetches the pinned release, `KIT_CTX` points at another `ctx` (`docs/env-vars.md`). Changes made
 through `Bash` are not seen by the hook; the next hooked write's `validate --changed` picks them up.
 
+**`… install` fails with `CERTIFICATE_VERIFY_FAILED`** — the fetch from PyPI uses Python's own trust store, not git's,
+and this Python has no CA bundle. On a python.org build for macOS run its `Install Certificates.command`; elsewhere
+point `SSL_CERT_FILE` at the system bundle (e.g. `/etc/ssl/certs/ca-certificates.crt`) and run `install` again.
+
 **"`<doc>` is a doc in the adopted ctx store … may not write it"** — the `PreToolUse` deny. Nothing is broken: write
 the doc through the ctx MCP tools the reason names (`ctx_str_replace` for an `Edit`, `ctx_create` or `ctx_new` for
 a `Write`, `ctx_log` for a Session-log line, `ctx_fm` for a frontmatter field), keyed by the path without `.md`.
