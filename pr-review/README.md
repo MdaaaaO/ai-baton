@@ -10,7 +10,7 @@ per-user **state** lives outside this repo, in the workspace's `.context/state/p
   `skipped`, `shadow_approve`, `shadow_fallback`, `auto_approved`. Appends take `.ledger.lock`.
 - `.submitted/<digest>/` — the exact payload of every review posted (`submit-review.sh --confirm`);
   pruned after `submitted_retention_days`.
-- `.scan.lock` — held by a running `pr-scan.sh`; a second sweep exits 3 instead of double-marking.
+- `.scan.lock` — held by a running `pr-scan.sh`; a second sweep exits 3 instead of repeating the gh calls and racing the first for `latest` (only `--mark-only` writes the ledger, under `ledger-append.sh`'s lock).
 
 Nothing else lives in this directory — the former `config.json` / `ledger.jsonl` / `.submitted`
 compatibility symlinks were removed on 2026-09-24; every script resolves `PR_REVIEW_HOME` itself.

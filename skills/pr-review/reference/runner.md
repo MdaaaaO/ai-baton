@@ -118,7 +118,8 @@ Return the AUTO:/CTX:/NEEDS lines only.")
 ```
 
 Main session on return — `shadow` mode: append `{"repo","pr","head","status":"shadow_approve"|"shadow_fallback","ts","reason"}`
-to the ledger (under `flock "$ROOT/.ledger.lock"`) and tell the user one line ("would approve <repo>#<n> — <body>" /
+to the ledger (pipe the row to `bash $BATON/skills/pr-review/scripts/ledger-append.sh "$ROOT/ledger.jsonl"` — exit 0
+appended, exit 1 bad JSON, exit 3 lock timeout, exit 4 write failure; see its header) and tell the user one line ("would approve <repo>#<n> — <body>" /
 "fallback: <reason>"). A `shadow_fallback` row stays an ordinary queue row; a `shadow_approve` row drops from later sweeps
 on that head. `live` mode: on `approve`, write `$CTX/request.json` `{"event":"APPROVE","body":<body>,"comments":[]}`, run
 `submit-review.sh preview … --auto` then `submit … --confirm <digest> --auto` **without** an `AskUserQuestion` — the script
@@ -148,8 +149,8 @@ Only steps 5–6 (the interactive walk and the Submit prompt) are skipped, and o
      be `COMMENT`, `auto_comment.mode` must be `live`, the live PR author must not be the login) and
      refuses otherwise. Ledger status `auto_commented`.
    - **Any STOP** → `on_stop` (config): `hold` (default) — post nothing; append ledger status `held` for
-     this head (under `flock "$ROOT/.ledger.lock"`, the same append path `shadow_comment` uses) so the
-     next tick does not spawn a runner on the same head again, then the row stays an ordinary queue row
+     this head (via `ledger-append.sh`, the same append path `shadow_comment` uses — see its exit codes
+     above) so the next tick does not spawn a runner on the same head again, then the row stays an ordinary queue row
      for the next interactive `pr-review` walk. `comment` — post the COMMENT review
      anyway, the STOP finding included in the body as a flagged item (still never APPROVE/REQUEST_CHANGES
      — the event is always `COMMENT` on this path, whatever `on_stop` says). `request_changes` is
@@ -165,7 +166,7 @@ Only steps 5–6 (the interactive walk and the Submit prompt) are skipped, and o
    step 2.
 4. **Logging.** Same ledger as `--auto`: `.context/state/pr-review/ledger.jsonl`
    (`{"repo","pr","head","status":"auto_commented"|"shadow_comment"|"held","ts",...}`, written by
-   `submit-review.sh` for `auto_commented`, by the main session under `flock "$ROOT/.ledger.lock"` for
+   `submit-review.sh` for `auto_commented`, by the main session via `ledger-append.sh` for
    `shadow_comment` and `held`).
 5. Step 8 KB write-back still runs for every row this path posts or shadow-decides.
 6. Kill switch: `auto_comment.mode: off`. Never APPROVE / REQUEST_CHANGES on this path, whatever the

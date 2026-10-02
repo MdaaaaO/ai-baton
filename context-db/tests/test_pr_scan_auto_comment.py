@@ -167,6 +167,15 @@ class ScanHarness:
     def run_scan(self, env: dict, *args: str):
         return subprocess.run(["bash", str(PR_SCAN), "--quiet", *args], env=env, capture_output=True, text=True, timeout=60)
 
+    def mark_only(self, env: dict):
+        """Marks the most recent sweep's shown rows as surfaced — the main session's step, run separately
+        from the (read-only) sweep itself, against the exact run dir `run_scan` just wrote (`--run` is
+        required; no `latest`-fallback in the script itself, but nothing newer has run in these tests, so
+        `latest` still names that same run)."""
+        run_dir = str(self.tmp / "scanout" / "latest")
+        return subprocess.run(["bash", str(PR_SCAN), "--mark-only", "--run", run_dir], env=env,
+                              capture_output=True, text=True, timeout=60)
+
     def queue(self):
         latest = self.tmp / "scanout" / "latest"
         return json.loads((latest / "queue.json").read_text())
@@ -427,7 +436,7 @@ class ReviewedHeadRows(ScanHarness, unittest.TestCase):
             702: (h2, [my_review("CHANGES_REQUESTED", h2, 7002)]),
             703: (h3, []),
         })
-        r = self.run_scan(env, "--mark")
+        r = self.run_scan(env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         for num, label in ((701, "watching (you approved)"), (702, "watching (you requested changes)")):
             row = self.row(num)
@@ -437,8 +446,11 @@ class ReviewedHeadRows(ScanHarness, unittest.TestCase):
         self.assertEqual(self.row(703)["section"], "New — not started")
         self.assertEqual([row["pr"] for row in self.queue()][0], 703)   # a reviewed row never outranks an open one
         self.assertIn(" new=1 ", r.stdout)                              # only the unreviewed PR counts as new
+        # the main session's step, not the sweep's: marks this run's shown rows as surfaced
+        m = self.mark_only(env)
+        self.assertEqual(m.returncode, 0, m.stdout + m.stderr)
         # still open, same heads: the next sweep keeps watching them and has nothing new to report
-        r = self.run_scan(env, "--mark")
+        r = self.run_scan(env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.row(701)["section"], "Watching")
         self.assertIn(" new=0 ", r.stdout)
@@ -446,7 +458,7 @@ class ReviewedHeadRows(ScanHarness, unittest.TestCase):
     def test_a_reviewed_head_alone_is_not_news(self):
         self.write_config(prios=[1])
         head = "d" * 40
-        r = self.run_scan(self.sweep_env({704: (head, [my_review("APPROVED", head, 7004)])}), "--mark")
+        r = self.run_scan(self.sweep_env({704: (head, [my_review("APPROVED", head, 7004)])}))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.row(704)["section"], "Watching")
         self.assertIn(" new=0 ", r.stdout)   # the fork answers NO-OP: our own review is not a reason for a brief
@@ -457,12 +469,14 @@ class ReviewedHeadRows(ScanHarness, unittest.TestCase):
         self.write_ledger([{"repo": REPO, "pr": 705, "head": head, "status": "auto_commented", "event": "COMMENT",
                             "review_id": 7005, "comments": 2, "ts": "2026-01-01T00:00:00Z"}])
         env = self.sweep_env({705: (head, [my_review("COMMENTED", head, 7005)]), 706: (other, [])})
-        r = self.run_scan(env, "--mark")
+        r = self.run_scan(env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         row = self.row(705)
         self.assertEqual((row["kind"], row["section"], row["state_label"]),
                          ("done", "Handled this tick", "handled (review #7005)"), row)
-        r = self.run_scan(env, "--mark")   # shown and marked above: this sweep drops it as done
+        m = self.mark_only(env)
+        self.assertEqual(m.returncode, 0, m.stdout + m.stderr)
+        r = self.run_scan(env)   # shown and marked above: this sweep drops it as done
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn(705, [row["pr"] for row in self.queue()], self.queue())
         self.assertIn("done=1 ", r.stdout)
@@ -499,6 +513,50 @@ class ReviewedHeadRows(ScanHarness, unittest.TestCase):
         self.assertIn("boom", errors)
         self.assertEqual(self.row(709)["kind"], "new")   # the queue itself survives, without a section
         self.assertNotIn("section", self.row(709))
+
+
+@unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
+class SweepLeavesTheLedgerAlone(ScanHarness, unittest.TestCase):
+    """The sweep (`pr-scan.sh` with no `--mark-only`) is read-only against the ledger — the one write
+    this skill causes moves to the separate `--mark-only` step, run by the main session, never the
+    (forked, read-only) sweep itself."""
+
+    def test_a_sweep_with_new_rows_does_not_touch_the_ledger(self):
+        self.write_config(prios=[1])
+        cfg = json.loads(self.state_dir.joinpath("config.json").read_text())
+        cfg["sweep_repos"] = [REPO]
+        self.state_dir.joinpath("config.json").write_text(json.dumps(cfg))
+        env = self.env(STUB_SWEEP_JSON=json.dumps([
+            {"number": 801, "updatedAt": "2099-01-01T00:00:00Z", "isDraft": False,
+             "author": {"login": "alice", "is_bot": False}, "headRefOid": "9" * 40},
+        ]), STUB_PR_801_JSON=json.dumps(pr_json(801, "alice", "9" * 40, updated_at="2099-01-01T00:00:00Z")),
+            STUB_REVIEWS_801_JSON=json.dumps([]))
+        ledger_path = self.state_dir / "ledger.jsonl"
+        self.assertFalse(ledger_path.exists())            # nothing seeded it before the sweep runs
+        r = self.run_scan(env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(" new=1 ", r.stdout)               # the sweep did find a new, unsurfaced row …
+        self.assertEqual(ledger_path.read_text(), "")    # … and still never wrote it
+
+    def test_mark_only_is_the_only_thing_that_writes(self):
+        self.write_config(prios=[1])
+        cfg = json.loads(self.state_dir.joinpath("config.json").read_text())
+        cfg["sweep_repos"] = [REPO]
+        self.state_dir.joinpath("config.json").write_text(json.dumps(cfg))
+        env = self.env(STUB_SWEEP_JSON=json.dumps([
+            {"number": 802, "updatedAt": "2099-01-01T00:00:00Z", "isDraft": False,
+             "author": {"login": "alice", "is_bot": False}, "headRefOid": "8" * 40},
+        ]), STUB_PR_802_JSON=json.dumps(pr_json(802, "alice", "8" * 40, updated_at="2099-01-01T00:00:00Z")),
+            STUB_REVIEWS_802_JSON=json.dumps([]))
+        r = self.run_scan(env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        ledger_path = self.state_dir / "ledger.jsonl"
+        self.assertEqual(ledger_path.read_text(), "")
+        m = self.mark_only(env)
+        self.assertEqual(m.returncode, 0, m.stdout + m.stderr)
+        rows = [json.loads(ln) for ln in ledger_path.read_text().splitlines() if ln.strip()]
+        self.assertEqual([r["pr"] for r in rows], [802])
+        self.assertEqual(rows[0]["status"], "surfaced")
 
 
 if __name__ == "__main__":
