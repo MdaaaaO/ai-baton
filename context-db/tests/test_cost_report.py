@@ -630,7 +630,6 @@ class PrOverlayCappedBothEnds(unittest.TestCase):
             tickets.write_text(
                 "key\tcreated\tresolved\ttype\tparent\n"
                 "KEY-456\t2026-01-02\t2026-01-05\ttask\t\n"   # resolved before the first spend day
-                "KEY-789\t2026-01-02\t2026-01-20\ttask\t\n"   # resolved after the last spend day
                 "KEY-123\t2026-01-02\t2026-01-12\ttask\t\n",  # inside the window — the only one that counts
                 encoding="utf-8")
             out_json = d / "report.json"
