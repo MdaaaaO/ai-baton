@@ -866,6 +866,16 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.status()[1], "ok", "a plain run does not repeat the error")
         self.assertEqual(self.unverified_file.read_text(), mark, "and leaves the mark as it is")
 
+        r = self.sync(env=self.gh_env(GH_AUTH_RC="1"), args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("unverified (gh not authenticated or unreachable)", self.status_file.read_text())
+        self.assertEqual(self.unverified_file.read_text(), mark,
+                         "a check that cannot run never turns a rejection back into a warning")
+
+        r = self.sync(env=self.gh_env(GH_MANIFEST_CONTENT=f"commit {tag_sha}\n"), args=["--accept"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(self.unverified_file.exists(), "a verified answer removes the rejection")
+
     def test_unverified_mark_survives_a_run_made_off_main(self):
         self.origin_commit("a")
         self.origin_commit("b")

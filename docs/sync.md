@@ -128,7 +128,9 @@ installed or authenticated, say); a check that still cannot run refreshes the st
 `ok … unverified (<reason>)` again, and one that runs and fails reports `error` (exit 1) and rewrites the
 mark as `<commit-sha> rejected (<reason>)` — the release stays applied, nothing is rolled back, and
 `kit-health` § 1 reports an error with that reason from then on (the status line goes back to `ok` at the
-next plain run; the mark does not). The mark follows `main`, not `HEAD`: a run made while the checkout is
+next plain run; the mark does not). A `rejected` mark is never turned back into `unverified`: a later
+`--accept` whose check cannot run leaves it as it is, and only a verified answer or a moved `main`
+removes it. The mark follows `main`, not `HEAD`: a run made while the checkout is
 detached or on another branch refuses to sync and leaves the mark alone.
 
 A contributor who wants the old behaviour — always track `origin/main`, no hold — opts out with:

@@ -73,6 +73,7 @@ network), and records the sync as `unverified` in `.sync-status` and, durably, i
 `kit-health` § 1 reads the latter and warns, naming the command above to run by hand. The mark stays until a
 later `make claude_sync` verifies the release or `main` moves to a different commit — not just until the next
 sync run. A later `make claude_sync` whose check runs and rejects the applied release turns the mark into
-`rejected`, which `kit-health` reports as an error; the release itself stays applied.
+`rejected`, which `kit-health` reports as an error until a check verifies the release or `main` moves (a
+check that cannot run does not lift it); the release itself stays applied.
 
 There is no way yet to pull back a release that turns out to be bad: the remedy today is a newer release.

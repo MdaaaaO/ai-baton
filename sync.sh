@@ -316,7 +316,9 @@ verify_release() {
 # cannot run refreshes the stored reason and says `unverified` in this run's status again; one that
 # runs and fails reports `error` (exit 1) and rewrites the mark as `<commit-sha> rejected (<reason>)`
 # — the release stays applied, nothing is rolled back, and `kit-health` § 1 reports an error with
-# that reason from then on (the status line's `error` only lasts until the next plain run).
+# that reason from then on (the status line's `error` only lasts until the next plain run). A
+# `rejected` mark is only ever removed, never turned back into `unverified`: a later check that
+# cannot run leaves it as it is.
 sync_release() {
   local tag=$1 target before verify_suffix rej_line rej_tag mark_line mark_sha
   target="$(git rev-parse "refs/tags/$tag^{commit}" 2>/dev/null)"
@@ -334,7 +336,11 @@ sync_release() {
         if verify_release "$tag" "$before"; then
           if [ -n "$VERIFY_SUFFIX" ]; then
             PULLED="$PULLED $VERIFY_SUFFIX"
-            printf '%s %s\n' "$before" "$VERIFY_SUFFIX" >"$UNVERIFIED"
+            # a check that could not run says nothing new about a release an earlier check rejected
+            case "${mark_line#* }" in
+              rejected*) ;;
+              *) printf '%s %s\n' "$before" "$VERIFY_SUFFIX" >"$UNVERIFIED" ;;
+            esac
           else
             rm -f "$UNVERIFIED"
           fi
