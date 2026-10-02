@@ -106,16 +106,15 @@ if [ "$MARK_ONLY" = 1 ]; then
   exit $rc
 fi
 
+# one scan at a time, taken before the retention sweep and the `latest` repoint: a second sweep would repeat the
+# gh calls and race the first for `latest` (the ledger is written only by --mark-only, under ledger-append.sh's
+# own lock); with_lock falls back to an atomic mkdir where this host has no flock (macOS without coreutils)
+with_lock "$ROOT/.scan.lock" || { echo "error: another pr-scan holds $ROOT/.scan.lock — not starting a second sweep" >&2; exit 3; }
 find "$BASE_OUT" -mindepth 1 -maxdepth 1 -type d -name 'run.*' -mtime +7 -exec rm -rf {} + 2>/dev/null
 OUT=$(mktemp -d "$BASE_OUT/run.$(date -u +%Y%m%dT%H%M%SZ).XXXX"); ln -sfn "$OUT" "$BASE_OUT/latest"
 ERR=$OUT/errors.txt; : > "$ERR"; : > "$ERR.raw"
 # epoch arithmetic + epoch_to_iso, not `date -d "-N days"` (GNU-only — BSD `date` has no `-d`)
 since=$(epoch_to_iso "$(( $(date -u +%s) - DAYS * 86400 ))")
-
-# one scan at a time — a second sweep would repeat the gh calls and race the first for `latest` (the ledger is
-# written only by --mark-only, under ledger-append.sh's own lock); with_lock falls back to an
-# atomic mkdir where this host has no flock (macOS without coreutils)
-with_lock "$ROOT/.scan.lock" || { echo "error: another pr-scan holds $ROOT/.scan.lock — not starting a second sweep" >&2; exit 3; }
 
 # gh_json <label> <gh args…> — 2 attempts with backoff; result (valid JSON, non-empty) lands in $RESP.
 # Runs in the current shell so the failure counters survive (never call it inside $(…)).

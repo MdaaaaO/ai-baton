@@ -133,5 +133,26 @@ class MarkOnlyRequiresRun(unittest.TestCase):
                           "a second --mark-only --run on the same run must not double-append")
 
 
+@unittest.skipUnless(shutil.which("jq") and shutil.which("bash") and shutil.which("flock"), "jq, bash and flock needed")
+class RefusedSweepLeavesLatest(unittest.TestCase):
+    """#44 review: the sweep repointed `latest` at a fresh, empty run dir BEFORE taking `.scan.lock`, so a second
+    sweep that the lock then refused (exit 3) had already moved `latest` off the running sweep's dir."""
+    setUp, make_run, env = MarkOnlyRequiresRun.setUp, MarkOnlyRequiresRun.make_run, MarkOnlyRequiresRun.env
+
+    def test_a_sweep_refused_by_the_scan_lock_leaves_latest_and_the_run_dirs_alone(self):
+        run_a = self.make_run("run.a", [row(101, "a" * 40)])
+        (self.base_out / "latest").symlink_to(run_a, target_is_directory=True)
+        holder = subprocess.Popen(["flock", str(self.state_dir / ".scan.lock"), "sleep", "30"])
+        self.addCleanup(holder.wait)
+        self.addCleanup(holder.kill)
+        for _ in range(50):   # wait until the holder has the lock
+            if subprocess.run(["flock", "-n", str(self.state_dir / ".scan.lock"), "true"]).returncode != 0:
+                break
+            subprocess.run(["sleep", "0.1"])
+        r = subprocess.run(["bash", str(PR_SCAN), "--quiet"], env=self.env(), capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertEqual(os.readlink(self.base_out / "latest"), str(run_a))
+        self.assertEqual(sorted(p.name for p in self.base_out.glob("run.*")), ["run.a"])
+
 if __name__ == "__main__":
     unittest.main()
