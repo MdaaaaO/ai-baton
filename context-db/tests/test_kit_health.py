@@ -506,7 +506,75 @@ class EnvFileCheck(unittest.TestCase):
                 f"{kit_profile.SESSION_ENV_END}\n", encoding="utf-8")
             kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
         text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
         self.assertNotIn("do-not-print", text)
+
+    def test_a_line_that_does_not_split_prints_none_of_its_text(self):
+        with tempfile.TemporaryDirectory() as td:
+            envfile = Path(td) / "env"
+            envfile.write_text(f'export BATON="{td}/gone; export OTHER=do-not-print\n', encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("`BATON=…`", text)
+        self.assertNotIn("do-not-print", text)
+        self.assertNotIn("does not exist", text)
+
+    def test_a_trailing_comment_is_not_part_of_the_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            kept = Path(td) / "kept"
+            kept.mkdir()
+            envfile = Path(td) / "env"
+            envfile.write_text(
+                f"{kit_profile.SESSION_ENV_BEGIN}\nexport BATON='{kept}' # don't print this\n"
+                f"export CLAUDE_PROJECT_DIR={kept}; export OTHER=do-not-print\n{kit_profile.SESSION_ENV_END}\n",
+                encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        self.assertEqual(r.lines, [])
+
+    def test_a_value_only_a_shell_can_resolve_is_not_called_gone(self):
+        with tempfile.TemporaryDirectory() as td:
+            envfile = Path(td) / "env"
+            envfile.write_text(
+                "export CLAUDE_PROJECT_DIR=$HOME\nexport CLAUDE_PROJECT_DIR=~\nexport CLAUDE_PROJECT_DIR=rel/dir\n"
+                "export CLAUDE_PROJECT_DIR=\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        self.assertEqual(r.lines, [])
+
+    def test_a_stray_project_dir_after_the_block_warns_though_its_path_exists(self):
+        with tempfile.TemporaryDirectory() as td:
+            kept, other = Path(td) / "kept", Path(td) / "other"
+            kept.mkdir()
+            other.mkdir()
+            block = f"{kit_profile.SESSION_ENV_BEGIN}\nexport CLAUDE_PROJECT_DIR={kept}\n{kit_profile.SESSION_ENV_END}\n"
+            envfile = Path(td) / "env"
+            envfile.write_text(f"export CLAUDE_PROJECT_DIR={other}\n" + block, encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+            self.assertEqual(r.lines, [], "before the block the hook's value wins")
+            envfile.write_text(block + f"export CLAUDE_PROJECT_DIR={other}\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("overrides the hook's value", text)
+        self.assertIn("delete the stray line", text)
+
+    def test_a_begin_marker_without_its_end_is_no_block(self):
+        with tempfile.TemporaryDirectory() as td:
+            gone = Path(td) / "gone"
+            envfile = Path(td) / "env"
+            envfile.write_text(f"{kit_profile.SESSION_ENV_BEGIN}\nexport BATON={gone}\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("delete the stray line", text)
+        self.assertNotIn("start a new session", text)
+
+    def test_a_line_without_export_or_with_wider_spacing_is_still_read(self):
+        with tempfile.TemporaryDirectory() as td:
+            envfile = Path(td) / "env"
+            envfile.write_text(f"BATON={td}/gone\nexport   BATON={td}/gone\n", encoding="utf-8")
+            kh, r = self.run_check({"CLAUDE_ENV_FILE": str(envfile)})
+        self.assertEqual(r.counts[kh.WARN], 2, "\n".join(r.lines))
 
 
 class DiskCheck(unittest.TestCase):

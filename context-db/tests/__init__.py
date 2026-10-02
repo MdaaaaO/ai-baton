@@ -1,8 +1,8 @@
 """The test package. Importing it does four things before any test module loads an engine module.
 
 1. It scrubs the variables a Claude Code session exports into its Bash commands, so `make test` gives the same result
-   inside a plugin-install session as in CI (#20): the SessionStart hook exports CLAUDE_PROJECT_DIR, BATON and
-   WORKSPACE_* (kit_profile.py session-env), and Claude Code sets CLAUDE_PLUGIN_ROOT, CLAUDE_ENV_FILE and
+   inside a plugin-install session as in CI (#20): the SessionStart hook exports CLAUDE_PROJECT_DIR, BATON,
+   BATON_ENV_FILE and WORKSPACE_* (kit_profile.py session-env), and Claude Code sets CLAUDE_PLUGIN_ROOT, CLAUDE_ENV_FILE and
    CLAUDE_PLUGIN_OPTION_* for hooks. Tests that need one set it themselves. It also drops any inherited GIT_*
    variable (GIT_CONFIG_GLOBAL, GIT_AUTHOR_NAME, …), so a developer's own git environment cannot leak into a
    fixture's subprocess env by accident.

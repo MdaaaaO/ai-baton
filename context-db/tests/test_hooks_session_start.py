@@ -131,7 +131,7 @@ class SessionEnvUpdateCli(unittest.TestCase):
             kit_profile.update_session_env_file(str(target), {})
             lines = target.read_text(encoding="utf-8").splitlines()
             self.assertEqual([ln for ln in lines if ln.startswith("export BATON_ENV_FILE=")],
-                             [f"export BATON_ENV_FILE='{target.resolve()}'"])
+                             [f"export BATON_ENV_FILE='{os.path.abspath(target)}'"])
             self.assertEqual(lines[-1], END)
 
     def test_an_unreadable_path_raises_and_writes_nothing(self):
