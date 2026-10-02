@@ -486,7 +486,11 @@ class SyncSh(unittest.TestCase):
         slow = Path(path) / "find"
         slow.write_text("#!/bin/sh\n"
                         f"out=$({real_find} \"$@\")\n"
-                        f"n=1; until mkdir {turns}/$n 2>/dev/null; do n=$((n + 1)); done\n"
+                        # each run's own turn number, claimed with the shell's own exclusive create
+                        # (POSIX noclobber) rather than `mkdir`'s exit status: this host's `mkdir` is
+                        # not a safe exclusivity check either, and a counter that double-assigns a
+                        # turn would undo the staggered-sleep ordering this test depends on
+                        f"n=1; until (set -C; : >{turns}/$n) 2>/dev/null; do n=$((n + 1)); done\n"
                         "sleep \"$(awk \"BEGIN{print $n * 0.2}\")\"\n"
                         "[ -z \"$out\" ] || printf '%s\\n' \"$out\"\n")
         slow.chmod(0o755)

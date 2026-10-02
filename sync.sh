@@ -438,8 +438,12 @@ sync_kit() {
 # the cheap check first: no repo means no lock, no status
 [ -d "$HERE/.git" ] || { log "skip: .claude is not a git repo"; exit 0; }
 
-# lock: flock where it exists (Linux); on hosts without it (macOS without coreutils) an atomic mkdir
-# lock. Either way the holder records `<pid> <utc-ts> <process-start-time>` (in .sync.lock, or
+# lock: flock where it exists (Linux); on hosts without it (macOS without coreutils, or any host
+# whose `mkdir` is not actually exclusive — some uutils coreutils builds let two concurrent `mkdir
+# <newdir>` calls on the same new path both exit 0) a lock dir instead, whose holder is never
+# whoever `mkdir` said yes to but whoever wins claim_owner's exclusive create of its `owner` file
+# (`(set -C; : >"<path>")` — POSIX `noclobber`, exclusive on every shell/host this kit targets).
+# Either way the holder then records `<pid> <utc-ts> <process-start-time>` (in .sync.lock, or
 # .sync.lock.d/owner) — the third field is the owner's own process start time as `ps -o lstart=`
 # reports it, so a stale lock can be told apart from a live one even after its pid gets reused (a
 # reboot or pid wraparound): a lock dir is stale when its owner pid is gone (`kill -0`), or when the
@@ -449,10 +453,11 @@ sync_kit() {
 # age, so a slow-but-live sync can hold it as long as it needs to. An owner line with no third field
 # (written before this check existed) or one `ps` cannot answer right now falls back to `kill -0`
 # alone, same as before — a lock is never stolen just because the extra check could not be made. With
-# no owner file at all (a sync.sh from before owner files, or one killed between its mkdir and the
-# write) a lock dir is stale only once older than 10 minutes. Breaking a stale lock is serialised by a
-# second mkdir lock and re-checked inside it, so two runs that both saw the same dead owner can never
-# both remove-and-retake it (the second would delete the first's fresh lock). A busy lock is logged as
+# no owner file at all (a sync.sh from before owner files, or one killed between claiming the lock dir
+# and writing its stamp) a lock dir is stale only once older than 10 minutes. Breaking a stale lock is
+# serialised the same way, by a second claim (on the breaker dir's own `owner` file), re-checked
+# inside it, so two runs that both saw the same dead owner can never both remove-and-retake it (the
+# second would delete the first's fresh lock). A busy lock is logged as
 # `skipped`, said on stderr with the holder, and exits 3 (the SessionEnd hook swallows it; `make
 # claude_sync` shows it) but never writes .sync-status: the holder's pending/ok/error is newer.
 LOCKDIR="$HERE/.sync.lock.d"; LOCKBRK="$HERE/.sync.lock.break"; HAVE_LOCKDIR=""; HAVE_LOCKBRK=""
@@ -461,7 +466,7 @@ cleanup() {
   [ -n "$ERRF" ] && rm -f "$ERRF"
   [ -n "$VERIFY_ERRF" ] && rm -f "$VERIFY_ERRF"
   [ -n "$VERIFY_DIR" ] && rm -rf "$VERIFY_DIR"
-  [ -n "$HAVE_LOCKBRK" ] && rmdir "$LOCKBRK" 2>/dev/null
+  [ -n "$HAVE_LOCKBRK" ] && rm -f "$LOCKBRK/owner" && rmdir "$LOCKBRK" 2>/dev/null
   [ -n "$HAVE_LOCKDIR" ] && rm -f "$LOCKDIR/owner" && rmdir "$LOCKDIR" 2>/dev/null
   return 0
 }
@@ -511,19 +516,31 @@ lockdir_stale() {
   [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +10 2>/dev/null)" ] || return 1
   STALE_WHY="no owner recorded, older than 10 min"; return 0
 }
+# claim_owner <path> — the actual holder of a lock dir is whoever creates <path> (its `owner` file)
+# with the shell's own exclusive create, in a subshell so this call's own `noclobber` setting never
+# leaks into the rest of the script. POSIX `noclobber` refuses to open an existing file for output
+# and is exclusive on every shell/host this kit targets — unlike a plain `mkdir "<newdir>"`, whose
+# exit status is NOT a safe exclusivity check on every host (see the block comment above take_lock).
+# Same lines as skills/_lib/portable.sh's own claim_owner — duplicated here, not sourced, because
+# this script has no other dependency on the kit checkout and must keep working run standalone.
+claim_owner() {
+  (set -C; : >"$1") 2>/dev/null
+}
 own_lockdir() { HAVE_LOCKDIR=1; owner_stamp >"$LOCKDIR/owner"; }
 take_lockdir() {
-  if mkdir "$LOCKDIR" 2>/dev/null; then own_lockdir; return 0; fi
+  if mkdir "$LOCKDIR" 2>/dev/null && claim_owner "$LOCKDIR/owner"; then own_lockdir; return 0; fi
   lockdir_stale || return 1
-  mkdir "$LOCKBRK" 2>/dev/null || return 1
+  mkdir "$LOCKBRK" 2>/dev/null
+  claim_owner "$LOCKBRK/owner" || return 1
   HAVE_LOCKBRK=1
   local rc=1
   # re-check under the breaker: another run may have broken it and taken a fresh lock meanwhile
   if lockdir_stale; then
     rm -f "$LOCKDIR/owner"; rmdir "$LOCKDIR" 2>/dev/null
-    if mkdir "$LOCKDIR" 2>/dev/null; then own_lockdir; log "lock: removed a stale lock dir ($STALE_WHY)"; rc=0; fi
+    mkdir "$LOCKDIR" 2>/dev/null
+    if claim_owner "$LOCKDIR/owner"; then own_lockdir; log "lock: removed a stale lock dir ($STALE_WHY)"; rc=0; fi
   fi
-  rmdir "$LOCKBRK" 2>/dev/null; HAVE_LOCKBRK=""
+  rm -f "$LOCKBRK/owner"; rmdir "$LOCKBRK" 2>/dev/null; HAVE_LOCKBRK=""
   return "$rc"
 }
 skipped() {
