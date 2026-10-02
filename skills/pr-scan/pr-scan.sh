@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # pr-scan.sh [--days N] [--limit N] [--repo owner/name]... [--mark] [--quiet]
+# --limit N caps how many candidates get enriched (the 3 per-candidate gh calls below), not how many
+# rows are shown or counted new — `max_rows` in config.json trims the table itself.
 # Builds the user's review queue: direct requests > team (CODEOWNERS) requests > sweep of configured repos.
 # Read-only against GitHub. Writes candidates.jsonl + queue.json under a fresh $OUT run dir (latest symlink
 # next to it); with --mark appends `surfaced` rows to the ledger so the next run can say what is new.
@@ -73,6 +75,25 @@ gh_json(){
   FAILS=$((FAILS+1)); echo "FAIL $label (rc=$rc): $(tail -c 160 "$ERR.raw" | tr '\n' ' ')" >> "$ERR"; RESP=""; return 1
 }
 in_list(){ jq -e --arg a "$1" --argjson b "$2" '$b | index($a)' >/dev/null <<<"{}"; }   # in_list <item> <json array>
+# fetch_threads <repo> <num> <key> — reviewThreads, cursor-paginated like pr-merge.sh's open_threads
+# and reply-threads.sh (a bare first:100 silently truncates a PR with >100 threads, hiding a "mine"
+# open thread on page 2 forever). Sets $RESP to the merged nodes array on success; reuses gh_json's
+# retry/FAILS accounting per page, so a page that never recovers counts as an ordinary error.
+fetch_threads(){
+  local repo=$1 num=$2 key=$3 o=${1%/*} r=${1#*/} cursor="" raw="" page
+  while :; do
+    if [ -n "$cursor" ]; then
+      gh_json "threads $key" api graphql -f query="$threads_q2" -F o="$o" -F r="$r" -F n="$num" -F c="$cursor" || return 1
+    else
+      gh_json "threads $key" api graphql -f query="$threads_q1" -F o="$o" -F r="$r" -F n="$num" || return 1
+    fi
+    page=$RESP
+    raw+=$(jq -c '.data.repository.pullRequest.reviewThreads.nodes[]?' <<<"$page")$'\n'
+    [ "$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage' <<<"$page")" = true ] || break
+    cursor=$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor' <<<"$page")
+  done
+  RESP=$(jq -sc '[.[]]' <<<"$raw")
+}
 
 # 1. direct + team requests (search API: 2 calls). Drafts and the user's own PRs never enter the queue.
 : > "$OUT/direct.jsonl"; : > "$OUT/team.jsonl"
@@ -108,7 +129,8 @@ total=$(wc -l < "$OUT/union.jsonl")
 
 # 3. enrich (3 calls per candidate: pull, reviews, threads) — the cap counts surviving candidates only
 : > "$OUT/candidates.jsonl"; n=0; dropped_bot=$pre_bot; dropped_stale=$pre_stale; dropped_draft=0; dropped_done=$pre_done; dropped_skip=0; dropped_approved=0; dropped_cap=0; dropped_fail=0; degraded=0; ac_count=0
-threads_q='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved opener:comments(first:1){nodes{author{login}}} last:comments(last:1){nodes{author{login}}}}}}}}'
+threads_q1='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){pageInfo{hasNextPage endCursor} nodes{isResolved opener:comments(first:1){nodes{author{login}}} last:comments(last:1){nodes{author{login}}}}}}}}'
+threads_q2='query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{isResolved opener:comments(first:1){nodes{author{login}}} last:comments(last:1){nodes{author{login}}}}}}}}'
 while IFS= read -r row; do
   key=$(jq -r .key <<<"$row"); src=$(jq -r .src <<<"$row"); repo=${key%#*}; num=${key##*#}
   [ "$n" -ge "$CAP" ] && { dropped_cap=$((dropped_cap+1)); continue; }
@@ -125,7 +147,7 @@ while IFS= read -r row; do
   # Auto-approve is scoped to PRs the user was asked to review (direct or via owner_teams) — sweep rows never run the gate.
   auto='null'
   if [ "$AUTO_MODE" != off ] && [ "$src" != sweep ] && [ "$(jq -r .changed_files <<<"$pr")" -le "$AUTO_MAXF" ] && [ "$(jq -r '.additions+.deletions' <<<"$pr")" -le $((AUTO_MAXL*4)) ]; then
-    auto_raw=$(python3 "$TRIVIAL" "$repo" "$num" 2>>"$ERR.raw" || true)   # exit 1 = gh failure; it still prints a JSON with reasons
+    auto_raw=$(python3 "$TRIVIAL" "$repo" "$num" 2>>"$ERR.raw" || true)   # exit 1 = gh/API failure, exit 3 = config/setup problem; both still print a JSON with reasons
     auto=$(jq -c '{eligible: (.eligible // false), class, reasons: ((.reasons // [])[:3]), packages: [.packages[]? | "\(.name) \(.from)→\(.to)"], error: (.error // false)}' <<<"$auto_raw" 2>/dev/null) \
       || { auto='null'; FAILS=$((FAILS+1)); echo "FAIL trivial-check $key: unparseable output: $(head -c 160 <<<"$auto_raw" | tr '\n' ' ')" >> "$ERR"; }
     [ "$(jq -r '.error // false' <<<"$auto")" = true ] && { FAILS=$((FAILS+1)); echo "FAIL trivial-check $key: $(jq -r '.reasons[0] // ""' <<<"$auto")" >> "$ERR"; }
@@ -148,10 +170,9 @@ while IFS= read -r row; do
   humans=$(jq -c --argjson b "$BOTS" --arg me "$ME" '[.[] | select((.user.login as $u | ($b|index($u))|not) and .user.login!=$me and (.state=="APPROVED" or .state=="CHANGES_REQUESTED" or (.state=="COMMENTED" and ((.body//"")|length)>0)))] | group_by(.user.login) | map({login: .[0].user.login, state: (last.state)})' <<<"$reviews")
   approved=$(jq -r '[.[] | select(.state=="APPROVED")] | length' <<<"$humans")
   changes=$(jq -r '[.[] | select(.state=="CHANGES_REQUESTED")] | length' <<<"$humans")
-  o=${repo%/*}; r=${repo#*/}
   threads='{"open":null,"mine":null}'
-  if gh_json "threads $key" api graphql -f query="$threads_q" -F o="$o" -F r="$r" -F n="$num"; then
-    threads=$(jq -c --arg me "$ME" '[.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved|not)] | {open: length, mine: ([.[] | select(.opener.nodes[0].author.login==$me and .last.nodes[0].author.login!=$me)] | length)}' <<<"$RESP")
+  if fetch_threads "$repo" "$num" "$key"; then
+    threads=$(jq -c --arg me "$ME" '[.[] | select(.isResolved|not)] | {open: length, mine: ([.[] | select(.opener.nodes[0].author.login==$me and .last.nodes[0].author.login!=$me)] | length)}' <<<"$RESP")
   else deg=$(jq -c '. + ["threads"]' <<<"$deg"); fi
   # ledger: every status ever recorded for THIS head (order-independent — no grep on serialised key order)
   lset=$(jq -c --arg repo "$repo" --argjson pr "$num" --arg h "$head" '[.[] | select(.repo==$repo and .pr==$pr and .head==$h)]' <<<"$LEDGER_JSON")
