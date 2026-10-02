@@ -362,9 +362,15 @@ class Wiring(unittest.TestCase):
             self.assertIn(part, cmd)
 
     def test_make_target_without_arguments_runs_every_case(self):
-        cmd = " ".join(self.make_n("eval").split())
+        # the second recipe line (the per-case Bash-grant loop, #489) always spells out --case/--allow-tools in
+        # its own static text, so only the main invocation (everything before it) answers "no scope given"
+        out = self.make_n("eval")
+        main = out.split("eval_bash_cases.py", 1)[0]
+        cmd = " ".join(main.split())
         self.assertIn("claude plugin eval . --no-publish --ablation none", cmd)
-        for flag in ("--case", "--model", "--trust-plugin", "--runs", "--concurrency"):
+        self.assertIn("--model 'sonnet'", cmd)  # MODEL ?= sonnet (#489)
+        self.assertIn("--scaffold", cmd)  # SCAFFOLD ?= 1 (#489)
+        for flag in ("--case", "--trust-plugin", "--runs", "--concurrency", "--json"):
             self.assertNotIn(flag, cmd)
 
     def test_make_target_judges_with_sonnet_unless_told_otherwise(self):
@@ -372,6 +378,33 @@ class Wiring(unittest.TestCase):
         self.assertIn("--judge-model 'sonnet'", " ".join(self.make_n("eval").split()))
         self.assertIn("--judge-model 'some-judge'", " ".join(self.make_n("eval", "JUDGE=some-judge").split()))
         self.assertNotIn("--judge-model", " ".join(self.make_n("eval", "JUDGE=").split()))
+
+    def test_make_target_pins_the_model_to_sonnet_unless_told_otherwise(self):
+        # #489: the default (unpinned) model took several turns where sonnet took one and hit a case's
+        # max_turns — the model was the variable to fix, not a blanket max_turns raise
+        self.assertIn("--model 'sonnet'", " ".join(self.make_n("eval").split()))
+        self.assertIn("--model 'some-model'", " ".join(self.make_n("eval", "MODEL=some-model").split()))
+        self.assertNotIn("--model", " ".join(self.make_n("eval", "MODEL=").split()))
+
+    def test_scaffold_runs_by_default_and_can_be_turned_off(self):
+        self.assertIn("--scaffold", " ".join(self.make_n("eval").split()))
+        self.assertNotIn("--scaffold", " ".join(self.make_n("eval", "SCAFFOLD=").split()))
+
+    def test_json_dir_writes_a_main_result_and_a_per_bash_case_result(self):
+        out = " ".join(self.make_n("eval", "JSON_DIR=evals/results/run").split())
+        self.assertIn("--json 'evals/results/run/main.json'", out)
+        self.assertIn("--json 'evals/results/run/$c.json'", out)
+        self.assertNotIn("--json", " ".join(self.make_n("eval").split()))
+
+    def test_bash_case_loop_is_scoped_the_same_way_as_the_main_invocation(self):
+        self.assertIn("eval_bash_cases.py --skill 'pr-open'", " ".join(self.make_n("eval", "SKILL=pr-open").split()))
+        self.assertIn("eval_bash_cases.py --case 'foo-*'", " ".join(self.make_n("eval", "CASE=foo-*").split()))
+        self.assertIn("eval_bash_cases.py", " ".join(self.make_n("eval").split()))
+
+    def test_bash_case_loop_grants_bash_only_to_that_one_case(self):
+        cmd = " ".join(self.make_n("eval").split())
+        loop = cmd.split("eval_bash_cases.py", 1)[1]
+        self.assertIn('--case "$c" --allow-tools Bash', loop)
 
     def test_ci_runs_the_static_check(self):
         mk = (KIT / "context-db" / "Makefile").read_text(encoding="utf-8")

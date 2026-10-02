@@ -129,22 +129,42 @@ jobs:
           MODELS: ${{ steps.inputs.outputs.models }}
           JUDGE_MODEL: ${{ inputs.judge_model }}
           RUNS: ${{ inputs.runs }}
+          # A case's own Bash runs with the step's environment, which carries CLAUDE_CODE_OAUTH_TOKEN above — the
+          # cases are the kit's own, but the answers are not, so that credential must never be readable from
+          # inside a run. This scrubs a Bash-tool subprocess down to a safe list (PATH, HOME, USER, SHELL, TERM,
+          # LANG) via bubblewrap, which the CLI install step above already installs; it fails OPEN (runs
+          # unisolated, with a warning) if bubblewrap is ever missing, so the bwrap check right below is the
+          # backstop that turns a silent "ran unisolated" into a loud job failure instead.
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
         shell: bash
         run: |
           set -o pipefail
+          command -v bwrap >/dev/null 2>&1 || { echo "::error::bwrap is missing — CLAUDE_CODE_SUBPROCESS_ENV_SCRUB would silently run Bash unisolated"; exit 1; }
           rc=0
           for model in ${MODELS:-default}; do
             [ "$model" = default ] && model=""
-            echo "## evals — ${SKILL:-every case} on ${model:-the default model}, judge ${JUDGE_MODEL:-the make default}" >> "$GITHUB_STEP_SUMMARY"
+            echo "## evals — ${SKILL:-every case} on ${model:-the make default (sonnet)}, judge ${JUDGE_MODEL:-the make default}" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
-            # an empty JUDGE switches the make target's default judge off, on the command line and from the
-            # environment alike (make reads both): the input lives in JUDGE_MODEL, a name make does not use, and
-            # JUDGE is passed only when the input names a model
-            make -C context-db eval TRUST=1 JOBS=4 SKILL="$SKILL" MODEL="$model" RUNS="$RUNS" ${JUDGE_MODEL:+"JUDGE=$JUDGE_MODEL"} \
+            # an empty MODEL/JUDGE switches the make target's own default off, on the command line and from the
+            # environment alike (make reads both): the inputs live in MODELS/JUDGE_MODEL, names make does not
+            # use, and MODEL/JUDGE are passed only when the input actually names a model
+            make -C context-db eval TRUST=1 JOBS=4 SKILL="$SKILL" RUNS="$RUNS" JSON_DIR="evals/results/$GITHUB_RUN_ID/${model:-default}" ${model:+"MODEL=$model"} ${JUDGE_MODEL:+"JUDGE=$JUDGE_MODEL"} \
               2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || rc=1
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           done
           exit $rc
+
+      # The result JSON (--json, wired through the make target's JSON_DIR) survives the job even when a case
+      # fails the run, so a red run's actual scores and criteria votes are still readable afterward — not just
+      # the step summary's text. evals/results/ is git-ignored; this is the only place the JSON leaves the runner.
+      - if: always() && steps.token.outputs.enabled == 'true'
+        name: Upload the result JSON
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: evals-results-${{ github.run_id }}
+          path: .claude/evals/results/${{ github.run_id }}/
+          if-no-files-found: ignore
+          retention-days: 30
 
       # A run with the secret missing skips every step above and would otherwise conclude success — a required
       # check satisfied by a run that evaluated nothing. workflow_dispatch always runs from within this repo (no

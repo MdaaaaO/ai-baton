@@ -188,6 +188,29 @@ class EvalsHygiene(unittest.TestCase):
         code = "\n".join(line for line in self.TEXT.splitlines() if not line.lstrip().startswith("#"))
         self.assertNotIn(".claude/context-db", code)
 
+    def test_model_is_never_passed_unconditionally(self):
+        # #489: the CLI's own default model took several turns where sonnet took one and hit a case's max_turns;
+        # the make target now pins MODEL ?= sonnet, so the workflow must only override it when an input names a
+        # model (the same MODEL="$model" gotcha PR #490 already fixed for JUDGE/JUDGE_MODEL on this line)
+        run_line = next(line for line in self.TEXT.splitlines() if "make -C context-db eval " in line)
+        self.assertIn('${model:+"MODEL=$model"}', run_line)
+        self.assertNotRegex(run_line, r'(?<![+"])MODEL="')
+
+    def test_bash_tool_subprocesses_are_scrubbed_of_the_eval_credential(self):
+        # a case's own Bash runs with the step's environment, which carries CLAUDE_CODE_OAUTH_TOKEN — the cases
+        # are the kit's own, the answers are not, so that credential must never be readable from inside a run
+        step = self.TEXT.split("name: Run the suite", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn('CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"', step)
+        # the scrub fails OPEN (runs unisolated, silently, if bubblewrap is missing) rather than closed — an
+        # explicit presence check turns that silent failure into a loud job failure instead
+        self.assertIn("command -v bwrap", step)
+
+    def test_the_result_json_is_uploaded_as_an_artifact_even_on_failure(self):
+        step = self.TEXT.split("name: Upload the result JSON", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("always()", self.TEXT.split("name: Upload the result JSON", 1)[0].rsplit("- if:", 1)[1].split("\n", 1)[0])
+        self.assertIn("actions/upload-artifact@", step)
+        self.assertIn("if-no-files-found: ignore", step)
+
 
 class PythonFloorLeg(unittest.TestCase):
     """ci.yml's python-floor job (the 3.9 leg) is a real merge gate, not decoration — auto-merge.yml must wait on

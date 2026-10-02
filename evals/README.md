@@ -17,7 +17,10 @@ contains it, e.g. `'(?<![\w-])<skill>(?![\w-])'` (`min: 1` for a positive, `min:
 `arm: both` so it is scored), and `criteria.md`, an `llm` grader on the outcome. `docs/templates/evals/` holds one of
 each — copy here, rename to `<skill>-<case>`, fill the `<…>` marks (the scaffold sits under `docs/` so the runner never
 scores a placeholder). No case carries a real id, host, person or organisation — placeholders only (`acme/widgets`,
-`ABC-123`, `#42`). Every skill now has a trigger suite; `kit-review-*` are the reviewer's
+`ABC-123`, `#42`). A case that needs a file in place before the agent starts (a diff to react to, not a tool it has
+to invent) adds a `case.yaml` next to its `prompt.md` — `schema_version` plus `context: {scaffold_script: fixture.sh}`
+— and `fixture.sh` writes that file; the runner merges the two, and `fixture.sh` only runs under `--scaffold`
+(default on for `make eval`, see below) since it is author-supplied bash run as the invoking user. Every skill now has a trigger suite; `kit-review-*` are the reviewer's
 proof cases (`docs/REVIEW.md`), and `<skill>-behaviour-<case>` are behaviour cases (below) — neither is a
 trigger suite.
 
@@ -47,8 +50,8 @@ drifted plan on a real `HEAD MOVED` event reads `DRIFT` and picks `REDRAW`, and 
 | run | what | tokens |
 |---|---|---|
 | `make -C $BATON/context-db eval-check` | every case loads (prompt keys, grader types), every trigger suite has ≥ 10 cases with both kinds; skills without a suite and descriptions with no recognized trigger phrase (`TRIGGER_WHEN` / `TRIGGER_OTHER`) are notes on a bare run, but `ci.yml` runs `REQUIRE_ALL=1`, so both are a failure there. Part of `make ci` and `ci.yml` | none |
-| `make -C $BATON/context-db eval SKILL=<skill> [MODEL=<id>] [RUNS=<n>] [JUDGE=<model>] [JOBS=<n>]` | `claude plugin eval . --ablation none --judge-model sonnet --case '<skill>-*' --no-publish` — the trigger rate on your machine. `JUDGE` is the model the `llm` graders vote with (default `sonnet`; the CLI's smaller default judge fails criteria with several conditions on answers that meet them); `JOBS` runs that many agent runs at once | yes |
-| `evals` workflow (Actions → evals → Run workflow; inputs `skill`, `models`, `judge_model`, `runs`) | the same run on a hosted runner with the `CLAUDE_CODE_OAUTH_TOKEN` secret, four agent runs at once, one pass per model; the output is the job summary. Run it per skill: with `skill` empty it runs every case, which takes hours. Models and runs multiply the time; a combination that cannot fit the job's time limit is refused before it spends anything | yes |
+| `make -C $BATON/context-db eval SKILL=<skill> [MODEL=<id>] [RUNS=<n>] [JUDGE=<model>] [JOBS=<n>] [JSON_DIR=<dir>]` | `claude plugin eval . --ablation none --judge-model sonnet --case '<skill>-*' --no-publish` — the trigger rate on your machine. `JUDGE` is the model the `llm` graders vote with (default `sonnet`; the CLI's smaller default judge fails criteria with several conditions on answers that meet them); `MODEL` pins the agent model (default `sonnet` — the CLI's own default model takes more turns on some cases than `max_turns` allows; set `MODEL=` empty for the CLI's default); `JOBS` runs that many agent runs at once; `SCAFFOLD` runs each case's `scaffold_script` (default on — set `SCAFFOLD=` empty to skip, same as `--no-scaffold`); `JSON_DIR`, if set, also writes each run's full result JSON there (`--json`). A case whose `allowed_tools` lists `Bash` runs again, alone, with `--allow-tools Bash` added — that grant is never widened to a case that does not ask for it | yes |
+| `evals` workflow (Actions → evals → Run workflow; inputs `skill`, `models`, `judge_model`, `runs`) | the same run on a hosted runner with the `CLAUDE_CODE_OAUTH_TOKEN` secret, four agent runs at once, one pass per model, pinned to `sonnet` unless `models` names others; the output is the job summary, and each model's full result JSON is also uploaded as a workflow artifact. Run it per skill: with `skill` empty it runs every case, which takes hours. Models and runs multiply the time; a combination that cannot fit the job's time limit is refused before it spends anything. A `Bash`-using case's own subprocess runs with its environment scrubbed of the eval credential (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) | yes |
 
 A change to a skill's `description:` cites a green run of that skill's suite (the workflow or `make eval`) in its PR:
 the suite is the acceptance test for shortening or rewording a trigger.
