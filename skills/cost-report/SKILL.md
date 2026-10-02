@@ -123,9 +123,10 @@ are the only work units — lines changed are never a denominator.
   row (counted from 1) and column instead of counting as 0. `--since`/`--until` are checked the same way, in every subcommand
   that takes them.
 - **A rate-limited `gh search` retries, bounded.** `work-prs`/`work-tickets` wait 10, 20, then 40 s
-  (each wait announced on stderr) on a 403/429/"rate limit" from `gh` (`COST_REPORT_RETRY_DELAY`, `docs/env-vars.md`); any other
-  `gh` failure, or the retries running out, is a clear error naming the scope/repo and month — never a
-  partial TSV.
+  (each wait announced on stderr) when `gh`'s failure says "rate limit" or reports HTTP 429
+  (`COST_REPORT_RETRY_DELAY`, `docs/env-vars.md`) — a bare 403 (SAML enforcement, a scope error) is not
+  retried; any other `gh` failure, or the retries running out, is a clear error naming the scope/repo
+  and month — never a partial TSV.
 
 ## Traps
 

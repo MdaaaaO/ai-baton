@@ -60,7 +60,9 @@ FIXED = session_stats.prices()[:4]  # (in, cache_write, cache_read, out) $/Mtok 
 # SESSION_STATS_PRICES the same way session_stats.py's own CLI does, instead of always the built-in table
 CHEAP = ("sonnet", "haiku")
 RESERVED_BUCKET_NAMES = {"prior-7d", "rolling-7d"}  # the rolling-7 pair `report` always builds itself; a
-# `--phase`/`cost.phases` entry reusing one of these names would silently merge into (or overwrite) it
+# `--phase`/`cost.phases` entry reusing one of these names would silently merge into (or overwrite) it.
+# A phase named like a week bucket (`YYYY-Wnn`, WK_RE below) is refused the same way — `--view weekly/all`
+# keys `metrics` by the same string a `_iso_week()` bucket would use.
 COLUMN_KEYS = ("date", "email", "model", "cost", "input", "output", "cache_read", "cache_write")
 # Org mode has NO default column names or row filter: every warehouse has its own schema, and a default
 # would silently build SQL for one environment's table. cost.columns + cost.filters are required there.
@@ -252,7 +254,7 @@ SELECT CAST({col['date']} AS DATE) AS d, {col['model']} AS model,
 FROM {m['spend_table']}
 WHERE {where} AND LOWER({col['email']}) = LOWER('{email}')
 GROUP BY 1, 2 ORDER BY 1, 2;"""
-    control = f"""-- control: everyone else, daily aggregate, weekdays, no identities leave the warehouse.
+    control = f"""-- control: everyone else, daily aggregate — EVERY day, not just weekdays (see below) — no identities leave the warehouse.
 -- Deliberately a plain date GROUP BY, not a week bucket: an engine's week-format function (ISO
 -- year/week format elements in TO_CHAR, on some engines) can silently produce the same literal key for every row instead of
 -- erroring, which collapses every week into one and passes a broken control through undetected. `ingest`
@@ -279,9 +281,10 @@ def _lower_keys(rows: list) -> list[dict]:
 
 
 class StrictParseError(ValueError):
-    """`_num`/`_day` could not parse a value a row claims is a number or a date. A ValueError subclass so the
-    one pre-existing `except ValueError` (`_control_week_key`'s soft skip for a malformed control-row date)
-    keeps working unchanged; everywhere else this propagates up to `main()`, which turns it into one clean
+    """`_num`/`_day` could not parse a value a row claims is a number or a date. A ValueError subclass for a
+    narrow reason: callers that only mean to skip a row with NO date/week column at all (e.g.
+    `_control_week_key`'s `d`-is-blank case) check for that directly and never need to catch this; everywhere
+    a value WAS present and failed to parse, this propagates up to `main()`, which turns it into one clean
     stderr line + exit 2 — never a silent 0.0 and never a traceback."""
 
 
@@ -357,21 +360,21 @@ def _check_since_until(a) -> int | None:
 WK_RE = re.compile(r"^\d{4}-W\d{2}$")
 
 
-def _control_week_key(r: dict) -> str | None:
+def _control_week_key(r: dict, *, row: int | None = None) -> str | None:
     """A control row's ISO-week key: use `wk` verbatim when the row already carries one (an engine-specific
     week-bucketing query, e.g. ISO year-of-week and week functions), else compute it from `d` with Python's
     own `date.isocalendar()` (the portable `sql` daily control) — never trust a warehouse-formatted week
-    string without checking its shape (see WK_RE below); `None` when the row has neither column."""
+    string without checking its shape (see WK_RE below); `None` only when the row has NEITHER column — a
+    genuinely dateless row, skipped and counted by the caller. A row that DOES carry a `d` but one that
+    does not parse is not that case: `_day` raises StrictParseError, which is deliberately left to propagate
+    (exit 2 naming this row), the same as every other malformed value in the file."""
     wk = str(r.get("wk") or "").strip()
     if wk:
         return wk
     d = str(r.get("d") or "").strip()
     if not d:
         return None
-    try:
-        return _iso_week(_day(d))  # the one week-key definition `report` also uses
-    except ValueError:
-        return None
+    return _iso_week(_day(d, row=row, col="d"))  # the one week-key definition `report` also uses
 
 
 def cmd_ingest(a) -> int:
@@ -407,7 +410,7 @@ def cmd_ingest(a) -> int:
         cskipped = 0
         bad_wk: list[str] = []
         for i, r in enumerate(crow, 1):
-            wk = _control_week_key(r)
+            wk = _control_week_key(r, row=i)
             if not wk:
                 cskipped += 1
                 continue
@@ -516,6 +519,8 @@ def read_csv(path: str) -> list[dict]:
         if "d" not in keymap.values():
             raise SystemExit(f"{path}: no date column recognised (accepted: {sorted(set(k for k, v in CSV_ALIASES.items() if v == 'd'))})")
         for i, r in enumerate(rd, 1):  # data rows, the header not counted
+            if all(str(v or "").strip() == "" for v in r.values()):
+                continue  # a fully blank row (a spreadsheet export's trailing artifact) carries nothing to parse
             row = {"d": "", "model": "unknown", "usd": None, "inp": 0.0, "cached": 0.0, "cwrite": 0.0, "outp": 0.0}
             for h, f in keymap.items():
                 v = r.get(h)
@@ -561,8 +566,12 @@ def cmd_collect_private(a) -> int:
 
 # ----------------------------------------------------------------------------- work units
 # A `gh search`/`gh api` call that hits GitHub's primary or secondary rate limit fails outright (gh does not
-# retry on its own); gh's stderr names it one of these ways depending on which limit and which gh version.
-GH_RATE_LIMIT_RE = re.compile(r"(^|[^0-9])(403|429)([^0-9]|$)|rate limit", re.IGNORECASE)
+# retry on its own); gh's stderr names it either with the phrase "rate limit" (primary: "API rate limit
+# exceeded"; secondary: "secondary rate limit") or, on some gh versions, a bare "HTTP 429" status line. A
+# plain 403 (SAML enforcement, a scope the token lacks, …) is not a rate limit and must run once and fail —
+# and the digits "403"/"429" can appear anywhere in unrelated text (a repo name, a search query echoed back
+# in a 422), so neither is matched as a bare number.
+GH_RATE_LIMIT_RE = re.compile(r"rate limit|HTTP\s+429\b", re.IGNORECASE)
 GH_RATE_LIMIT_ATTEMPTS = 4  # small and bounded: a scope/month that keeps failing should surface, not hang
 GH_RETRY_DELAY_DEFAULT = 10.0  # doubled per wait: 10 + 20 + 40 s, past the one-minute window of the search limit
 
@@ -578,7 +587,7 @@ def _gh_retry_delay() -> float:
 
 
 def _gh(args: list[str], *, context: str = "") -> str:
-    """Run `gh`. A rate-limited call (403/429 or "rate limit" in stderr) gets GH_RATE_LIMIT_ATTEMPTS tries
+    """Run `gh`. A rate-limited call ("rate limit" or "HTTP 429" in stderr — never a bare 403) gets GH_RATE_LIMIT_ATTEMPTS tries
     total, the wait doubling from the base delay each time and announced on stderr (a silent minute looks
     like a hang). Any other failure (bad query, auth, timeout) is not retried. `context` names the
     scope/month/repo being fetched so the final error is specific, never a bare "gh failed"."""
@@ -863,11 +872,16 @@ def cmd_report(a) -> int:
     if a.view in ("rolling7", "all"):
         buckets += [Bucket("prior-7d", p7s, p7e), Bucket("rolling-7d", r7s, last)]
     phases = [parse_phase(p) for p in (a.phase or [])] or [(str(p["name"]), str(p["start"]), str(p.get("end") or "")) for p in mode["phases"] if isinstance(p, dict) and p.get("name") and p.get("start")]
-    collide = sorted({n for n, _, _ in phases} & RESERVED_BUCKET_NAMES)
-    if collide:
-        print(f"phase name(s) {', '.join(collide)} collide with the reserved bucket names ({', '.join(sorted(RESERVED_BUCKET_NAMES))})", file=sys.stderr)
-        return 2
+    # Checked only where phases are actually used: `rolling7` never builds a phase bucket, so a name that
+    # would collide elsewhere is harmless there — reusing a reserved or week-shaped name is only a real
+    # collision once it lands in the same `metrics` dict as `prior-7d`/`rolling-7d` or a `YYYY-Wnn` week.
     if a.view in ("phases", "all") and phases:
+        names = {n for n, _, _ in phases}
+        bad = sorted(names & RESERVED_BUCKET_NAMES) + sorted(n for n in names if WK_RE.fullmatch(n))
+        if bad:
+            print(f"phase name(s) {', '.join(bad)} collide with the reserved bucket names "
+                  f"({', '.join(sorted(RESERVED_BUCKET_NAMES))}) or the weekly-bucket name shape (YYYY-Wnn)", file=sys.stderr)
+            return 2
         buckets += [Bucket(n, s, e if e else last) for n, s, e in phases]
     if a.view in ("phases", "all") and not phases:
         buckets.append(Bucket("all", first, last))

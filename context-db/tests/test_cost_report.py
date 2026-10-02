@@ -202,6 +202,14 @@ class PortableControlSql(unittest.TestCase):
         self.assertIn("GROUP BY 1 ORDER BY 1;", control)
         self.assertIn("COUNT(DISTINCT user_email) AS users,", control)
 
+    def test_control_query_has_no_weekday_filter_function(self):
+        # the weekday filter moved into `ingest` (Python's own `date.isoweekday()`, see ControlWeekBucketing)
+        # so the SQL has no weekday predicate at all — not `DAYOFWEEKISO`, not any other dialect's name for it.
+        _own, control = self._sql()
+        sql = "\n".join(ln for ln in control.splitlines() if not ln.lstrip().startswith("--"))
+        for forbidden in ("DAYOFWEEKISO", "DAYOFWEEK", "ISODOW", "WEEKDAY"):
+            self.assertNotIn(forbidden, sql)
+
 
 class ControlWeekBucketing(unittest.TestCase):
     """`ingest` now does the ISO-week bucketing the SQL used to (see PortableControlSql): daily control
@@ -274,6 +282,58 @@ class ControlWeekBucketing(unittest.TestCase):
         rc, ctl, _printed = self._ingest_control([{"wk": "2026-W39", "usd": 10, "outp": 100}])
         self.assertEqual(rc, 0)
         self.assertEqual(ctl[0]["usd"], 10)
+
+    def test_bad_number_in_a_control_row_raises_not_silently_summed(self):
+        # `_control_week_key`'s own soft skip (no date/week column at all) must not mask a bad NUMBER
+        # elsewhere in the same row — that still goes through `_num` and fails loudly, named by row.
+        with self.assertRaises(cost_report.StrictParseError) as cm:
+            self._ingest_control([{"wk": "2026-W39", "usd": "garbage", "outp": 100}])
+        msg = str(cm.exception)
+        self.assertIn("row 1", msg)
+        self.assertIn("usd", msg)
+
+
+class ControlRowMalformedDateStrict(unittest.TestCase):
+    """A control row's date used to be checked only by `_control_week_key`'s own `except ValueError`, which
+    `StrictParseError` (a `ValueError` subclass) slipped straight through: a malformed date silently counted
+    as "skipped (no date/week column)" instead of failing like every other bad value in the file. A row
+    that truly has neither `d` nor `wk` is still skipped and counted — only a date that was PRESENT and did
+    not parse must now exit 2."""
+
+    def _ingest(self, control_rows: list) -> int:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "rows.json").write_text(json.dumps([{"d": "2026-09-01", "usd": 1}]), encoding="utf-8")
+            (d / "control_rows.json").write_text(json.dumps(control_rows), encoding="utf-8")
+            args = ns(rows=str(d / "rows.json"), out=str(d / "daily.json"), control_out=str(d / "control.json"),
+                      control_rows=str(d / "control_rows.json"))
+            return cost_report.cmd_ingest(args)
+
+    def test_impossible_calendar_date_in_control_row_exits_2(self):
+        with self.assertRaises(cost_report.StrictParseError) as cm:
+            self._ingest([{"d": "2026-02-30", "usd": 999}])
+        self.assertIn("row 1", str(cm.exception))
+
+    def test_non_iso_date_in_control_row_exits_2(self):
+        with self.assertRaises(cost_report.StrictParseError) as cm:
+            self._ingest([{"d": "Sep 2 2026", "usd": 999}])
+        self.assertIn("row 1", str(cm.exception))
+
+    def test_control_row_with_neither_date_nor_week_is_still_skipped(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "rows.json").write_text(json.dumps([{"d": "2026-09-01", "usd": 1}]), encoding="utf-8")
+            (d / "control_rows.json").write_text(json.dumps([{"usd": 5, "outp": 50}]), encoding="utf-8")
+            out, control_out = d / "daily.json", d / "control.json"
+            args = ns(rows=str(d / "rows.json"), out=str(out), control_out=str(control_out),
+                      control_rows=str(d / "control_rows.json"))
+            buf = []
+            with unittest.mock.patch("builtins.print", lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+                rc = cost_report.cmd_ingest(args)
+            ctl = json.loads(control_out.read_text(encoding="utf-8"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(ctl, [])
+        self.assertIn("1 row(s) skipped", "\n".join(buf))
 
 
 class StrictNumParsing(unittest.TestCase):
@@ -372,6 +432,42 @@ class CsvReaderStrictNum(unittest.TestCase):
             self.assertIn("row 2", msg)  # the second data row; the header is not counted
             self.assertIn("cost", msg)
 
+    def test_bad_value_in_a_token_column_also_raises(self):
+        # only `cost` was ever exercised against `_num` here before; a token column (e.g. `output`) must
+        # fail the same strict way, not silently pass whatever `str(v)` happened to be.
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "export.csv"
+            path.write_text("date,cost,output\n2026-09-01,12.00,bogus\n", encoding="utf-8")
+            with self.assertRaises(cost_report.StrictParseError) as cm:
+                cost_report.read_csv(str(path))
+            msg = str(cm.exception)
+            self.assertIn("row 1", msg)
+            self.assertIn("output", msg)
+
+
+class CsvBlankRowSkipped(unittest.TestCase):
+    """A spreadsheet export can append a fully blank trailing row (every cell empty or whitespace) — on
+    main that row was silently dropped; strict parsing must not turn it into a `cannot parse ''` failure.
+    A row that has SOME cells filled and a blank date is not this case and still exits 2, same as before."""
+
+    def test_fully_blank_row_is_skipped_not_a_parse_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "export.csv"
+            path.write_text("date,cost,output\n2026-09-01,1.5,100\n,,\n", encoding="utf-8")
+            rows = cost_report.read_csv(str(path))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["d"], "2026-09-01")
+
+    def test_row_with_some_cells_filled_and_blank_date_still_exits_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "export.csv"
+            path.write_text("date,cost,output\n2026-09-01,1.5,100\n,2.0,50\n", encoding="utf-8")
+            with self.assertRaises(cost_report.StrictParseError) as cm:
+                cost_report.read_csv(str(path))
+        msg = str(cm.exception)
+        self.assertIn("row 2", msg)
+        self.assertIn("date", msg)
+
 
 class SinceUntilValidatedEverywhere(unittest.TestCase):
     """`--since`/`--until` used to be checked only by `sql`; every subcommand that takes either flag must
@@ -418,6 +514,22 @@ class SinceUntilValidatedEverywhere(unittest.TestCase):
                 rc = cost_report.cmd_work_tickets(ns(since=None, until="not-a-date", out="unused.tsv"))
         self.assertEqual(rc, 2)
         self.assertIn("--until wants YYYY-MM-DD", buf.getvalue())
+
+    def test_work_prs_rejects_bad_since_before_touching_gh(self):
+        buf = io.StringIO()
+        with unittest.mock.patch.object(cost_report, "_gh", side_effect=AssertionError("must not call gh")):
+            with contextlib.redirect_stderr(buf):
+                rc = cost_report.cmd_work_prs(ns(since="not-a-date", until=None, out="unused.tsv"))
+        self.assertEqual(rc, 2)
+        self.assertIn("--since wants YYYY-MM-DD", buf.getvalue())
+
+    def test_sql_rejects_bad_since_before_touching_profile(self):
+        buf = io.StringIO()
+        with unittest.mock.patch.object(cost_report.profile, "get", side_effect=AssertionError("must not touch profile")):
+            with contextlib.redirect_stderr(buf):
+                rc = cost_report.cmd_sql(ns(since="not-a-date", until=None))
+        self.assertEqual(rc, 2)
+        self.assertIn("--since wants YYYY-MM-DD", buf.getvalue())
 
     def test_report_rejects_bad_until(self):
         buf = io.StringIO()
@@ -543,6 +655,83 @@ class GhRateLimitRetry(unittest.TestCase):
         self.assertNotEqual(cm.exception.code, 0)
         self.assertIn("acme/repo 2026-01-01..2026-01-31", str(cm.exception.code))
 
+    def test_saml_403_is_not_retried_runs_once_no_sleep(self):
+        # a plain 403 with no "rate limit" text (org SAML enforcement, a missing scope, …) is not a rate
+        # limit — it must run exactly once and fail with its own error, never four tries and three waits.
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return unittest.mock.Mock(returncode=1, stdout="",
+                                       stderr="HTTP 403: Resource protected by organization SAML enforcement")
+
+        with unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=fake_run), \
+             unittest.mock.patch.object(cost_report.time, "sleep") as sleep_mock:
+            with self.assertRaises(SystemExit):
+                cost_report._gh(["search", "prs"])
+        self.assertEqual(len(calls), 1)
+        sleep_mock.assert_not_called()
+
+    def test_422_with_403_inside_the_echoed_url_is_not_retried(self):
+        # the digits "403" can appear anywhere in gh's stderr (here: part of a repo name echoed back in a
+        # validation error) — that must never be mistaken for a rate-limit status code.
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return unittest.mock.Mock(
+                returncode=1, stdout="",
+                stderr="HTTP 422: Validation Failed (https://api.github.com/search/issues?q=repo%3Aorg%2Fapi403)")
+
+        with unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=fake_run), \
+             unittest.mock.patch.object(cost_report.time, "sleep") as sleep_mock:
+            with self.assertRaises(SystemExit):
+                cost_report._gh(["search", "prs"])
+        self.assertEqual(len(calls), 1)
+        sleep_mock.assert_not_called()
+
+    def test_http_403_with_rate_limit_text_is_retried(self):
+        # a 403 IS retried when gh's stderr names it a rate limit in words — the status code alone never
+        # decides it either way.
+        calls = []
+        responses = iter([
+            unittest.mock.Mock(returncode=1, stdout="", stderr="HTTP 403: API rate limit exceeded"),
+            unittest.mock.Mock(returncode=0, stdout="[]", stderr=""),
+        ])
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return next(responses)
+
+        with unittest.mock.patch.dict(os.environ, {"COST_REPORT_RETRY_DELAY": "1"}), \
+             unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=fake_run), \
+             unittest.mock.patch.object(cost_report.time, "sleep") as sleep_mock, \
+             contextlib.redirect_stderr(io.StringIO()):
+            out = cost_report._gh(["search", "prs"])
+        self.assertEqual(out, "[]")
+        self.assertEqual(len(calls), 2)
+        sleep_mock.assert_called_once()
+
+    def test_http_429_status_is_retried(self):
+        calls = []
+        responses = iter([
+            unittest.mock.Mock(returncode=1, stdout="", stderr="HTTP 429: Too Many Requests"),
+            unittest.mock.Mock(returncode=0, stdout="[]", stderr=""),
+        ])
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return next(responses)
+
+        with unittest.mock.patch.dict(os.environ, {"COST_REPORT_RETRY_DELAY": "1"}), \
+             unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=fake_run), \
+             unittest.mock.patch.object(cost_report.time, "sleep") as sleep_mock, \
+             contextlib.redirect_stderr(io.StringIO()):
+            out = cost_report._gh(["search", "prs"])
+        self.assertEqual(out, "[]")
+        self.assertEqual(len(calls), 2)
+        sleep_mock.assert_called_once()
+
 
 class CostReportRetryDelayEnvVar(unittest.TestCase):
     def test_env_var_overrides_default(self):
@@ -643,10 +832,39 @@ class PrOverlayCappedBothEnds(unittest.TestCase):
         self.assertEqual(wide["tk_closed"], 1)
         self.assertIn("capped at 2026-01-10..2026-01-15", o["basis"]["tickets"])
 
+    def test_pr_merged_before_first_spend_day_excluded(self):
+        # the merged-date cap has its own `first <=` check, separate from the created-date one above —
+        # a phase window that starts well before the first spend day must not let a PR merged in that
+        # gap through on the bucket's own start/end alone.
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            daily = d / "daily.json"
+            daily.write_text(json.dumps([
+                {"d": "2026-01-10", "model": "sonnet", "usd": 1.0, "inp": 1, "cached": 0, "cwrite": 0, "outp": 10, "billed": True},
+                {"d": "2026-01-15", "model": "sonnet", "usd": 1.0, "inp": 1, "cached": 0, "cwrite": 0, "outp": 10, "billed": True},
+            ]), encoding="utf-8")
+            prs = d / "prs.tsv"
+            prs.write_text(
+                "repo\tnumber\tcreated\tmerged\tclosed\tstate\n"
+                "org/api\t1\t2025-12-20\t2026-01-05\t2026-01-05\tmerged\n",  # merged before the first spend day
+                encoding="utf-8")
+            out_json = d / "report.json"
+            args = ns(daily=str(daily), control=None, prs=str(prs), tickets=None,
+                      phase=["wide=2025-12-01..2026-01-31"], view="phases", until=None, out=None, json=str(out_json))
+            with unittest.mock.patch("builtins.print", lambda *a, **k: None):
+                rc = cost_report.cmd_report(args)
+            self.assertEqual(rc, 0)
+            o = json.loads(out_json.read_text(encoding="utf-8"))
+        wide = next(b for b in o["buckets"] if b["bucket"] == "wide")
+        self.assertEqual(wide["pr_merged"], 0)
+
 
 class ReservedPhaseNameRefused(unittest.TestCase):
     """`report` always builds its own `prior-7d`/`rolling-7d` rolling pair; a `--phase`/`cost.phases` entry
-    reusing one of those names must be refused, not silently merged into (or overwriting) the built-in one."""
+    reusing one of those names must be refused, not silently merged into (or overwriting) the built-in one.
+    A phase named like a week bucket (`YYYY-Wnn`) is refused the same way, since `--view weekly/all` would
+    key `metrics` by that exact string too. Either check only matters where phases are actually built
+    (`--view phases/all`) — `rolling7` never builds a phase bucket, so a colliding name there is harmless."""
 
     def test_phase_named_rolling_7d_is_refused(self):
         with tempfile.TemporaryDirectory() as d:
@@ -661,6 +879,33 @@ class ReservedPhaseNameRefused(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("rolling-7d", buf.getvalue())
         self.assertIn("prior-7d", buf.getvalue())
+
+    def test_phase_named_like_a_week_bucket_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            daily = Path(d) / "daily.json"
+            daily.write_text(json.dumps([{"d": "2026-01-10", "model": "sonnet", "usd": 1.0, "inp": 1,
+                                           "cached": 0, "cwrite": 0, "outp": 10, "billed": True}]), encoding="utf-8")
+            args = ns(daily=str(daily), control=None, prs=None, tickets=None,
+                      phase=["2026-W36=2026-01-01..2026-01-10"], view="phases", until=None, out=None, json=None)
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = cost_report.cmd_report(args)
+        self.assertEqual(rc, 2)
+        self.assertIn("2026-W36", buf.getvalue())
+
+    def test_reserved_name_check_only_applies_where_phases_are_used(self):
+        # `--view rolling7` never builds a phase bucket, so a `--phase` that reuses a reserved name must
+        # not be refused there — the collision the check guards against never happens under this view.
+        with tempfile.TemporaryDirectory() as d:
+            daily = Path(d) / "daily.json"
+            daily.write_text(json.dumps([{"d": "2026-01-10", "model": "sonnet", "usd": 1.0, "inp": 1,
+                                           "cached": 0, "cwrite": 0, "outp": 10, "billed": True}]), encoding="utf-8")
+            args = ns(daily=str(daily), control=None, prs=None, tickets=None,
+                      phase=["rolling-7d=2026-01-01..2026-01-10"], view="rolling7", until=None, out=None, json=None)
+            buf = []
+            with unittest.mock.patch("builtins.print", lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+                rc = cost_report.cmd_report(args)
+        self.assertEqual(rc, 0)
 
 
 class DocstringLooseCoupling(unittest.TestCase):
