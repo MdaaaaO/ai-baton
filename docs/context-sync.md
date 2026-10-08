@@ -11,13 +11,16 @@ with the remote on its own: every context write commits and pushes; every sessio
 |---|---|---|
 | after every write under `.context/` (a ctx tool or a `Write`/`Edit` under `sessions/`) | `commit → fetch → rebase → push` from the asynchronous `PostToolUse` hook, after the catalogs were regenerated | nothing when it worked; the scratch dir's `hooks.log` holds the line; a conflict is shown by the next synchronous hook as a system message |
 | `session-register`, `session-touch`, `session-end`, `session-rename` (and `heartbeat.sh`'s touches) | the same pass, synchronously | the command prints `context sync: pushed …`, `push pending …` or `conflict: …` |
-| session start (`startup`, `resume`, `clear`) | `commit → fetch → rebase`, no push (`run --no-push`) | `context sync: pulled …` in the hook output; a pending conflict leads the registry brief |
+| session start (`startup`, `resume`, `clear`) | `commit → fetch → rebase`, no push (`run --no-push --quiet`) | `context sync: pulled …` in the hook output when something came in, nothing when the store was already current; a pending conflict leads the registry brief (with or without ctx installed) |
 | by hand | `make -C $BATON/context-db context-sync` / `context-sync-status` | the one line; exit 3 on a conflict |
 
 Each pass runs under the store's own lock (`.git/ctx-sync.lock`), so two sessions on one machine never race git's
 index; a pass that finds the lock held leaves the change to the holder's `git add -A` or to the next write. Network
 calls carry a short timeout and `GIT_TERMINAL_PROMPT=0`: no network, no credential, or a slow remote gives
-`committed …, push pending` and the next pass retries — a hook never hangs on it.
+`committed …, push pending` and the next pass retries — a hook never hangs on it. A pass the hook's own timeout
+kills mid-rebase leaves the store with a rebase in progress; the next pass sees that nobody holds the lock and
+the status says `running`, aborts that rebase and starts over. A rebase **you** started by hand is left alone:
+the pass stops with exit 3 and the hooks say `a rebase is in progress in the store` until you finish or abort it.
 
 ## The switch — `context.sync`
 
@@ -103,6 +106,6 @@ duplicated section is yours to tidy in the next flush; `session-handoff` step 5 
 | `context-db/bin/session.py` | runs the pass after every registry change and prints its line |
 | `hooks/hooks.json`, `settings.json` | the SessionStart pull (`run --no-push --quiet`) and the ctx-tool `post-tool-use` entry |
 | `<store>/.gitattributes` | the managed merge-driver block (tracked, so every clone merges alike) |
-| `<store>/.git/ctx-sync/status`, `…/merged`, `<store>/.git/ctx-sync.lock` | the pass's state: the pending conflict, the paths a driver merged, the per-store lock |
+| `<git dir>/ctx-sync/status`, `…/merged`, `<git dir>/ctx-sync.lock` | the pass's state: the pending conflict, the paths a driver merged, the per-store lock — in `<store>/.git`, or in the directory a `.git` gitfile (`--separate-git-dir`, a worktree) names |
 | `skills/kit-health/kit-health.py` § 4 | the health row |
 | `context-db/tests/test_ctx_sync.py` | two clones against a bare remote: push, pull, concurrent appends, frontmatter repair, the validate gate, the lock, every mode |

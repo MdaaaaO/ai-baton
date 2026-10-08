@@ -26,8 +26,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/context-db/bin/ctx_sync.py\" run --no-push --quiet --timeout 6 --lock-wait 2 2>/dev/null || true",
-            "timeout": 15
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/context-db/bin/ctx_sync.py\" run --no-push --quiet --timeout 10 --lock-wait 2 2>/dev/null || true",
+            "timeout": 30
           },
           {
             "type": "command",
@@ -71,7 +71,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/context-db/bin/ctx_adapter.py\" hook post-tool-use-async 2>/dev/null || true",
-            "timeout": 30,
+            "timeout": 120,
             "async": true
           }
         ]
@@ -87,7 +87,7 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/context-db/bin/ctx_adapter.py\" hook post-tool-use-async 2>/dev/null || true",
-            "timeout": 30,
+            "timeout": 120,
             "async": true
           }
         ]

@@ -207,6 +207,30 @@ class Modes(Base):
         code, line = self.line(self.a)
         self.assertIn("pushed", line)
 
+    def test_quiet_pull_is_silent_until_something_comes_in(self):
+        r = self.run_sync(self.b, "run", "--no-push", "--quiet")
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stderr)  # the session-start hook: nothing to pull, nothing to say
+        (self.a / "alpha" / "alpha.md").write_text(DOC + "\n- more\n", encoding="utf-8")
+        self.line(self.a)
+        r = self.run_sync(self.b, "run", "--no-push", "--quiet")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("pulled", r.stdout)
+
+    def test_a_gitfile_store_keeps_its_state_in_the_git_dir(self):
+        # `.git` a file: a clone with --separate-git-dir (a worktree looks the same to the pass)
+        gitdir = self.t / "c.git"
+        root = self.t / "c" / ".context"
+        git(self.t, "clone", "-q", f"--separate-git-dir={gitdir}", str(self.remote), str(root), env=self.env)
+        self.assertTrue((root / ".git").is_file())
+        (root / "alpha" / "alpha.md").write_text(DOC + "\n- from c\n", encoding="utf-8")
+        code, line = self.line(root)
+        self.assertEqual(code, 0, line)
+        self.assertIn("pushed", line)
+        self.assertEqual(json.loads((gitdir / "ctx-sync" / "status").read_text(encoding="utf-8"))["state"], "ok")
+        self.assertTrue((gitdir / "ctx-sync.lock").exists())
+        r = self.run_sync(root, "status")
+        self.assertTrue(r.stdout.startswith("push; origin/main"), r.stdout)
+
     def test_commit_identity_falls_back_to_the_actor(self):
         env = {k: v for k, v in self.env.items() if not k.startswith(("GIT_AUTHOR", "GIT_COMMITTER"))}
         env.update(CONTEXT_ROOT=str(self.a), CTX_ACTOR="kit-07", WORKSPACE_GITHUB_LOGIN="someone")  # a session name
@@ -324,6 +348,61 @@ class TwoClones(Base):
         self.assertFalse((self.b / ".git" / "rebase-merge").exists())
         self.assertEqual(git(self.b, "status", "--porcelain", env=self.env).stdout, "")
         self.assertTrue((self.b / "alpha" / "alpha.md").exists())
+
+    def stopped_rebase_in_b(self) -> None:
+        """Both clones append to the end of the doc; b's rebase by hand (no merge drivers configured yet) stops."""
+        (self.a / "alpha" / "alpha.md").write_text(DOC + "\n- from a\n", encoding="utf-8")
+        self.line(self.a)
+        (self.b / "alpha" / "alpha.md").write_text(DOC + "\n- from b\n", encoding="utf-8")
+        git(self.b, "add", "-A", env=self.env)
+        git(self.b, "commit", "-q", "-m", "by hand", env=self.env)
+        git(self.b, "fetch", "-q", "origin", "main", env=self.env)
+        r = git(self.b, "rebase", "origin/main", env=self.env, check=False)
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((self.b / ".git" / "rebase-merge").exists())
+
+    def test_a_rebase_a_killed_pass_left_is_undone_by_the_next_pass(self):
+        self.stopped_rebase_in_b()
+        st = self.b / ".git" / "ctx-sync" / "status"
+        st.parent.mkdir(exist_ok=True)
+        st.write_text(json.dumps({"state": "running", "detail": "rebase"}), encoding="utf-8")  # what a pass writes before `git rebase`
+        r = self.run_sync(self.b, "status")
+        self.assertIn("interrupted mid-rebase", r.stdout)
+        self.assertNotIn("rebase is in progress", r.stdout)
+        code, line = self.line(self.b)
+        self.assertEqual(code, 0, line)
+        self.assertIn("pushed", line)  # aborted the stale rebase, then merged both lines with the drivers
+        self.assertFalse((self.b / ".git" / "rebase-merge").exists())
+        merged = git(self.t, "--git-dir", str(self.remote), "show", "main:alpha/alpha.md", env=self.env).stdout
+        self.assertIn("- from a", merged)
+        self.assertIn("- from b", merged)
+
+    def test_a_rebase_started_by_hand_stops_the_pass_until_it_is_finished(self):
+        self.stopped_rebase_in_b()
+        code, line = self.line(self.b)
+        self.assertEqual(code, 3, line)
+        self.assertIn("a rebase is in progress", line)
+        self.assertTrue((self.b / ".git" / "rebase-merge").exists())  # untouched
+        self.assertIn("a rebase is in progress", self.run_sync(self.b, "status").stdout)
+        hook = subprocess.run([sys.executable, str(ADAPTER), "hook", "post-tool-use"], env=dict(self.env, CONTEXT_ROOT=str(self.b)),
+                              input=json.dumps({"tool_name": "mcp__ctx__ctx_log", "tool_input": {}}), capture_output=True,
+                              text=True, timeout=60)
+        self.assertIn("a rebase is in progress", json.loads(hook.stdout)["systemMessage"])
+        git(self.b, "rebase", "--abort", env=self.env)
+        code, line = self.line(self.b)
+        self.assertEqual(code, 0, line)
+        self.assertIn("pushed", line)
+
+    def test_brief_registry_shows_the_pending_conflict_without_ctx(self):
+        (self.a / "alpha" / "alpha.md").unlink()
+        self.line(self.a)
+        (self.b / "alpha" / "alpha.md").write_text(DOC + "\n- more\n", encoding="utf-8")
+        self.assertEqual(self.line(self.b)[0], 3)
+        env = dict(self.env, CONTEXT_ROOT=str(self.b))  # no KIT_CTX, no pinned ctx under this cache: ctx is not installed
+        hook = subprocess.run([sys.executable, str(ADAPTER), "hook", "brief-registry"], env=env, input="{}",
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(hook.returncode, 0, hook.stderr)
+        self.assertIn("conflict pending in alpha/alpha.md", hook.stdout)
 
     def test_generated_catalogs_are_regenerated_not_merged(self):
         (self.a / "INDEX.md").write_text("# Index\n\nfrom a\n", encoding="utf-8")

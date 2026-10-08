@@ -15,8 +15,9 @@ Mode — the env config's `context.sync` (`kit_profile.py get context.sync`, def
 
 Subcommands:
   run [--no-push] [--quiet] [--timeout S] [--lock-wait S]
-                          one sync pass; prints one line (`--quiet`: not when it is `clean …` or `off …`); exit 0,
-                          3 on a conflict that needs a person, 2 on a git failure that is not a conflict
+                          one sync pass; prints one line (`--quiet`: not when it is `clean …` or `off …` — with
+                          `--no-push`, `clean` is a pull that brought and committed nothing); exit 0, 3 on a
+                          conflict that needs a person, 2 on a git failure that is not a conflict
   status                                          one line: mode, branch, ahead/behind, a pending conflict
   merge-doc  O A B P      git merge driver for `*.md`: three-way frontmatter (per key; `updated` = newest; the side
                           with the newer `updated` wins a key both changed), bodies union-merged (`git merge-file
@@ -24,7 +25,10 @@ Subcommands:
   merge-max  O A B        merge driver for `.audit/seq`: the larger counter
   merge-regen O A B P     merge driver for a generated catalog: keep one side, regenerate after the rebase
 
-How a pass runs (under `.git/ctx-sync.lock`, so two sessions on one machine never race git's index.lock):
+How a pass runs (under `.git/ctx-sync.lock`, so two sessions on one machine never race git's index.lock; `.git`
+may be a gitfile — `--separate-git-dir`, a worktree — and the lock, status and record live in the git dir it names):
+  0. a rebase left mid-way by a pass a hook timeout killed (status `running`, nobody holds the lock) is aborted
+     first; a rebase a person started by hand stops the pass (exit 3) until they finish or abort it.
   1. `git add -A` + commit when the store changed (`--no-verify`; author = the registered session name when the
      repository has no identity of its own).
   2. fetch `origin/<branch>`; when behind, `git rebase --autostash` with the merge drivers above active
@@ -114,8 +118,28 @@ def configured_mode() -> str:
     return v if v in MODES else "auto"
 
 
+def git_dir(root: Path) -> Path:
+    """The store's git directory: `.git` itself, or where a `.git` *file* (`--separate-git-dir`, a worktree) points."""
+    p = root / ".git"
+    if p.is_file():
+        try:
+            for line in p.read_text(encoding="utf-8").splitlines():
+                if line.startswith("gitdir:"):
+                    target = Path(line[7:].strip())
+                    return target if target.is_absolute() else (root / target).resolve()
+        except OSError:
+            pass
+    return p
+
+
+def rebase_in_progress(root: Path) -> bool:
+    d = git_dir(root)
+    return (d / "rebase-merge").exists() or (d / "rebase-apply").exists()
+
+
 def own_toplevel(git: Git) -> bool:
-    """True when the content root is the top of its own work tree (not a directory inside a bigger repo)."""
+    """True when the content root is the top of its own work tree (not a directory inside a bigger repo); `.git` may
+    be a directory or a gitfile."""
     if not (git.root / ".git").exists():
         return False
     top = git.out("rev-parse", "--show-toplevel", timeout=10)
@@ -145,7 +169,7 @@ def mode_of(git: Git) -> tuple[str, str]:
 
 # ── status file ───────────────────────────────────────────────────────────────────────────────────────────────
 def status_path(root: Path) -> Path:
-    return root / ".git" / "ctx-sync" / "status"
+    return git_dir(root) / "ctx-sync" / "status"
 
 
 def read_status(root: Path) -> dict:
@@ -168,8 +192,12 @@ def write_status(root: Path, state: str, detail: str = "", paths: list[str] | No
 
 
 def pending_conflict(root: Path) -> str:
-    """One line for a hook to show while a conflict waits for a person, else ''."""
+    """One line for a hook to show while a conflict (or a rebase someone started by hand) waits for a person, else ''.
+    A rebase a killed pass left behind (status `running`) is not reported: the next pass recovers it."""
     st = read_status(root)
+    if rebase_in_progress(root) and st.get("state") != "running":
+        return ("context sync: a rebase is in progress in the store — finish it (`git rebase --continue`) or "
+                "`git rebase --abort`, then `make -C $BATON/context-db context-sync`")
     if st.get("state") != "conflict":
         return ""
     paths = ", ".join(st.get("paths") or [])[:200]
@@ -251,7 +279,7 @@ def commit_changes(git: Git) -> str:
 
 
 def merged_record(root: Path) -> Path:
-    return root / ".git" / "ctx-sync" / "merged"
+    return git_dir(root) / "ctx-sync" / "merged"
 
 
 def read_merged(root: Path) -> list[str]:
@@ -310,6 +338,7 @@ def rebase_onto_remote(git: Git, branch: str) -> tuple[bool, str]:
         merged_record(root).write_text("", encoding="utf-8")
     except OSError:
         pass
+    write_status(root, "running", "rebase")  # a pass killed here (a hook timeout) is recognised and undone by the next one
     r = git.run("rebase", "-q", "--autostash", f"origin/{branch}", timeout=120)
     if r.returncode != 0:
         conflicted = git.out("diff", "--name-only", "--diff-filter=U", timeout=30).splitlines()
@@ -317,6 +346,7 @@ def rebase_onto_remote(git: Git, branch: str) -> tuple[bool, str]:
         why = (r.stderr or r.stdout).strip().splitlines()[-1:] or ["rebase stopped"]
         write_status(root, "conflict", why[0][:200], conflicted)
         return False, f"conflict: {', '.join(conflicted) or why[0][:120]}"
+    write_status(root, "ok")
     merged = read_merged(root)
     finding = validate_merged(root, merged)
     if finding:
@@ -339,8 +369,8 @@ class NoNetwork(Exception):
 
 
 def acquire(root: Path, wait: float):
-    """The store's sync lock (`.git/ctx-sync.lock`), or None when another pass held it for `wait` seconds."""
-    p = root / ".git" / "ctx-sync.lock"
+    """The store's sync lock (`<git dir>/ctx-sync.lock`), or None when another pass held it for `wait` seconds."""
+    p = git_dir(root) / "ctx-sync.lock"
     fh = open(p, "a", encoding="utf-8")  # noqa: SIM115 — held for the pass
     deadline = time.monotonic() + wait
     while True:
@@ -357,20 +387,29 @@ def acquire(root: Path, wait: float):
 def run(root: Path, push: bool = True, timeout: float = NET_TIMEOUT, lock_wait: float = LOCK_WAIT) -> tuple[int, str]:
     """One pass. (exit code, the one line)."""
     git = Git(root, timeout)
-    mode, why = mode_of(git)
-    if mode == "off":
+    if configured_mode() == "off" or not own_toplevel(git):
+        mode, why = mode_of(git)
         return 0, f"off ({why})"
-    if (root / ".git" / "rebase-merge").exists() or (root / ".git" / "rebase-apply").exists():
-        return 3, "conflict: a rebase is in progress in the store — finish or `git rebase --abort` it, then rerun"
     lock = acquire(root, lock_wait)
     if lock is None:
         return 0, "busy (another sync pass holds the lock; its `git add -A` sweeps this change up)"
     try:
+        if rebase_in_progress(root):  # before mode_of: a rebase detaches HEAD, which would read as "commit only"
+            if read_status(root).get("state") != "running":
+                return 3, "conflict: a rebase is in progress in the store — finish or `git rebase --abort` it, then rerun"
+            # a pass killed mid-rebase (a hook timeout): nobody drives that rebase — the lock is ours — so undo it
+            # (`--autostash` restores what it stashed) and go on; this pass fetches and rebases again
+            git.run("rebase", "--abort", timeout=60)
+            write_status(root, "ok")
+        mode, why = mode_of(git)
+        if mode == "off":
+            return 0, f"off ({why})"
         ensure_drivers(git)
         sha = commit_changes(git)
         if mode == "commit":
             return 0, f"committed {sha} ({why}, no push)" if sha else f"clean ({why}, no push)"
         branch = why.split("/", 1)[1]
+        head = git.out("rev-parse", "HEAD", timeout=10)
         try:
             ok, detail = rebase_onto_remote(git, branch)
         except NoNetwork as e:
@@ -381,7 +420,10 @@ def run(root: Path, push: bool = True, timeout: float = NET_TIMEOUT, lock_wait: 
         if not push:
             write_status(root, "ok")
             ahead = git.out("rev-list", "--count", f"origin/{branch}..HEAD", timeout=30) or "0"
-            return 0, f"pulled ({ahead} ahead, push left to the next pass)"
+            if not sha and git.out("rev-parse", "HEAD", timeout=10) == head:
+                return 0, (f"clean (in sync with origin/{branch})" if ahead == "0"
+                           else f"clean (nothing to pull; {ahead} ahead, push left to the next pass)")
+            return 0, f"{'committed ' + sha + ', ' if sha else ''}pulled ({ahead} ahead, push left to the next pass)"
         for attempt in range(PUSH_RETRIES + 1):
             ahead = git.out("rev-list", "--count", f"origin/{branch}..HEAD", timeout=30) or "0"
             if ahead == "0":
@@ -435,8 +477,8 @@ def status(root: Path) -> str:
             parts.append(f"{ahead} ahead, {behind} behind (as of the last fetch)")
         else:
             parts.append("remote branch not fetched yet")
-    if (root / ".git" / "rebase-merge").exists() or (root / ".git" / "rebase-apply").exists():
-        parts.append("REBASE IN PROGRESS")
+    if rebase_in_progress(root) and read_status(root).get("state") == "running":
+        parts.append("a pass was interrupted mid-rebase (the next pass undoes it)")
     pending = pending_conflict(root)
     if pending:
         parts.append(pending)

@@ -195,7 +195,8 @@ COMPACT_DEADLINE = 8    # seconds the whole brief-session hook may spend, start 
                         # ready, so only a skipped context-doc lookup is ever at risk
 LOCK_TIMEOUT = "3"      # CTX_LOCK_TIMEOUT for a hook's ctx call unless the user set one: a held lock must not stall a tool
 MESSAGE_MAX = 1000      # characters of validate findings returned as the systemMessage
-SYNC_NET_TIMEOUT = 10   # seconds one fetch or push of the context-sync pass may take inside the async hook (30 s entry)
+SYNC_NET_TIMEOUT = 20   # seconds one fetch or push of the context-sync pass may take inside the async hook (120 s entry:
+                        # fetch + rebase + validate + push, with the two non-fast-forward retries, fit with room)
 SYNC_LOCK_WAIT = 8      # seconds that pass waits for another session's pass on the same store before leaving it to it
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
 BIN = Path(__file__).resolve().parent
@@ -1205,6 +1206,16 @@ def hook(name: str) -> str:
         # not happen; staying silent would read exactly like "no findings".
         first = lines[0] if lines else f"exit {r.returncode}"
         return _message(f"ctx validate did not run: {first[:MESSAGE_MAX]}", pending)
+    if name == "brief-registry":
+        # the pending-conflict line does not need ctx: a machine without it still syncs the store (#515)
+        root = _context_root()
+        pending = _sync_pending(root) if root.is_dir() else ""
+        store = _store_args(root) if root.is_dir() else None
+        if ctx is None or store is None:
+            return pending
+        r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
+        brief = r.stdout if r.returncode == 0 else ""
+        return f"{pending}\n\n{brief}" if pending else brief
     if ctx is None:
         return ""
     root = _context_root()
@@ -1213,11 +1224,6 @@ def hook(name: str) -> str:
     store = _store_args(root)
     if store is None:
         return ""
-    if name == "brief-registry":
-        r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
-        pending = _sync_pending(root)
-        brief = r.stdout if r.returncode == 0 else ""
-        return f"{pending}\n\n{brief}" if pending else brief
     if name == "brief-session":
         _compact_brief(ctx, store, payload)  # writes and flushes its own output; see its docstring
         return ""
