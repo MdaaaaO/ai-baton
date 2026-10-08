@@ -47,6 +47,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 |---|---|---|---|---|
 | `KIT_CTX` | unset (the pinned install under `${XDG_CACHE_HOME:-~/.cache}/ai-baton-kit/ctx-store/<version>/`) | `context-db/bin/ctx_adapter.py` | a `ctx` executable to use instead of the pinned install; set but not an executable file means "not installed", never a fallback | user-facing |
 | `CTX_STORE` | unset (the hooks name the content root with `--store`) | `context-db/bin/ctx_adapter.py` | ctx-store's own store locator; when set, the hooks leave it to ctx instead of naming the content root | user-facing |
+| `CTX_ACTOR` | unset (the adapter defaults it to the registered session name for ctx; `ctx_sync.py` falls back to it after that name, before `WORKSPACE_USER`) | `context-db/bin/ctx_sync.py` | ctx-store's actor name; the context-sync pass reuses it as the commit author of the store when the repository has no `user.name` of its own | user-facing |
 | `KIT_NO_CTX_FETCH` | unset | `setup.sh` | `1` skips `ctx_adapter.py install`'s network fetch of the pinned ctx-store release (its wheel, from PyPI, checked against the pinned sha256) and only prints the manual install/adopt commands, as setup.sh always did before; set by the setup tests so none of them downloads from the network | user-facing |
 
 ## `context-db/bin/new.sh` (`make new …`)

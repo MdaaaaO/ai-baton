@@ -58,6 +58,8 @@ Kit / config (env fact store .context/reference/env/):
   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=sonnet] [RUNS=3] [JOBS=4] [JSON_DIR=<dir>]  # run the eval suite (SPENDS TOKENS)
   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
+  make -C $BATON/context-db context-sync              # commit, pull --rebase and push the context store when it is its own git repo (docs/context-sync.md)
+  make -C $BATON/context-db context-sync-status       # one line: sync mode, branch, ahead/behind, a pending conflict
   make -C $BATON/context-db migrate [CONTEXT=<store>] # bring a store forward: kb.py migrate, then ctx_adapter.py adopt —
                                                        #   both steps in one call (sync-check.sh and kit-health name each on its own)
   make -C $BATON/context-db kit-health [STALE=90] [KIT_HEALTH_ARGS=…]  # full kit audit of the store CONTEXT names (the kit-health skill's script)
@@ -437,12 +439,18 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        ignore. Anything else, or any error: no decision
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
                        comes back as `{"systemMessage": …}`; any exit but 0 or
-                       NO_STORE (or a timeout) comes back as `ctx validate did not run: …`
+                       NO_STORE (or a timeout) comes back as `ctx validate did not run: …`. Also run after a write
+                       through a ctx MCP tool: a context-sync conflict an earlier pass left in the store
+                       (ctx_sync.py's status file, #515) is prepended to — or is — the message, with or without ctx
   post-tool-use-async  the same trigger, or a write through a ctx MCP tool → `ctx touch --session <session_id>` (the
                        registry row `session register` stamped with the harness session id), then the kit's
                        catalogs INDEX.md (gen_index.py) and SESSION_INDEX.md (gen_sessions.py --no-archive) are
-                       regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
-  brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
+                       regenerated — with or without ctx — then one context-sync pass (`ctx_sync.py run`: commit,
+                       pull --rebase, push, when the store is its own git repository with a remote; docs/context-sync.md);
+                       a failure goes to the scratch dir's hooks.log only
+  brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted, led by the pending
+                       context-sync conflict line when there is one (the pull itself is the hook entry before it,
+                       `ctx_sync.py run --no-push`)
   brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and epic
                        <epic key>", the session row's own `epic:` frontmatter value verbatim, or "and no
                        context doc" when the row carries no `epic:` field at all), then `ctx brief --session

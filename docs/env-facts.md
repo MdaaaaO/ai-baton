@@ -74,7 +74,9 @@ identity, phases — optional, absent = private mode), `datalake.kind` (warehous
 `datalake.mcp_tools.probe` — optional, absent = no such probe here), `kit.install_mode` (`clone`|`plugin`|`dev-checkout` — written by `setup.sh`, never by
 hand; kit-health § 1 compares it with how the kit actually runs, #34), `leaks.markers` (optional: literal strings — a sandbox product's CLI or env-file path, a tenant or team name — that kit-health's leak scan adds to the configured values; for what no generic shape can know, #95), `kit.sandbox_markers` (optional: absolute
 paths or environment-variable names whose presence means this machine runs in a sandbox, so kit-health warns when
-`github.sandbox_token_prefix` is empty there; absent = no sandbox check, #94), plus `environment` (this
+`github.sandbox_token_prefix` is empty there; absent = no sandbox check, #94), `context.sync` (`auto`|`off`|`commit`|`push` —
+whether the kit commits, pulls and pushes a `.context/` that is its own git repository after every write;
+`context-sync.md`, #515), plus `environment` (this
 environment's name, a lowercase slug) and `domains` (extra `.context/` folders). Template with every
 key: `.claude/environment-template/config.json`; `kit-verify` checks the store against it.
 Everything that is an id or a name is a table row, not a config key.

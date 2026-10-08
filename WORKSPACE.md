@@ -2,7 +2,7 @@
 
 The **environment-agnostic body** of the workspace `CLAUDE.md`. The root `CLAUDE.md` (personal) says
 who the user is, then imports this file and the environment's prose (`.context/reference/environment.md`).
-Everything below holds everywhere; environment differences live in the env store (values) and `environment.md` (prose).
+Everything below holds everywhere; environment differences live in the env store and `environment.md`.
 Identity is `WORKSPACE_*` (`/plugin configure ai-baton`, else `.claude/settings.local.json`), never here.
 Kit reference: `$BATON/README.md`.
 
@@ -20,7 +20,8 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't lo
 2. **Persist:** new doc `make -C $BATON/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug>
    TITLE="…"` (types: `.context/README.md`). **Writes to `.context/` docs go through ctx tools** —
    `ctx_str_replace`, `ctx_insert`, `ctx_log`, `ctx_fm`, `ctx_create` (Bash: `$BATON/context-db/bin/ctx_adapter.py
-   ctx <verb>`); `Write`/`Edit` is denied outside `sessions/`. Hooks validate and re-index.
+   ctx <verb>`); `Write`/`Edit` is denied outside `sessions/`. Hooks validate, re-index and sync a
+   git-versioned `.context/` (`$BATON/docs/context-sync.md`).
 3. **Domains are folders:** core `reference/`, `repos/`, `pr-reviews/`, `meetings/`, `1on1/`,
    `self-assessment/`, `on-call/`, `archive/`; the environment adds its own (`domains` in the env
    config). Repo deep-dives are `.context/repos/<repo>.md` (links + TLDRs; the repo's own `CLAUDE.md`
@@ -31,7 +32,7 @@ gets its own update). One per initiative, `TYPE=epic`, fixed sections *Tracker &
 was built (PRs per repo) · Key decisions & gotchas · Infra/secrets locations · Remaining work · Session
 log* (dated one-liners, oldest first). Keep it lean — history to `.context/archive/<slug>-log.md`
 (`verify` warns past 30 KB). It is the **handoff document**: a cold session picks it up alone, so
-it is updated at every step, not only the end.
+update it at every step.
 
 ## Environment facts — never hardcode, never guess
 
@@ -60,7 +61,7 @@ Specs: `docs/env-facts.md`, `docs/new-environment.md`.
 - **PR watches:** one multi-PR `pr-watch` Monitor per repo per session; every open PR has exactly one
   watcher. Watches die with their session — the successor re-arms them at startup.
 - **Kit changes are PR-only.** The kit checkout (`.claude/` or a clone) stays on `main`;
-  edit in `.worktrees/kit_<topic>` off `origin/main`, open a PR, the user merges (`CONTRIBUTING.md`). `.context/` content is local, never synced.
+  edit in `.worktrees/kit_<topic>` off `origin/main`, open a PR, the user merges (`CONTRIBUTING.md`).
 
 ## Skills
 

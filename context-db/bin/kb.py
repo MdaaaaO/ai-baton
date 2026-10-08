@@ -1137,6 +1137,7 @@ def blank_config() -> dict:
         "verify": {"repos": {}},
         "length": {"repos": {}},
         "commits": {"default": "conventional", "repos": {}},
+        "context": {"sync": "auto"},
     }
 
 

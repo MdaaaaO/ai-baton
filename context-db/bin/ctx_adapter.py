@@ -65,12 +65,18 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        ignore. Anything else, or any error: no decision
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
                        comes back as `{"systemMessage": …}`; any exit but 0 or
-                       NO_STORE (or a timeout) comes back as `ctx validate did not run: …`
+                       NO_STORE (or a timeout) comes back as `ctx validate did not run: …`. Also run after a write
+                       through a ctx MCP tool: a context-sync conflict an earlier pass left in the store
+                       (ctx_sync.py's status file, #515) is prepended to — or is — the message, with or without ctx
   post-tool-use-async  the same trigger, or a write through a ctx MCP tool → `ctx touch --session <session_id>` (the
                        registry row `session register` stamped with the harness session id), then the kit's
                        catalogs INDEX.md (gen_index.py) and SESSION_INDEX.md (gen_sessions.py --no-archive) are
-                       regenerated — with or without ctx; a failure goes to the scratch dir's hooks.log only
-  brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted
+                       regenerated — with or without ctx — then one context-sync pass (`ctx_sync.py run`: commit,
+                       pull --rebase, push, when the store is its own git repository with a remote; docs/context-sync.md);
+                       a failure goes to the scratch dir's hooks.log only
+  brief-registry       SessionStart startup|resume|clear → `ctx brief --registry`, byte-budgeted, led by the pending
+                       context-sync conflict line when there is one (the pull itself is the hook entry before it,
+                       `ctx_sync.py run --no-push`)
   brief-session        SessionStart compact → one owner line ("compacted — re-grounded from sessions/<name> and epic
                        <epic key>", the session row's own `epic:` frontmatter value verbatim, or "and no
                        context doc" when the row carries no `epic:` field at all), then `ctx brief --session
@@ -189,6 +195,9 @@ COMPACT_DEADLINE = 8    # seconds the whole brief-session hook may spend, start 
                         # ready, so only a skipped context-doc lookup is ever at risk
 LOCK_TIMEOUT = "3"      # CTX_LOCK_TIMEOUT for a hook's ctx call unless the user set one: a held lock must not stall a tool
 MESSAGE_MAX = 1000      # characters of validate findings returned as the systemMessage
+SYNC_NET_TIMEOUT = 20   # seconds one fetch or push of the context-sync pass may take inside the async hook (120 s entry:
+                        # fetch + rebase + validate + push, with the two non-fast-forward retries, fit with room)
+SYNC_LOCK_WAIT = 8      # seconds that pass waits for another session's pass on the same store before leaving it to it
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
 BIN = Path(__file__).resolve().parent
 KIT_ROOT = BIN.parent.parent  # context-db/bin -> context-db -> the kit root, where .claude-plugin/plugin.json lives
@@ -810,6 +819,35 @@ def refresh_catalogs(root: Path) -> None:
             _log(f"{args[0]}: {e}")
 
 
+def _sync(root: Path) -> None:
+    """One context-sync pass (ctx_sync.py: commit, pull --rebase and push the store when it is its own git repository
+    with a remote — a no-op otherwise, #515) after the catalogs are fresh. The pass's one line goes to hooks.log
+    unless it says `clean`/`off`; a conflict also lands in the store's status file, which the synchronous hooks read
+    (`_sync_pending`) — this hook is asynchronous, so nothing it prints reaches the session."""
+    try:
+        import ctx_sync  # same dir
+        code, line = ctx_sync.run(root, timeout=SYNC_NET_TIMEOUT, lock_wait=SYNC_LOCK_WAIT)
+        if code != 0 or not line.startswith(("clean", "off")):
+            _log(f"context sync: {line}")
+    except Exception as e:  # noqa: BLE001 — a hook never fails on the sync
+        _log(f"context sync: {e}")
+
+
+def _sync_pending(root: Path) -> str:
+    """The conflict line a context-sync pass left in the store (`.git/ctx-sync/status`), or ''."""
+    try:
+        import ctx_sync  # same dir
+        return ctx_sync.pending_conflict(root)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _message(*parts: str) -> str:
+    """A `{"systemMessage": …}` of the non-empty parts (` · `-joined), or '' when there is nothing to say."""
+    text = " · ".join(p for p in parts if p)
+    return json.dumps({"systemMessage": text[:MESSAGE_MAX]}) if text else ""
+
+
 def _session_id(payload: dict) -> str:
     sid = payload.get("session_id")
     return sid.strip() if isinstance(sid, str) else ""
@@ -1144,7 +1182,40 @@ def hook(name: str) -> str:
             except (OSError, subprocess.SubprocessError) as e:
                 _log(f"ctx touch: {e}")
         refresh_catalogs(root)
+        _sync(root)
         return ""
+    if name == "post-tool-use":
+        # the one hook that also runs for a ctx MCP write: a context-sync conflict left by an earlier pass is
+        # shown here, after the write that follows it, whatever tool made the write (#515)
+        root = _context_root()
+        pending = _sync_pending(root) if root.is_dir() else ""
+        via_ctx = bool(CTX_WRITE_TOOL.match(str(payload.get("tool_name", ""))))
+        store = _store_args(root) if root.is_dir() else None
+        if ctx is None or store is None or via_ctx or not _changed_under(payload, root):
+            return _message(pending)  # a write through a ctx tool was validated by ctx itself
+        try:
+            r = _ctx(ctx, store, "validate", "--changed", "--adopt")
+        except subprocess.TimeoutExpired:
+            return _message(f"ctx validate did not run: no answer within {HOOK_TIMEOUT}s", pending)
+        lines = _lines(r.stderr)
+        if r.returncode == 3:  # validation findings
+            return _message(f"ctx validate: {' · '.join(lines)[:MESSAGE_MAX]}", pending)
+        if r.returncode == 0 or _code(r) == "NO_STORE":
+            return _message(pending)  # clean, or the content root is not a store yet (not adopted): nothing to say
+        # Any other exit (usage, lock timeout, read-only, a ctx that changed its verbs) means validation did
+        # not happen; staying silent would read exactly like "no findings".
+        first = lines[0] if lines else f"exit {r.returncode}"
+        return _message(f"ctx validate did not run: {first[:MESSAGE_MAX]}", pending)
+    if name == "brief-registry":
+        # the pending-conflict line does not need ctx: a machine without it still syncs the store (#515)
+        root = _context_root()
+        pending = _sync_pending(root) if root.is_dir() else ""
+        store = _store_args(root) if root.is_dir() else None
+        if ctx is None or store is None:
+            return pending
+        r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
+        brief = r.stdout if r.returncode == 0 else ""
+        return f"{pending}\n\n{brief}" if pending else brief
     if ctx is None:
         return ""
     root = _context_root()
@@ -1153,25 +1224,6 @@ def hook(name: str) -> str:
     store = _store_args(root)
     if store is None:
         return ""
-    if name == "post-tool-use":
-        if not _changed_under(payload, root):
-            return ""  # a write through a ctx tool was validated by ctx itself
-        try:
-            r = _ctx(ctx, store, "validate", "--changed", "--adopt")
-        except subprocess.TimeoutExpired:
-            return json.dumps({"systemMessage": f"ctx validate did not run: no answer within {HOOK_TIMEOUT}s"})
-        lines = _lines(r.stderr)
-        if r.returncode == 3:  # validation findings
-            return json.dumps({"systemMessage": f"ctx validate: {' · '.join(lines)[:MESSAGE_MAX]}"})
-        if r.returncode == 0 or _code(r) == "NO_STORE":
-            return ""  # clean, or the content root is not a store yet (not adopted): nothing to say
-        # Any other exit (usage, lock timeout, read-only, a ctx that changed its verbs) means validation did
-        # not happen; staying silent would read exactly like "no findings".
-        first = lines[0] if lines else f"exit {r.returncode}"
-        return json.dumps({"systemMessage": f"ctx validate did not run: {first[:MESSAGE_MAX]}"})
-    if name == "brief-registry":
-        r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
-        return r.stdout if r.returncode == 0 else ""
     if name == "brief-session":
         _compact_brief(ctx, store, payload)  # writes and flushes its own output; see its docstring
         return ""

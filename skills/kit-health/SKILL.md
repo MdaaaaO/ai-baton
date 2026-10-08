@@ -2,9 +2,9 @@
 name: kit-health
 description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Walks each finding, reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
 metadata:
-  version: "71"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "72"
+  updated: "2026-10-08"
+  reviewed: "2026-10-08"
   facts: "aws.profile kit-health"
 user-invocable: true
 ---
@@ -22,7 +22,9 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    warns when a newer kit release is out and names the update command; on a clone, § 1 also names the release
    channel, the installed tag and a held preview, and warns when the last sync applied an update it could not
    verify; on a plugin install, it checks the cache against the installed release's attested manifest and, when
-   an update is pending, lists the files it would change; § 5 says whether `.context/` is an
+   an update is pending, lists the files it would change; § 4 carries the `.context/` git-sync line
+   (`context-sync-status`: warns when a git store syncs nothing or commits wait for a push, RED on a pending
+   conflict — `docs/context-sync.md`); § 5 says whether `.context/` is an
    adopted ctx store (not adopted: `ctx_adapter.py adopt`, once; behind the kit's settings/types: the same
    `adopt` brings it forward); § 6 lists the units changed since the
    last stamp. A stale row in § 3: `/env-init --refresh`, never a hand-dated row.

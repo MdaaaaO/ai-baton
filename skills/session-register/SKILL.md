@@ -2,9 +2,9 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate-back-then-carousel when paste-started as a successor, re-arm PR-watch at startup, rename a mis-named session, name ctx writes as yourself, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "30"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "31"
+  updated: "2026-10-08"
+  reviewed: "2026-10-08"
 user-invocable: true
 ---
 
@@ -24,7 +24,10 @@ worktree.
 
 ## 1. On startup — orient, then register
 
-1. **Read `.context/SESSION_INDEX.md` first.** See which sessions are active, what epic each
+1. **Read `.context/SESSION_INDEX.md` first.** When `.context/` is its own git repository with a remote, the
+   SessionStart hook has already pulled it (`context sync: pulled …` in the hook output), so the index is the
+   latest from every machine; a `context sync: conflict pending …` line names a doc a person must resolve before
+   anything else is written (`docs/context-sync.md`). See which sessions are active, what epic each
    owns, and what it says to coordinate on. A `⚠ STALE` row (no heartbeat >12h) may be a dead
    session — re-verify with `ListAgents` (match by **ref**, not name; the tool exists in the main
    session only — a forked worker reports the row to its caller instead) before trusting or
@@ -136,8 +139,10 @@ and sets `CTX_ACTOR` from it when the environment does not already have one.
 Your entry must show a heartbeat within the last 12h or it is treated as stale.
 
 - **Every write under `.context/` touches your row** — the ctx-store `PostToolUse` hook, keyed by the harness
-  session id `session-register` stamped — so an active session stays fresh without a call. When your
-  focus changes, record it:
+  session id `session-register` stamped — so an active session stays fresh without a call. The same hook then
+  commits and pushes the store when it is its own git repository (`context.sync`, `docs/context-sync.md`), and
+  every `session-register` / `session-touch` / `session-end` prints the pass's one line (`pushed …`,
+  `push pending …`, or a `conflict:` to resolve). When your focus changes, record it:
   ```sh
   make -C $BATON/context-db session-touch NAME=<name> WORKING="<what you're on now>"
   ```

@@ -45,6 +45,8 @@
 #   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
 #   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=sonnet] [RUNS=3] [JOBS=4] [JSON_DIR=<dir>]  # run the eval suite (SPENDS TOKENS)
 #   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
+#   make -C $BATON/context-db context-sync              # commit, pull --rebase and push the context store when it is its own git repo (docs/context-sync.md)
+#   make -C $BATON/context-db context-sync-status       # one line: sync mode, branch, ahead/behind, a pending conflict
 #   make -C $BATON/context-db migrate [CONTEXT=<store>] # bring a store forward: kb.py migrate, then ctx_adapter.py adopt —
 #                                                        #   both steps in one call (sync-check.sh and kit-health name each on its own)
 #   make -C $BATON/context-db kit-health [STALE=90] [KIT_HEALTH_ARGS=…]  # full kit audit of the store CONTEXT names (the kit-health skill's script)
@@ -85,7 +87,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
+.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check context-sync context-sync-status migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
 # An explicit `SESSION_ID=` (command line or shell environment) wins as-is; otherwise take the CURRENT, expanded
 # value of CLAUDE_CODE_SESSION_ID (`:=`, not `?=`/`=`, which would store the unexpanded reference text — `sq` below
 # reads SESSION_ID with $(value …), so a lazily-expanded default would leak the literal "$(CLAUDE_CODE_SESSION_ID)").
@@ -108,6 +110,17 @@ kb:
 # make sync-check  — non-fatal: is the kit repo in step with origin? (session-register runs it)
 sync-check:
 	@sh $(ENGINE)../sync-check.sh || true
+
+# make context-sync [CONTEXT=<store>]  — one sync pass of the context store over git (ctx_sync.py run): commit what
+# changed, pull --rebase from origin with the kit's merge drivers, push. A no-op unless the store is its own git
+# repository (context.sync = auto); exit 3 names the doc a person has to resolve. The hooks run the same pass after
+# every context write; this is the by-hand rerun after resolving a conflict.
+context-sync:
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/ctx_sync.py run
+
+# make context-sync-status [CONTEXT=<store>]  — mode, branch, ahead/behind and any pending conflict, one line.
+context-sync-status:
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/ctx_sync.py status
 
 # make migrate [CONTEXT=<store>]  — bring a store forward: kb.py migrate (env-config flags), then ctx_adapter.py
 # adopt (kit settings/types + any pending ctx migrations) — both steps in one call; sync-check.sh and kit-health

@@ -77,7 +77,9 @@ flowchart TB
   re-exports plugin `userConfig` identity as `WORKSPACE_*`, plus `CLAUDE_PROJECT_DIR` and `BATON`, and
   `workspace-rules` injects `WORKSPACE.md`. On both paths the ctx-store adapter (`context-db/bin/ctx_adapter.py`) runs
   at `PreToolUse`, `PostToolUse` and `SessionStart`, a silent no-op until ctx-store is installed and a store is named
-  (`docs/troubleshooting.md` § ctx-store hooks).
+  (`docs/troubleshooting.md` § ctx-store hooks). After every context write the `PostToolUse` pass also commits and
+  pushes a `.context/` that is its own git repository, and `SessionStart` pulls it (`context-db/bin/ctx_sync.py`,
+  `docs/context-sync.md`).
 - **Writes to the context DB go through ctx**: on an adopted store (`ctx_adapter.py adopt`, run once by `setup.sh`)
   the model writes a `.context/` doc with the ctx MCP server's tools (`ctx_str_replace`, `ctx_insert`, `ctx_log`,
   `ctx_fm`, `ctx_create`, `ctx_new`, `ctx_move`) — validated, locked and audited by ctx — and the `PreToolUse` hook
