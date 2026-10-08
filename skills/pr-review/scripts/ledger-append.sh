@@ -14,9 +14,9 @@
 #
 # Locking: `--lock <path>` (default: `.ledger.lock` next to <ledger-path>, the name every caller already
 # uses) via `with_lock` (skills/_lib/portable.sh — flock where the host has it, the portable mkdir-based
-# lock dir otherwise). `with_lock` itself is non-blocking; this script polls it for up to
-# LEDGER_APPEND_TIMEOUT seconds (default 10, whole seconds only) so a writer racing another one retries
-# instead of failing on the first busy tick — the lock is typically held only for the length of one
+# lock dir otherwise). `with_lock` itself is non-blocking; this script polls it once a second for at
+# least LEDGER_APPEND_TIMEOUT seconds (default 10, whole seconds only) so a writer racing another one
+# retries instead of failing on the first busy tick — the lock is typically held only for the length of one
 # append. All validated rows are written in ONE `>>` under the held lock, so a concurrent appender can
 # never interleave into the middle of this call's rows.
 #
@@ -59,12 +59,17 @@ while IFS= read -r line; do
 done <<<"$rows"
 
 timeout=${LEDGER_APPEND_TIMEOUT:-10}
-start=$(date +%s)
 acquired=""
+waited=0
+# Count the one-second sleeps rather than subtracting `date +%s` stamps: those are whole seconds, so a
+# start late in a wall-clock second made the wait end up to a second early (#520 — the macOS leg's
+# mkdir-lock overhead tripped it about one run in three). This way the real wait is never shorter than
+# the timeout: `timeout` polls a second apart, then one last try.
 while :; do
   if with_lock "$LOCK"; then acquired=1; break; fi
-  [ $(( $(date +%s) - start )) -ge "$timeout" ] && break
+  [ "$waited" -ge "$timeout" ] && break
   sleep 1
+  waited=$((waited + 1))
 done
 [ -n "$acquired" ] || { echo "ledger-append: could not acquire $LOCK within ${timeout}s — another writer held it" >&2; exit 3; }
 
