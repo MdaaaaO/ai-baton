@@ -625,6 +625,23 @@ def regen() -> None:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import gen_sessions
     gen_sessions.main([])  # never session.py's own argv
+    sync_store()
+
+
+def sync_store() -> None:
+    """One context-sync pass after the registry changed (`ctx_sync.py run` — commit, pull --rebase, push when the
+    store is its own git repository with a remote, a no-op otherwise; docs/context-sync.md). Its one line is
+    printed so the caller sees `pushed …`, `push pending …` or the conflict it has to resolve; `off`/`clean` and any
+    failure of the pass itself stay silent — the registry write already happened."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ctx_sync.py")
+    try:
+        r = subprocess.run([sys.executable, script, "run", "--quiet", "--timeout", "15"], capture_output=True,
+                           text=True, timeout=120, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return
+    line = (r.stdout.strip().splitlines() or [""])[-1]
+    if line:
+        print(line)
 
 
 def main() -> int:

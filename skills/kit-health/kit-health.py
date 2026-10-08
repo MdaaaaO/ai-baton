@@ -1338,6 +1338,29 @@ def env_file_wiring(r: Report) -> None:
                   + " — delete the stray line, the hook only replaces the block")
 
 
+def sync_wiring(r: Report) -> None:
+    """§ 4's context-sync row (#515): what `ctx_sync.py status` says about the store's git sync — a conflict or a
+    rebase left half-done is an error, work not pushed a warning, a git store with the sync switched off a warning."""
+    rc, out, err = sh([sys.executable, str(BIN / "ctx_sync.py"), "status"], timeout=60)
+    line = (out or err).splitlines()[-1] if (out or err) else ""
+    if rc != 0 or not line:
+        r.add(WARN, "machine", f"context sync: `ctx_sync.py status` did not answer ({line or err[:200] or f'exit {rc}'})")
+        return
+    if line.startswith("off ("):
+        if "context.sync: off" in line and (ctx() / ".git").exists():
+            r.add(WARN, "machine", "context sync: the store is a git repository but `context.sync` is `off` — nothing commits or "
+                  "pushes your context; `kb.py config-set context.sync auto` turns it on (docs/context-sync.md)")
+        else:
+            r.add(OK, "machine", f"context sync: {line}")
+        return
+    if "conflict" in line or "REBASE IN PROGRESS" in line:
+        r.add(ERR, "machine", f"context sync: {line}")
+    elif "uncommitted" in line or re.search(r"\b[1-9]\d* ahead\b", line):
+        r.add(WARN, "machine", f"context sync: work not pushed yet — `make -C $BATON/context-db context-sync` ({line})")
+    else:
+        r.add(OK, "machine", f"context sync: {line}")
+
+
 def sec_machine(r: Report) -> str:
     r.h("4 · This machine — wiring")
     envname = kit_profile.name()
@@ -1345,6 +1368,7 @@ def sec_machine(r: Report) -> str:
     seed_wiring(r)
     autocompact_wiring(r)
     env_file_wiring(r)
+    sync_wiring(r)
     if not (ENV / "config.json").is_file():
         r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):

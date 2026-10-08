@@ -15,6 +15,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_sync.py\" run --no-push --quiet --timeout 6 --lock-wait 2 2>/dev/null || true",
+            "timeout": 15
+          },
+          {
+            "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py\" hook brief-registry 2>/dev/null || true",
             "timeout": 10
           }
@@ -63,6 +68,11 @@
       {
         "matcher": "mcp__.*ctx__ctx_.*",
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py\" hook post-tool-use 2>/dev/null || true",
+            "timeout": 10
+          },
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/ctx_adapter.py\" hook post-tool-use-async 2>/dev/null || true",

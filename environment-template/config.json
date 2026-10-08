@@ -115,6 +115,10 @@
     "default": "conventional",
     "repos": {}
   },
+  "context": {
+    "_comment": "sync: how the kit keeps the .context/ store in step with a git remote (context-db/bin/ctx_sync.py, docs/context-sync.md). auto (default): when .context/ is its own git repository with an origin remote, every context write commits, pulls --rebase and pushes; a repository without a remote is committed only; a store inside a bigger repo is left alone. off: never touch git. commit: commit, never push. push: commit, pull --rebase and push (what auto picks when the store has a remote). Added by `kb.py migrate` with `auto`.",
+    "sync": "auto | off | commit | push"
+  },
   "self_assessment": {
     "sources": [
       "github",

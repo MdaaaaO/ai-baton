@@ -120,8 +120,6 @@ flowchart LR
 | Both | [Claude Code](https://claude.com/claude-code), `python3` and `make`. `gh` logged in lets `--personal` fill your identity and runs the PR and ticket skills |
 | Clone | `git` as well |
 
-[`docs/packaging.md`](docs/packaging.md) compares the two paths.
-
 ### Quick start: a GitHub-only machine
 
 This setup needs no questions. Run the block for your path above, from your workspace root. `--personal` takes
@@ -145,12 +143,12 @@ the same `setup.sh`.
 
 ### Keep it current
 
-| Path | Update, then restart Claude Code and run `/kit-health` to re-stamp the machine |
+| Path | Update, then restart Claude Code and run `/kit-health` |
 |---|---|
 | Plugin | `claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@ai-baton-kit` |
 | Clone | `make claude_sync` (or `sh .claude/sync.sh --accept`). It only fast-forwards, to a release tag |
 
-`/kit-health` warns when a newer release is out and prints the update command. [`docs/sync.md`](docs/sync.md)
+`/kit-health` warns when a newer release is out, with the update command. [`docs/sync.md`](docs/sync.md)
 explains the clone's hooks and guards.
 
 ## What's inside
@@ -183,6 +181,7 @@ It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `contex
 | [loading](docs/loading.md) | What loads when, and the byte budgets |
 | [packaging](docs/packaging.md) | Plugin versus clone |
 | [sync](docs/sync.md) | How the kit moves between machines |
+| [context-sync](docs/context-sync.md) | `.context/` as a private git repo the hooks sync |
 | [authoring](docs/authoring.md) | The checklist for a new skill or agent |
 | [delegation](docs/delegation.md) | When to hand a read or a fix to a subagent, sized by cost |
 | [engine-cli](docs/engine-cli.md) | Every engine command and flag |

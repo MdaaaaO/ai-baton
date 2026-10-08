@@ -11,7 +11,9 @@ current directory. Full algorithm: `kit_profile.py`'s `context_root()` — the e
 `session.py`, `gen_index.py`, `gen_sessions.py`, `verify.py`, `new.sh` (`kit_profile.py context`) and the Makefile's
 `CONTEXT` all ask it and keep no fallback of their own. The test suite never uses it: `make test` and the test package
 run on a throw-away store under the temp dir (`docs/contributing.md` § Testing). Every other mention of the default
-(`context-db/Makefile`'s header, `docs/engine-cli.md`) links back to this paragraph rather than restating it.
+(`context-db/Makefile`'s header, `docs/engine-cli.md`) links back to this paragraph rather than restating it. The
+content root may be its own private git repository: the kit then commits and pushes it after every write and pulls
+it at session start (`docs/context-sync.md`, the `context.sync` config key).
 
 > **Plugin install:** the tree below is the clone's. On a plugin install the kit is not in `<workspace root>/.claude/`
 > (that directory holds only workspace settings such as your `settings.local.json`), the root `CLAUDE.md` has no `@.claude/WORKSPACE.md` line

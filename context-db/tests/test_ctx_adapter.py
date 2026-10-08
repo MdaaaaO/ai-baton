@@ -430,7 +430,7 @@ class HooksAreSilentWithoutCtxOrStore(Base):
         (self.t / "proj").mkdir()
         (self.t / "proj" / ".claude").symlink_to(KIT)
         cmds = Wiring.adapter_commands()
-        self.assertEqual(len(cmds), 12)  # six hook entries on each install path
+        self.assertEqual(len(cmds), 14)  # seven hook entries on each install path
         for cmd in cmds:
             r = subprocess.run(["sh", "-c", cmd], input=self.payload(), env=env, capture_output=True, text=True, timeout=60)
             self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""), cmd)
@@ -748,14 +748,15 @@ class Wiring(unittest.TestCase):
         plugin = self.wired(KIT / "hooks" / "hooks.json")
         clone = self.wired(KIT / "settings.json")
         self.assertEqual(plugin, clone)
-        [(edits, sync)] = plugin["post-tool-use"]
+        [(edits, sync), (ctx_sync, sync2)] = plugin["post-tool-use"]
         self.assertTrue(edits.startswith("PostToolUse:"))
         for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
             self.assertRegex(edits.split(":", 1)[1], rf"(^|\|){tool}(\||$)")
-        self.assertEqual(sync, False)   # validate is synchronous: its finding must surface
+        self.assertEqual((sync, sync2), (False, False))   # validate / the pending-conflict line are synchronous: they must surface
         self.assertEqual(plugin["pre-tool-use"], [(edits.replace("PostToolUse", "PreToolUse"), False)])  # a deny must block
         [(on_edit, a1), (on_ctx, a2)] = plugin["post-tool-use-async"]
         self.assertEqual((on_edit, a1, a2), (edits, True, True))
+        self.assertEqual(ctx_sync, on_ctx)  # the same ctx-tool matcher, synchronous (#515: the conflict line)
         mcp_matcher = on_ctx.split(":", 1)[1]
         mod = load_adapter()
         for tool in ("mcp__plugin_ai-baton_ctx__ctx_log", "mcp__ctx__ctx_str_replace", "mcp__ctx__ctx_create"):

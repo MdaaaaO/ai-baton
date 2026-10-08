@@ -2,9 +2,9 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "27"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "28"
+  updated: "2026-10-08"
+  reviewed: "2026-10-08"
 user-invocable: true
 ---
 
@@ -53,9 +53,13 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 4. **Memory** — only if a *situational* fact worth recalling emerged (not an always-on rule — those
    go to `WORKSPACE.md` § Rules). Write or update the note **and** add or fix its one-line entry in
    `MEMORY.md`. Prefer updating an existing note over adding a duplicate; delete notes proven wrong.
-5. **Index integrity** — nothing to run: after every `.context/` write the kit's hooks validate the doc,
-   regenerate `INDEX.md` and `SESSION_INDEX.md` and touch your registry row. A `ctx validate: …` system
-   message after a write is a finding — fix it now. If you added a
+5. **Index integrity and context sync** — nothing to run: after every `.context/` write the kit's hooks validate
+   the doc, regenerate `INDEX.md` and `SESSION_INDEX.md`, touch your registry row and — when `.context/` is its
+   own git repository with a remote (`context.sync`, `docs/context-sync.md`) — commit and push it. A
+   `ctx validate: …` system message after a write is a finding — fix it now. A `context sync: conflict pending …`
+   message names a doc a person must resolve: do it (or hand it over in the prompt below), then
+   `make -C $BATON/context-db context-sync` must say `pushed` or `clean`; `session-end` in step 9 prints the
+   same line — a session must not end with `push pending` unmentioned. If you added a
    skill, add its trigger to `WORKSPACE.md` § Skills. If you added a memory note, confirm it has a
    `MEMORY.md` line (no orphans). Every `[[wikilink]]` should resolve.
 6. **Signing** — only where the env config has `systems.signed_commits: true`: pending commits go through
