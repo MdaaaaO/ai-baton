@@ -195,10 +195,10 @@ def pending_conflict(root: Path) -> str:
     """One line for a hook to show while a conflict (or a rebase someone started by hand) waits for a person, else ''.
     A rebase a killed pass left behind (status `running`) is not reported: the next pass recovers it."""
     st = read_status(root)
-    if rebase_in_progress(root) and st.get("state") != "running":
+    if rebase_in_progress(root) and st.get("state") not in ("running", "conflict"):
         return ("context sync: a rebase is in progress in the store — finish it (`git rebase --continue`) or "
                 "`git rebase --abort`, then `make -C $BATON/context-db context-sync`")
-    if st.get("state") != "conflict":
+    if st.get("state") != "conflict":  # a conflict with a rebase still in progress: its detail says what failed
         return ""
     paths = ", ".join(st.get("paths") or [])[:200]
     return (f"context sync: conflict pending{' in ' + paths if paths else ''} — {st.get('detail', '')[:200]}; "
@@ -399,7 +399,11 @@ def run(root: Path, push: bool = True, timeout: float = NET_TIMEOUT, lock_wait: 
                 return 3, "conflict: a rebase is in progress in the store — finish or `git rebase --abort` it, then rerun"
             # a pass killed mid-rebase (a hook timeout): nobody drives that rebase — the lock is ours — so undo it
             # (`--autostash` restores what it stashed) and go on; this pass fetches and rebases again
-            git.run("rebase", "--abort", timeout=60)
+            r = git.run("rebase", "--abort", timeout=60)
+            if r.returncode != 0 or rebase_in_progress(root):
+                why = (r.stderr or r.stdout).strip().splitlines()[-1:] or ["rebase --abort failed"]
+                write_status(root, "conflict", f"could not undo an interrupted rebase: {why[0][:160]}")
+                return 3, "conflict: could not undo the rebase an interrupted pass left — `git rebase --abort` in the store, then rerun"
             write_status(root, "ok")
         mode, why = mode_of(git)
         if mode == "off":

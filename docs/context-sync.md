@@ -19,7 +19,8 @@ index; a pass that finds the lock held leaves the change to the holder's `git ad
 calls carry a short timeout and `GIT_TERMINAL_PROMPT=0`: no network, no credential, or a slow remote gives
 `committed …, push pending` and the next pass retries — a hook never hangs on it. A pass the hook's own timeout
 kills mid-rebase leaves the store with a rebase in progress; the next pass sees that nobody holds the lock and
-the status says `running`, aborts that rebase and starts over. A rebase **you** started by hand is left alone:
+the status says `running`, aborts that rebase and starts over (an abort git itself refuses is recorded as a
+conflict — `could not undo an interrupted rebase` — for you to clean up). A rebase **you** started by hand is left alone:
 the pass stops with exit 3 and the hooks say `a rebase is in progress in the store` until you finish or abort it.
 
 ## The switch — `context.sync`

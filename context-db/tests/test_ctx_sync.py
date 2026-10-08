@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -376,6 +377,27 @@ class TwoClones(Base):
         merged = git(self.t, "--git-dir", str(self.remote), "show", "main:alpha/alpha.md", env=self.env).stdout
         self.assertIn("- from a", merged)
         self.assertIn("- from b", merged)
+
+    def test_a_rebase_abort_that_fails_is_reported_not_papered_over(self):
+        # a `rebase-merge` dir git cannot read back (a pass killed while git was still writing it): `--abort` fails
+        rm = self.b / ".git" / "rebase-merge"
+        rm.mkdir()
+        (rm / "head-name").write_text("refs/heads/main\n", encoding="utf-8")
+        st = self.b / ".git" / "ctx-sync" / "status"
+        st.parent.mkdir(exist_ok=True)
+        st.write_text(json.dumps({"state": "running", "detail": "rebase"}), encoding="utf-8")
+        code, line = self.line(self.b)
+        self.assertEqual(code, 3, line)
+        self.assertIn("could not undo the rebase", line)
+        self.assertNotIn("pushed", line)
+        status = json.loads(st.read_text(encoding="utf-8"))
+        self.assertEqual(status["state"], "conflict", status)
+        self.assertIn("could not undo an interrupted rebase", status["detail"])
+        self.assertIn("could not undo", self.run_sync(self.b, "status").stdout)
+        shutil.rmtree(rm)  # the person cleans it up by hand; the next pass is ordinary again
+        code, line = self.line(self.b)
+        self.assertEqual(code, 0, line)
+        self.assertIn("clean", line)
 
     def test_a_rebase_started_by_hand_stops_the_pass_until_it_is_finished(self):
         self.stopped_rebase_in_b()
