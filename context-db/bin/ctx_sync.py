@@ -403,7 +403,8 @@ def run(root: Path, push: bool = True, timeout: float = NET_TIMEOUT, lock_wait: 
             if r.returncode != 0 or rebase_in_progress(root):
                 why = (r.stderr or r.stdout).strip().splitlines()[-1:] or ["rebase --abort failed"]
                 write_status(root, "conflict", f"could not undo an interrupted rebase: {why[0][:160]}")
-                return 3, "conflict: could not undo the rebase an interrupted pass left — `git rebase --abort` in the store, then rerun"
+                return 3, ("conflict: could not undo the rebase an interrupted pass left — in the store, `git rebase --abort`, "
+                           "or remove `.git/rebase-merge` when git cannot read it (`git status` says), then rerun")
             write_status(root, "ok")
         mode, why = mode_of(git)
         if mode == "off":
