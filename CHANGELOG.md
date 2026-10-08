@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.9.0 (2026-10-08)
+
+
+### Features
+
+* **engine:** sync the context store over git (#515) ([#516](https://github.com/MdaaaaO/ai-baton/issues/516)) ([b43d7e7](https://github.com/MdaaaaO/ai-baton/commit/b43d7e7029be44337b8001662b8e7b73a3392083))
+
+
+### CI
+
+* **deps:** bump actions/upload-artifact from 4.6.2 to 7.0.1 ([#506](https://github.com/MdaaaaO/ai-baton/issues/506)) ([84b25a1](https://github.com/MdaaaaO/ai-baton/commit/84b25a1a1cc2bb031689324d7c6d0f55bf70e7df))
+* **deps:** bump anthropics/claude-code-action from 1.0.235 to 1.0.238 ([#507](https://github.com/MdaaaaO/ai-baton/issues/507)) ([c1ae82a](https://github.com/MdaaaaO/ai-baton/commit/c1ae82a6afec0b1ce39382268f7e0ebd7ebe447f))
+
 ## 0.8.0 (2026-10-02)
 
 
