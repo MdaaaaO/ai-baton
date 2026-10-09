@@ -2,7 +2,8 @@
 but for the one root-CLAUDE.md warning the kit accepts on purpose (#521 — the file is the clone install's memory
 file, docs/layout.md; a plugin install never loads it). A fake `claude` on PATH plays the CLI: the old one that
 prints no warning, the 2.1.28x+ one that prints the accepted warning, one with a second warning, one that errors,
-and one whose skills/ pass is what fails. No network, no real CLI. Run: make -C .claude/context-db test."""
+one whose skills/ pass is what fails, and the fail-closed cases: a reworded banner the script can't count, a
+lone warning that isn't the accepted one, a count that disagrees with the bullets. No network, no real CLI. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import os
 import shutil
@@ -17,13 +18,13 @@ SCRIPT = KIT / "context-db" / "bin" / "plugin_validate.sh"
 ACCEPTED = ("  ❯ root: CLAUDE.md at the plugin root is not loaded as project context. "
             "To ship context with your plugin, use a skill (skills/<name>/SKILL.md) instead.")
 OTHER = "  ❯ root: plugin.json: unknown key `colour`"
+HEAD = f"Validating marketplace manifest: {KIT}/.claude-plugin/marketplace.json\n\nValidating plugin: {KIT}/CLAUDE.md\n\n"
 
 
 def banner(warnings: list[str]) -> str:
-    head = f"Validating marketplace manifest: {KIT}/.claude-plugin/marketplace.json\n\nValidating plugin: {KIT}/CLAUDE.md\n\n"
     if not warnings:
-        return head + "✔ Validation passed\n"
-    return head + f"⚠ Found {len(warnings)} warning{'s' if len(warnings) != 1 else ''}:\n\n" + "\n".join(warnings) + "\n\n✔ Validation passed with warnings\n"
+        return HEAD + "✔ Validation passed\n"
+    return HEAD + f"⚠ Found {len(warnings)} warning{'s' if len(warnings) != 1 else ''}:\n\n" + "\n".join(warnings) + "\n\n✔ Validation passed with warnings\n"
 
 
 @unittest.skipUnless(shutil.which("sh"), "sh needed")
@@ -69,6 +70,30 @@ class PluginValidate(unittest.TestCase):
         self.assertIn("unknown key `colour`", r.stderr)
         self.assertNotIn("not loaded as project context", r.stderr)  # only the unexpected one is named
         self.assertEqual(calls, ["plugin validate ."])  # stops before skills/agents
+
+    def test_a_lone_warning_that_is_not_the_accepted_one_fails(self):
+        r, calls = self.run_with_fake(banner([OTHER]))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("beyond the accepted root CLAUDE.md one", r.stderr)
+        self.assertIn("unknown key `colour`", r.stderr)
+        self.assertEqual(calls, ["plugin validate ."])
+
+    def test_a_changed_bullet_glyph_cannot_slip_a_warning_through(self):
+        # the count line still says 2, so a CLI that stops printing `❯` bullets still fails here
+        out = HEAD + "⚠ Found 2 warnings:\n\n" + ACCEPTED.replace("❯", "-") + "\n" + OTHER.replace("❯", "-") + "\n\n✔ Validation passed with warnings\n"
+        r, calls = self.run_with_fake(out)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("unknown key `colour`", r.stderr)
+        self.assertEqual(calls, ["plugin validate ."])
+
+    def test_warnings_without_a_readable_count_fail_closed(self):
+        # a reworded banner: the script can't tell how many warnings there are, so it must not say OK
+        out = HEAD + "Warnings:\n" + ACCEPTED + "\n" + OTHER + "\n\n✔ Validation passed with warnings\n"
+        r, calls = self.run_with_fake(out)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("no 'Found N warning' count", r.stderr)
+        self.assertNotIn("plugin validate: OK", r.stdout)
+        self.assertEqual(calls, ["plugin validate ."])
 
     def test_a_validator_error_at_the_root_fails_with_its_exit_code(self):
         r, calls = self.run_with_fake("✘ Validation failed\n", root_rc=1)
