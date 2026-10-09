@@ -37,7 +37,7 @@
 #   make -C $BATON/context-db check-links               # every relative Markdown link and `<file> § <heading>` pointer resolves; docs/ says $BATON, not .claude/
 #   make -C $BATON/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
 #   make -C $BATON/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
-#   make -C $BATON/context-db plugin-validate            # plugin + marketplace manifests and every skill/agent, through `claude plugin validate --strict` (needs the `claude` CLI)
+#   make -C $BATON/context-db plugin-validate            # plugin + marketplace manifests and every skill/agent, through `claude plugin validate` — strict but for the accepted root-CLAUDE.md warning (needs the `claude` CLI)
 #   make -C $BATON/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
 #   make -C $BATON/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
 #   make -C $BATON/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
@@ -261,10 +261,11 @@ shellcheck:
 	  else echo "shellcheck: FAILED — neither shellcheck nor uvx on this machine (install one, or ALLOW_SKIP=1 to skip it knowingly)"; exit 1; fi
 
 # make plugin-validate  — the plugin and marketplace manifests + every skill/agent, through Claude Code's own validator
-# (`claude plugin validate --strict`, docs/packaging.md). A clone without the `claude` CLI says so instead of failing:
-# kit-verify still checks the version discipline (plugin.json version == VERSION) on every machine.
+# (`claude plugin validate`, strict except for the one root-CLAUDE.md warning bin/plugin_validate.sh accepts on purpose;
+# docs/packaging.md). A clone without the `claude` CLI says so instead of failing: kit-verify still checks the version
+# discipline (plugin.json version == VERSION) on every machine.
 plugin-validate:
-	@cd $(ENGINE).. && if command -v claude >/dev/null 2>&1; then claude plugin validate --strict . && claude plugin validate --strict skills >/dev/null && claude plugin validate --strict agents >/dev/null && echo "plugin validate: OK"; \
+	@cd $(ENGINE).. && if command -v claude >/dev/null 2>&1; then sh $(BIN)/plugin_validate.sh; \
 	  elif [ -n "$(ALLOW_SKIP)" ]; then echo "plugin validate: skipped (no \`claude\` CLI on this machine; ALLOW_SKIP=1)"; \
 	  else echo "plugin validate: FAILED — no \`claude\` CLI on this machine (npm i -g @anthropic-ai/claude-code, or ALLOW_SKIP=1)"; exit 1; fi
 
