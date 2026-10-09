@@ -132,7 +132,10 @@ these disagree (every machine, no `claude` CLI needed). `.conventional-release.t
 shape — nested, tag-prefixed — that mechanism can't reach, so `make kit_release` runs
 `context-db/bin/bump_marketplace_ref.py` as a second commit on the release branch instead (`CONTRIBUTING.md` §
 Releases). `make -C $BATON/context-db plugin-validate` (part of `make ci` and
-`ci.yml`) runs `claude plugin validate --strict` on the manifests, the skills and the agents where the CLI exists.
+`ci.yml`) runs `claude plugin validate` on the manifests, the skills and the agents where the CLI exists — strict (a
+warning fails it) but for one warning `context-db/bin/plugin_validate.sh` accepts on purpose: the CLI's note that a
+`CLAUDE.md` at the plugin root is not loaded as plugin context. That file is the kit's memory on a clone install
+(`docs/layout.md`); a plugin install never loads it, which is what the warning says. Any other warning still fails.
 
 ## Pre-publish checklist
 

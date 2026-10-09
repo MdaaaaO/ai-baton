@@ -50,7 +50,7 @@ Kit / config (env fact store .context/reference/env/):
   make -C $BATON/context-db check-links               # every relative Markdown link and `<file> § <heading>` pointer resolves; docs/ says $BATON, not .claude/
   make -C $BATON/context-db install-smoke             # README's clone + plugin install blocks on a scratch HOME (plugin needs `claude`)
   make -C $BATON/context-db shellcheck                # shellcheck -S warning over the shell scripts and hooks
-  make -C $BATON/context-db plugin-validate            # plugin + marketplace manifests and every skill/agent, through `claude plugin validate --strict` (needs the `claude` CLI)
+  make -C $BATON/context-db plugin-validate            # plugin + marketplace manifests and every skill/agent, through `claude plugin validate` — strict but for the accepted root-CLAUDE.md warning (needs the `claude` CLI)
   make -C $BATON/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
   make -C $BATON/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
   make -C $BATON/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
