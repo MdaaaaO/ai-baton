@@ -66,8 +66,8 @@ flowchart TB
   `agent:` names (`triage`, `review-runner`, `auto-runner`) and returns a brief, never acts.
 - **Engine**: every script under `context-db/bin/` (reference: `docs/engine-cli.md`) reads the environment through
   `kit_profile.py` and the env store through `kb.py`; `session.py` / `gen_sessions.py` keep the registry,
-  `gen_index.py` / `verify.py` the catalog, `kit_verify.py` / `review_gate.py` / `review_evidence.py` the kit's own
-  checks.
+  `mission.py` builds the mission-control page's data from it and the rest of the store, `gen_index.py` / `verify.py`
+  the catalog, `kit_verify.py` / `review_gate.py` / `review_evidence.py` the kit's own checks.
 - **Context DB**: `.context/` beside the kit (or `CLAUDE_PROJECT_DIR/.context` on a plugin install, `CONTEXT_ROOT`
   to override). Its spec is `.context/README.md` (seeded from `context-db/context-README.template.md`); the env
   store's is `docs/env-facts.md`.

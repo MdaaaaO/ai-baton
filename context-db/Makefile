@@ -26,6 +26,11 @@
 #   Every session-* target refreshes the row's `stats:` line from the transcript named by
 #   $CLAUDE_CODE_SESSION_ID (or SESSION_ID=<uuid>); NOSTATS=1 skips it. Zero model turns.
 #
+# Mission control (the .context/ store as one local page: data.json + index.html under state/mission-control/):
+#   make -C $BATON/context-db mission-build [OUT=<dir>] [FORCE=1]  # build the page; nothing is written when nothing changed (FORCE=1 rebuilds); a secret or e-mail in the data stops it
+#   make -C $BATON/context-db mission-diff [OUT=<dir>]             # exit 0 when the built page is current, 1 when it changed or was never built
+#   make -C $BATON/context-db mission-open [OUT=<dir>]             # print the path of the built index.html (never starts a browser)
+#
 # Kit / config (env fact store .context/reference/env/):
 #   make -C $BATON/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|config-set|init|path|migrate|discover|stale
 #   make -C $BATON/context-db kb ARGS="set slack.channel foo C0… --from tool:slack_search_channels"
@@ -87,7 +92,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check context-sync context-sync-status migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke
+.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check context-sync context-sync-status migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke mission-build mission-diff mission-open
 # An explicit `SESSION_ID=` (command line or shell environment) wins as-is; otherwise take the CURRENT, expanded
 # value of CLAUDE_CODE_SESSION_ID (`:=`, not `?=`/`=`, which would store the unexpanded reference text — `sq` below
 # reads SESSION_ID with $(value …), so a lazily-expanded default would leak the literal "$(CLAUDE_CODE_SESSION_ID)").
@@ -354,3 +359,22 @@ archive:
 	   echo "archived $$f (INDEX.md counts it under its domain; \`make find DOMAIN=<domain> STATUS=archived\` still lists it)"; \
 	 else rm -f "$$tmp"; exit 1; fi; \
 	 $(MAKE) --no-print-directory -f $(lastword $(MAKEFILE_LIST)) index
+
+# --- mission control: the store as one local page (bin/mission.py; zero model turns, nothing leaves the machine) ---
+# make mission-build [OUT=<dir>] [FORCE=1] [CONTEXT=<store>]  — data.json, build.json, index.html, last.sha and a
+# `.gitignore` holding `*` under <store>/state/mission-control/ (OUT= puts them in another directory). A build that
+# would write what last.sha already names does nothing (FORCE=1 rebuilds anyway); a secret shape or an e-mail address
+# in the data stops it with exit 1 and writes nothing. mission-diff exits 0 when the built page is current and 1 when
+# it is not; mission-open prints the built index.html's path. OUT is read from the command line only (a stray $OUT
+# in the shell never moves the build) and is relative to this directory under `make -C`, so pass an absolute path;
+# `unexport` and `sq` keep its text data, as for the session-* targets.
+unexport OUT
+MISSION_OUT = $(if $(filter command,$(origin OUT)),--out $(call sq,OUT),)
+mission-build:
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/mission.py build $(MISSION_OUT) $(if $(value FORCE),--force,)
+
+mission-diff:
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/mission.py diff $(MISSION_OUT)
+
+mission-open:
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/mission.py open $(MISSION_OUT)
