@@ -365,13 +365,13 @@ archive:
 # `.gitignore` holding `*` under <store>/state/mission-control/ (OUT= puts them in another directory). A build that
 # would write what last.sha already names does nothing (FORCE=1 rebuilds anyway); a secret shape or an e-mail address
 # in the data stops it with exit 1 and writes nothing. mission-diff exits 0 when the built page is current and 1 when
-# it is not; mission-open prints the built index.html's path. OUT is read from the command line only (a stray $OUT
-# in the shell never moves the build) and is relative to this directory under `make -C`, so pass an absolute path;
-# `unexport` and `sq` keep its text data, as for the session-* targets.
+# it is not; mission-open prints the built index.html's path. OUT and FORCE are read from the command line only (a
+# stray $OUT in the shell never moves the build, a stray $FORCE never forces one); OUT is relative to this directory
+# under `make -C`, so pass an absolute path; `unexport` and `sq` keep its text data, as for the session-* targets.
 unexport OUT
 MISSION_OUT = $(if $(filter command,$(origin OUT)),--out $(call sq,OUT),)
 mission-build:
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/mission.py build $(MISSION_OUT) $(if $(value FORCE),--force,)
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/mission.py build $(MISSION_OUT) $(if $(filter command,$(origin FORCE)),$(if $(value FORCE),--force,),)
 
 mission-diff:
 	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/mission.py diff $(MISSION_OUT)

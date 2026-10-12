@@ -1918,11 +1918,12 @@ class MakeTargets(Store):
         for target in ("mission-build", "mission-diff", "mission-open"):
             self.assertNotIn("--out", self.make(target, dry=True).stdout, target)
 
-    def test_out_from_the_shell_environment_is_ignored(self):
-        r = self.make("mission-build", dry=True, env_extra={"OUT": str(self.tmp / "stray"), "FORCE": ""})
+    def test_out_and_force_from_the_shell_environment_are_ignored(self):
+        r = self.make("mission-build", dry=True, env_extra={"OUT": str(self.tmp / "stray"), "FORCE": "1"})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("--out", r.stdout)
         self.assertNotIn("stray", r.stdout)
+        self.assertNotIn("--force", r.stdout)
 
     def test_out_is_quoted_as_data(self):
         out = f"{self.tmp}/o u't $(x) `y` $$z"
