@@ -235,7 +235,8 @@ class RealTemplate(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(r.stderr, "")
         self.assertTrue(one_line(r.stdout))
-        self.assertRegex(r.stdout, r"^ok: .*index\.html: 6 sections, 2 JSON blocks, no remote reference\n$")
+        self.assertRegex(r.stdout,
+                         r"^ok: .*index\.html: 6 sections, 2 JSON blocks, no remote load or script call found\n$")
 
     def test_check_accepts_the_page_built_from_a_blank_store(self):
         page = text(BUILT_BLANK, "index.html")
@@ -272,10 +273,10 @@ class Findings(unittest.TestCase):
         ('<a href="https://github.com.evil.example/">x</a>', "link host not allowed: github.com.evil.example"),
         ('<a href="https://github.com@evil.example/">x</a>', "link host not allowed: evil.example"),
         ('<a href="https://evil.example:8443/">x</a>', "link host not allowed: evil.example"),
-        ('<div style="background:url(https://evil.example/a.png)">x</div>', "remote style"),
-        ('<style>@import "https://evil.example/a.css";</style>', "remote style"),
-        ("<style>.a{background:url( '//evil.example/a.png' )}</style>", "remote style"),
-        ('<button formaction="https://evil.example/">x</button>', "remote reference outside a link"),
+        ('<div style="background:url(https://evil.example/a.png)">x</div>', "style loads"),
+        ('<style>@import "https://evil.example/a.css";</style>', "style loads"),
+        ("<style>.a{background:url( '//evil.example/a.png' )}</style>", "style loads"),
+        ('<button formaction="https://evil.example/">x</button>', "forbidden attribute: <button formaction="),
         ('<svg><use href="https://evil.example/s.svg#a"/></svg>', "remote reference outside a link"),
     ]
     FINE = [
@@ -284,6 +285,16 @@ class Findings(unittest.TestCase):
         '<a href="#sessions">x</a>',
         '<a href="notes/page.html">x</a>',
         '<p>https://evil.example/ written as text</p>',
+        '<p>fetch( and url( and import( written as text</p>',
+        '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'">',
+        '<meta name="refresh" content="5">',
+        '<div data-id="7" style="color:red;background:#fff">x</div>',
+        '<a href="#sessions" title="fetch( url( new Worker">x</a>',
+        '<a href="javascript:void(0)">x</a>',
+        '<button onclick="toggle(this)">x</button>',
+        "<style>.x{color:red;margin:0 auto}</style>",
+        "<script>var prefetch = 1, importance = 2; refetch(1); newWorkers(2); var myWebSocketless = 3;</script>",
+        '<script id="extra" type="application/json">{"a": "fetch( WebSocket document.write"}</script>',
     ]
 
     @classmethod
@@ -363,7 +374,9 @@ class Findings(unittest.TestCase):
 
 
 # ── check.py: the command ────────────────────────────────────────────────────────────────────────────────────
-class Cli(unittest.TestCase):
+class Planted(unittest.TestCase):
+    """The built page in a scratch dir, a way to plant markup in it, and the command run against the result."""
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(prefix="kit-shell-t-")
         self.addCleanup(tmp.cleanup)
@@ -381,6 +394,8 @@ class Cli(unittest.TestCase):
     def check(self, *args, root: Path | None = None, env=None) -> subprocess.CompletedProcess:
         return run_tool(CHECK, BASE if root is None else root, *args, env=env, cwd=self.tmp)
 
+
+class Cli(Planted):
     def test_a_clean_page_exits_0_with_one_line_and_changes_nothing(self):
         path = self.write_page()
         before = {p.name: p.read_bytes() for p in self.tmp.iterdir()}
@@ -472,6 +487,148 @@ class Cli(unittest.TestCase):
         self.assertEqual((r.returncode, r.stderr), (0, ""))
         for needle in ("--allow-host", "--sections", "Exit 0", "exit 2"):
             self.assertIn(needle, r.stdout)
+
+
+# ── check.py: one hostile construct at a time ────────────────────────────────────────────────────────────────
+class Constructs(Planted):
+    """The command on the built page with one construct planted: it exits 1 and the one finding names the construct.
+    The shipped page exiting 0 (RealTemplate) is the other half of each of these."""
+
+    def verdict(self, path: Path, needle: str, count: int = 1) -> None:
+        r = self.check(path)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(needle, r.stdout)
+        self.assertEqual(len(r.stdout.splitlines()), count, r.stdout)
+        self.assertTrue(one_line(r.stderr), r.stderr)
+
+    def refuses(self, markup: str, needle: str, count: int = 1) -> None:
+        with self.subTest(markup=markup):
+            self.verdict(self.planted(markup), needle, count)
+
+    # the page redirects itself
+    def test_a_meta_refresh_is_refused_with_or_without_a_url(self):
+        for markup in ('<meta http-equiv="refresh" content="0; url=https://evil.example/">',
+                       '<META HTTP-EQUIV=" Refresh " CONTENT="30">',
+                       "<meta http-equiv=refresh content='0;url=/next.html'>"):
+            self.refuses(markup, 'meta refresh: <meta http-equiv="refresh"')
+
+    # an attribute that fetches or navigates
+    def test_an_img_srcset_is_refused_when_the_remote_candidate_is_not_first(self):
+        self.refuses('<img srcset="a.png 1x, https://evil.example/b.png 2x">', "forbidden attribute: <img srcset=")
+
+    def test_a_link_imagesrcset_is_refused(self):
+        self.refuses('<link rel="preload" as="image" imagesrcset="a.png 1x, //evil.example/b.png 2x">',
+                     "forbidden attribute: <link imagesrcset=")
+
+    def test_a_source_srcset_is_refused(self):
+        self.refuses('<picture><source srcset="//evil.example/b.webp"></picture>',
+                     "forbidden attribute: <source srcset=")
+
+    def test_a_poster_is_refused_remote_or_not(self):
+        self.refuses('<video poster="https://evil.example/p.png"></video>', "forbidden attribute: <video poster=")
+        self.refuses('<video poster="p.png"></video>', "forbidden attribute: <video poster=")
+
+    def test_a_ping_list_is_refused_when_the_remote_url_is_not_first(self):
+        self.refuses('<a href="#sessions" ping="/a https://evil.example/p">x</a>', "forbidden attribute: <a ping=")
+
+    def test_a_data_attribute_is_refused(self):
+        self.refuses('<div data="d.json">x</div>', "forbidden attribute: <div data=")
+
+    def test_an_action_or_a_formaction_is_refused_on_any_element(self):
+        self.refuses('<button formaction="/save">x</button>', "forbidden attribute: <button formaction=")
+        self.refuses('<input type="submit" formaction="//evil.example/s">', "forbidden attribute: <input formaction=")
+        self.refuses('<form action="/save"></form>', "<form action=")
+        self.refuses('<div action="/save">x</div>', "forbidden attribute: <div action=")
+
+    # CSS that loads
+    def test_a_url_in_a_style_block_is_refused_remote_or_not(self):
+        self.refuses("<style>.a{background:url(a.png)}</style>", 'style loads: "url(a.png)" in <style>')
+        self.refuses("<style>.a{background:URL( 'https://evil.example/a.png' )}</style>", "style loads: ")
+
+    def test_an_image_set_in_a_style_block_is_refused(self):
+        self.refuses('<style>.a{background-image:image-set("a.png" 1x)}</style>', "style loads: \"image-set(")
+        self.refuses('<style>.a{background-image:-webkit-image-set("a.png" 1x)}</style>', "style loads: \"image-set(")
+
+    def test_a_url_in_a_style_attribute_is_refused_remote_or_not(self):
+        self.refuses('<div style="background:url(a.png)">x</div>', 'style loads: "url(a.png)" in a style attribute')
+        self.refuses('<div style="background:url(//evil.example/a.png)">x</div>', "in a style attribute")
+
+    def test_an_image_set_in_a_style_attribute_is_refused(self):
+        self.refuses("<div style=\"background:image-set('a.png' 1x)\">x</div>", "style loads: \"image-set(")
+
+    # script that opens a connection, loads code or writes markup
+    def test_a_fetch_call_is_refused(self):
+        for call in ("fetch('/x')", "window.fetch ('/x')", "fetch\n('/x')"):
+            self.refuses(f"<script>{call}</script>", "script call: fetch( in an inline script")
+
+    def test_an_xmlhttprequest_is_refused(self):
+        self.refuses("<script>var r = new XMLHttpRequest(); r.open('GET', '/x');</script>",
+                     "script call: XMLHttpRequest in an inline script")
+
+    def test_a_sendbeacon_call_is_refused(self):
+        self.refuses("<script>navigator.sendBeacon('/x', 'y')</script>", "script call: sendBeacon in an inline script")
+
+    def test_a_websocket_is_refused(self):
+        self.refuses("<script>new WebSocket('wss://evil.example/')</script>",
+                     "script call: WebSocket in an inline script")
+
+    def test_an_eventsource_is_refused(self):
+        self.refuses("<script>new EventSource('/s')</script>", "script call: EventSource in an inline script")
+
+    def test_a_dynamic_import_is_refused(self):
+        for call in ("import('./m.js')", "import ('./m.js')"):
+            self.refuses(f"<script>{call}</script>", "script call: import( in an inline script")
+
+    def test_a_worker_is_refused(self):
+        for call in ("new Worker('w.js')", "new  SharedWorker('w.js')"):
+            self.refuses(f"<script>{call}</script>", "script call: new Worker in an inline script")
+
+    def test_a_service_worker_is_refused(self):
+        self.refuses("<script>navigator.serviceWorker.register('/sw.js')</script>",
+                     "script call: serviceWorker in an inline script")
+
+    def test_a_document_write_is_refused(self):
+        for call in ("document.write('<p>x</p>')", "document . writeln('x')"):
+            self.refuses(f"<script>{call}</script>", "script call: document.write in an inline script")
+
+    def test_an_image_beacon_and_import_scripts_are_refused(self):
+        self.refuses("<script>new Image().src = '/x'</script>", "script call: new Image in an inline script")
+        self.refuses("<script>importScripts('/w.js')</script>", "script call: importScripts in an inline script")
+
+    def test_a_module_or_a_speculation_rules_script_is_refused(self):
+        self.refuses('<script type="module">import x from "./m.js";</script>',
+                     'forbidden script type: <script type="module">')
+        self.refuses('<script type="speculationrules">{"prefetch": [{"source": "list", "urls": ["/n"]}]}</script>',
+                     'forbidden script type: <script type="speculationrules">')
+
+    def test_an_event_handler_attribute_is_scanned_like_a_script(self):
+        self.refuses("<button onclick=\"fetch('/x')\">x</button>", "script call: fetch( in the onclick attribute")
+
+    def test_a_javascript_url_is_scanned_like_a_script(self):
+        for href in ("javascript:fetch('/x')", "JavaScript:fetch('/x')", "java\nscript:fetch('/x')"):
+            self.refuses(f'<a href="{href}">x</a>', "script call: fetch( in the href attribute")
+
+    # what is read, and what is not
+    def test_a_style_or_a_script_left_open_at_the_end_of_the_page_is_still_read(self):
+        for tail, needle in (("<style>@import url(//evil.example/a.css);", "style loads: "),
+                             ("<script>fetch('/x')", "script call: fetch( in an inline script")):
+            with self.subTest(tail=tail):
+                self.verdict(self.write_page(self.page.rstrip() + tail), needle)
+
+    def test_the_words_inside_the_json_data_blocks_are_data_and_not_script(self):
+        words = '{"title": "fetch( XMLHttpRequest sendBeacon WebSocket import( new Worker document.write url("}'
+        page = re.sub(r'(<script id="data" type="application/json">).*?(</script>)',
+                      lambda m: m.group(1) + words + m.group(2), self.page, flags=re.S)
+        self.assertIn(words, page)
+        r = self.check(self.write_page(page))
+        self.assertEqual((r.returncode, r.stderr), (0, ""), r.stdout)
+
+    def test_a_json_block_declared_as_javascript_is_read_as_script(self):
+        page = self.page.replace('<script id="data" type="application/json">',
+                                 '<script id="data" type="text/javascript">fetch("/x");')
+        r = self.check(self.write_page(page))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("script call: fetch( in an inline script", r.stdout)
 
 
 # ── the commands the skill and the heartbeat run, end to end ─────────────────────────────────────────────────

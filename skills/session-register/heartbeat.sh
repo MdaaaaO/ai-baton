@@ -18,7 +18,8 @@
 # so even a session that never ran session-handoff leaves its numbers behind.
 # After every touch, and after that final session-end, it runs `make mission-build`: the private mission-control
 # page follows the registry — a local file, zero model turns, never a publish. A failed build never stops the
-# beat; its one output line lands in the log.
+# beat (`|| true`). Everything it prints lands in the log: one `mission:` line on a good tick; on a leak hit one
+# line per hit, a summary line and make's Error line, all of them again on every tick until the source doc is fixed.
 # Log/pidfile: $TMPDIR/ai-baton-<uid>/heartbeat-<key>.{log,pid} where <key> is $CLAUDE_CODE_SESSION_ID
 # when the harness set one, else the session NAME. Keying on the session id — not the name alone —
 # means two live sessions that end up registered under the same NAME (a naming accident, not something

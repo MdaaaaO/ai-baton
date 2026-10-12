@@ -37,8 +37,9 @@ leaves the machine. This skill checks that the page is current, rebuilds it when
 3. Run `make -C $BATON/context-db mission-open`. It prints the absolute path of `index.html` and never starts a
    browser; the user opens that path in a browser on this machine.
 4. Run `python3 $BATON/skills/mission-control/check.py <that path>`. Exit 0 means all six sections and both JSON
-   blocks are present and the page makes no remote reference. Exit 1 prints one finding per line: that is a defect in
-   the page shell, not in the store. Report the findings and do not hand the page over as good.
+   blocks are present and a text scan of the markup, the styles and the inline scripts found no remote load or script
+   call (it reads the page, it does not run it). Exit 1 prints one finding per line: that is a defect in the page
+   shell, not in the store. Report the findings and do not hand the page over as good.
 5. Tell the user what the page holds, in one short list:
    - **sessions** — active sessions with a STALE flag, ended sessions with a copy-prompt button, the archived count,
      and for each session its heartbeat, repos, crons and open PRs.

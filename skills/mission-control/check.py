@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check.py - the gate on a built mission-control page: complete, self-contained, no remote reference.
+"""check.py - the gate on a built mission-control page: complete, self-contained, no remote load or script call.
 
     check.py <index.html> [--allow-host HOST]... [--sections sessions,cost,...]
 
@@ -7,10 +7,18 @@ Reads the page with the stdlib HTML parser (no browser, no network) and reports 
   - a required section id is missing (default: sessions, cost, catalog, priorities, queues, pointers) or the
     label text "data as of" is;
   - the #data / #build JSON blocks are missing, are not application/json, or do not parse as a JSON object;
-  - a <script src>, <iframe>, <object>, <embed>, <link href>, <img src> or <form action>;
-  - an @import or a url() to a remote address in a <style> block or a style attribute;
+  - a <script src>, <iframe>, <object>, <embed>, <link href>, <img src> or <form action>, a <meta http-equiv=refresh>
+    (any), or a <script> of type module or speculationrules;
+  - a srcset, imagesrcset, poster, data, action, formaction or ping attribute with any value;
+  - an @import, a url() or an image-set() in a <style> block or a style attribute;
+  - in an inline <script> (the JSON blocks apart), in an on... attribute or in a javascript: URL, a whole-word
+    match for fetch(, XMLHttpRequest, sendBeacon, WebSocket, EventSource, import(, new Worker, serviceWorker,
+    document.write, new Image or importScripts;
   - an attribute value starting http://, https:// or // anywhere but on an <a href> whose host is github.com,
     the host of the store's tracker.url_template, or one given with --allow-host.
+
+It matches text: markup, CSS and script are read and never run, so a call assembled at run time is out of its
+reach. A clean run says the scan found nothing, not that the page is proven offline.
 
 Exit 0 and one line on stdout when clean; exit 1 with the findings on stdout and one summary line on stderr;
 exit 2 with one stderr line on a usage error or an unreadable file. Stdlib only, Python 3.9+.
@@ -35,9 +43,27 @@ LABEL = "data as of"
 BLOCKS = ("data", "build")
 KIT_HOSTS = ("github.com",)
 BAD_TAGS = ("iframe", "object", "embed")
+BAD_SCRIPTS = ("module", "speculationrules")  # script types that import code or prefetch pages the text never names
 LOADS = {"script": "src", "link": "href", "img": "src", "form": "action"}  # element -> the attribute that fetches
+LOAD_ATTRS = ("srcset", "imagesrcset", "poster", "data", "action", "formaction", "ping")  # fetch or navigate, anywhere
 URL_START = re.compile(r"(?:https?:)?//", re.I)
-CSS_REMOTE = re.compile(r"@import[^;]*|url\(\s*[\"']?\s*(?:https?:)?//[^)\"'\s]*", re.I)
+CSS_LOADS = re.compile(r"@import[^;]*|(?:url|image-set)\([^)]*\)?", re.I)
+CALLS = tuple(  # (name shown, pattern): script text that opens a connection, loads code or writes markup
+    (name, re.compile(pattern))
+    for name, pattern in (
+        ("fetch(", r"\bfetch\s*\("),
+        ("XMLHttpRequest", r"\bXMLHttpRequest\b"),
+        ("sendBeacon", r"\bsendBeacon\b"),
+        ("WebSocket", r"\bWebSocket\b"),
+        ("EventSource", r"\bEventSource\b"),
+        ("import(", r"\bimport\s*\("),
+        ("new Worker", r"\bnew\s+(?:Shared)?Worker\b"),
+        ("serviceWorker", r"\bserviceWorker\b"),
+        ("document.write", r"\bdocument\s*\.\s*write(?:ln)?\b"),
+        ("new Image", r"\bnew\s+Image\b"),
+        ("importScripts", r"\bimportScripts\b"),
+    )
+)
 ID_RE = re.compile(r"[A-Za-z][\w-]*\Z")
 BLANK = "".join(chr(c) for c in range(33))  # what a URL parser trims from both ends of a value
 
@@ -60,6 +86,11 @@ def host_of(url: str) -> str | None:
         return None
 
 
+def calls(code: str) -> list[str]:
+    """The names, in table order, of the connections, loads and markup writes a piece of script text mentions."""
+    return [name for name, pattern in CALLS if pattern.search(code)]
+
+
 def tracker_host() -> str | None:
     """The host of the store's tracker.url_template, None when unset, templated or the store cannot be read."""
     try:
@@ -80,12 +111,13 @@ class Scan(HTMLParser):
         self.allowed = allowed
         self.ids: set[str] = set()
         self.text: list[str] = []  # visible text: everything outside <script> and <style>
-        self.css: list[str] = []
+        self.css: list[list[str]] = []  # the text of each <style>, in the pieces the parser delivered it in
+        self.code: list[list[str]] = []  # ... of each <script> a browser may run (a JSON data block is not one)
         self.blocks: dict[str, list[str]] = {}
         self.types: dict[str, str] = {}
         self.found: list[str] = []
         self.raw: str | None = None  # the open <script> or <style>
-        self.block: str | None = None  # the JSON block being read
+        self.cur: list[str] = []  # its pieces
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         a: dict[str, str] = {}
@@ -98,12 +130,21 @@ class Scan(HTMLParser):
             self.found.append(f"forbidden element: <{tag}>")
         elif loads:
             self.found.append(f'forbidden element: <{tag} {loads}="{clean(a[loads])}">')
+        if tag == "meta" and a.get("http-equiv", "").strip().lower() == "refresh":
+            self.found.append(f'meta refresh: <meta http-equiv="refresh" content="{clean(a.get("content", ""))}">')
+        if tag == "script" and a.get("type", "").strip().lower() in BAD_SCRIPTS:
+            self.found.append(f'forbidden script type: <script type="{clean(a["type"])}">')
         for name, value in a.items():
             if name == loads:
                 continue
-            if name == "style":
-                self.found.extend(f'remote style: "{clean(m)}" in a style attribute' for m in CSS_REMOTE.findall(value))
             url = url_of(value)
+            if name in LOAD_ATTRS and url:
+                self.found.append(f'forbidden attribute: <{tag} {name}="{clean(value)}">')
+                continue
+            if name == "style":
+                self.found.extend(f'style loads: "{clean(m)}" in a style attribute' for m in CSS_LOADS.findall(value))
+            if name.startswith("on") or url[:11].lower() == "javascript:":
+                self.found.extend(f"script call: {c} in the {name} attribute" for c in calls(value))
             if not URL_START.match(url):
                 continue
             if tag == "a" and name == "href":
@@ -113,23 +154,21 @@ class Scan(HTMLParser):
             else:
                 self.found.append(f'remote reference outside a link: <{tag} {name}="{clean(value)}">')
         if tag in ("script", "style"):
-            self.raw = tag
+            self.raw, self.cur = tag, []
+            if tag == "style":
+                self.css.append(self.cur)
+            elif a.get("type", "").strip().lower() != "application/json":
+                self.code.append(self.cur)
             if tag == "script" and a.get("id") in BLOCKS and a["id"] not in self.blocks:
-                self.block = a["id"]
-                self.blocks[self.block] = []
-                self.types[self.block] = a.get("type", "")
+                self.blocks[a["id"]] = self.cur
+                self.types[a["id"]] = a.get("type", "")
 
     def handle_endtag(self, tag: str) -> None:
         if tag == self.raw:
-            self.raw = self.block = None
+            self.raw = None
 
     def handle_data(self, data: str) -> None:
-        if self.raw is None:
-            self.text.append(data)
-        elif self.raw == "style":
-            self.css.append(data)
-        elif self.block:
-            self.blocks[self.block].append(data)
+        (self.text if self.raw is None else self.cur).append(data)
 
 
 def scan(page: str, sections: list[str], allowed: set[str]) -> list[str]:
@@ -156,7 +195,8 @@ def scan(page: str, sections: list[str], allowed: set[str]) -> list[str]:
             continue
         if not isinstance(doc, dict):
             out.append(f"JSON block is not an object: #{bid}")
-    out.extend(f'remote style: "{clean(m)}" in <style>' for m in CSS_REMOTE.findall("".join(s.css)))
+    out.extend(f'style loads: "{clean(m)}" in <style>' for part in s.css for m in CSS_LOADS.findall("".join(part)))
+    out.extend(f"script call: {c} in an inline script" for part in s.code for c in calls("".join(part)))
     out.extend(s.found)
     return list(dict.fromkeys(out))
 
@@ -205,7 +245,8 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(findings))
         sys.stderr.write(f"check.py: {clean(args.page)}: {len(findings)} finding{'s' * (len(findings) != 1)}\n")
         return 1
-    print(f"ok: {clean(args.page)}: {len(sections)} sections, {len(BLOCKS)} JSON blocks, no remote reference")
+    print(f"ok: {clean(args.page)}: {len(sections)} sections, {len(BLOCKS)} JSON blocks, "
+          "no remote load or script call found")
     return 0
 
 
