@@ -75,6 +75,7 @@ DOMAINS = (("repos", 14), ("meetings", 13), ("notes", 13))  # 40 docs
 STATUSES = ("active", "reference", "draft", "done")
 TYPES = ("reference", "log", "note")
 SSH_TITLE = "Remote git@github.com:acme/x.git notes"  # an SSH remote in a title: not an e-mail address
+NEXT_PROMPT = "Register as kit-delta-2, read the open PR list, then continue the export."  # kit-delta's hand-off
 
 
 def engine_env(root, **extra) -> dict:
@@ -196,7 +197,7 @@ def write_sessions(root: Path) -> None:
         "kit-gamma", "active", "2026-10-09T06:00:00Z", stats="5 turns · 0.2h"))
     write(root, "sessions/kit-delta.md", session_doc(
         "kit-delta", "ended", "2026-10-09T18:00:00Z", epic="KEY-456",
-        prompt="Register as kit-delta-2, read the open PR list, then continue the export."))
+        prompt=NEXT_PROMPT))
     write(root, "sessions/kit-epsilon.md", session_doc("kit-epsilon", "ended", "2026-10-09T20:00:00Z"))
     write(root, "sessions/archive/kit-zeta.md", session_doc("kit-zeta", "ended", "2026-09-20T10:00:00Z"))
     write(root, "sessions/_ledger.md", ledger_text())
@@ -766,7 +767,7 @@ class Sessions(unittest.TestCase):
         by_name = {e["name"]: e for key in ("active", "ended", "archived") for e in DATA["sessions"][key]}
         self.assertTrue(by_name["kit-delta"]["has_prompt"])
         self.assertEqual(by_name["kit-delta"]["prompt"],
-                         "Register as kit-delta-2, read the open PR list, then continue the export.")
+                         NEXT_PROMPT)
         self.assertFalse(by_name["kit-epsilon"]["has_prompt"])
         self.assertEqual(by_name["kit-epsilon"]["prompt"], "")
 
@@ -1422,6 +1423,18 @@ class Gate(Store):
         ("cost", "e-mail address", lambda root: plant(root, "sessions/_ledger.md", "`kit-delta`", f"`{EMAIL}`")),
         ("queues", "GitHub token", lambda root: plant(
             root, "state/pr-review/ledger.jsonl", '"head": "abc1234"', f'"head": "{TOKEN}"')),
+        # JSON writes a newline or a tab as a backslash and a letter: these begin a line, or follow a tab, in the real text
+        ("sessions", "GitHub token", lambda root: plant(  # the start of the second line of a multi-line prompt
+            root, "sessions/kit-delta.md", NEXT_PROMPT, f"Register as kit-delta-2 and continue the export.\n{TOKEN}")),
+        ("sessions", "GitHub token", lambda root: plant(  # right after a tab
+            root, "sessions/kit-delta.md", NEXT_PROMPT, f"Register as kit-delta-2, then:\t{TOKEN}")),
+        ("sessions", "GitHub token", lambda root: plant(  # a newline-separated list where only the last line carries it
+            root, "sessions/kit-delta.md", NEXT_PROMPT, f"- register as kit-delta-2\n- read the open PR list\n{TOKEN}")),
+        ("sessions", "e-mail address", lambda root: plant(  # the second line begins with the address: reported whole
+            root, "sessions/kit-delta.md", NEXT_PROMPT, f"Register as kit-delta-2.\n{EMAIL} has the open PR list")),
+        ("queues", "e-mail address", lambda root: plant(  # the walk outcome: its heading, then the first line under it
+            root, "kit-health/2026-10-09-walk.md", "Filed two follow-ups; nothing blocks the release.",
+            f"{EMAIL} filed two follow-ups")),
     )
 
     def test_a_secret_or_an_address_in_any_section_stops_the_build(self):
@@ -1496,6 +1509,56 @@ class Gate(Store):
     def test_the_fixture_s_ssh_remote_title_is_built_not_flagged(self):
         self.assertEqual(self.build().returncode, 0)
         self.assertIn(SSH_TITLE, [d["title"] for d in self.data()["catalog"]["docs"]])
+
+
+class GateText(unittest.TestCase):
+    """mission.gate reads every string, keys included, as the page shows it: JSON writes a newline or a tab as a
+    backslash and a letter, which hides a token that starts a line from the shapes' word boundary."""
+    TOKEN_HIT = "sessions · line 2 · GitHub token · GitHub token:gh…"
+    EMAIL_HIT = "sessions · line 2 · e-mail address · e-mail address:so…"
+
+    def hits(self, value, key: str = "prompt") -> list:
+        return mission.gate({"sessions": {key: value}})
+
+    def test_a_token_that_starts_a_later_line_is_a_hit(self):
+        self.assertEqual(self.hits(f"Resume.\n{TOKEN}"), [self.TOKEN_HIT])
+
+    def test_a_token_after_any_character_json_escapes_is_a_hit(self):
+        for before in ("\n", "\r\n", "\r", "\t", "\f", "\b", "\x0b", "\x1f", "\x00", '"', "\\"):
+            with self.subTest(before=before):
+                self.assertEqual(self.hits(f"x{before}{TOKEN}"), [self.TOKEN_HIT])
+
+    def test_a_token_that_is_the_whole_value_or_sits_mid_line_is_still_a_hit(self):
+        self.assertEqual(self.hits(TOKEN), [self.TOKEN_HIT])
+        self.assertEqual(self.hits(f"token {TOKEN} here"), [self.TOKEN_HIT])
+
+    def test_an_address_that_starts_a_later_line_is_reported_whole(self):
+        for before in ("\n", "\t"):
+            with self.subTest(before=before):
+                self.assertEqual(self.hits(f"Resume.{before}{EMAIL}"), [self.EMAIL_HIT])  # not `ns…` or `ts…`
+
+    def test_only_the_last_line_of_a_newline_separated_list_can_carry_it(self):
+        self.assertEqual(self.hits("\n".join(["- read the open PR list", "- continue the export", TOKEN])), [self.TOKEN_HIT])
+        self.assertEqual(self.hits("\n".join(["- read the open PR list", "- continue the export", EMAIL])), [self.EMAIL_HIT])
+
+    def test_every_line_of_a_value_is_scanned_and_every_hit_listed(self):
+        self.assertEqual(self.hits(f"{TOKEN}\nclean\n{EMAIL}"), [self.TOKEN_HIT, self.EMAIL_HIT])
+
+    def test_a_key_is_scanned_like_a_value(self):
+        self.assertEqual(self.hits(1, key=f"x\n{TOKEN}"), [self.TOKEN_HIT])
+        self.assertEqual(self.hits(1, key=EMAIL), [self.EMAIL_HIT])
+
+    def test_a_multi_line_value_is_reported_at_the_json_line_that_holds_it(self):
+        found = mission.gate({"sessions": {"a": 1, "b": f"x\ny\n{TOKEN}", "c": "clean"}})
+        self.assertEqual(found, ["sessions · line 3 · GitHub token · GitHub token:gh…"])
+        self.assertIn("\\n", mission.dumps({"b": "x\ny"}))  # one JSON line, however many lines the value has
+
+    def test_text_without_a_shape_has_no_hit_however_many_lines_it_has(self):
+        text = "Resume.\n\tindented\n- git@github.com:acme/x.git\n\n\"quoted\" and a \\ backslash\n/home/user/work/app.py"
+        self.assertEqual(self.hits(text), [])
+
+    def test_numbers_flags_nulls_and_empty_containers_have_nothing_to_scan(self):
+        self.assertEqual(mission.gate({"n": {"i": 1, "f": 1.5, "t": True, "z": None, "e": [], "d": {}}, "s": 1, "x": None}), [])
 
 
 # ── the page template ─────────────────────────────────────────────────────────────────────────────────────────
