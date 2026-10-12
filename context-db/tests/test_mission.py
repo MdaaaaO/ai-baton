@@ -418,11 +418,32 @@ class BuildFiles(Store):
 
     def test_out_creates_nested_directories_and_may_be_relative(self):
         r = self.mission("build", "--out", "a/b/c", "--template", TPL, cwd=self.tmp)
-        nested = self.tmp / "a" / "b" / "c"
+        # a relative --out is joined to the working directory, which the OS reports resolved (macOS: /var is /private/var)
+        nested = self.tmp.resolve() / "a" / "b" / "c"
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(sorted(p.name for p in nested.iterdir()), sorted(OUTPUTS))
         self.assertIn(str(nested / "index.html"), r.stdout)
         self.assertEqual(self.mission("open", "--out", "a/b/c", cwd=self.tmp).stdout, f"{nested / 'index.html'}\n")
+
+    def test_out_through_a_symlink_is_kept_as_given_and_a_relative_one_starts_from_the_resolved_cwd(self):
+        real, via = self.tmp / "real", self.tmp / "via"
+        real.mkdir()
+        try:
+            via.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError) as e:
+            self.skipTest(f"no symlinks here: {e}")
+        given = via / "o"  # an absolute --out is printed exactly as given, the link included
+        r = self.mission("build", "--out", given, "--template", TPL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.split()[2], str(given / "index.html"))
+        self.assertEqual(sorted(p.name for p in (real / "o").iterdir()), sorted(OUTPUTS))
+        self.assertEqual(self.mission("open", "--out", given).stdout, f"{given / 'index.html'}\n")
+        self.assertEqual(self.mission("diff", "--out", given, "--template", TPL).stdout.split()[-1], str(given))
+        # a relative --out is joined to the working directory, which the OS reports resolved
+        resolved = real.resolve() / "p" / "index.html"
+        r = self.mission("build", "--out", "p", "--template", TPL, cwd=via)
+        self.assertEqual((r.returncode, r.stdout.split()[2]), (0, str(resolved)), r.stderr)
+        self.assertEqual(self.mission("open", "--out", "p", cwd=via).stdout, f"{resolved}\n")
 
     def test_a_second_build_is_unchanged_and_writes_nothing(self):
         self.assertEqual(self.build().returncode, 0)
@@ -1635,7 +1656,7 @@ class Templates(Store):
     def test_no_output_holds_a_path_of_this_machine(self):
         self.assertEqual(self.build().returncode, 0)
         for name in ("data.json", "build.json", "index.html", "last.sha", ".gitignore"):
-            for local in (str(self.tmp), str(KIT), str(Path.home())):
+            for local in (str(self.tmp), str(self.tmp.resolve()), str(KIT), str(Path.home())):
                 self.assertNotIn(local, self.text(name), name)
 
 
@@ -1803,7 +1824,8 @@ class ExitCodes(Store):
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()
         home = str(Path.home())
-        values = [str(self.tmp), str(self.root), str(KIT), ZONE_NAME, TRACKER_TEMPLATE, "acme", *([home] if len(home) > 1 else [])]
+        values = [str(self.tmp), str(self.tmp.resolve()), str(self.root), str(KIT), ZONE_NAME, TRACKER_TEMPLATE, "acme",
+                  *([home] if len(home) > 1 else [])]
         for args in (["--help"], ["build", "--help"], ["diff", "--help"], ["open", "--help"]):
             r = self.mission(*args, cwd=elsewhere)  # a configured store is right there: the text must not read it
             self.assertEqual(r.returncode, 0, r.stderr)
