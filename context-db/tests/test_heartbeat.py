@@ -4,7 +4,9 @@ is a no-op (never a second detached copy racing the first), and once the owning 
 detached loop writes the "ended" line and calls `make session-end` exactly once, then removes its pidfile —
 proven by handing it an ALREADY-DEAD owner pid so the outer liveness loop's very first check fails and the
 end path runs immediately (no real sleep needed; the loop's periodic-touch path sleeps in fixed 60s chunks
-by design — the header's own "checks liveness every 60s" — so it is not economical to unit-test here). A
+by design — the header's own "checks liveness every 60s" — so it is not economical to unit-test here). Each
+touch and the final session-end are followed by `make mission-build` (the local mission-control page follows
+the registry): in that order, never on a no-op start, and a failing build never stops the beat. A
 stub `make` on PATH stands in for the real context-db Makefile, so this never touches a live env store.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
@@ -35,6 +37,20 @@ class Heartbeat(unittest.TestCase):
         make.chmod(0o755)
         self.tmphome = self.tmp / "tmphome"
         self.tmphome.mkdir()
+
+    CALLED = ("session-touch", "session-end", "mission-build")
+
+    def called(self) -> list:
+        """The make targets the stub saw, in call order — the stub logs `$*`, whose path and variable words
+        are not what these tests are about."""
+        if not self.make_log.exists():
+            return []
+        return [next((w for w in line.split() if w in self.CALLED), "?") for line in self.make_log.read_text().splitlines()]
+
+    def make_fails_on(self, target: str) -> None:
+        make = self.bin / "make"
+        make.write_text(f'#!/bin/bash\necho "$*" >> {self.make_log}\ncase "$*" in *{target}*) exit 1;; esac\nexit 0\n',
+                         encoding="utf-8")
 
     def env(self, **extra) -> dict:
         base = {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "TMPDIR": str(self.tmphome),
@@ -133,7 +149,7 @@ class Heartbeat(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("already running", r.stdout)
         self.assertEqual(self.make_log.read_text() if self.make_log.exists() else "", "",
-                          "a no-op start must never touch the registry")
+                          "a no-op start must never touch the registry nor rebuild the page")
 
     def test_an_already_dead_owner_ends_the_row_and_removes_the_pidfile_without_touching_first(self):
         dead = subprocess.Popen(["sh", "-c", "exit 0"])
@@ -148,7 +164,22 @@ class Heartbeat(unittest.TestCase):
         calls = self.make_log.read_text()
         self.assertIn("session-end", calls)
         self.assertNotIn("session-touch", calls, "an owner already dead at entry must never touch first")
+        self.assertEqual(self.called(), ["session-end", "mission-build"],
+                          "the row is ended first, then the page is rebuilt so it shows the ended row")
         self.assertEqual(list(d.glob("heartbeat-*.pid")), [], "the pidfile must be cleaned up on exit")
+
+    def test_a_failing_build_on_the_end_path_still_ends_the_row_and_removes_the_pidfile(self):
+        self.make_fails_on("mission-build")
+        dead = subprocess.Popen(["sh", "-c", "exit 0"])
+        dead.wait()
+        d = self.pidfile_dir()
+        d.mkdir(parents=True)
+        env = self.env(HEARTBEAT_DETACHED="1", CLAUDE_PID=str(dead.pid), CLAUDE_CODE_SESSION_ID="sess-demo")
+        r = subprocess.run(["bash", str(SCRIPT), "demo4", "focus", "3600"], env=env,
+                            capture_output=True, text=True, timeout=15)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.called(), ["session-end", "mission-build"])
+        self.assertEqual(list(d.glob("heartbeat-*.pid")), [], "a failed build must not leave the pidfile behind")
 
     def test_owner_walk_matches_a_bare_version_string_comm(self):
         owner_pid = os.getpid()  # this test process: guaranteed alive for as long as the test runs
@@ -222,6 +253,34 @@ class Heartbeat(unittest.TestCase):
         calls = self.make_log.read_text()
         self.assertIn("WORKING_IF_EMPTY=short focus", calls)
         self.assertNotIn("WORKING=short focus", calls)
+
+
+    def run_first_tick(self, name: str, sid: str):
+        """Start the detached loop body with a live owner and return its Popen once the first tick's calls are logged
+        (the stub make records them as they happen); the loop then sits in its 60 s liveness poll."""
+        owner = subprocess.Popen(["sleep", "30"])
+        env = self.env(HEARTBEAT_DETACHED="1", CLAUDE_PID=str(owner.pid), CLAUDE_CODE_SESSION_ID=sid)
+        proc = subprocess.Popen(["bash", str(SCRIPT), name, "focus", "3600"], env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.terminate)
+        self.addCleanup(owner.wait)
+        self.addCleanup(owner.terminate)
+        self.assertTrue(self.wait_for(lambda: "mission-build" in self.called()),
+                         "the first tick should have rebuilt the page by now")
+        return proc
+
+    def test_a_tick_rebuilds_the_page_right_after_the_touch(self):
+        self.run_first_tick("tick", "sess-tick")
+        self.assertEqual(self.called(), ["session-touch", "mission-build"],
+                          "one touch, then one local rebuild; nothing is published and nothing else runs")
+
+    def test_a_failing_build_never_stops_the_beat(self):
+        self.make_fails_on("mission-build")
+        proc = self.run_first_tick("tick-fail", "sess-fail")
+        time.sleep(0.3)  # a loop that died on the failed build would have exited by now
+        self.assertIsNone(proc.poll(), "the heartbeat must keep running after a failed build")
+        self.assertEqual(self.called(), ["session-touch", "mission-build"])
 
 
 if __name__ == "__main__":

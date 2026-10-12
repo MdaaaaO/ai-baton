@@ -83,7 +83,7 @@ several machines or several people.
 ## How it works
 
 1. Every session loads `WORKSPACE.md` (the shared rules): a clone's root `CLAUDE.md` imports `.claude/WORKSPACE.md`,
-   a plugin's SessionStart hook injects it. The root `CLAUDE.md` also imports `.context/reference/environment.md`
+   a plugin's SessionStart hook injects it. The root `CLAUDE.md` imports `.context/reference/environment.md`
    (your environment's prose).
 2. Only the skills' names and descriptions load into a session. A skill's body loads when it runs.
 3. A skill that needs a value, such as a channel id, reads it from the env store in `.context/reference/env/`. It
@@ -155,7 +155,7 @@ explains the clone's hooks and guards.
 
 | Category | Skills |
 |---|---|
-| Sessions and knowledge | `session-register` · `session-handoff` · `session-retro` · `env-init` · `kit-setup` · `kit-health` · `cost-report` · `self-assessment` |
+| Sessions and knowledge | `session-register` · `session-handoff` · `session-retro` · `env-init` · `kit-setup` · `kit-health` · `cost-report` · `self-assessment` · `mission-control` |
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |

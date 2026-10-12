@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission control</title>
+<style>
+{{part:style.css}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+<h1>Mission control</h1>
+<p class="asof"><span class="label">data as of</span> <span data-asof></span></p>
+<p class="built" data-built></p>
+</header>
+<nav id="tabs" aria-label="Sections">
+<a id="tab-sessions" href="#sessions">Sessions</a>
+<a id="tab-cost" href="#cost">Cost</a>
+<a id="tab-catalog" href="#catalog">Catalog</a>
+<a id="tab-priorities" href="#priorities">Priorities</a>
+<a id="tab-queues" href="#queues">Queues</a>
+<a id="tab-pointers" href="#pointers">Pointers</a>
+</nav>
+<noscript><p class="problems">This page draws itself with JavaScript; turn it on to see the data.</p></noscript>
+<main>
+<section id="sessions"><h2>Sessions</h2><div class="body"></div></section>
+<section id="cost"><h2>Cost</h2><div class="body"></div></section>
+<section id="catalog"><h2>Catalog</h2><div class="body"></div></section>
+<section id="priorities"><h2>Priorities</h2><div class="body"></div></section>
+<section id="queues"><h2>Queues</h2><div class="body"></div></section>
+<section id="pointers"><h2>Pointers</h2><div class="body"></div>
+<p class="asof"><span class="label">data as of</span> <span data-asof></span></p>
+<p class="built" data-built></p>
+</section>
+</main>
+<footer>Private local page from the mission-control skill (kit {{KIT_VERSION}}). It makes no network request: everything on it comes from the two JSON blocks below.</footer>
+</div>
+<script id="data" type="application/json">{{DATA_JSON}}</script>
+<script id="build" type="application/json">{{BUILD_JSON}}</script>
+<script>
+(function () {
+'use strict';
+{{part:util.js}}
+{{part:sections.js}}
+{{part:app.js}}
+}());
+</script>
+</body>
+</html>

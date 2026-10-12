@@ -2,9 +2,9 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate-back-then-carousel when paste-started as a successor, re-arm PR-watch at startup, rename a mis-named session, name ctx writes as yourself, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "31"
-  updated: "2026-10-08"
-  reviewed: "2026-10-08"
+  version: "32"
+  updated: "2026-10-12"
+  reviewed: "2026-10-12"
 user-invocable: true
 ---
 
@@ -74,6 +74,8 @@ worktree.
         REPOS=<repo[,repo]> WORKING="<current ticket/PR in one line>" \
         RESP="<what you own; what others should coordinate with you on>"
    ```
+   `make -C $BATON/context-db mission-build` rebuilds the private mission-control page from the registry: a local
+   file, zero model turns, never a publish (the `mission-control` skill shows it).
    Then fill the body of `.context/sessions/<name>.md` (a direct `Edit`, or the ctx tools — `sessions/` is
    exempt from the write deny) with anything another session needs (what you own vs. don't, in-flight
    worktrees/PRs). The session type is owned (§ below): a ctx write to your own file must name your
