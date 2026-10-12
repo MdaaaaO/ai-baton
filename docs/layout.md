@@ -8,7 +8,7 @@ lives in the workspace's `.context/`, never in this repo. How the pieces call ea
 (`.claude/`'s sibling — one level further up from a kit worktree such as `.worktrees/kit_<topic>/`), else
 `CLAUDE_PROJECT_DIR`, else — a plugin install only — the nearest `.context/reference/env/config.json` above the
 current directory. Full algorithm: `kit_profile.py`'s `context_root()` — the engine's only resolver: `kb.py`,
-`session.py`, `gen_index.py`, `gen_sessions.py`, `verify.py`, `new.sh` (`kit_profile.py context`) and the Makefile's
+`session.py`, `gen_index.py`, `gen_sessions.py`, `mission.py`, `verify.py`, `new.sh` (`kit_profile.py context`) and the Makefile's
 `CONTEXT` all ask it and keep no fallback of their own. The test suite never uses it: `make test` and the test package
 run on a throw-away store under the temp dir (`docs/contributing.md` § Testing). Every other mention of the default
 (`context-db/Makefile`'s header, `docs/engine-cli.md`) links back to this paragraph rather than restating it. The
@@ -31,6 +31,7 @@ it at session start (`docs/context-sync.md`, the `context.sync` config key).
 │   ├── reference/environment.md  # this environment's prose: domains, capabilities, conventions, rules, repo map
 │   ├── memory/              #   harness auto-memory (symlinked from ~/.claude/projects/<slug>/memory)
 │   ├── state/pr-review/     #   pr-scan / pr-review config.json, ledger.jsonl, .submitted/
+│   ├── state/mission-control/ #   the mission-control page build — local, self-ignored by its own .gitignore
 │   └── state/sign-queue/    #   the sign-queue's own runtime jobs + logs (skills/sign-queue/ ships the scripts only)
 ├── CLAUDE.md                # your preamble + `@.claude/WORKSPACE.md` (clone only) + `@.context/reference/environment.md` — NOT in this repo
 ├── Makefile                 # your targets + `include .claude/workspace.mk` (clone only; NOT in this repo)

@@ -48,6 +48,7 @@ TOOLS = (
     "gen_sessions.py",
     "gen_index.py",
     "verify.py",
+    "mission.py",
     "commit_style.py",
     "sizing.py",
     "evidence_check.py",

@@ -39,6 +39,11 @@ Live session registry (who is working on what, right now — see SESSION_INDEX.m
   Every session-* target refreshes the row's `stats:` line from the transcript named by
   $CLAUDE_CODE_SESSION_ID (or SESSION_ID=<uuid>); NOSTATS=1 skips it. Zero model turns.
 
+Mission control (the .context/ store as one local page: data.json + index.html under state/mission-control/):
+  make -C $BATON/context-db mission-build [OUT=<dir>] [FORCE=1]  # build the page; nothing is written when nothing changed (FORCE=1 rebuilds); a secret or e-mail in the data stops it
+  make -C $BATON/context-db mission-diff [OUT=<dir>]             # exit 0 when the built page is current, 1 when it changed or was never built
+  make -C $BATON/context-db mission-open [OUT=<dir>]             # print the path of the built index.html (never starts a browser)
+
 Kit / config (env fact store .context/reference/env/):
   make -C $BATON/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|config-set|init|path|migrate|discover|stale
   make -C $BATON/context-db kb ARGS="set slack.channel foo C0… --from tool:slack_search_channels"
@@ -682,6 +687,56 @@ free-form gotcha, an arrow in prose, a date in parentheses) never warns.
 
 Operates on the content root gen_index takes from kit_profile.context_root() (docs/layout.md's
 "Content root" paragraph). Run via `make -C $BATON/context-db verify`. Stdlib only.
+```
+
+## `mission.py`
+
+```text
+usage: mission.py [-h] {build,diff,open} ...
+
+mission.py — build the mission-control page from the .context/ store.
+
+Reads the store's structured sources (session registry and ledger, doc
+frontmatter, priorities, queues, memory pointers; never a transcript) into one
+deterministic data.json, gates it for leaks, and inlines it in a
+self-contained index.html. No model turn, no network, no clock in the data:
+an unchanged store gives an unchanged data.json and the same page sha.
+
+  build [--out DIR] [--template FILE] [--force]
+      Write data.json, build.json, index.html, last.sha and a .gitignore
+      holding `*` into DIR (default: state/mission-control in the content
+      root). A secret shape or an e-mail address anywhere in data.json stops
+      the build: exit 1, nothing written, one `<section> · line <n> · <what>
+      · <redacted>` line per hit on stdout. When last.sha already names the
+      page it would write, it prints `unchanged` and writes nothing; --force
+      rebuilds regardless.
+  diff [--out DIR] [--template FILE]
+      The same computation without writing or gating: exit 0 when last.sha
+      matches, 1 when the page changed or was never built.
+  open [--out DIR]
+      Print the absolute path of index.html, exit 1 when it is not built.
+      The engine never starts a browser.
+
+Template: --template FILE, else the kit's skills/mission-control/page.tpl.html
+when it exists, else a minimal built-in page. Tokens: {{DATA_JSON}} and
+{{BUILD_JSON}} (script-safe JSON for the <script id="data"> and
+<script id="build"> blocks of type application/json), {{KIT_VERSION}}, and
+{{part:NAME}} (parts/NAME beside the template, inlined as is, one level deep).
+The built-in page also uses {{AS_OF}} and {{DATA_PRETTY}}.
+
+The content root is CONTEXT_ROOT, else the resolver in kit_profile (see
+docs/layout.md). Exit codes: 0 ok, 1 changed / absent / leak hit, 2 usage or
+I/O error (one stderr line, never a traceback).
+
+positional arguments:
+  {build,diff,open}
+    build            write the page and its data (gated, skipped when
+                     unchanged)
+    diff             exit 0 when the built page is current, 1 when not
+    open             print the path of the built index.html
+
+options:
+  -h, --help         show this help message and exit
 ```
 
 ## `commit_style.py`
