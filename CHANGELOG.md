@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.10.0 (2026-10-13)
+
+
+### Features
+
+* **engine:** mission.py builds the mission-control page from the store ([#531](https://github.com/MdaaaaO/ai-baton/issues/531)) ([af0feb3](https://github.com/MdaaaaO/ai-baton/commit/af0feb3917caa3a341147d079b98c10b307c0457))
+* **skills:** mission-control shell, check.py and local rebuild hooks ([#532](https://github.com/MdaaaaO/ai-baton/issues/532)) ([014241e](https://github.com/MdaaaaO/ai-baton/commit/014241e23f47967b066821c1dc337c067bffd570))
+
+
+### Bug Fixes
+
+* **pr-review:** ledger-append waits the full lock timeout ([#522](https://github.com/MdaaaaO/ai-baton/issues/522)) ([78fc39b](https://github.com/MdaaaaO/ai-baton/commit/78fc39bd8884823305e5ac50db30c49678ebb1c9))
+
+
+### CI
+
+* **kit:** accept the root CLAUDE.md warning in plugin-validate ([#523](https://github.com/MdaaaaO/ai-baton/issues/523)) ([b3d79e1](https://github.com/MdaaaaO/ai-baton/commit/b3d79e1fffb7190ee5582bc3e1dbd96e5a98af9d))
+
 ## 0.9.0 (2026-10-08)
 
 
