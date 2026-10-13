@@ -11,6 +11,7 @@
 #   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
 #   make -C $BATON/context-db find DOMAIN=<domain>    # docs in a domain
 #   make -C $BATON/context-db find DOMAIN=<domain> STATUS=archived   # only the ones in that status
+#   make -C $BATON/context-db view DOC=<path>         # a doc with its lines numbered (DOC=<directory>: its docs with sizes; no DOC: the whole store); runs the pinned ctx, none on PATH needed
 #   make -C $BATON/context-db archive SLUG=opine      # flip a doc to status: archived
 #
 # Live session registry (who is working on what, right now — see SESSION_INDEX.md):
@@ -92,7 +93,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check context-sync context-sync-status migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke mission-build mission-diff mission-open
+.PHONY: help new index verify find view archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check context-sync context-sync-status migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke mission-build mission-diff mission-open
 # An explicit `SESSION_ID=` (command line or shell environment) wins as-is; otherwise take the CURRENT, expanded
 # value of CLAUDE_CODE_SESSION_ID (`:=`, not `?=`/`=`, which would store the unexpanded reference text — `sq` below
 # reads SESSION_ID with $(value …), so a lazily-expanded default would leak the literal "$(CLAUDE_CODE_SESSION_ID)").
@@ -296,6 +297,15 @@ endif
 ifeq ($(TAG)$(DOMAIN),)
 	@echo "usage: make find TAG=<tag> [STATUS=<status>]  |  make find DOMAIN=<domain> [STATUS=<status>]"
 endif
+
+# make view DOC=<path>  — ctx view on the store CONTEXT names, through the adapter: the pinned ctx, so no `ctx` has to be
+# on PATH (the kit never puts it there). A doc comes back with its lines numbered, a directory as its docs with their
+# sizes, no DOC as the whole store; the output stops at ctx's default budget (the rest: python3 $BATON/context-db/bin/
+# ctx_adapter.py ctx view <doc> --range <first>:<last>, or --full). DOC reaches ctx as one argument, `$(…)` and quotes as
+# data (`sq`, as for TITLE=).
+unexport DOC
+view:
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/ctx_adapter.py ctx view $(if $(value DOC),$(call sq,DOC),)
 
 # --- live session registry (operational; skipped by index/verify) ---
 # Each session writes ONLY its own sessions/<NAME>.md, so sessions never collide.

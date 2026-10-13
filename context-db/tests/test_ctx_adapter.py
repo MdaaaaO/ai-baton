@@ -14,6 +14,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -28,8 +29,10 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
-BIN = HERE.parent / "bin"
+ENGINE = HERE.parent
+BIN = ENGINE / "bin"
 ADAPTER = BIN / "ctx_adapter.py"
+MAKE_VARS = ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES")  # an outer `make test` must not leak into a make run here
 sys.path.insert(0, str(BIN))
 sys.path.insert(0, str(HERE.parent))
 from tests import hermetic_env  # noqa: E402
@@ -157,6 +160,14 @@ class Base(unittest.TestCase):
     def payload(self, **kw) -> str:
         return json.dumps({"session_id": self.sid, "cwd": str(self.t), **kw})
 
+    def pin_a_copy(self) -> Path:
+        with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.t / "cache")}):
+            d = load_adapter().pinned_dir()
+        d.mkdir(parents=True)
+        (d / "ctx").write_text(FAKE_CTX, encoding="utf-8")
+        (d / "ctx").chmod(0o755)
+        return d / "ctx"
+
 
 class Pin(Base):
     def test_version_prints_the_one_pinned_release(self):
@@ -207,14 +218,6 @@ class Resolver(Base):
         pinned = self.pin_a_copy()
         r = self.adapter("where")
         self.assertEqual((r.returncode, r.stdout.strip()), (0, str(pinned)))
-
-    def pin_a_copy(self) -> Path:
-        with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.t / "cache")}):
-            d = load_adapter().pinned_dir()
-        d.mkdir(parents=True)
-        (d / "ctx").write_text(FAKE_CTX, encoding="utf-8")
-        (d / "ctx").chmod(0o755)
-        return d / "ctx"
 
 
 class Install(Base):
@@ -1144,6 +1147,90 @@ class Adopt(Base):
         self.assertEqual(self.adapter("ctx", "maintain", **env).returncode, 0)  # a second run changes nothing
         r = self.adapter("ctx", "validate", **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)  # the archive doc `maintain` made validates too
+
+
+@unittest.skipUnless(shutil.which("make"), "make is not installed")
+class MakeView(Base):
+    """`make view DOC=<path>`: the entry point a copy button hands over, because the kit never puts `ctx` on PATH. The
+    target runs the adapter, which resolves $KIT_CTX or the pinned install, on the store CONTEXT names."""
+
+    def make(self, *args: str, **env: str) -> subprocess.CompletedProcess:
+        merged = {k: v for k, v in {**self.env, **env}.items() if k not in MAKE_VARS}
+        return subprocess.run([shutil.which("make"), "-s", "--no-print-directory", "-C", str(ENGINE), "view", *args],
+                              env=merged, capture_output=True, text=True, cwd=self.t, timeout=120)
+
+    def argv(self) -> list[str]:
+        """What ctx was called with, the store option split off (its path is compared resolved: a temp dir may sit
+        behind a symlink)."""
+        (call,) = self.calls()
+        flag, store, *rest = call["argv"]
+        self.assertEqual((flag, Path(store).resolve()), ("--store", self.root.resolve()))
+        return rest
+
+    def test_it_runs_ctx_view_on_the_store_the_target_names(self):
+        r = self.make(f"CONTEXT={self.root}", "DOC=d/a.md", KIT_CTX=str(self.fake), FAKE_CTX_OUT=" 1  ---\n")
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, " 1  ---\n", ""))
+        self.assertEqual(self.argv(), ["view", "d/a.md"])
+
+    def test_the_store_defaults_to_the_content_root(self):
+        r = self.make("DOC=d/a.md", KIT_CTX=str(self.fake))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.argv(), ["view", "d/a.md"])
+
+    def test_no_doc_asks_for_the_whole_store(self):
+        for args in ((), ("DOC=",)):
+            Path(self.log).unlink(missing_ok=True)
+            r = self.make(f"CONTEXT={self.root}", *args, KIT_CTX=str(self.fake))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(self.argv(), ["view"], args)
+
+    def test_a_path_stays_one_argument_of_data_whatever_it_holds(self):
+        ran = self.t / "ran"
+        odd = f"a b\"c'd$(touch {ran})`touch {ran}`;touch {ran} $HOME"
+        r = self.make(f"CONTEXT={self.root}", f"DOC={odd}", KIT_CTX=str(self.fake))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.argv(), ["view", odd])
+        self.assertFalse(ran.exists(), "the path was run as shell")
+
+    def test_the_pinned_install_runs_whatever_ctx_is_on_path(self):
+        self.pin_a_copy()
+        decoy, ran = self.t / "decoy", self.t / "decoy.ran"
+        decoy.mkdir()
+        (decoy / "ctx").write_text(f"#!/bin/sh\necho ran >> '{ran}'\nexit 9\n", encoding="utf-8")
+        (decoy / "ctx").chmod(0o755)
+        r = self.make(f"CONTEXT={self.root}", "DOC=d/a.md", PATH=os.pathsep.join([str(decoy), self.env.get("PATH", "")]))
+        self.assertEqual(r.returncode, 0, r.stderr)  # no KIT_CTX: the pinned copy ran, not the one found by name
+        self.assertEqual(self.argv(), ["view", "d/a.md"])
+        self.assertFalse(ran.exists(), "a ctx found on PATH ran")
+
+    def test_it_says_so_when_ctx_is_not_installed(self):
+        r = self.make(f"CONTEXT={self.root}", "DOC=d/a.md")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not installed", r.stderr)
+        self.assertEqual(self.calls(), [])
+
+    def test_the_exit_code_and_the_message_of_ctx_come_through(self):
+        r = self.make(f"CONTEXT={self.root}", "DOC=d/gone.md", KIT_CTX=str(self.fake), FAKE_CTX_RC="2",
+                      FAKE_CTX_ERR="NO_SUCH_DOC d/gone: no such doc\n")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("NO_SUCH_DOC d/gone: no such doc", r.stderr)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_doc_comes_back_with_its_lines_numbered_and_a_directory_with_its_sizes(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        (self.root / "d" / "a.md").write_text(EPIC, encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        doc = self.make(f"CONTEXT={self.root}", "DOC=d/a.md", **env)
+        self.assertEqual(doc.returncode, 0, doc.stdout + doc.stderr)
+        self.assertRegex(doc.stdout, r"(?m)^\s*1\s+---$")
+        self.assertRegex(doc.stdout, r"(?m)^\s*2\s+title: A$")
+        folder = self.make(f"CONTEXT={self.root}", "DOC=d", **env)
+        self.assertEqual(folder.returncode, 0, folder.stdout + folder.stderr)
+        self.assertRegex(folder.stdout, r"(?m)^d/a\.md \(\d+ bytes\)$")
+        missing = self.make(f"CONTEXT={self.root}", "DOC=d/gone.md", **env)
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("NO_SUCH_DOC", missing.stderr)
 
 
 class AdoptBehind(Base):

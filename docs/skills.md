@@ -17,6 +17,8 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 - **kit-health** — audits the kit on this machine: frontmatter, env-value leaks, store coverage, wiring.
 - **cost-report** — your Claude Code spend against the work shipped, week over week.
 - **self-assessment** — writes the weekly self-assessment from `.context/` and the systems of record.
+- **mission-control** — builds, checks and opens the private page that shows the store (sessions, spend, docs,
+  priorities, queues, pointers) as one local HTML file; rebuilt locally, never published.
 
 ## Pull requests
 

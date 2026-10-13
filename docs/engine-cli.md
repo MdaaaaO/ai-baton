@@ -24,6 +24,7 @@ These targets create, index, verify, and find docs.
   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
   make -C $BATON/context-db find DOMAIN=<domain>    # docs in a domain
   make -C $BATON/context-db find DOMAIN=<domain> STATUS=archived   # only the ones in that status
+  make -C $BATON/context-db view DOC=<path>         # a doc with its lines numbered (DOC=<directory>: its docs with sizes; no DOC: the whole store); runs the pinned ctx, none on PATH needed
   make -C $BATON/context-db archive SLUG=opine      # flip a doc to status: archived
 
 Live session registry (who is working on what, right now — see SESSION_INDEX.md):
