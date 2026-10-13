@@ -78,10 +78,16 @@ SSH_TITLE = "Remote git@github.com:acme/x.git notes"  # an SSH remote in a title
 NEXT_PROMPT = "Register as kit-delta-2, read the open PR list, then continue the export."  # kit-delta's hand-off
 
 
+MAKE_VARS = ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES")  # what an outer `make` exports to its recipes
+
+
 def engine_env(root, **extra) -> dict:
     """The environment of an engine subprocess: this suite's (WORKSPACE_* and git variables already dropped by the
-    tests package) with CONTEXT_ROOT pointing at the fixture, no TZ, and UTF-8 pipes."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("WORKSPACE_") and k != "TZ"}
+    tests package) with CONTEXT_ROOT pointing at the fixture, no TZ, none of the variables an outer `make test` exports
+    (an inherited MAKEFLAGS=w makes a sub-make print its directory lines whatever -s says: the result must not depend
+    on how the suite was started), and UTF-8 pipes."""
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("WORKSPACE_") and k != "TZ" and k not in MAKE_VARS}
     env.update(CONTEXT_ROOT=str(root), PYTHONIOENCODING="utf-8")
     env.update(extra)
     return env

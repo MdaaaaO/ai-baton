@@ -13,7 +13,9 @@ Reads the page with the stdlib HTML parser (no browser, no network) and reports 
   - an @import, a url() or an image-set() in a <style> block or a style attribute;
   - in an inline <script> (the JSON blocks apart), in an on... attribute or in a javascript: URL, a whole-word
     match for fetch(, XMLHttpRequest, sendBeacon, WebSocket, EventSource, import(, new Worker, serviceWorker,
-    document.write, new Image or importScripts;
+    importScripts, new Image, new Audio (connections and loads), document.write, innerHTML, outerHTML,
+    insertAdjacentHTML (markup writes), window.open, location.href, location.assign or location.replace
+    (navigation); an assignment to .src; or a literal http:// or https:// URL;
   - an attribute value starting http://, https:// or // anywhere but on an <a href> whose host is github.com,
     the host of the store's tracker.url_template, or one given with --allow-host.
 
@@ -48,7 +50,7 @@ LOADS = {"script": "src", "link": "href", "img": "src", "form": "action"}  # ele
 LOAD_ATTRS = ("srcset", "imagesrcset", "poster", "data", "action", "formaction", "ping")  # fetch or navigate, anywhere
 URL_START = re.compile(r"(?:https?:)?//", re.I)
 CSS_LOADS = re.compile(r"@import[^;]*|(?:url|image-set)\([^)]*\)?", re.I)
-CALLS = tuple(  # (name shown, pattern): script text that opens a connection, loads code or writes markup
+CALLS = tuple(  # (name shown, pattern): script text that opens a connection, loads code, writes markup or navigates
     (name, re.compile(pattern))
     for name, pattern in (
         ("fetch(", r"\bfetch\s*\("),
@@ -62,6 +64,14 @@ CALLS = tuple(  # (name shown, pattern): script text that opens a connection, lo
         ("document.write", r"\bdocument\s*\.\s*write(?:ln)?\b"),
         ("new Image", r"\bnew\s+Image\b"),
         ("importScripts", r"\bimportScripts\b"),
+        ("innerHTML", r"\binnerHTML\b"),
+        ("outerHTML", r"\bouterHTML\b"),
+        ("insertAdjacentHTML", r"\binsertAdjacentHTML\b"),
+        ("new Audio", r"\bnew\s+Audio\b"),
+        ("window.open", r"\bwindow\s*\.\s*open\b"),
+        ("location.href|assign|replace", r"\blocation\s*\.\s*(?:href|assign|replace)\b"),
+        (".src =", r"\.\s*src\s*=(?!=)"),
+        ("http(s)://", r"(?i:\bhttps?://)"),  # a remote URL spelled out; never a bare //, which is a comment
     )
 )
 ID_RE = re.compile(r"[A-Za-z][\w-]*\Z")

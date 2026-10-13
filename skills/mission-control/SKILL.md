@@ -37,9 +37,13 @@ leaves the machine. This skill checks that the page is current, rebuilds it when
 3. Run `make -C $BATON/context-db mission-open`. It prints the absolute path of `index.html` and never starts a
    browser; the user opens that path in a browser on this machine.
 4. Run `python3 $BATON/skills/mission-control/check.py <that path>`. Exit 0 means all six sections and both JSON
-   blocks are present and a text scan of the markup, the styles and the inline scripts found no remote load or script
-   call (it reads the page, it does not run it). Exit 1 prints one finding per line: that is a defect in the page
-   shell, not in the store. Report the findings and do not hand the page over as good.
+   blocks are present and a text scan of the markup, the styles and the inline scripts found none of: a remote load,
+   a connection or loader call (`fetch(`, `new Worker`, `new Audio` and the like), a markup write (`innerHTML`,
+   `outerHTML`, `insertAdjacentHTML`, `document.write`), a navigation (`window.open`, `location.href`, `.assign`,
+   `.replace`), a `.src =` assignment, a literal `http(s)://` URL in a script. It reads the page, it does not run it.
+   Exit 1 prints one finding per line: a defect in the page shell (the template, a part or the generator's output),
+   not in the store. Exit 2 means the check did not run (a usage error or an unreadable page). Report either and do
+   not hand the page over as good.
 5. Tell the user what the page holds, in one short list:
    - **sessions** — active sessions with a STALE flag, ended sessions with a copy-prompt button, the archived count,
      and for each session its heartbeat, repos, crons and open PRs.
@@ -66,8 +70,13 @@ One line, in the shape that fits the run; the user reads the sections in the pag
 
 - Rebuilt: `mission-control: <path> — data as of <as_of> (rebuilt)`.
 - Already current: `mission-control: <path> — data as of <as_of> (already current)`.
-- Stopped by the leak gate or a check finding: `mission-control: stopped — <section> · <shape>`, then the source doc to
-  fix. Name the shape (a secret shape, an e-mail address, a remote reference), never the value.
+- Stopped: `mission-control: stopped — <what>`, then what to fix. Name the shape (a secret shape, an e-mail address,
+  a remote reference), never the value.
+  - Leak gate (§ 2.2): `<section> · <shape>`, then the source doc that line points to.
+  - Check finding (§ 2.4, exit 1): the finding, then the template, part or generator output that produced it, never a
+    store doc.
+  - Check not run (§ 2.4, exit 2): `check not run · usage error` or `check not run · unreadable page`, whichever it
+    was, then run `make -C $BATON/context-db mission-build` first and check again.
 - `<as_of>` is the value near the top of the `data.json` beside the page. `null` means no source carried a
   timestamp: write `no source timestamp` instead of a time.
 

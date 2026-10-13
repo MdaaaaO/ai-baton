@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ENGINE = Path(__file__).resolve().parents[1]
 KIT = ENGINE.parent
@@ -140,7 +141,8 @@ class Files(unittest.TestCase):
     def test_nothing_in_the_template_or_the_parts_reaches_the_network(self):
         markup = ("http://", "https://", "<script src", "<link", "<img", "<iframe", "<object", "<embed", "<base",
                   "<form", "@import", "url(")
-        scripts = ("fetch", "XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "new Image", "importScripts")
+        scripts = ("fetch", "XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "new Image", "new Audio",
+                   "importScripts")
         for name, body in self.everything.items():
             for needle in markup:
                 self.assertNotIn(needle, body, f"{needle} in {name}")
@@ -153,6 +155,11 @@ class Files(unittest.TestCase):
             for needle in ("innerHTML", "outerHTML", "insertAdjacentHTML", "createContextualFragment", "document.write",
                            "eval(", "new Function", "alert(", "confirm(", "prompt(", "window.open"):
                 self.assertNotIn(needle, body, f"{needle} in {name}")
+
+    def test_no_script_part_trips_a_pattern_the_gate_looks_for(self):
+        """The gate's own table, applied to each part's source: a hit is named by part here, by page in RealTemplate."""
+        for name, body in self.scripts.items():
+            self.assertEqual(check_module().calls(body), [], name)
 
     def test_no_part_can_end_its_block_early(self):
         for name, body in self.parts.items():
@@ -295,6 +302,21 @@ class Findings(unittest.TestCase):
         "<style>.x{color:red;margin:0 auto}</style>",
         "<script>var prefetch = 1, importance = 2; refetch(1); newWorkers(2); var myWebSocketless = 3;</script>",
         '<script id="extra" type="application/json">{"a": "fetch( WebSocket document.write"}</script>',
+        '<script id="extra2" type="application/json">{"a": "innerHTML outerHTML insertAdjacentHTML new Audio '
+        'window.open location.href el.src = x https://cdn.example/a.js"}</script>',
+        "<p>innerHTML, outerHTML, insertAdjacentHTML, new Audio, window.open, location.href and el.src = x as text</p>",
+        "<p>see https://cdn.example/a.js or http://cdn.example/b written as text</p>",
+        "<!-- innerHTML, window.open, el.src = x and https://cdn.example/a.js are only a comment -->",
+        '<!--[if IE]><script>el.innerHTML = 1; go("https://cdn.example/x")</script><![endif]-->',
+        "<script>var xinnerHTML = 1, innerHTMLs = 2, xouterHTML = 3, outerHTMLs = 4, reinsertAdjacentHTML = 5, "
+        "insertAdjacentHTMLs = 6, newAudio = 7, s = 'renew Audio'; new Audioish();</script>",
+        "<script>var e = {}; e.srcElement = 5; e.mysrc = 6; e.source = 7; relocation.href = 8; locations.assign = 9;"
+        " location.hrefs = 10; location.assigned = 11; location.replacement = 12;</script>",
+        "<script>if (a.src == b) { go(); } if (c.src === d || e.src != f || g.src >= 2 || h.src <= 3) go();</script>",
+        "<script>door.open(); x.open(1); reopen(); mywindow.open(); var opener = window.opener;</script>",
+        "<script>var h = location.hash.replace(/^#/, ''); var q = location.search, p = location.pathname;</script>",
+        "<script>var n = 1; // a plain comment, no address\nvar s = '//', t = 'http', u = 'https:', "
+        "v = 'xhttps://', w = 'ahttp://';</script>",
     ]
 
     @classmethod
@@ -592,8 +614,66 @@ class Constructs(Planted):
             self.refuses(f"<script>{call}</script>", "script call: document.write in an inline script")
 
     def test_an_image_beacon_and_import_scripts_are_refused(self):
-        self.refuses("<script>new Image().src = '/x'</script>", "script call: new Image in an inline script")
+        self.refuses("<script>var i = new Image(); go(i)</script>", "script call: new Image in an inline script")
         self.refuses("<script>importScripts('/w.js')</script>", "script call: importScripts in an inline script")
+
+    def test_an_image_beacon_trips_the_constructor_and_the_src_assignment(self):
+        r = self.check(self.planted("<script>new Image().src = '/x'</script>"))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), ["script call: new Image in an inline script",
+                                                 "script call: .src = in an inline script"])
+
+    # script that writes markup, navigates or names a remote address
+    def test_an_innerhtml_access_is_refused(self):
+        for code in ("el.innerHTML = '<b>x</b>'", "document.body.innerHTML += x", "var h = el.innerHTML"):
+            self.refuses(f"<script>{code}</script>", "script call: innerHTML in an inline script")
+
+    def test_an_outerhtml_access_is_refused(self):
+        for code in ("el.outerHTML = '<b>x</b>'", "el['outerHTML'] = x"):
+            self.refuses(f"<script>{code}</script>", "script call: outerHTML in an inline script")
+
+    def test_an_insertadjacenthtml_call_is_refused(self):
+        for code in ("el.insertAdjacentHTML('beforeend', '<b>x</b>')", "el.insertAdjacentHTML ('afterbegin', x)"):
+            self.refuses(f"<script>{code}</script>", "script call: insertAdjacentHTML in an inline script")
+
+    def test_a_new_audio_is_refused(self):
+        for code in ("new Audio('/a.mp3')", "new  Audio()", "new\nAudio('/a.mp3')"):
+            self.refuses(f"<script>{code}</script>", "script call: new Audio in an inline script")
+
+    def test_a_window_open_is_refused(self):
+        for code in ("window.open('/x')", "window . open('/x', '_blank')", "window\n.open('/x')"):
+            self.refuses(f"<script>{code}</script>", "script call: window.open in an inline script")
+
+    def test_a_location_navigation_is_refused(self):
+        for code in ("location.href = '/x'", "window.location.assign('/x')", "document.location.replace('/x')",
+                     "location . href='#a'"):
+            self.refuses(f"<script>{code}</script>", "script call: location.href|assign|replace in an inline script")
+
+    def test_a_src_assignment_is_refused(self):
+        for code in ("img.src = '/x.png'", "s.src='/x.js'", "el . src =x", "el.\nsrc\n= x"):
+            self.refuses(f"<script>{code}</script>", "script call: .src = in an inline script")
+
+    def test_a_literal_remote_url_in_a_script_is_refused(self):
+        for code in ("var u = 'https://cdn.example/x.js'", 'var u = "http://cdn.example/"',
+                     "u = 'HTTPS://CDN.EXAMPLE/x'", "// see https://cdn.example/docs\nvar n = 1"):
+            self.refuses(f"<script>{code}</script>", "script call: http(s):// in an inline script")
+
+    NEW_FORMS = (
+        ("innerHTML", "el.innerHTML = 'x'"),
+        ("outerHTML", "el.outerHTML = 'x'"),
+        ("insertAdjacentHTML", "el.insertAdjacentHTML('beforeend', 'x')"),
+        ("new Audio", "new Audio('a.mp3')"),
+        ("window.open", "window.open('a.html')"),
+        ("location.href|assign|replace", "location.href = 'a.html'"),
+        (".src =", "el.src = 'a.png'"),
+        ("http(s)://", "go('https://cdn.example/a.js')"),
+    )
+
+    def test_each_new_form_is_read_in_a_script_an_event_handler_and_a_javascript_url(self):
+        for name, code in self.NEW_FORMS:
+            self.refuses(f"<script>{code}</script>", f"script call: {name} in an inline script")
+            self.refuses(f'<button onclick="{code}">x</button>', f"script call: {name} in the onclick attribute")
+            self.refuses(f'<a href="javascript:{code}">x</a>', f"script call: {name} in the href attribute")
 
     def test_a_module_or_a_speculation_rules_script_is_refused(self):
         self.refuses('<script type="module">import x from "./m.js";</script>',
@@ -616,7 +696,9 @@ class Constructs(Planted):
                 self.verdict(self.write_page(self.page.rstrip() + tail), needle)
 
     def test_the_words_inside_the_json_data_blocks_are_data_and_not_script(self):
-        words = '{"title": "fetch( XMLHttpRequest sendBeacon WebSocket import( new Worker document.write url("}'
+        words = ('{"title": "fetch( XMLHttpRequest sendBeacon WebSocket import( new Worker document.write url( '
+                 'innerHTML outerHTML insertAdjacentHTML new Audio window.open location.href el.src = x '
+                 'https://cdn.example/a.js"}')
         page = re.sub(r'(<script id="data" type="application/json">).*?(</script>)',
                       lambda m: m.group(1) + words + m.group(2), self.page, flags=re.S)
         self.assertIn(words, page)
@@ -646,8 +728,9 @@ class MakeFlow(unittest.TestCase):
         self.page = self.root / "state" / "mission-control" / "index.html"
 
     def make(self, target: str, *args, root: Path | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run(["make", "-s", "-C", str(ENGINE), target, *args], capture_output=True, text=True,
-                              encoding="utf-8", timeout=120, env=engine_env(root or self.root), cwd=str(self.tmp))
+        return subprocess.run(["make", "-s", "--no-print-directory", "-C", str(ENGINE), target, *args],
+                              capture_output=True, text=True, encoding="utf-8", timeout=120,
+                              env=engine_env(root or self.root), cwd=str(self.tmp))
 
     def test_detect_build_open_check(self):
         before = self.make("mission-diff")
@@ -668,7 +751,9 @@ class MakeFlow(unittest.TestCase):
 
         opened = self.make("mission-open")
         self.assertEqual(opened.returncode, 0, opened.stderr)
-        self.assertEqual(Path(opened.stdout.strip().splitlines()[-1]).resolve(), self.page.resolve())
+        shown = re.search(r"(?m)^(\S*index\.html)$", opened.stdout)  # by its shape: other lines may surround it
+        self.assertIsNotNone(shown, opened.stdout)
+        self.assertEqual(Path(shown.group(1)).resolve(), self.page.resolve())
 
         verdict = run_tool(CHECK, self.root, self.page)
         self.assertEqual(verdict.returncode, 0, verdict.stdout + verdict.stderr)
@@ -677,6 +762,20 @@ class MakeFlow(unittest.TestCase):
         self.assertRegex(again.stdout, rf"(?m)^mission: unchanged {line.group(2)} ")
         forced = self.make("mission-build", "FORCE=1")
         self.assertRegex(forced.stdout, rf"(?m)^mission: built \S+ {line.group(2)}$")
+
+    def test_the_output_does_not_depend_on_how_the_suite_was_started(self):
+        """An outer `make test` exports MAKEFLAGS (w: print the directory, even under -s); the page line still stands
+        alone and a failure still ends in make's own Error line."""
+        with mock.patch.dict(os.environ, {"MAKEFLAGS": "w", "MFLAGS": "-w", "MAKELEVEL": "1"}):
+            built = self.make("mission-build")
+            opened = self.make("mission-open")
+            refused = self.make("mission-diff", root=self.tmp / "no-such" / ".context")
+        self.assertEqual(built.returncode, 0, built.stderr)
+        self.assertEqual(opened.returncode, 0, opened.stderr)
+        self.assertEqual(Path(opened.stdout.strip()).resolve(), self.page.resolve())
+        for r in (built, opened, refused):
+            self.assertNotIn("directory", r.stdout + r.stderr)
+        self.assertIn("Error 2", refused.stderr)
 
     def test_a_changed_store_makes_the_page_behind(self):
         self.assertEqual(self.make("mission-build").returncode, 0)
