@@ -60,8 +60,9 @@ leaves the machine. This skill checks that the page is current, rebuilds it when
    Staleness and cron times are computed when the page is opened (against the opening time, in the store's display
    zone and in UTC), so the same file reads differently later without a rebuild.
 7. Say what the page cannot do. It is read-only: it writes nothing back and runs nothing. It offers copy buttons for
-   the commands and prompts you would run yourself (`ctx view <path>` per doc, a `find` per domain and tag, a
-   session's registry path, an ended session's saved prompt). Publishing the page anywhere is not part of this skill.
+   the commands and prompts you would run yourself (`make -C $BATON/context-db view DOC=<path>` per doc, a `find`
+   per domain and tag, a session's registry path, an ended session's saved prompt). Publishing the page anywhere is
+   not part of this skill.
 8. A registered session's heartbeat and `session-handoff` already rebuild the page. Rebuild by hand only when § 1
    says the page is behind, or when the user asks for it.
 

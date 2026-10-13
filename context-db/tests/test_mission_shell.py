@@ -38,6 +38,8 @@ SECTIONS = ("sessions", "cost", "catalog", "priorities", "queues", "pointers")
 TEMPLATE_LABEL = "skills/mission-control/page.tpl.html"  # what build.json names the kit's own template
 FORGE_HOSTS = {"github.com", "tracker.example"}  # the only hosts the placeholder store's links point at
 BUDGET = 45 * 1024  # the template and its parts together
+COMMAND_PREFIX = "make -C $BATON/context-db "  # every shell command the page hands over starts with this
+DATA_PAYLOADS = ("s.path", "s.prompt")  # copied as data, not run: a session's registry path, an ended session's prompt
 
 _TMP = None
 BASE: Path  # the placeholder store
@@ -89,6 +91,33 @@ def check_module():
 
 def one_line(stream: str) -> bool:
     return len(stream.splitlines()) == 1 and "Traceback" not in stream
+
+
+def copy_sites(source: str) -> list:
+    """The first argument of every `copyButton(` and `cmd(` call in a script part, as written: what the button copies."""
+    found = []
+    for m in re.finditer(r"(?<![\w.$])(?:copyButton|cmd)\(", source):
+        depth, quote, i = 0, "", m.end()
+        while i < len(source):
+            c = source[i]
+            if quote:
+                if c == "\\":
+                    i += 1
+                elif c == quote:
+                    quote = ""
+            elif c in "'\"`":
+                quote = c
+            elif c in "([{":
+                depth += 1
+            elif c in ")]}":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif c == "," and depth == 0:
+                break
+            i += 1
+        found.append(source[m.end():i].strip())
+    return found
 
 
 # ── the template and its parts, as they sit in the kit ───────────────────────────────────────────────────────
@@ -160,6 +189,32 @@ class Files(unittest.TestCase):
         """The gate's own table, applied to each part's source: a hit is named by part here, by page in RealTemplate."""
         for name, body in self.scripts.items():
             self.assertEqual(check_module().calls(body), [], name)
+
+    def test_nothing_the_page_hands_over_calls_ctx_by_name(self):
+        """The kit never puts `ctx` on PATH, so a pasted `ctx <verb>` fails with "command not found" on most machines:
+        the page hands over make entry points of the engine, which resolve the pinned install."""
+        for name, body in self.everything.items():
+            self.assertIsNone(re.search(r"\bctx\s+[a-z]", body), f"a ctx command in {name}")
+
+    def test_every_command_the_page_copies_is_a_make_entry_of_the_engine(self):
+        makefile = (ENGINE / "Makefile").read_text(encoding="utf-8")
+        used = {}
+        for name, body in self.scripts.items():
+            if name == "util.js":  # where copyButton and cmd are defined
+                continue
+            constants = dict(re.findall(r"(?m)^const ([A-Z][A-Z_]*) = '([^'\n]*)';", body))
+            for expr in copy_sites(body):
+                if expr in DATA_PAYLOADS:
+                    continue
+                head = re.match(r"([A-Z][A-Z_]*)\b", expr)
+                self.assertTrue(head and head.group(1) in constants, f"{name}: the button for `{expr}` hands over text "
+                                f"that is neither a make entry constant nor one of {DATA_PAYLOADS}")
+                used[head.group(1)] = constants[head.group(1)]
+        self.assertTrue({"FIND", "VIEW"} <= set(used), sorted(used))
+        for const, value in used.items():
+            self.assertTrue(value.startswith(COMMAND_PREFIX), f"{const} = {value!r}")
+            target = value[len(COMMAND_PREFIX):].split(" ")[0]
+            self.assertRegex(makefile, rf"(?m)^{re.escape(target)}:", f"{const} names a make target the engine lacks")
 
     def test_no_part_can_end_its_block_early(self):
         for name, body in self.parts.items():
@@ -801,6 +856,30 @@ class MakeFlow(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertRegex(r.stderr, r"(?m)^mission: content root not found: ")
         self.assertIn("Error 2", r.stderr)
+
+    def test_the_view_command_the_page_hands_over_runs_as_pasted(self):
+        """The copy button of a doc hands over a shell line. Run through a shell that has $BATON, with the ctx the engine
+        resolves standing in for the pinned install, it reaches `ctx view` with the doc's path and the store."""
+        view = re.search(r"(?m)^const VIEW = '([^'\n]*)';", (PARTS / "sections.js").read_text(encoding="utf-8"))
+        self.assertIsNotNone(view, "the page names no VIEW command")
+        self.assertEqual(self.make("mission-build").returncode, 0)
+        docs = json.loads(text(self.page.parent, "data.json"))["catalog"]["docs"]
+        paths = [d["path"] for d in docs][:3]
+        self.assertEqual(len(paths), 3)
+        log, fake = self.tmp / "ctx.log", self.tmp / "bin" / "ctx"
+        fake.parent.mkdir()
+        fake.write_text(f"#!{sys.executable}\nimport json, os, sys\n"
+                        "open(os.environ['FAKE_CTX_LOG'], 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n", encoding="utf-8")
+        fake.chmod(0o755)
+        env = engine_env(self.root, BATON=str(KIT), KIT_CTX=str(fake), FAKE_CTX_LOG=str(log))
+        for path in paths:
+            r = subprocess.run(["sh", "-c", view.group(1) + path], env=env, capture_output=True, text=True,
+                               encoding="utf-8", timeout=120, cwd=str(self.tmp))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([c[2:] for c in calls], [["view", path] for path in paths])
+        for call in calls:
+            self.assertEqual((call[0], Path(call[1]).resolve()), ("--store", self.root.resolve()))
 
     def test_a_leak_hit_names_section_and_line_and_writes_nothing(self):
         plant(self.root, "reference/priorities.md", "Ship the widget exporter", f"Ship the widget exporter {EMAIL}")

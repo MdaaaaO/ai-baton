@@ -2,6 +2,7 @@
 // elements and text nodes only, and shows a plain line when its dataset is empty.
 const NOW = Date.now();
 const FIND = 'make -C $BATON/context-db find ';
+const VIEW = 'make -C $BATON/context-db view DOC=';
 const LEDGER_CAP = 40;
 const DOC_CAP = 100;
 
@@ -176,7 +177,7 @@ function docCard(d) {
     d.large
       ? el('span', { class: 'badge warn', title: 'large doc: loading it whole is expensive, read the part you need' }, 'large · ' + size(d.bytes))
       : muted(size(d.bytes)),
-    copyButton('ctx view ' + d.path, 'copy view'));
+    copyButton(VIEW + d.path, 'copy view'));
   const tags = list(d.tags).length
     ? el('div', { class: 'tags' }, list(d.tags).map((tag) => copyButton(FIND + 'TAG=' + tag, tag, 'chip')))
     : null;
@@ -230,7 +231,7 @@ function renderPriorities(body, data) {
     return;
   }
   const items = list(p.items);
-  put(body, el('p', { class: 'muted' }, 'Read-only view of ', cmd('ctx view ' + p.path)));
+  put(body, el('p', { class: 'muted' }, 'Read-only view of ', cmd(VIEW + p.path)));
   if (!items.length) {
     put(body, empty('none — no checklist items in the priorities file'));
     return;
@@ -278,9 +279,9 @@ function renderQueues(body, data) {
   }
   put(body, facts([
     ['latest walk', kh.latest ? kh.latest.date : null],
-    ['log', kh.latest ? cmd('ctx view ' + kh.latest.path) : null],
+    ['log', kh.latest ? cmd(VIEW + kh.latest.path) : null],
     ['health stamp', kh.stamp ? 'updated ' + kh.stamp.updated : null],
-    ['stamp doc', kh.stamp ? cmd('ctx view ' + kh.stamp.path) : null],
+    ['stamp doc', kh.stamp ? cmd(VIEW + kh.stamp.path) : null],
   ]));
   put(body, kh.latest && present(kh.latest.outcome) ? el('div', { class: 'outcome' }, kh.latest.outcome) : null);
 }
