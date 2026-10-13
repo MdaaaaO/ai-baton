@@ -113,6 +113,7 @@ HEALTH_LOG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-.+\.md$")
 PART_RE = re.compile(r"\{\{part:([^{}]*)\}\}")
 PART_NAME_RE = re.compile(r"^\w[\w.-]*$")
 TOKEN_RE = re.compile(r"\{\{(DATA_JSON|BUILD_JSON|AS_OF|DATA_PRETTY)\}\}")
+JSON_STRING_RE = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"')  # one string literal of dumps(): a key or a value, escapes intact
 
 # The built-in page: no template installed, still a complete, self-contained, request-free page.
 BUILTIN_PAGE = """<!doctype html>
@@ -178,9 +179,10 @@ def parse_local(text) -> str | None:
 
 
 def is_stale(heartbeat: str, now: datetime) -> bool:
-    """Whether a stored heartbeat is more than gen_sessions.STALE_HOURS old at `now` (UTC when naive). The page
-    applies this rule when it is opened: data.json stores no age, so it stays the same until the store changes.
-    A heartbeat that is not a UTC stamp is not stale, as in gen_sessions."""
+    """The reference rule for a stale session: a stored heartbeat more than gen_sessions.STALE_HOURS old at `now`
+    (UTC when naive); one that is not a UTC stamp is not stale, as in gen_sessions. The build never calls it:
+    data.json stores no age (it would change with every build), so the page decides this itself when it is opened,
+    by the same rule, and the tests pin this one to the session index's."""
     t = parse_utc(heartbeat)
     if t is None:
         return False
@@ -629,14 +631,19 @@ def dumps(obj) -> str:
 
 def gate(data: dict) -> list[str]:
     """One `<section> · line <n> · <what> · <redacted value>` per secret shape or e-mail address in data.json,
-    scanned section by section; `n` counts the lines of that section's own JSON. Workspace paths are allowed."""
+    scanned section by section; `n` counts the lines of that section's own JSON. Every string, keys included, is
+    scanned decoded and line by line, as the page shows it: in the JSON text a newline or a tab is a backslash and a
+    letter, and the shapes begin at a word boundary, so a token that starts a line of a value would not be seen.
+    Workspace paths are allowed."""
     shapes = [(re.compile(rx), what) for rx, what in leak_shapes.SECRET_SHAPES]
     shapes.append((re.compile(EMAIL_SHAPE), "e-mail address"))
     hits = []
     for name in sorted(data):
         for n, line in enumerate(dumps(data[name]).split("\n"), 1):
-            for what, value in leak_shapes.line_hits(line, shapes):
-                hits.append(f"{name} · line {n} · {what} · {leak_shapes.redact(what, value)}")
+            for literal in JSON_STRING_RE.findall(line):
+                for text in json.loads(literal).split("\n"):
+                    for what, value in leak_shapes.line_hits(text, shapes):
+                        hits.append(f"{name} · line {n} · {what} · {leak_shapes.redact(what, value)}")
     return hits
 
 

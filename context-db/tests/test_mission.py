@@ -75,6 +75,7 @@ DOMAINS = (("repos", 14), ("meetings", 13), ("notes", 13))  # 40 docs
 STATUSES = ("active", "reference", "draft", "done")
 TYPES = ("reference", "log", "note")
 SSH_TITLE = "Remote git@github.com:acme/x.git notes"  # an SSH remote in a title: not an e-mail address
+NEXT_PROMPT = "Register as kit-delta-2, read the open PR list, then continue the export."  # kit-delta's hand-off
 
 
 def engine_env(root, **extra) -> dict:
@@ -196,7 +197,7 @@ def write_sessions(root: Path) -> None:
         "kit-gamma", "active", "2026-10-09T06:00:00Z", stats="5 turns · 0.2h"))
     write(root, "sessions/kit-delta.md", session_doc(
         "kit-delta", "ended", "2026-10-09T18:00:00Z", epic="KEY-456",
-        prompt="Register as kit-delta-2, read the open PR list, then continue the export."))
+        prompt=NEXT_PROMPT))
     write(root, "sessions/kit-epsilon.md", session_doc("kit-epsilon", "ended", "2026-10-09T20:00:00Z"))
     write(root, "sessions/archive/kit-zeta.md", session_doc("kit-zeta", "ended", "2026-09-20T10:00:00Z"))
     write(root, "sessions/_ledger.md", ledger_text())
@@ -417,11 +418,32 @@ class BuildFiles(Store):
 
     def test_out_creates_nested_directories_and_may_be_relative(self):
         r = self.mission("build", "--out", "a/b/c", "--template", TPL, cwd=self.tmp)
-        nested = self.tmp / "a" / "b" / "c"
+        # a relative --out is joined to the working directory, which the OS reports resolved (macOS: /var is /private/var)
+        nested = self.tmp.resolve() / "a" / "b" / "c"
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(sorted(p.name for p in nested.iterdir()), sorted(OUTPUTS))
         self.assertIn(str(nested / "index.html"), r.stdout)
         self.assertEqual(self.mission("open", "--out", "a/b/c", cwd=self.tmp).stdout, f"{nested / 'index.html'}\n")
+
+    def test_out_through_a_symlink_is_kept_as_given_and_a_relative_one_starts_from_the_resolved_cwd(self):
+        real, via = self.tmp / "real", self.tmp / "via"
+        real.mkdir()
+        try:
+            via.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError) as e:
+            self.skipTest(f"no symlinks here: {e}")
+        given = via / "o"  # an absolute --out is printed exactly as given, the link included
+        r = self.mission("build", "--out", given, "--template", TPL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.split()[2], str(given / "index.html"))
+        self.assertEqual(sorted(p.name for p in (real / "o").iterdir()), sorted(OUTPUTS))
+        self.assertEqual(self.mission("open", "--out", given).stdout, f"{given / 'index.html'}\n")
+        self.assertEqual(self.mission("diff", "--out", given, "--template", TPL).stdout.split()[-1], str(given))
+        # a relative --out is joined to the working directory, which the OS reports resolved
+        resolved = real.resolve() / "p" / "index.html"
+        r = self.mission("build", "--out", "p", "--template", TPL, cwd=via)
+        self.assertEqual((r.returncode, r.stdout.split()[2]), (0, str(resolved)), r.stderr)
+        self.assertEqual(self.mission("open", "--out", "p", cwd=via).stdout, f"{resolved}\n")
 
     def test_a_second_build_is_unchanged_and_writes_nothing(self):
         self.assertEqual(self.build().returncode, 0)
@@ -766,7 +788,7 @@ class Sessions(unittest.TestCase):
         by_name = {e["name"]: e for key in ("active", "ended", "archived") for e in DATA["sessions"][key]}
         self.assertTrue(by_name["kit-delta"]["has_prompt"])
         self.assertEqual(by_name["kit-delta"]["prompt"],
-                         "Register as kit-delta-2, read the open PR list, then continue the export.")
+                         NEXT_PROMPT)
         self.assertFalse(by_name["kit-epsilon"]["has_prompt"])
         self.assertEqual(by_name["kit-epsilon"]["prompt"], "")
 
@@ -1422,6 +1444,18 @@ class Gate(Store):
         ("cost", "e-mail address", lambda root: plant(root, "sessions/_ledger.md", "`kit-delta`", f"`{EMAIL}`")),
         ("queues", "GitHub token", lambda root: plant(
             root, "state/pr-review/ledger.jsonl", '"head": "abc1234"', f'"head": "{TOKEN}"')),
+        # JSON writes a newline or a tab as a backslash and a letter: these begin a line, or follow a tab, in the real text
+        ("sessions", "GitHub token", lambda root: plant(  # the start of the second line of a multi-line prompt
+            root, "sessions/kit-delta.md", NEXT_PROMPT, f"Register as kit-delta-2 and continue the export.\n{TOKEN}")),
+        ("sessions", "GitHub token", lambda root: plant(  # right after a tab
+            root, "sessions/kit-delta.md", NEXT_PROMPT, f"Register as kit-delta-2, then:\t{TOKEN}")),
+        ("sessions", "GitHub token", lambda root: plant(  # a newline-separated list where only the last line carries it
+            root, "sessions/kit-delta.md", NEXT_PROMPT, f"- register as kit-delta-2\n- read the open PR list\n{TOKEN}")),
+        ("sessions", "e-mail address", lambda root: plant(  # the second line begins with the address: reported whole
+            root, "sessions/kit-delta.md", NEXT_PROMPT, f"Register as kit-delta-2.\n{EMAIL} has the open PR list")),
+        ("queues", "e-mail address", lambda root: plant(  # the walk outcome: its heading, then the first line under it
+            root, "kit-health/2026-10-09-walk.md", "Filed two follow-ups; nothing blocks the release.",
+            f"{EMAIL} filed two follow-ups")),
     )
 
     def test_a_secret_or_an_address_in_any_section_stops_the_build(self):
@@ -1498,6 +1532,56 @@ class Gate(Store):
         self.assertIn(SSH_TITLE, [d["title"] for d in self.data()["catalog"]["docs"]])
 
 
+class GateText(unittest.TestCase):
+    """mission.gate reads every string, keys included, as the page shows it: JSON writes a newline or a tab as a
+    backslash and a letter, which hides a token that starts a line from the shapes' word boundary."""
+    TOKEN_HIT = "sessions · line 2 · GitHub token · GitHub token:gh…"
+    EMAIL_HIT = "sessions · line 2 · e-mail address · e-mail address:so…"
+
+    def hits(self, value, key: str = "prompt") -> list:
+        return mission.gate({"sessions": {key: value}})
+
+    def test_a_token_that_starts_a_later_line_is_a_hit(self):
+        self.assertEqual(self.hits(f"Resume.\n{TOKEN}"), [self.TOKEN_HIT])
+
+    def test_a_token_after_any_character_json_escapes_is_a_hit(self):
+        for before in ("\n", "\r\n", "\r", "\t", "\f", "\b", "\x0b", "\x1f", "\x00", '"', "\\"):
+            with self.subTest(before=before):
+                self.assertEqual(self.hits(f"x{before}{TOKEN}"), [self.TOKEN_HIT])
+
+    def test_a_token_that_is_the_whole_value_or_sits_mid_line_is_still_a_hit(self):
+        self.assertEqual(self.hits(TOKEN), [self.TOKEN_HIT])
+        self.assertEqual(self.hits(f"token {TOKEN} here"), [self.TOKEN_HIT])
+
+    def test_an_address_that_starts_a_later_line_is_reported_whole(self):
+        for before in ("\n", "\t"):
+            with self.subTest(before=before):
+                self.assertEqual(self.hits(f"Resume.{before}{EMAIL}"), [self.EMAIL_HIT])  # not `ns…` or `ts…`
+
+    def test_only_the_last_line_of_a_newline_separated_list_can_carry_it(self):
+        self.assertEqual(self.hits("\n".join(["- read the open PR list", "- continue the export", TOKEN])), [self.TOKEN_HIT])
+        self.assertEqual(self.hits("\n".join(["- read the open PR list", "- continue the export", EMAIL])), [self.EMAIL_HIT])
+
+    def test_every_line_of_a_value_is_scanned_and_every_hit_listed(self):
+        self.assertEqual(self.hits(f"{TOKEN}\nclean\n{EMAIL}"), [self.TOKEN_HIT, self.EMAIL_HIT])
+
+    def test_a_key_is_scanned_like_a_value(self):
+        self.assertEqual(self.hits(1, key=f"x\n{TOKEN}"), [self.TOKEN_HIT])
+        self.assertEqual(self.hits(1, key=EMAIL), [self.EMAIL_HIT])
+
+    def test_a_multi_line_value_is_reported_at_the_json_line_that_holds_it(self):
+        found = mission.gate({"sessions": {"a": 1, "b": f"x\ny\n{TOKEN}", "c": "clean"}})
+        self.assertEqual(found, ["sessions · line 3 · GitHub token · GitHub token:gh…"])
+        self.assertIn("\\n", mission.dumps({"b": "x\ny"}))  # one JSON line, however many lines the value has
+
+    def test_text_without_a_shape_has_no_hit_however_many_lines_it_has(self):
+        text = "Resume.\n\tindented\n- git@github.com:acme/x.git\n\n\"quoted\" and a \\ backslash\n/home/user/work/app.py"
+        self.assertEqual(self.hits(text), [])
+
+    def test_numbers_flags_nulls_and_empty_containers_have_nothing_to_scan(self):
+        self.assertEqual(mission.gate({"n": {"i": 1, "f": 1.5, "t": True, "z": None, "e": [], "d": {}}, "s": 1, "x": None}), [])
+
+
 # ── the page template ─────────────────────────────────────────────────────────────────────────────────────────
 class Templates(Store):
     def template(self, text: str, parts=None, name: str = "page.tpl.html") -> Path:
@@ -1572,7 +1656,7 @@ class Templates(Store):
     def test_no_output_holds_a_path_of_this_machine(self):
         self.assertEqual(self.build().returncode, 0)
         for name in ("data.json", "build.json", "index.html", "last.sha", ".gitignore"):
-            for local in (str(self.tmp), str(KIT), str(Path.home())):
+            for local in (str(self.tmp), str(self.tmp.resolve()), str(KIT), str(Path.home())):
                 self.assertNotIn(local, self.text(name), name)
 
 
@@ -1740,7 +1824,8 @@ class ExitCodes(Store):
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()
         home = str(Path.home())
-        values = [str(self.tmp), str(self.root), str(KIT), ZONE_NAME, TRACKER_TEMPLATE, "acme", *([home] if len(home) > 1 else [])]
+        values = [str(self.tmp), str(self.tmp.resolve()), str(self.root), str(KIT), ZONE_NAME, TRACKER_TEMPLATE, "acme",
+                  *([home] if len(home) > 1 else [])]
         for args in (["--help"], ["build", "--help"], ["diff", "--help"], ["open", "--help"]):
             r = self.mission(*args, cwd=elsewhere)  # a configured store is right there: the text must not read it
             self.assertEqual(r.returncode, 0, r.stderr)
@@ -1833,11 +1918,12 @@ class MakeTargets(Store):
         for target in ("mission-build", "mission-diff", "mission-open"):
             self.assertNotIn("--out", self.make(target, dry=True).stdout, target)
 
-    def test_out_from_the_shell_environment_is_ignored(self):
-        r = self.make("mission-build", dry=True, env_extra={"OUT": str(self.tmp / "stray"), "FORCE": ""})
+    def test_out_and_force_from_the_shell_environment_are_ignored(self):
+        r = self.make("mission-build", dry=True, env_extra={"OUT": str(self.tmp / "stray"), "FORCE": "1"})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("--out", r.stdout)
         self.assertNotIn("stray", r.stdout)
+        self.assertNotIn("--force", r.stdout)
 
     def test_out_is_quoted_as_data(self):
         out = f"{self.tmp}/o u't $(x) `y` $$z"
