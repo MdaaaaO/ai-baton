@@ -303,10 +303,11 @@ class Findings(unittest.TestCase):
         "<script>var prefetch = 1, importance = 2; refetch(1); newWorkers(2); var myWebSocketless = 3;</script>",
         '<script id="extra" type="application/json">{"a": "fetch( WebSocket document.write"}</script>',
         '<script id="extra2" type="application/json">{"a": "innerHTML outerHTML insertAdjacentHTML new Audio '
-        'window.open location.href el.src = x https://cdn.example/a.js"}</script>',
-        "<p>innerHTML, outerHTML, insertAdjacentHTML, new Audio, window.open, location.href and el.src = x as text</p>",
+        'window.open location.href location = x el.src = x https://cdn.example/a.js"}</script>',
+        "<p>innerHTML, outerHTML, insertAdjacentHTML, new Audio, window.open, location.href, location = x and "
+        "el.src = x as text</p>",
         "<p>see https://cdn.example/a.js or http://cdn.example/b written as text</p>",
-        "<!-- innerHTML, window.open, el.src = x and https://cdn.example/a.js are only a comment -->",
+        "<!-- innerHTML, window.open, location = x, el.src = x and https://cdn.example/a.js are only a comment -->",
         '<!--[if IE]><script>el.innerHTML = 1; go("https://cdn.example/x")</script><![endif]-->',
         "<script>var xinnerHTML = 1, innerHTMLs = 2, xouterHTML = 3, outerHTMLs = 4, reinsertAdjacentHTML = 5, "
         "insertAdjacentHTMLs = 6, newAudio = 7, s = 'renew Audio'; new Audioish();</script>",
@@ -315,6 +316,8 @@ class Findings(unittest.TestCase):
         "<script>if (a.src == b) { go(); } if (c.src === d || e.src != f || g.src >= 2 || h.src <= 3) go();</script>",
         "<script>door.open(); x.open(1); reopen(); mywindow.open(); var opener = window.opener;</script>",
         "<script>var h = location.hash.replace(/^#/, ''); var q = location.search, p = location.pathname;</script>",
+        "<script>if (location == x || location === y || location != z || location !== w) go(); const h = location.hash;"
+        " var relocation = 1, locations = 2, xlocation = 3, locationX = 4;</script>",
         "<script>var n = 1; // a plain comment, no address\nvar s = '//', t = 'http', u = 'https:', "
         "v = 'xhttps://', w = 'ahttp://';</script>",
     ]
@@ -649,6 +652,11 @@ class Constructs(Planted):
                      "location . href='#a'"):
             self.refuses(f"<script>{code}</script>", "script call: location.href|assign|replace in an inline script")
 
+    def test_a_location_assignment_is_refused(self):
+        for code in ("location = '//evil.example/'", "window.location = x", "document.location=x",
+                     "window . location\n= '/x'", "top.location = x"):
+            self.refuses(f"<script>{code}</script>", "script call: location = in an inline script")
+
     def test_a_src_assignment_is_refused(self):
         for code in ("img.src = '/x.png'", "s.src='/x.js'", "el . src =x", "el.\nsrc\n= x"):
             self.refuses(f"<script>{code}</script>", "script call: .src = in an inline script")
@@ -665,6 +673,7 @@ class Constructs(Planted):
         ("new Audio", "new Audio('a.mp3')"),
         ("window.open", "window.open('a.html')"),
         ("location.href|assign|replace", "location.href = 'a.html'"),
+        ("location =", "location = 'a.html'"),
         (".src =", "el.src = 'a.png'"),
         ("http(s)://", "go('https://cdn.example/a.js')"),
     )
@@ -697,8 +706,8 @@ class Constructs(Planted):
 
     def test_the_words_inside_the_json_data_blocks_are_data_and_not_script(self):
         words = ('{"title": "fetch( XMLHttpRequest sendBeacon WebSocket import( new Worker document.write url( '
-                 'innerHTML outerHTML insertAdjacentHTML new Audio window.open location.href el.src = x '
-                 'https://cdn.example/a.js"}')
+                 'innerHTML outerHTML insertAdjacentHTML new Audio window.open location.href '
+                 'location = x window.location = x el.src = x https://cdn.example/a.js"}')
         page = re.sub(r'(<script id="data" type="application/json">).*?(</script>)',
                       lambda m: m.group(1) + words + m.group(2), self.page, flags=re.S)
         self.assertIn(words, page)
