@@ -99,16 +99,16 @@ done). **Follow-up — manual** — reviewed on an older head; nothing acts unle
 user's APPROVE or REQUEST_CHANGES stands on this head and the PR is still open: the next move is the author's.
 
 **Needs you**
-| # | PR | Prio | Why now | Size | Humans · Thr · Bot | Author · Title | State |
-|--:|----|------|---------|-----:|:--:|----|----|
-| 1 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 2 · follow-up | author replied in 1 thread | 592/2 | APP · 1 · – | <author> · Migrate the model descriptions to … | needs you (author replied) |
+| # | PR | Prio | Why now | Size | Humans · Thr · Bot | Approved | Author · Title | State |
+|--:|----|------|---------|-----:|:--:|:--:|----|----|
+| 1 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 2 · follow-up | author replied in 1 thread | 592/2 | APP · 1 · – | ✓ 1 | <author> · Migrate the model descriptions to … | needs you (author replied) |
 
 …or `none`…
 
 **New — not started**
-| # | PR | Prio | Why now | Size | Humans · Thr · Bot | Author · Title | State |
-|--:|----|------|---------|-----:|:--:|----|----|
-| 2 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 3 · team | via <team>, requested 09-17 | 159/3 | – · 0 · – | <author> · KEY-123: pin the local toolchain binary … | new (manual) |
+| # | PR | Prio | Why now | Size | Humans · Thr · Bot | Approved | Author · Title | State |
+|--:|----|------|---------|-----:|:--:|:--:|----|----|
+| 2 | [<repo>#<n>](https://github.com/<org>/<repo>/pull/<n>) | 3 · team | via <team>, requested 09-17 | 159/3 | – · 0 · – | – | <author> · KEY-123: pin the local toolchain binary … | new (manual) |
 
 …or `none`…
 
@@ -148,7 +148,6 @@ auto-COMMENT path for direct review requests.
 
 - Skip a PR for its current head: append `{"repo":"<org>/x","pr":N,"head":"<sha>","status":"skipped","ts":"…"}` to the ledger.
 - Change repos, freshness window, bot list, or row cap: edit `.context/state/pr-review/config.json`.
-- Handle a new direct request that another human already approved: set `approved_direct` in the same file. `keep` (default; a missing key means `keep`) changes nothing. `mark` keeps the row and ends its State label with ` · approved by N`. `drop` removes the row and counts it in `dropped(approved=…)`, as `pr-scan.sh` already does for team and sweep rows. A `re_review`, `follow_up` or `done` row, and a row with degraded reviews, never changes. An unknown value reads as `keep` and prints one warning line to stderr.
 - Arm recurring: `/loop 2h /pr-scan` — the default cadence (the fork returns NO-OP on quiet ticks, so the
   main session spends nothing beyond the ~$0.1 Sonnet tick); widen the interval, e.g. `/loop 4h /pr-scan`,
   to halve that further when the queue is calm.

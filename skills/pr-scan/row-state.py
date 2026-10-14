@@ -31,12 +31,6 @@ request, so it renders in the New section; only a manual-policy follow-up — th
 that actually needs a human decision — lands in the Follow-up section, matching that
 section's "— manual" name.
 
-The label can carry one suffix. When the row has `approved_mark: true`, this script appends
-` · approved by N` to `state_label`, where N is the row's own `approved` count. pr-scan.sh sets
-`approved_mark` from the `approved_direct: mark` setting in config.json, and only on a new direct
-request that another human approved. This script never reads config.json: it trusts the row field.
-The suffix changes the label text only, never `state` or `section`.
-
 Reads queue.json (a JSON array) and ledger.jsonl (JSON-lines, may be missing or
 empty); writes the same array back to stdout with `state`, `section` and
 `state_label` added to every row.
@@ -122,8 +116,6 @@ def main():
     out = []
     for row in rows:
         state, section, label = derive_state(row, ledger_rows)
-        if row.get("approved_mark") is True:
-            label += f" · approved by {row.get('approved') or 0}"
         out.append({**row, "state": state, "section": section, "state_label": label})
     json.dump(out, sys.stdout)
 

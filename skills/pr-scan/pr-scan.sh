@@ -24,11 +24,6 @@
 # threads never re-surface — the open thread is the gate, not a to-do. done = our review sits on this head and
 # nothing waits on us: kept (lowest prio, never counted as new) while our APPROVE / REQUEST_CHANGES stands on an
 # open PR, and once for a review the kit posted (ledger `reviewed` / `auto_commented`); everything else drops.
-# approved_direct (config.json: keep | mark | drop) sets what happens to a `new` DIRECT request that another human
-# already approved. A team or sweep row in that state always drops (counted in `dropped(approved=…)`).
-# `keep` is the default, also when the key is missing: the row stays. `mark`: the row stays and gets `approved_mark`,
-# which row-state.py turns into a ` · approved by N` suffix on `state_label`. `drop`: the row drops like the others.
-# `re_review`, `follow_up`, `done` and degraded rows (a failed reviews fetch) are never dropped or marked.
 # new (summary) = shown rows not yet `surfaced` on this (head, kind), `done` rows aside; NO-OP for the fork = new=0.
 # errors= counts gh calls that failed after a retry (a failed call is never an empty queue); retries= the ones
 # that recovered. Concurrency: one scan at a time (.scan.lock); `--mark-only`'s ledger append takes its own
@@ -61,9 +56,6 @@ AUTO_MAXF=$(jq -r '.auto_approve.max_files // 10' "$CFG"); AUTO_MAXL=$(jq -r '.a
 AUTOC_MODE=$(jq -r '.auto_comment.mode // "off"' "$CFG"); AUTOC_PRIOS=$(jq -c '.auto_comment.prios // [1]' "$CFG")
 AUTOC_MAX=$(jq -r '.auto_comment.max_per_tick // 3' "$CFG")
 AUTOC_REREVIEW=$(jq -r '.auto_comment.include_re_review // false' "$CFG")
-# what a `new` direct request does once another human approved it: keep | mark | drop (a missing key = keep).
-# The value is checked after the --mark-only branch below, so only a sweep prints the warning for a bad value.
-APPROVED_DIRECT=$(jq -r '(.approved_direct // "keep") | if type == "string" then . else tojson end' "$CFG")
 TRIVIAL=$(dirname "$0")/../pr-review/scripts/trivial-check.py
 ROW_STATE=$(dirname "$0")/row-state.py
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
@@ -113,14 +105,6 @@ if [ "$MARK_ONLY" = 1 ]; then
   fi
   exit $rc
 fi
-
-# an unknown `approved_direct` value reads as `keep`: one warning line on stderr, no `errors=` count, exit code unchanged
-case $APPROVED_DIRECT in
-  keep|mark|drop) ;;
-  *) _bad=${APPROVED_DIRECT//[[:cntrl:]]/ }
-     printf 'pr-scan: warning: approved_direct "%s" is not keep|mark|drop — treating it as keep\n' "${_bad:0:40}" >&2
-     APPROVED_DIRECT=keep ;;
-esac
 
 # one scan at a time, taken before the retention sweep and the `latest` repoint: a second sweep would repeat the
 # gh calls and race the first for `latest` (the ledger is written only by --mark-only, under ledger-append.sh's
@@ -259,13 +243,7 @@ while IFS= read -r row; do
   elif has skipped; then dropped_skip=$((dropped_skip+1)); continue
   elif has shadow_approve || has auto_approved || has shadow_comment; then dropped_done=$((dropped_done+1)); continue   # shadow_fallback stays: it is an ordinary row; a `held` row stays too (interactive pr-review still needs it)
   else kind=new; fi
-  # a `new` row that another human approved, with a complete reviews fetch (`deg`): a team or sweep row drops.
-  # A direct request follows `approved_direct`: `drop` drops it too, `mark` keeps it and flags it for row-state.py.
-  approved_mark=false
-  if [ "$deg" = '[]' ] && [ "$approved" -gt 0 ] && [ "$kind" = "new" ]; then
-    if [ "$src" != "direct" ] || [ "$APPROVED_DIRECT" = drop ]; then dropped_approved=$((dropped_approved+1)); continue
-    elif [ "$APPROVED_DIRECT" = mark ]; then approved_mark=true; fi
-  fi
+  if [ "$deg" = '[]' ] && [ "$approved" -gt 0 ] && [ "$src" != "direct" ] && [ "$kind" = "new" ]; then dropped_approved=$((dropped_approved+1)); continue; fi
   surfaced=$(jq -r --arg k "$kind" '[.[] | select(.status=="surfaced" and .kind==$k)] | length > 0' <<<"$lset")
   # bot verdict: one helper, shared with fetch-context/pr-watch/pr-merge/trivial-check — pass the
   # reviews we already fetched for this candidate, so this costs no extra gh call.
@@ -313,12 +291,11 @@ while IFS= read -r row; do
     --arg bot "$bot" --arg lstatus "$lstatus" --argjson surfaced "$surfaced" --argjson deg "$deg" --argjson deep "$DEEP" --arg url "$(jq -r .html_url <<<"$pr")" --argjson auto "$auto" \
     --argjson req "$(jq -c '[.requested_reviewers[].login] + [.requested_teams[].slug | "@"+.]' <<<"$pr")" \
     --argjson prio "$prio_val" --argjson mine "$mine_cur" --argjson ac_eligible "$ac_eligible" --arg ac_reason "$ac_reason" \
-    --argjson approved_mark "$approved_mark" \
     '{repo:$repo, pr:$pr, head:$head, src:$src, kind:$kind, author:$author, title:$title, updated:$upd, base:$base,
       lines:($add+$del), files:$files, humans:$humans, approved:$approved, changes_requested:$changes, threads:$threads,
       bot:$bot, ledger:$lstatus, surfaced:$surfaced, degraded:$deg, deep:(($add+$del)>$deep), url:$url, requested:$req, auto:$auto,
       auto_comment: {eligible:$ac_eligible, reason:$ac_reason},
-      mine:$mine, prio:$prio} + (if $approved_mark then {approved_mark:true} else {} end)' >> "$OUT/candidates.jsonl"
+      mine:$mine, prio:$prio}' >> "$OUT/candidates.jsonl"
 done < "$OUT/union.jsonl"
 
 # 4. rank + present — `new` and `auto` are counted over the SHOWN rows, which are exactly the rows --mark-only records

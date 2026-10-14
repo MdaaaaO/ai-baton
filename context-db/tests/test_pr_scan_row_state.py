@@ -141,51 +141,5 @@ class RowStateSections(unittest.TestCase):
         self.assertIn("600006", by_pr[606]["state_label"])            # review id off the row when the ledger has none
 
 
-class ApprovedMarkSuffix(unittest.TestCase):
-    """`approved_mark: true` (set by pr-scan.sh for `approved_direct: mark`) ends `state_label` with
-    ` · approved by N`; the suffix never moves a row between states or sections, and row-state.py reads
-    no config.json to decide it (these tests give it none)."""
-
-    def run_rows(self, rows: list[dict], ledger: list[dict] | None = None) -> dict:
-        tmp = Path(tempfile.mkdtemp(prefix="kit-prscan-rowstate-mark-test."))
-        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
-        queue_path, ledger_path = tmp / "queue.json", tmp / "ledger.jsonl"
-        queue_path.write_text(json.dumps(rows))
-        ledger_path.write_text("".join(json.dumps(r) + "\n" for r in (ledger or [])))
-        r = subprocess.run(
-            [sys.executable, str(ROW_STATE), "--queue", str(queue_path), "--ledger", str(ledger_path)],
-            capture_output=True, text=True, timeout=30,
-        )
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        return {out["pr"]: out for out in json.loads(r.stdout)}
-
-    def test_the_suffix_carries_the_rows_own_approval_count(self):
-        by_pr = self.run_rows([
-            {**row(601), "approved": 1, "approved_mark": True},
-            {**row(603), "approved": 3, "approved_mark": True, "auto_comment": {"eligible": True}},
-        ])
-        self.assertEqual(by_pr[601]["state_label"], "new (manual) · approved by 1")
-        self.assertEqual(by_pr[603]["state_label"], "new (auto) · approved by 3")
-        for out in by_pr.values():
-            self.assertEqual((out["state"], out["section"]), ("new", "New — not started"))
-
-    def test_no_suffix_unless_the_field_is_true(self):
-        by_pr = self.run_rows([
-            {**row(601), "approved": 2},                                  # no field: keep, or a missing key
-            {**row(602), "approved": 2, "approved_mark": False},
-            {**row(603), "approved": 2, "approved_mark": "true"},         # a string is not the boolean pr-scan.sh writes
-        ])
-        for pr in (601, 602, 603):
-            self.assertEqual(by_pr[pr]["state_label"], "new (manual)", by_pr[pr])
-
-    def test_the_suffix_is_appended_to_whichever_label_the_row_gets(self):
-        by_pr = self.run_rows(
-            [{**row(602), "approved": 1, "approved_mark": True}],
-            ledger=[{"repo": REPO, "pr": 602, "head": HEADS[602], "status": "held", "ts": "2026-09-01T00:00:00Z"}],
-        )
-        self.assertEqual(by_pr[602]["state_label"], "needs you (STOP) · approved by 1")
-        self.assertEqual(by_pr[602]["section"], "Needs you")
-
-
 if __name__ == "__main__":
     unittest.main()
