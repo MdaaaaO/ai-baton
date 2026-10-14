@@ -18,7 +18,7 @@ Write all prose in Simplified Technical English (ASD-STE100).
 
 ## Where it applies
 
-Apply the rules to chat replies and to text you write for other surfaces: PR descriptions and comments, Slack drafts, tickets and ticket comments, Notion pages and docs.
+Apply the rules to chat replies and to text you write for other surfaces: PR descriptions and comments, chat drafts, tickets and ticket comments, and docs pages.
 
 ## What stays as it is
 
@@ -32,6 +32,6 @@ Keep these exactly as they are:
 
 ## Limits
 
-This style sets the wording only. Each surface keeps its own format rules, for example one line per paragraph on GitHub, full names instead of "it" or "both" in drafts, and links for tracker keys.
+This style sets the wording only. Each surface keeps its own format rules, such as the clickable tracker-key links in `WORKSPACE.md`.
 
 These rules follow the main STE writing rules. They do not claim full ASD-STE100 compliance.
