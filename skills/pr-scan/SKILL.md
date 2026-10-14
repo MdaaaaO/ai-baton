@@ -2,8 +2,8 @@
 name: pr-scan
 description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts, stale, already-reviewed heads. Returns a <=8-row brief in 5 ordered State sections, or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
 metadata:
-  version: "20"
-  updated: "2026-10-02"
+  version: "21"
+  updated: "2026-10-14"
   reviewed: "2026-10-02"
   facts: "github.display_names"
 argument-hint: "[--days N] [--limit N (enrich cap, not row count — max_rows caps rows)] [--repo owner/name]"
@@ -148,6 +148,7 @@ auto-COMMENT path for direct review requests.
 
 - Skip a PR for its current head: append `{"repo":"<org>/x","pr":N,"head":"<sha>","status":"skipped","ts":"…"}` to the ledger.
 - Change repos, freshness window, bot list, or row cap: edit `.context/state/pr-review/config.json`.
+- Handle a new direct request that another human already approved: set `approved_direct` in the same file. `keep` (default; a missing key means `keep`) changes nothing. `mark` keeps the row and ends its State label with ` · approved by N`. `drop` removes the row and counts it in `dropped(approved=…)`, as `pr-scan.sh` already does for team and sweep rows. A `re_review`, `follow_up` or `done` row, and a row with degraded reviews, never changes. An unknown value reads as `keep` and prints one warning line to stderr.
 - Arm recurring: `/loop 2h /pr-scan` — the default cadence (the fork returns NO-OP on quiet ticks, so the
   main session spends nothing beyond the ~$0.1 Sonnet tick); widen the interval, e.g. `/loop 4h /pr-scan`,
   to halve that further when the queue is calm.

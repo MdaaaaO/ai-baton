@@ -181,6 +181,8 @@
     "include_re_review": false,
     "_include_re_review_note": "false (default) = a direct re-request on a PR we already reviewed (kind=re_review) is never auto-COMMENT eligible, however its prio — a re-request needs a fresh look, not a repeat of the prior review's verdict. true opts re-requests back into the prios gate explicitly."
   },
+  "approved_direct": "keep",
+  "_approved_direct": "keep (default, also when the key is missing) | mark | drop. Applies to a new direct review request that another human already approved. keep = the row stays as it is. mark = the row stays and its State label ends with ' · approved by N'. drop = pr-scan removes the row, as it already does for team and sweep rows, and counts it in dropped(approved=…). A re-review, follow-up or done row, and a row whose reviews fetch failed, never change. An unknown value reads as keep and prints one warning line to stderr.",
   "bundle_max_files": 60,
   "bundle_max_kb": 200,
   "submitted_retention_days": 14

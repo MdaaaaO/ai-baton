@@ -16,7 +16,7 @@ Loaded from `SKILL.md` § Answer. Same meaning in every section.
   thread count · review-bot Assessment on this head (`🟢`/`🟡`/`🔴`, `–` if none).
 - `Author · Title` — first name from the profile's `github.display_names` map (`python3 $BATON/context-db/bin/kit_profile.py get github.display_names`),
   otherwise the login verbatim (never a capitalised login) · title truncated to 45 characters with `…`; never wrap a cell.
-- `State` — `.state_label` verbatim (e.g. `handled (review #123456)`, `needs you (STOP)`, `new (auto)`, `follow-up (manual)`, `watching (you approved)`).
+- `State` — `.state_label` verbatim (e.g. `handled (review #123456)`, `needs you (STOP)`, `new (auto)`, `follow-up (manual)`, `watching (you approved)`). With `approved_direct: mark` in the config, a new direct request that another human approved ends with ` · approved by N` (for example `new (manual) · approved by 1`); copy it as it is.
 - Header line: date **and** time as `YYYY-MM-DD HH:MM UTC` (from `date -u`), counts from the summary line; `dropped:` lists only
   non-zero buckets.
 - Trailing lines: `**Auto**` repeats the gate facts only (`class`, `packages`, CI, threads from `queue.json .auto`) or `none`;
