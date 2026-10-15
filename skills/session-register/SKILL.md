@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate-back-then-carousel when paste-started as a successor, re-arm PR-watch at startup, rename a mis-named session, name ctx writes as yourself, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "33"
+  version: "34"
   updated: "2026-10-15"
   reviewed: "2026-10-12"
 user-invocable: true
@@ -111,8 +111,10 @@ worktree.
    Skip a PR only if `SESSION_INDEX.md` shows another *active* session already watching it
    (one watcher per PR across sessions). Then list the armed PRs in your session file
    (`repo#n head — what it waits on`) so the next session can repeat this step: **replace** the `none` under the
-   existing `## Open PRs` heading (`ctx_str_replace`) — never add a second `## Open PRs` heading; the heading is
-   already there, and `session.py` merges a duplicate on the next touch. Registration is not
+   `## Open PRs` heading (`ctx_str_replace`, with the `## Open PRs` heading line in `old_str` — never a bare `none`,
+   which can match elsewhere) — never add a second `## Open PRs` heading. `session.py touch`/`end` always leave the
+   heading behind; right after a fresh register it may not exist yet, so add it once if missing. A duplicate is merged on the next
+   touch, the last one winning. Registration is not
    complete until the watches are up — a PR whose review lands unwatched is the failure this step
    prevents (owner decision, 2026-09-18).
 

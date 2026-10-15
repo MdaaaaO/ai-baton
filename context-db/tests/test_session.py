@@ -429,6 +429,41 @@ class NoSilentLoss(unittest.TestCase):
         body = "# S\n\n## Next session\n\n```\n## Open PRs\nquoted\n```\n\n## Open PRs\n- x\n"
         self.assertEqual(sess._merge_duplicate_sections(body), body)
 
+    def test_latest_state_open_prs_none_beats_an_earlier_stale_list(self):
+        sess = _load_session_module(self.root)
+        body = "# S\n\n## Open PRs\n- o/r#1 abc — waits\n\n## Owns\n- a\n\n## Open PRs\nnone\n"
+        out = sess._merge_duplicate_sections(body)
+        self.assertEqual(self._headings(out, "## Open PRs"), 1)
+        self.assertIn("## Open PRs\n\nnone", out)
+        self.assertNotIn("o/r#1", out)
+
+    def test_latest_state_next_session_last_prompt_wins_verbatim(self):
+        sess = _load_session_module(self.root)
+        body = "# S\n\n## Next session\n\nold prompt\n\n## Next session\n\nnew prompt\nsecond line\n"
+        out = sess._merge_duplicate_sections(body)
+        self.assertEqual(self._headings(out, "## Next session"), 1)
+        self.assertIn("new prompt\nsecond line", out)
+        self.assertNotIn("old prompt", out)
+
+    def test_latest_state_blank_last_duplicate_falls_back_to_the_previous(self):
+        sess = _load_session_module(self.root)
+        out = sess._merge_duplicate_sections("## Next session\n\nkeep me\n\n## Next session\n\n")
+        self.assertEqual(self._headings(out, "## Next session"), 1)
+        self.assertIn("keep me", out)
+
+    def test_an_indented_open_prs_duplicate_is_merged(self):
+        sess = _load_session_module(self.root)
+        body = "# S\n\n## Open PRs\n- o/r#1 abc — waits\n\n ## Open PRs\nnone\n"
+        out = sess._merge_duplicate_sections(body)
+        self.assertEqual(self._headings(out, "## Open PRs"), 1)
+        self.assertIn("## Open PRs\n\nnone", out)
+
+    def test_a_non_latest_state_heading_still_unions(self):
+        sess = _load_session_module(self.root)
+        out = sess._merge_duplicate_sections("# S\n\n## Owns\n- a\n\n## Owns\n- b\n")
+        self.assertEqual(self._headings(out, "## Owns"), 1)
+        self.assertIn("- a\n\n- b", out)
+
     def test_a_non_string_tracker_regex_does_not_break_the_registry(self):
         import json as _json
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},

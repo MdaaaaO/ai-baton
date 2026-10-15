@@ -339,11 +339,18 @@ def _is_stub(content: str) -> bool:
     return content.strip().lower() in ("", "none")
 
 
+# Sections that hold the session's *current* state: of several duplicates the last one is the newest, so it wins.
+LATEST_STATE_SECTIONS = (OPEN_PRS_HEADING, NEXT_HEADING)
+
+
 def _merge_duplicate_sections(body: str) -> str:
     """Collapse repeated `## heading` sections into one, so a session file never carries two of the same name
     (the store's validator flags a duplicate heading). The first occurrence keeps its place; the contents are
     joined in order, a `none`-only (or blank) stub losing to any filled-in section and an identical repeat
-    counting once. Nothing a session wrote is dropped. Fence handling matches `_replace_section`: a heading inside a
+    counting once. Nothing a session wrote is dropped, except in `LATEST_STATE_SECTIONS` (`## Open PRs`, `## Next
+    session`): there the LAST non-empty duplicate wins in full (a bare `none` is content and beats an earlier stale
+    list; a blank one falls back to the previous). A heading is matched on its stripped text, so an indented
+    ` ## Open PRs` is the same heading, as in `_replace_section`. Fence handling matches `_replace_section`: a heading inside a
     balanced fenced block is text. A body with no duplicate is returned byte-for-byte unchanged, so this is safe to
     run on every write."""
     lines = body.rstrip("\n").split("\n")
@@ -352,7 +359,7 @@ def _merge_duplicate_sections(body: str) -> str:
     for ln in lines:
         if track and ln.lstrip().startswith("```"):
             fence = not fence
-        if not fence and ln.startswith("## "):
+        if not fence and ln.strip().startswith("## "):
             secs.append([ln.strip(), []])
         elif secs:
             secs[-1][1].append(ln)
@@ -367,6 +374,10 @@ def _merge_duplicate_sections(body: str) -> str:
             continue
         done.add(h)
         parts = ["\n".join(c).strip("\n") for hh, c in secs if hh == h]
+        if h in LATEST_STATE_SECTIONS:
+            content = next((x for x in reversed(parts) if x.strip()), "")
+            out += [h, ""] + ([content, ""] if content else [])
+            continue
         real = []
         for part in parts:
             if not _is_stub(part) and part not in real:
