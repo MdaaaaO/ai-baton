@@ -387,6 +387,48 @@ class NoSilentLoss(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("## Open PRs\n\nnone", doc_path.read_text(encoding="utf-8"))
 
+    def _headings(self, doc: str, heading: str) -> int:
+        return sum(1 for ln in doc.splitlines() if ln.strip() == heading)
+
+    def test_a_second_open_prs_heading_is_merged_over_the_stub_through_a_full_cycle(self):
+        # A session that writes its own `## Open PRs` list after the scaffolded `none` stub leaves two headings
+        # (the store's validator flags a duplicate); every touch/end merges them, the filled-in list winning.
+        name = "t-dup-prs"
+        doc_path = self.root / "sessions" / f"{name}.md"
+        run("session.py", "register", "--name", name, "--no-stats", root=self.root)
+        r = run("session.py", "touch", "--name", name, "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._headings(doc_path.read_text(encoding="utf-8"), "## Open PRs"), 1)  # the stub
+        doc_path.write_text(doc_path.read_text(encoding="utf-8") + "\n## Open PRs\n- o/r#1 abc — waits\n", encoding="utf-8")
+        self.assertEqual(self._headings(doc_path.read_text(encoding="utf-8"), "## Open PRs"), 2)
+        for cmd in ("touch", "end"):
+            r = run("session.py", cmd, "--name", name, "--no-stats", root=self.root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            doc = doc_path.read_text(encoding="utf-8")
+            self.assertEqual(self._headings(doc, "## Open PRs"), 1, doc)
+            self.assertIn("- o/r#1 abc — waits", doc)
+            self.assertNotIn("\nnone\n", doc)  # the stub lost
+        self.assertEqual(self._headings(doc, "## Open PRs"), 1)
+
+    def test_register_heals_a_duplicated_section_and_keeps_distinct_content(self):
+        name = "t-dup-heal"
+        doc_path = self.root / "sessions" / f"{name}.md"
+        run("session.py", "register", "--name", name, "--no-stats", root=self.root)
+        doc_path.write_text(doc_path.read_text(encoding="utf-8")
+                            + "\n## Owns\n- a\n\n## Open decisions\nnone\n\n## Owns\n- b\n\n## Open decisions\nnone\n",
+                            encoding="utf-8")
+        r = run("session.py", "register", "--name", name, "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = doc_path.read_text(encoding="utf-8")
+        self.assertEqual(self._headings(doc, "## Owns"), 1)
+        self.assertIn("- a\n\n- b", doc)  # two real lists are joined, nothing dropped
+        self.assertEqual(doc.count("## Open decisions\n\nnone"), 1)
+
+    def test_a_fenced_duplicate_heading_is_left_alone_by_the_merge(self):
+        sess = _load_session_module(self.root)
+        body = "# S\n\n## Next session\n\n```\n## Open PRs\nquoted\n```\n\n## Open PRs\n- x\n"
+        self.assertEqual(sess._merge_duplicate_sections(body), body)
+
     def test_a_non_string_tracker_regex_does_not_break_the_registry(self):
         import json as _json
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},

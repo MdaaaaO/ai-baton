@@ -82,7 +82,9 @@ DEFAULT_BODY = """# Session: {name}
 
 <!-- What this session is doing right now, what it OWNS, and what another session
      must coordinate with it on before touching the same epic / PR / worktree.
-     Override this whenever your responsibilities change. -->
+     Override this whenever your responsibilities change.
+     The Open PRs section appears here as `none` once the file is touched: replace that `none` (ctx_str_replace)
+     with your list, never add a second Open PRs heading. -->
 """
 
 
@@ -332,6 +334,54 @@ def _ensure_open_prs_heading(body: str) -> str:
     return _replace_section(body, OPEN_PRS_HEADING, "none")
 
 
+def _is_stub(content: str) -> bool:
+    """A section body that says nothing: blank, or the lone word `none` the scaffold writes."""
+    return content.strip().lower() in ("", "none")
+
+
+def _merge_duplicate_sections(body: str) -> str:
+    """Collapse repeated `## heading` sections into one, so a session file never carries two of the same name
+    (the store's validator flags a duplicate heading). The first occurrence keeps its place; the contents are
+    joined in order, a `none`-only (or blank) stub losing to any filled-in section and an identical repeat
+    counting once. Nothing a session wrote is dropped. Fence handling matches `_replace_section`: a heading inside a
+    balanced fenced block is text. A body with no duplicate is returned byte-for-byte unchanged, so this is safe to
+    run on every write."""
+    lines = body.rstrip("\n").split("\n")
+    track = sum(1 for ln in lines if ln.lstrip().startswith("```")) % 2 == 0
+    head, secs, fence = [], [], False   # secs: [heading, [content lines]]
+    for ln in lines:
+        if track and ln.lstrip().startswith("```"):
+            fence = not fence
+        if not fence and ln.startswith("## "):
+            secs.append([ln.strip(), []])
+        elif secs:
+            secs[-1][1].append(ln)
+        else:
+            head.append(ln)
+    names = [h for h, _ in secs]
+    if len(set(names)) == len(names):
+        return body
+    out, done = list(head), set()
+    for h, _ in secs:
+        if h in done:
+            continue
+        done.add(h)
+        parts = ["\n".join(c).strip("\n") for hh, c in secs if hh == h]
+        real = []
+        for part in parts:
+            if not _is_stub(part) and part not in real:
+                real.append(part)
+        content = "\n\n".join(real) if real else next((x for x in parts if x.strip()), "")
+        out += [h, ""] + ([content, ""] if content else [])
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
+def _normalize_body(body: str) -> str:
+    """What every touch/end writes back: duplicate sections merged (existing files self-heal), then the
+    `## Open PRs` heading guaranteed."""
+    return _ensure_open_prs_heading(_merge_duplicate_sections(body))
+
+
 def _ledger_append(meta: dict, st) -> None:
     import session_stats
     k = session_stats._k
@@ -384,6 +434,7 @@ def cmd_register(a) -> None:
     if a.working is not None: meta["working_on"] = a.working
     if a.resp:   meta["responsibilities"] = a.resp
     if a.note:   body = _replace_section(body, NOTES_HEADING, a.note)  # never the whole body: `## Open PRs` lives there
+    body = _merge_duplicate_sections(body)
     _apply_stats(meta, _stats(a))
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
@@ -409,7 +460,7 @@ def cmd_touch(a) -> None:
     nxt = _next_prompt(a)
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
-    body = _ensure_open_prs_heading(body)
+    body = _normalize_body(body)
     _apply_stats(meta, _stats(a))
     meta["heartbeat"] = now_iso()
     meta["updated"] = today()
@@ -447,7 +498,7 @@ def cmd_end(a) -> None:
         meta["working_on"] = a.working
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
-    body = _ensure_open_prs_heading(body)
+    body = _normalize_body(body)
     if meta.get("status") == "ended":
         # Already ended: allow the hand-off fields to be refined, but never a second ledger row.
         print(f"{a.name} already ended — no second ledger row", file=sys.stderr)
