@@ -53,7 +53,7 @@ The workspace root holds the repos, `CLAUDE.md`, a `Makefile` and infra dirs `.c
 
 ## The `.context/` DB — find first, persist durable knowledge
 
-Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't load it by default:
+Each `*.md` under `.context/` is a row; its frontmatter is the columns; don't load it by default:
 
 1. **Find first:** read `.context/INDEX.md` (the generated catalog) and open only the leaf docs the
    task needs. Narrow with `make -C $BATON/context-db find DOMAIN=<domain>` or `find TAG=<tag>`.
@@ -61,7 +61,8 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't lo
    TITLE="…"` (types: `.context/README.md`). **Writes to `.context/` docs go through ctx tools** —
    `ctx_str_replace`, `ctx_insert`, `ctx_log`, `ctx_fm`, `ctx_create` (Bash: `$BATON/context-db/bin/ctx_adapter.py
    ctx <verb>`); `Write`/`Edit` is denied outside `sessions/`. Hooks validate, re-index and sync a
-   git-versioned `.context/` (`$BATON/docs/context-sync.md`).
+   git-versioned `.context/` (`$BATON/docs/context-sync.md`). The Bash adapter is the fallback when
+   the ctx MCP tools are absent or fail; it syncs after each write itself.
 3. **Domains are folders:** core `reference/`, `repos/`, `pr-reviews/`, `meetings/`, `1on1/`,
    `self-assessment/`, `on-call/`, `archive/`; the environment adds its own (`domains` in the env
    config). Repo deep-dives are `.context/repos/<repo>.md` (links + TLDRs; the repo's own `CLAUDE.md`
@@ -70,8 +71,8 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns. Don't lo
 **Context doc** = the private living doc for one epic / tracking issue (not the tracker item, which
 gets its own update). One per initiative, `TYPE=epic`, fixed sections *Tracker & links · Goal · What
 was built (PRs per repo) · Key decisions & gotchas · Infra/secrets locations · Remaining work · Session
-log* (dated one-liners, oldest first). Keep it lean — history to `.context/archive/<slug>-log.md`
-(`verify` warns past 30 KB). It is the **handoff document**: a cold session picks it up alone, so
+log* (dated one-liners, oldest first). Keep it lean: history to `.context/archive/<slug>-log.md`
+(`verify` warns past 30 KB). It is the **handoff document**: a cold session picks it up alone;
 update it at every step.
 
 ## Environment facts — never hardcode, never guess
@@ -122,10 +123,10 @@ always-on rule** — those are § Rules above (and in `environment.md`). Trigger
 Caching: a stable prefix re-reads each turn at ~0.1× input; editing `CLAUDE.md`, an import, skill
 description or tool list invalidates it, re-billing every open session next turn —
 **batch always-on edits into one PR**. Auto-compact backstop: a clone gets it from the kit's
-`settings.json`; a plugin install doesn't (ships none) — set `/autocompact 200k` (cloud:
+`settings.json`; a plugin install ships none — set `/autocompact 200k` (cloud:
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`).
 
-- **Load by task:** `INDEX.md` first, then only needed leaf docs. **Read slices** (`grep`,
+- **Load by task:** `INDEX.md`, then only needed leaf docs. **Read slices** (`grep`,
   `Read` with offset+limit) and pipe big output to a count or scratch file.
 - **Delegate by cost — reads and code.** The main model costs most: wide reads go to a
   subagent (keep its conclusion); a queue of ≥ 2 tickets goes to one background worker each
@@ -137,8 +138,8 @@ description or tool list invalidates it, re-billing every open session next turn
 - **Flush at every step.** When a ticket/PR/epic step lands: context doc (Session log + section), tick
   `.context/reference/priorities.md` where it exists; the `MEMORY.md` index if a memory note changed.
 - **One scope per session.** Feedback+ticketing, a build/review round, or a release — flush and end
-  at its boundary (a next-session prompt, not a carried prefix). Don't wake other sessions needlessly
-  — coordinate through the registry and context doc.
+  at its boundary (a next-session prompt, no carried prefix). Coordinate through the registry
+  and context doc, not wake-ups.
 
 ## Repos
 
