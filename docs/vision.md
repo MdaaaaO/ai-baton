@@ -61,7 +61,6 @@ These are open, and none is scheduled. Each waits for evidence.
 - **A harness-neutral core.** A second harness comes only after a real tester reports what breaks.
 - **Temporal facts and ownership expiry.** Wanted only if overlapping sessions on several machines show the need.
 - **Repo-scoped sessions.** Sessions run at the workspace root today. This is a known gap.
-- **Task-relevant pointers at session start.** Waits for an evaluation of whether they beat the plain index.
 
 ## Landscape
 
