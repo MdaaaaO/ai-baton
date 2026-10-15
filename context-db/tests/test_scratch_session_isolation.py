@@ -33,7 +33,9 @@ class RegisteringFixtureNeverWritesTheRealRuntimeDir(unittest.TestCase):
             real_runtime.mkdir(mode=0o700)
             real_session = "s-real-parent"       # the session actually running `make test`
             fixture_session = "s-fixture-fake"   # what a registering test fixture sets for itself
-            root = tmp / ".context"
+            # a register only records the name against the live store (#551): the layout of a real workspace
+            from tests import live_workspace
+            bin_dir, root = live_workspace(tmp)
 
             # The ambient env a real Claude Code session exports into every command it runs — what `make
             # test`'s Python process would inherit if run from inside one.
@@ -52,8 +54,8 @@ class RegisteringFixtureNeverWritesTheRealRuntimeDir(unittest.TestCase):
                 sys.path.insert(0, {str(CONTEXT_DB)!r})
                 import tests  # noqa: F401 — runs the package's isolation before any fixture executes
                 env = {{**os.environ, "CONTEXT_ROOT": {str(root)!r}, "CLAUDE_CODE_SESSION_ID": {fixture_session!r}}}
-                r = subprocess.run([sys.executable, {str(BIN / "session.py")!r}, "register", "--name", "iso-check",
-                                    "--no-stats"], env=env, cwd={str(BIN)!r}, capture_output=True, text=True)
+                r = subprocess.run([sys.executable, {str(bin_dir / "session.py")!r}, "register", "--name", "iso-check",
+                                    "--no-stats"], env=env, cwd={str(bin_dir)!r}, capture_output=True, text=True)
                 sys.stderr.write(r.stderr)
                 test_xdg = os.environ.get("XDG_RUNTIME_DIR", "")
                 leaked = Path({str(real_runtime)!r}) / "ai-baton-kit" / {fixture_session!r} / "session-name"

@@ -144,3 +144,15 @@ elif store_problem(_ctx):
     raise SystemExit(f"tests: refusing to run on CONTEXT_ROOT={_ctx} — {store_problem(_ctx)}. The suite only ever runs "
                      "on a throw-away store: `make -C context-db test` builds one, or unset CONTEXT_ROOT and the suite "
                      "builds its own.")
+
+
+def live_workspace(tmp) -> "tuple[Path, Path]":
+    """A throw-away workspace whose live store IS a fixture: `<tmp>/ws/.claude/context-db/bin` (a copy of the engine,
+    so `kit_profile.KIT` is `<tmp>/ws/.claude`) beside `<tmp>/ws/.context`, which that copy's resolver finds without
+    `CONTEXT_ROOT` — the layout of a real workspace. Returns (bin dir, store). A register run from the copied
+    `session.py` against that store is a register against the live store (`kit_profile.is_live_store()`)."""
+    ws = Path(tmp) / "ws"
+    bin_dir = ws / ".claude" / "context-db" / "bin"
+    shutil.copytree(KIT / "context-db" / "bin", bin_dir, ignore=shutil.ignore_patterns("__pycache__"))
+    (ws / ".context" / "sessions").mkdir(parents=True)
+    return bin_dir, ws / ".context"
