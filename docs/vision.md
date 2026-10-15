@@ -49,8 +49,9 @@ Other projects do single pieces well. The kit keeps the combination, and these p
   tool posts facts into it.
 - **No second harness adapter.** The kit targets Claude Code.
 - **No code graph.** The kit keeps no structural map of your code. Repo notes stay hand-written.
-- **No clone outside `.claude/`.** The plugin is the primary install. A clone belongs in `.claude/` and serves
-  contributors who want the git hooks and the sync.
+- **No second install clone.** The plugin is the primary install. A clone is either the install itself
+  (`.claude/` is the kit) or a contributor checkout beside your repos (`CONTRIBUTING.md`), never a second
+  install of the same kit.
 - **No third-party cost source.** `cost-report` uses its built-in estimator with dated prices, so its numbers do
   not depend on another service.
 

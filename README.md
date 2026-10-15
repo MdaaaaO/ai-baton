@@ -85,8 +85,8 @@ flowchart LR
 - **`pr-open`** opens the PR with its diagrams, labels and reviewers; **`pr-watch`** keeps it current and
   surfaces only what needs a decision.
 - Claude reads the diff against one rule file ([`docs/REVIEW.md`](docs/REVIEW.md)) and posts a verdict; an
-  approved, green PR merges itself. A human gates only the sensitive paths: anything under `.github/`, and the
-  review's own rule and gate files.
+  approved, green PR merges itself. A human gates only the sensitive paths: `.github/` and the review's own rule
+  and gate files.
 - **`session-handoff`** flushes what the session learned; **`session-retro`** checks the session against the
   kit and offers a kit gap back as an issue, closing the loop.
 
@@ -98,7 +98,7 @@ flowchart LR
 | A skills plugin | Skills hardcode your org, channels and ids, or ask you for them every time | An env fact store: a fact is found once, then read everywhere |
 | Nothing | Each session starts cold and forgets what the last one learned | `.context/`, an indexed markdown DB, plus a session registry and handoff docs |
 
-Use a plain `CLAUDE.md` for one repo and one person. The kit pays off past that: several repos, machines or people. Non-goals: [vision](docs/vision.md).
+Use a plain `CLAUDE.md` for one repo and one person. The kit pays off past that: several repos, machines or people ([vision](docs/vision.md)).
 
 ## How it works
 
@@ -119,10 +119,10 @@ Each machine checks its own copy:
 
 | Loop | What it does |
 |---|---|
-| `/kit-health` | Audits the kit and this machine's wiring (frontmatter, leaked values, env store, hooks, an engine smoke), names the update command when a newer release is out, and stamps `.context/kit-health/HEALTH-<env>.md` |
+| `/kit-health` | Audits the kit and this machine's wiring (frontmatter, leaked values, env store, hooks, an engine smoke), names the update command when a release is out, and stamps `.context/kit-health/HEALTH-<env>.md` |
 | Versioned units | Every skill and agent carries a version; each PR says what a machine must do, usually nothing, and the release log is generated |
-| Updates | A clone fast-forwards itself at session end, a plugin install updates per release, and each machine re-stamps on its own |
-| Many sessions | A live registry with heartbeats, one PR watcher per repo and a handoff prompt per session, so parallel and successor sessions pick up in-flight work |
+| Updates | A clone fast-forwards itself at session end, a plugin install updates per release, each machine re-stamps itself |
+| Many sessions | A live registry with heartbeats, one PR watcher per repo and a handoff prompt per session, so successor sessions pick up in-flight work |
 | The kit's own PRs | Claude reviews every PR, a gate blocks leaked values and missing version bumps, and auto-merge lands it on green |
 
 ```mermaid
@@ -189,6 +189,7 @@ It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `contex
 
 | Page | Read it for |
 |---|---|
+| [vision](docs/vision.md) | What the kit is and is not |
 | [layout](docs/layout.md) | What every file and directory is |
 | [conventions](docs/conventions.md) | The six rules that keep the kit portable |
 | [carousel](docs/carousel.md) · [assumptions](docs/assumptions.md) | The `AskUserQuestion` shape for every open decision a session returns |
