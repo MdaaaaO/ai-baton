@@ -50,6 +50,11 @@ it decides there's no match, and when the two still don't match, opens (or comme
 it fetches and moves `.claude/` to the right target (below). It refuses — `.sync-status` says `error …`
 and it pulls nothing — when `.claude/` is on another branch, has uncommitted changes, or carries local
 commits on `main`: each is work that belongs on a branch + PR, and the message says how to move it there.
+The message names the first five paths of `git status --short`, so a stray file is told apart from real work. A
+`manifest.txt` in the clone root (the kit ignores it) is the usual stray one: verify a release by hand into a
+scratch directory (`d=$(mktemp -d)`, then `gh release download <tag> … --dir "$d"` and
+`gh attestation verify "$d/manifest.txt" …`, the full command is in [`SECURITY.md`](../SECURITY.md#verifying-a-release)),
+never into the checkout.
 It never resets, stashes or discards anything.
 
 It takes a lock so two sessions never run the pull at once, exits 0 unless that lock is busy, logs to

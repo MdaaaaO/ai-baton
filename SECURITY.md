@@ -46,14 +46,17 @@ and the commands below have nothing to check for them.
 Check a downloaded release:
 
 ```sh
-gh release download <tag> --repo MdaaaaO/ai-baton --pattern manifest.txt
-gh attestation verify manifest.txt --repo MdaaaaO/ai-baton \
+d=$(mktemp -d)
+gh release download <tag> --repo MdaaaaO/ai-baton --pattern manifest.txt --dir "$d"
+gh attestation verify "$d/manifest.txt" --repo MdaaaaO/ai-baton \
   --signer-workflow MdaaaaO/ai-baton/.github/workflows/release.yml
 ```
 
+The scratch directory keeps `manifest.txt` out of your clone, where `sync.sh` would otherwise count it as uncommitted work.
+
 A pass proves the manifest was signed by this repository's `release` workflow and has not changed since. It
 does not say which run or which tag: the manifest's own `commit` line does. Run from a checkout of the kit,
-`python3 context-db/bin/release_manifest.py verify manifest.txt --root <checkout of that tag>` then checks the
+`python3 context-db/bin/release_manifest.py verify "$d/manifest.txt" --root <checkout of that tag>` then checks the
 manifest's claims against that checkout — every tracked file's hash, and the commit.
 
 Immutable releases and a tag ruleset on `v*` (no update, no delete) are both on for this repository. The

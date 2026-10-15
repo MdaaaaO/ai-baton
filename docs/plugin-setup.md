@@ -114,8 +114,9 @@ Verifying a release has what the release manifest and its attestation check prov
    Verifying a release):
 
    ```sh
-   gh release download <tag> --repo MdaaaaO/ai-baton --pattern manifest.txt
-   gh attestation verify manifest.txt --repo MdaaaaO/ai-baton \
+   d=$(mktemp -d)
+   gh release download <tag> --repo MdaaaaO/ai-baton --pattern manifest.txt --dir "$d"
+   gh attestation verify "$d/manifest.txt" --repo MdaaaaO/ai-baton \
      --signer-workflow MdaaaaO/ai-baton/.github/workflows/release.yml
    ```
 

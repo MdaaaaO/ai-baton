@@ -1605,6 +1605,16 @@ class CloneChannelReport(unittest.TestCase):
         self.assertIn("example/kit", text)
         self.assertIn("make claude_sync", text)
 
+    def test_hand_verify_command_downloads_into_a_scratch_dir(self):
+        # run from the checkout, a bare download would leave manifest.txt in the clone root
+        for text_kind in ("abc1234 unverified (offline, no gh)\n", "abc1234 rejected attestation verify rejected it\n"):
+            kh, r = self.run_report(describe="v0.3.0", unverified_text=text_kind)
+            text = r.findings[0][2]
+            self.assertIn("d=$(mktemp -d)", text)
+            self.assertIn('--dir "$d"', text)
+            self.assertIn('gh attestation verify "$d/manifest.txt"', text)
+            self.assertNotIn("verify manifest.txt", text)
+
     def test_a_mark_for_another_commit_never_warns(self):
         # HEAD moved without a sync run since: the mark says nothing about the commit checked out now
         mark = "abc1234 unverified (offline, no gh)\n"

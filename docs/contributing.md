@@ -212,10 +212,11 @@ tags that commit `vX.Y.Z` and publishes a GitHub Release with the section as not
 manifest of the tagged commit as an asset — `manifest.txt`: `commit <sha>` plus one sha256 line per
 tracked file, built by `context-db/bin/release_manifest.py` (`build`/`verify` subcommands, unit
 tested) and covered by a build-provenance attestation (no secrets: Sigstore signs it with the job's
-own OIDC token). Verify a downloaded release: `gh attestation verify manifest.txt --repo
-MdaaaaO/ai-baton --signer-workflow MdaaaaO/ai-baton/.github/workflows/release.yml` checks the
+own OIDC token). Verify a downloaded release (into a scratch dir, `d=$(mktemp -d)` and
+`gh release download <tag> … --dir "$d"`, never into the checkout): `gh attestation verify "$d/manifest.txt"
+--repo MdaaaaO/ai-baton --signer-workflow MdaaaaO/ai-baton/.github/workflows/release.yml` checks the
 attestation (the manifest came from that workflow run, untampered); `release_manifest.py verify
-manifest.txt --root <checkout>` then checks the manifest's own claims against a local checkout
+"$d/manifest.txt" --root <checkout>` then checks the manifest's own claims against a local checkout
 (every tracked file's hash, the commit).
 
 - `make kit_release_dry` (workspace root) — the next version and its section; writes nothing.

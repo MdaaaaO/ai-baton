@@ -78,6 +78,19 @@ class Build(unittest.TestCase):
             self.assertEqual(rm.main(["build", "--root", str(repo.path), "--out", str(out)]), 0)
             self.assertEqual(out.read_text(encoding="utf-8"), rm.build(repo.path))
 
+    def test_an_ignored_manifest_at_the_root_is_built_and_never_listed(self):
+        # the kit ignores /manifest.txt so a stray copy never blocks a sync; the release job still builds it there
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            (repo.path / ".gitignore").write_text("/manifest.txt\n", encoding="utf-8")
+            git(repo.path, "add", ".gitignore")
+            git(repo.path, "commit", "-q", "-m", "ignore")
+            out = repo.path / "manifest.txt"
+            self.assertEqual(rm.main(["build", "--root", str(repo.path), "--out", str(out)]), 0)
+            self.assertTrue(out.is_file())
+            self.assertNotIn("manifest.txt", rm.parse(out.read_text(encoding="utf-8"))[1])
+            self.assertEqual(rm.verify(out.read_text(encoding="utf-8"), repo.path), [])
+
 
 class Verify(unittest.TestCase):
     def test_matching_manifest_has_no_problems(self):
