@@ -755,7 +755,7 @@ class LoadingTable(unittest.TestCase):
         # never computed — the named units' bytes alone, no "(… B left of …)".
         out_buf, err_buf = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
-            rc = kit_verify.main(["--no-env", "skills/pr-open"])
+            rc = kit_verify.main(["--no-env", str(kit_verify.KIT / "skills" / "pr-open")])
         self.assertEqual(rc, 0, err_buf.getvalue())
         out = out_buf.getvalue()
         self.assertRegex(out, r"descriptions \d+ B")
