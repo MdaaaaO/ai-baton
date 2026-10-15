@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from typing import Optional
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,7 +20,7 @@ def stamp(days_ago: float) -> str:
 
 
 def session_file(root: Path, name: str, status: str, ended_days_ago: float, next_prompt: str, hb: str = "",
-                 registered: str | None = "") -> Path:
+                 registered: Optional[str] = "") -> Path:
     """A session doc; `registered` defaults to the heartbeat (registered, never touched since), None omits the field
     (a doc written before session.py stamped it)."""
     hb = hb or stamp(ended_days_ago)
