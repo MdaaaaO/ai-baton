@@ -227,6 +227,7 @@ def restore_from_archive(name: str) -> str:
         return live
     cands = _archived_candidates(name)
     if cands:
+        adir = os.path.join(SESS_DIR, "archive")
         _, fn = max(cands)
         try:
             os.replace(os.path.join(adir, fn), live)
