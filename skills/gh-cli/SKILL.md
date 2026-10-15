@@ -2,9 +2,9 @@
 name: gh-cli
 description: "Querying GitHub with `gh` without the known traps: auth (native vs proxy token), `--jq`/`--arg`, search rate limits, pagination, old-gh `--json` gaps, silent write failures, and checks/runs waits without a hand-rolled loop. Use when doing non-trivial `gh api`/`search`/`pr` calls or CI/comment waits."
 metadata:
-  version: "16"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "17"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   facts: "github.org,github.sandbox_token_prefix"
 ---
 
@@ -76,8 +76,9 @@ the script.
 - **Count ≠ impact.** Always pair a PR count with size (additions/deletions/files) and a
   window that is equal for everyone (the user's own start date is the fair floor — never a different one per person).
 - **Exclude bots** (the env config's `github.bots` list + `github.review_bot`) from author counts, and say so.
-- **Agent-drafted reviews exist**: reviews whose body carries `<!-- gh-review-snapshot:v1 … -->`
-  come from an agent that drafted the review for its author. Count them, but label them.
+- **Agent-drafted reviews exist**: reviews whose body carries `<!-- pr-review:v1 head=… base=… by=<login> -->`
+  (the marker `pr-review`'s `submit-review.sh` writes) were drafted by the agent and posted under the
+  reviewer's login. Count them, but label them.
 - **Repo scope matters**: a four-repo count can halve someone whose work is cross-repo; run the
   org-wide (`user:<org>`) count next to it.
 - Numbers go in a table in the reply, never in prose (`WORKSPACE.md` § Rules).
