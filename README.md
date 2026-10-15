@@ -33,16 +33,37 @@ git clone https://github.com/MdaaaaO/ai-baton.git .claude && sh .claude/setup.sh
 > **Never use your home directory as the workspace root.** `~/.claude` is Claude Code's own config directory;
 > `setup.sh` refuses `$HOME` as the workspace root.
 
-Both paths set `$BATON`, the environment variable naming the kit root that the rest of this repo's docs and
-commands write as `$BATON/…` — a clone's `settings.json` sets it to `.claude`, a plugin install's SessionStart
-hook exports it from Claude Code's plugin cache. You never set it yourself (`docs/glossary.md`).
+Both paths set `$BATON`, the kit root that this repo's docs write as `$BATON/…`: a clone's `settings.json` sets it
+to `.claude`, a plugin's SessionStart hook exports it from the plugin cache. You never set it (`docs/glossary.md`).
+
+## Your first session
+
+A fresh install, trimmed (`…`) and redacted (`you` is the login). None of it calls a model:
+
+```text
+# SessionStart hook: the resolved profile, then WORKSPACE.md (the shared rules, 9,985 B)
+resolved profile (kit_profile.py get):
+  tracker: kind=github key_regex=… url_template=https://github.com/{repo}/issues/{key}
+  systems on: <none>
+  footer: none yet — `session-register` records the name; …
+# Workspace — shared Claude Code context (core)  …
+
+$ make -C $BATON/context-db session-register NAME=demo-first REF=demo EPIC=you/sample-repo#1 \
+    REPOS=you/sample-repo WORKING="first session" RESP="demo"
+registered sessions/demo-first.md
+wrote SESSION_INDEX.md — 1 active, 0 ended listed, 0 with no prompt
+
+$ python3 $BATON/skills/kit-health/kit-health.py --stale 90 --quiet
+**AMBER** — 0 errors · 4 warnings · 29 checks passed · environment `you`
+```
+
+The first run is AMBER: each warning names its fix (here the unfetched ctx store and the missing stamp).
 
 ## The loop
 
-The kit exists to run this loop, not to be a feature list: an issue is sized once, picked up by a worker matched
+The kit exists to run this loop: an issue is sized once, picked up by a worker matched
 to that size, reviewed and merged without a human once the routine gates hold, and a session's own retro turns
-what went wrong back into an issue. The cost story is the point: the expensive model reviews and decides, and
-cheaper models do the reading and the mechanical work.
+what went wrong back into an issue. The expensive model reviews and decides; cheaper models do the reading and the mechanical work.
 
 ```mermaid
 flowchart LR
@@ -77,8 +98,7 @@ flowchart LR
 | A skills plugin | Skills hardcode your org, channels and ids, or ask you for them every time | An env fact store: a fact is found once, then read everywhere |
 | Nothing | Each session starts cold and forgets what the last one learned | `.context/`, an indexed markdown DB, plus a session registry and handoff docs |
 
-Use a plain `CLAUDE.md` when you have one repo and work alone. The kit pays off once you have several repos,
-several machines or several people.
+Use a plain `CLAUDE.md` for one repo and one person. The kit pays off past that: several repos, machines or people.
 
 ## How it works
 
@@ -95,7 +115,7 @@ several machines or several people.
 
 ## Stays healthy on every machine
 
-The kit maintains itself, and each machine that runs it checks its own copy:
+Each machine checks its own copy:
 
 | Loop | What it does |
 |---|---|
@@ -122,16 +142,15 @@ flowchart LR
 
 ### Quick start: a GitHub-only machine
 
-This setup needs no questions. Run the block for your path above, from your workspace root. `--personal` takes
+It asks no questions: run the block for your path above, from your workspace root. `--personal` takes
 your login and name from `gh`, your repos from the clones under the workspace root, and the timezone from the OS.
-It sets every `systems.*` flag to false. A skill that needs Jira, Slack or a warehouse stops with one "not
-applicable here" line. It is safe to re-run. Fetch the pinned ctx-store first
+It sets every `systems.*` flag to false, so a skill that needs Jira, Slack or a warehouse stops with one "not
+applicable here" line. Re-running is safe. Fetch the pinned ctx-store first
 (`python3 <kit>/context-db/bin/ctx_adapter.py install`) and setup also adopts `.context/` as a ctx store, so every
 write to a context doc goes through ctx's validated, audited verbs.
 
-On the plugin path `/kit-setup` runs the plugin's own `setup.sh` from inside the session, which knows where the
-plugin lives (its root moves on every update). That seeds `.context/` and the root `CLAUDE.md`, but no `Makefile` include:
-the plugin's own hook loads the shared rules. To set your identity without `gh`, run `/plugin configure ai-baton`.
+On the plugin path `/kit-setup` runs the plugin's own `setup.sh` from inside the session, since the plugin's root
+moves on every update. It seeds `.context/` and the root `CLAUDE.md` but no `Makefile` include: the hook loads the rules. To set your identity without `gh`, run `/plugin configure ai-baton`.
 [`docs/plugin-setup.md`](docs/plugin-setup.md) walks the plugin path step by step, including updates and a switch
 from a clone.
 
@@ -153,9 +172,11 @@ explains the clone's hooks and guards.
 
 ## What's inside
 
+**Bold** = start here on day one.
+
 | Category | Skills |
 |---|---|
-| Sessions and knowledge | `session-register` · `session-handoff` · `session-retro` · `env-init` · `kit-setup` · `kit-health` · `cost-report` · `self-assessment` · `mission-control` |
+| Sessions and knowledge | **`kit-health`** · **`session-register`** · **`session-handoff`** · `session-retro` · `env-init` · `kit-setup` · `cost-report` · `self-assessment` · `mission-control` |
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
