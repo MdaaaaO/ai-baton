@@ -2,7 +2,7 @@
 name: pr-scan
 description: "Forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts, stale, already-reviewed heads. Returns a <=8-row brief or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
 metadata:
-  version: "23"
+  version: "24"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "github.display_names"
@@ -131,7 +131,7 @@ job. The `**Auto**` and `**AUTO-COMMENT**` lines repeat the gate's facts only �
 
 Rows flagged `A` follow the one contract in `pr-review/reference/auto-approve.md` (gate, modes, ledger, fallback).
 
-## Unattended auto-COMMENT (owner-decision scope, opt-in — off by default)
+## Unattended auto-COMMENT (opt-in — off by default)
 
 Rows this fork flags `C` (config block `auto_comment` in `config.json`) are eligible for `pr-review`'s unattended
 auto-COMMENT path — a deterministic, gh-call-free pre-filter computed inline in `pr-scan.sh`. This fork only
@@ -145,7 +145,7 @@ auto-COMMENT path for direct review requests.
 - Skip a PR for its current head: append `{"repo":"<org>/x","pr":N,"head":"<sha>","status":"skipped","ts":"…"}` to the ledger.
 - Change repos, freshness window, bot list, or row cap: edit `.context/state/pr-review/config.json`.
 - Arm recurring: `/loop 2h /pr-scan` — the default cadence (the fork returns NO-OP on quiet ticks, so the
-  main session spends nothing beyond the ~$0.1 triage tick); widen the interval, e.g. `/loop 4h /pr-scan`,
+  main session spends nothing beyond one cheap triage tick); widen the interval, e.g. `/loop 4h /pr-scan`,
   to halve that further when the queue is calm.
   Disarm by stopping the loop; the ledger keeps state across sessions. Never two sweeps at once — the
   script's `.scan.lock` refuses the second, and the ledger is shared state.
