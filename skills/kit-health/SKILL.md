@@ -2,7 +2,7 @@
 name: kit-health
 description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Walks each finding, reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
 metadata:
-  version: "76"
+  version: "78"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "aws.profile kit-health"
@@ -47,6 +47,9 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    a direct `Write`/`Edit` of a `.context/` doc is denied. When that log already exists (an earlier run today, or
    the re-run after a Fix), `new` refuses to clobber it: `ctx_insert` a `## Run <HH:MM>` section with the same
    content at the top of its body instead (a report's runs read newest first).
+   Then `python3 $BATON/skills/kit-health/kit-health.py --archive-logs [--keep-logs N]` archives this environment's older
+   logs through `ctx fm`, keeping the N newest (default 1), today's and the HEALTH doc; only `status: active`
+   logs are touched, a `reference` one stays (idempotent; safe on a re-run).
 6. **Stamp.** Re-run step 1 with `--stamp`: it refuses on any error **or un-accepted leak hit**, else
    writes the HEALTH doc (`last_green`, `kit_commit`, `kit_version`, `install_mode`, `warnings`) and re-indexes.
 7. **PR.** Kit files the walk touched go out as one PR from that worktree (`pr-open`); after the merge (and
