@@ -77,5 +77,5 @@ sync run. A later `make claude_sync` whose check runs and rejects the applied re
 check that cannot run does not lift it); the release itself stays applied.
 
 A bad release is fixed by a newer release; there is no revocation switch. Publish the fixed version: the marketplace
-ref only moves forward, and a machine takes it with `claude plugin update`. A machine that cannot update yet pins the
-last good version by its tag.
+ref only moves forward, and a machine takes it with `claude plugin update`. A machine that cannot update yet stays on the
+version its marketplace `source.ref` names (the release tag).
