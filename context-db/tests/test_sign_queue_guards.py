@@ -565,6 +565,31 @@ class DrainSurvives(unittest.TestCase):
             self.assertIn("FAILED", out)
             self.assertNotIn("remote moved", out)
 
+    def test_a_gh007_push_rejection_names_the_no_reply_remedy_and_not_the_rebase_one(self):
+        gh007 = ("remote: error: GH007: Your push would publish a private email address.\\n"
+                 "remote: You can make your email public or disable this protection by visiting:\\n"
+                 "To github.com:example/repo.git\\n"
+                 " ! [remote rejected] feat -> feat (push declined due to email privacy restrictions)")
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._queue(Path(tmp))
+            job = sq.Q / "20260101T000000Z-000-a.sh"
+            job.write_text(f'# META {{"topic": "a"}}\nprintf \'%b\\n\' \'{gh007}\'\nexit 1\n')
+            out = self._drain(sq, rc=1)
+        self.assertIn("GH007", out)
+        self.assertIn("<login>@users.noreply.github.com", out)
+        self.assertIn("git commit --amend --reset-author", out)
+        self.assertNotIn("remote moved", out)
+
+    def test_a_bare_remote_rejection_gets_the_generic_hint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._queue(Path(tmp))
+            job = sq.Q / "20260101T000000Z-000-a.sh"
+            job.write_text('# META {"topic": "a"}\necho " ! [remote rejected] feat -> feat (hook declined)"\nexit 1\n')
+            out = self._drain(sq, rc=1)
+        self.assertIn("the remote refused the push", out)
+        self.assertNotIn("GH007", out)
+        self.assertNotIn("remote moved", out)
+
     def test_a_topic_that_starts_with_a_number_survives_a_job_name_without_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             sq = self._queue(Path(tmp))

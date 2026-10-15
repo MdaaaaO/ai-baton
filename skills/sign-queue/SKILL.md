@@ -3,8 +3,8 @@ name: sign-queue
 description: "Shared queue for commits the user must sign and push on the host: a session enqueues a job (worktree, branch, message file, flags), the user drains it with one command. Use when committing or pushing in a signed-commits repo; never paste git one-liners. Inert when `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "23"
-  updated: "2026-10-02"
+  version: "24"
+  updated: "2026-10-15"
   reviewed: "2026-10-02"
   requires: "signed_commits"
 ---
@@ -92,6 +92,9 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
   `.failed` file and enqueue again. If the commit itself was made but only the **push** failed (worktree clean,
   HEAD ahead of `origin/<branch>`), enqueue the same job again — the commit step is skipped ("already committed");
   add `--rebase` when the remote moved (an "Update branch" merge commit is the usual cause of a rejected push).
+  A push GitHub refuses with `GH007` (`! [remote rejected]`, "push would publish a private email address") is not a
+  moved remote: the drain hints the fix. On the signing host set `git config user.email <login>@users.noreply.github.com`,
+  `git commit --amend --reset-author` in the worktree, then enqueue again; `--rebase` cannot change an author e-mail.
 - `--files` and deletions: a `git rm`-staged deletion is in neither worktree nor index, so `git add -- <path>`
   fails on it; enqueue.sh drops such paths (they are already in the commit) and refuses paths that are
   neither present nor tracked. Check `git status --short` before enqueuing (first column = already staged).
