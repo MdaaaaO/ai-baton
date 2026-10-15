@@ -339,11 +339,11 @@ def clone_channel_report(r: Report) -> None:
     if kind:
         repo = kit_repo()
         tag = installed or "<tag>"
-        cmd = (f"gh release download {tag} --repo {repo} --pattern manifest.txt && "
-               f"gh attestation verify manifest.txt --repo {repo} "
-               f"--signer-workflow {repo}/.github/workflows/release.yml") if repo else \
-              ("gh release download <tag> --pattern manifest.txt && gh attestation verify manifest.txt "
-               "--repo <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yml")
+        r_ = repo or "<owner>/<repo>"
+        # a scratch target: run from the checkout, a bare download would leave manifest.txt in the clone root
+        cmd = (f'd=$(mktemp -d) && gh release download {tag} --repo {r_} --pattern manifest.txt --dir "$d" && '
+               f'gh attestation verify "$d/manifest.txt" --repo {r_} '
+               f"--signer-workflow {r_}/.github/workflows/release.yml")
         if kind == "rejected":
             r.add(ERR, "kit", f"the installed release failed a later manifest check ({reason}) and is still "
                   f"applied — check it by hand: `{cmd}` (docs/contributing.md § Releases); `make claude_sync` "

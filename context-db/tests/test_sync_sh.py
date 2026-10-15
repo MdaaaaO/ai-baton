@@ -542,6 +542,33 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.status()[1], "error")
         self.assertIn("uncommitted", self.check())
 
+    def test_dirty_refusal_names_the_paths(self):
+        # a stray file is told apart from real work by its name, not by the word "uncommitted"
+        (self.kit / "stray-download.bin").write_text("x")
+        (self.kit / ".gitignore").write_text("# edited\n")
+        self.sync()
+        line = " ".join(self.status())
+        self.assertEqual(self.status()[1], "error")
+        self.assertIn("?? stray-download.bin", line)
+        self.assertIn("M .gitignore", line)
+        self.assertEqual(len(self.status_file.read_text().splitlines()), 1, "the status file stays one line")
+
+    def test_kit_ignores_a_manifest_in_its_root(self):
+        # a release manifest downloaded by hand into the clone root must not read as uncommitted work
+        r = subprocess.run(["git", "check-ignore", "-q", "manifest.txt"], cwd=KIT, env=self.env, capture_output=True)
+        self.assertEqual(r.returncode, 0, "manifest.txt at the kit root must be in .gitignore")
+        r = subprocess.run(["git", "check-ignore", "-q", "docs/manifest.txt"], cwd=KIT, env=self.env,
+                           capture_output=True)
+        self.assertEqual(r.returncode, 1, "only the root copy is ignored")
+
+    def test_dirty_refusal_caps_the_path_list(self):
+        for i in range(8):
+            (self.kit / f"stray-{i}").write_text("x")
+        self.sync()
+        line = " ".join(self.status())
+        self.assertIn("+3 more", line)
+        self.assertNotIn("stray-7", line)
+
     # ── release channel: tag selection, the held preview, --accept, the `main` opt-out ──
     def test_default_channel_holds_the_highest_merged_release_tag(self):
         # two releases, then an unreleased commit: a bare run holds the highest tag origin/main

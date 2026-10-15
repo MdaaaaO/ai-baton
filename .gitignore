@@ -32,3 +32,7 @@ profiles/
 # skills/pr-open's mermaid-check.mjs deps are meant to land in a scratchpad, not here — but ignore a stray
 # in-place `npm ci` so it never gets committed by accident
 node_modules/
+
+# a release manifest downloaded or built by hand in the clone root (CI uploads it from here) must never
+# count as uncommitted work and block sync.sh
+/manifest.txt
