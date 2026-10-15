@@ -4,6 +4,69 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.11.0 (2026-10-15)
+
+
+### Features
+
+* **kit:** add a simplified technical english output style ([#543](https://github.com/MdaaaaO/ai-baton/issues/543)) ([c166bc1](https://github.com/MdaaaaO/ai-baton/commit/c166bc12304649d396f9927bb226b5b50c973e09))
+* **kit:** sweep pr-review scratch at wind-down and in kit-health ([#549](https://github.com/MdaaaaO/ai-baton/issues/549)) ([b7baa35](https://github.com/MdaaaaO/ai-baton/commit/b7baa35f9dfda3f2411cdf4deac0d41804fe1a0c))
+* **pr-open:** resolve reviewers from the live CODEOWNERS file ([#572](https://github.com/MdaaaaO/ai-baton/issues/572)) ([6102a2c](https://github.com/MdaaaaO/ai-baton/commit/6102a2c3ac5f479891d9776365813bd1e0c0a056))
+* **kit:** route the read-and-classify sweeps to haiku as a trial ([#565](https://github.com/MdaaaaO/ai-baton/issues/565)) ([656b296](https://github.com/MdaaaaO/ai-baton/commit/656b296eb70254d50603264c3fd81e3bdaf5548f))
+* **session-register:** watcher carve-out for a PR driven to merge ([#575](https://github.com/MdaaaaO/ai-baton/issues/575)) ([d11adfe](https://github.com/MdaaaaO/ai-baton/commit/d11adfe44433364dddb906fdfe545f0a66a1f1d3))
+* **engine:** seed the resolve rule from the env config and a key field ([#570](https://github.com/MdaaaaO/ai-baton/issues/570)) ([54b1dcb](https://github.com/MdaaaaO/ai-baton/commit/54b1dcb23042dfbd7a3fd5c3f46de427d491ee80))
+* **engine:** dated price config, cost-report target, cached manifests ([#559](https://github.com/MdaaaaO/ai-baton/issues/559)) ([c58d4ff](https://github.com/MdaaaaO/ai-baton/commit/c58d4ff888686c9c197f8ec6b72f1bfec19d93bd))
+* **ctx:** adapter syncs the store after each write ([#563](https://github.com/MdaaaaO/ai-baton/issues/563)) ([599e4af](https://github.com/MdaaaaO/ai-baton/commit/599e4af45530c1bc8def83cda3c1f04aa975051d))
+* **kit-health:** archive older daily logs once a new one exists ([#574](https://github.com/MdaaaaO/ai-baton/issues/574)) ([9e50e2d](https://github.com/MdaaaaO/ai-baton/commit/9e50e2d360ee120a0f9f1149b9bf341d0f5e3301))
+* **engine:** archive an ended session once its successor registered ([#567](https://github.com/MdaaaaO/ai-baton/issues/567)) ([2b64e41](https://github.com/MdaaaaO/ai-baton/commit/2b64e417cad38e403df33a7b7d76c3a49a28f21e))
+* **pr-review:** unattended approve on a clean runner sheet ([#571](https://github.com/MdaaaaO/ai-baton/issues/571)) ([9c38b4f](https://github.com/MdaaaaO/ai-baton/commit/9c38b4f66377124cb07f8d7970e6a85109f8f08a))
+* **memory-prune:** audit auto-memory against the always-on prefix ([#577](https://github.com/MdaaaaO/ai-baton/issues/577)) ([9e65a61](https://github.com/MdaaaaO/ai-baton/commit/9e65a613032a47b6dbb631259b36dc7cf6bd761d))
+* **engine:** size budgets by doc type, folded findings, slimmer index ([#569](https://github.com/MdaaaaO/ai-baton/issues/569)) ([df8abae](https://github.com/MdaaaaO/ai-baton/commit/df8abae00cbd53a120df0f0d071ef32c89bbbc65))
+
+
+### Bug Fixes
+
+* **pr-open:** bump source-map-js and katex in the mermaid-check lockfile ([#546](https://github.com/MdaaaaO/ai-baton/issues/546)) ([3f7c443](https://github.com/MdaaaaO/ai-baton/commit/3f7c44312b6854caee82d08ceb732946b0def7c4))
+* **session:** merge duplicate open-prs headings, fix step 4 wording ([#548](https://github.com/MdaaaaO/ai-baton/issues/548)) ([03e89e5](https://github.com/MdaaaaO/ai-baton/commit/03e89e5f6d2b60275f221e786547d4ba8ef500f7))
+* **kit-verify:** trim eight descriptions, report bytes left of budget ([#547](https://github.com/MdaaaaO/ai-baton/issues/547)) ([08581b7](https://github.com/MdaaaaO/ai-baton/commit/08581b757b153a4be13d6e89a1152e4d7c38f24d))
+* **mission-control:** report unreadable sources instead of blank data ([#555](https://github.com/MdaaaaO/ai-baton/issues/555)) ([7b49753](https://github.com/MdaaaaO/ai-baton/commit/7b4975370e65d7997fe04132d42bb0d962f00e98))
+* **ci:** keep the PR's conventional footers in the auto-merge squash ([#552](https://github.com/MdaaaaO/ai-baton/issues/552)) ([cf3942c](https://github.com/MdaaaaO/ai-baton/commit/cf3942c07f6065da9eb4f2ea7ba76d2e27b86a16))
+* **sign-queue:** name the no-reply remedy on a GH007 push rejection ([#561](https://github.com/MdaaaaO/ai-baton/issues/561)) ([6ce2995](https://github.com/MdaaaaO/ai-baton/commit/6ce299503d23fab329c58fbae76d589257306e60))
+* **sync:** verify the manifest from a scratch dir, name refused paths ([#556](https://github.com/MdaaaaO/ai-baton/issues/556)) ([14165df](https://github.com/MdaaaaO/ai-baton/commit/14165df34fe3ecc3f4b8d3d8160efea5131cb9ce))
+* **session:** record the footer name only for the live store ([#568](https://github.com/MdaaaaO/ai-baton/issues/568)) ([bea7892](https://github.com/MdaaaaO/ai-baton/commit/bea7892b4de4e905a256c9059adc719a9da624db))
+* **sync:** show the git fetch error and the rejected-tag remedy ([#557](https://github.com/MdaaaaO/ai-baton/issues/557)) ([48cfe5b](https://github.com/MdaaaaO/ai-baton/commit/48cfe5bf93b7dcd0bc9074992ddc5b8e3911579b))
+* **ticket-open:** stamp the Jira sketch as one fenced ASCII box ([#554](https://github.com/MdaaaaO/ai-baton/issues/554)) ([b5d4c89](https://github.com/MdaaaaO/ai-baton/commit/b5d4c89d833e82a261041cca8602823ac6c51dc9))
+* **pr-review:** accept every traps heading form in fetch-context ([#564](https://github.com/MdaaaaO/ai-baton/issues/564)) ([fc18b48](https://github.com/MdaaaaO/ai-baton/commit/fc18b480434c2c7fcc8ae3066b6f0f643beb9410))
+* **engine:** count gh issue tool calls in session-stats ticket counters ([#558](https://github.com/MdaaaaO/ai-baton/issues/558)) ([e67ae7f](https://github.com/MdaaaaO/ai-baton/commit/e67ae7f9a3721cb7826b3fce73db4d11238b678e))
+* **mission-control:** catch location setters and += in the scan ([#553](https://github.com/MdaaaaO/ai-baton/issues/553)) ([edbbac4](https://github.com/MdaaaaO/ai-baton/commit/edbbac4f4f858cdbf54962a7eb3c1a70c8c1ef31))
+
+
+### Documentation
+
+* **readme:** show a first session after the install blocks ([#560](https://github.com/MdaaaaO/ai-baton/issues/560)) ([b932b94](https://github.com/MdaaaaO/ai-baton/commit/b932b949cd70a88cbeab18d9ea39fcffd0bb0c0a))
+* **workspace:** always-on rules first; bad-release handling in SECURITY ([#566](https://github.com/MdaaaaO/ai-baton/issues/566)) ([dc7de71](https://github.com/MdaaaaO/ai-baton/commit/dc7de7153fd53d3bbe0f7f0e6a6d4317aa0dfa73))
+* **rules:** resolve an approver's review threads ourselves ([#580](https://github.com/MdaaaaO/ai-baton/issues/580)) ([a9fa61c](https://github.com/MdaaaaO/ai-baton/commit/a9fa61c6ad67cd239732b951b697351223bac9c0))
+* **vision:** what the kit is, who it is for, non-goals (#41) ([#583](https://github.com/MdaaaaO/ai-baton/issues/583)) ([04ea91f](https://github.com/MdaaaaO/ai-baton/commit/04ea91fdb6c5940e93cf5e9c1f4a727836cdc74f))
+
+
+### Refactors
+
+* **ci:** one checker and one prose home for commit and review rules ([#562](https://github.com/MdaaaaO/ai-baton/issues/562)) ([5976a29](https://github.com/MdaaaaO/ai-baton/commit/5976a29cb4a081c9b7d4ba4b483c891d34744e14))
+* **pr-review:** one home for runner steps, contract and facts (#48) ([#581](https://github.com/MdaaaaO/ai-baton/issues/581)) ([1d03139](https://github.com/MdaaaaO/ai-baton/commit/1d031396ebb67d2450c2791d8ff51d241d965f1f))
+* **sign-queue:** one skill plus a discipline reference ([#578](https://github.com/MdaaaaO/ai-baton/issues/578)) ([9267f2f](https://github.com/MdaaaaO/ai-baton/commit/9267f2f3896fa9e0f356631d6607b241c8b3c8f0))
+* **skills:** bodies state the rule, detail in reference (#49) ([#582](https://github.com/MdaaaaO/ai-baton/issues/582)) ([808dcac](https://github.com/MdaaaaO/ai-baton/commit/808dcacf78385e01a92c2a17a15e4eb3ff0d347e))
+
+
+### CI
+
+* **deps:** bump anthropics/claude-code-action from 1.0.238 to 1.0.245 ([#525](https://github.com/MdaaaaO/ai-baton/issues/525)) ([23481d8](https://github.com/MdaaaaO/ai-baton/commit/23481d8560a87db9abc9a0cadb61b88705ae854f))
+* **deps:** bump actions/upload-artifact from 7.0.1 to 7.0.2 ([#526](https://github.com/MdaaaaO/ai-baton/issues/526)) ([632f69c](https://github.com/MdaaaaO/ai-baton/commit/632f69ccc6a47ccdadcd343239b71340ae576bf0))
+
+
+### Chore
+
+* **engine:** re-pin ctx-store to 0.8.0 ([#576](https://github.com/MdaaaaO/ai-baton/issues/576)) ([c6da047](https://github.com/MdaaaaO/ai-baton/commit/c6da047cf13573f1b209ff04a1cb24b4f16f5a23))
+
 ## 0.10.0 (2026-10-13)
 
 
