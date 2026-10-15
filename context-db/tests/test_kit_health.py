@@ -1401,8 +1401,18 @@ class PrReviewExampleUnchanged(unittest.TestCase):
         kh = load_kit_health()
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "config.example.json"
-            p.write_text(json.dumps({"login": "a-real-login", "owner": "<org>"}), encoding="utf-8")
-            self.assertEqual(kh.pr_review_example_edited(p), ["login"])
+            p.write_text(json.dumps({"sweep_repos": ["acme/real-repo"]}), encoding="utf-8")
+            self.assertEqual(kh.pr_review_example_edited(p), ["sweep_repos"])
+            p.write_text(json.dumps({"sweep_repos": ["<org>/<repo-a>"]}), encoding="utf-8")
+            self.assertEqual(kh.pr_review_example_edited(p), [])
+
+    def test_a_fact_key_put_back_into_the_example_is_flagged(self):
+        # #48: login / owner / bots / owner_teams are facts read through kit_profile.py review-facts, never config keys
+        kh = load_kit_health()
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "config.example.json"
+            p.write_text(json.dumps({"login": "<x>", "bots": [], "auto_approve": {"owner_teams": []}}), encoding="utf-8")
+            self.assertEqual(kh.pr_review_example_edited(p), ["login", "bots", "auto_approve.owner_teams"])
 
     def test_missing_or_unparseable_example_is_not_flagged(self):
         kh = load_kit_health()

@@ -1,6 +1,5 @@
 {
-  "login": "<your-github-login>",
-  "owner": "<org>",
+  "_facts_note": "Tuning only. The GitHub login (WORKSPACE_GITHUB_LOGIN), owner (github.org), bot list (github.bots + github.review_bot) and owner teams (github.owner_teams) are facts: the scripts read them through kit_profile.py review-facts, never from this file.",
   "sweep_repos": [
     "<org>/<repo-a>",
     "<org>/<repo-b>"
@@ -9,13 +8,6 @@
   "max_rows": 8,
   "enrich_cap": 40,
   "deep_lines": 600,
-  "bots": [
-    "dependabot[bot]",
-    "renovate[bot]",
-    "github-actions[bot]",
-    "<review-bot-login>",
-    "copilot"
-  ],
   "footer": "",
   "auto_approve": {
     "mode": "shadow",
@@ -136,11 +128,7 @@
       "**/CODEOWNERS"
     ],
     "_scope_note": "GitHub-Actions bumps under .github/workflows are hard-excluded in v1 (owner to decide); lock-only PRs are not eligible",
-    "owner_teams": [
-      "<owner-team>",
-      "<owner-team-2>"
-    ],
-    "_ownership_note": "Auto-approve applies only to PRs the user is asked to review: requested_reviewers contains login OR requested_teams intersects owner_teams. Repo-sweep rows never qualify (a sweep row is not a request — it may come from teams the user is not in).",
+    "_ownership_note": "Auto-approve applies only to PRs the user is asked to review: requested_reviewers contains the login OR requested_teams intersects the env store's github.owner_teams. Repo-sweep rows never qualify (a sweep row is not a request — it may come from teams the user is not in).",
     "docs_exclude_globs": [
       "dbt/**/*.md",
       "**/dbt/**/*.md",

@@ -216,6 +216,10 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
                         python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 otherwise
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
+                        python3 kit_profile.py review-facts [--need login,owner]  # the pr-review scripts' GitHub facts as JSON
+                                                               #   {login, owner, bots, owner_teams, review_bot}: the login
+                                                               #   from identity, the rest from github.* in the store; exit 1
+                                                               #   + one stderr line per --need fact that is empty
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py scratch --sweep-pr-review  # wind-down: remove this session's own pr-review/ scratch subtree only (next.md, session-name stay); exit 2 on a symlinked/escaping one
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)

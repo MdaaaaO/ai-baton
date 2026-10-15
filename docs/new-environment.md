@@ -76,7 +76,7 @@ cp .claude/settings.local.example.json .claude/settings.local.json
 $EDITOR .claude/settings.local.json      # WORKSPACE_* identity keys (plugin install: /plugin configure ai-baton instead)
 sh .claude/setup.sh                      # from the workspace root — env store, memory link, seeds
 python3 .claude/context-db/bin/kb.py config-set environment acme    # then tracker.kind, github.org, systems.*, tz_default, domains
-$EDITOR .context/state/pr-review/config.json   # set "login"
+$EDITOR .context/state/pr-review/config.json   # sweep_repos (tuning only; login/org/bots come from the identity + store)
 $EDITOR CLAUDE.md                        # the preamble: who you are
 ```
 
@@ -122,8 +122,9 @@ edited — if you already have a root `CLAUDE.md` or `Makefile`, add the two imp
    capabilities this machine turns on (`systems.*`), how the skills behave here,
    conventions, the always-on rules that are yours, the repo map. Cite config keys, not values; it is
    a normal `.context/` reference doc (`make -C .claude/context-db index verify` covers it).
-7. **Per-user review config:** `.context/state/pr-review/config.json` — `owner` = your `github.org`,
-   `sweep_repos` inside it, `login` = you.
+7. **Per-user review config:** `.context/state/pr-review/config.json` — tuning only: `sweep_repos` inside
+   your `github.org`. The login (`WORKSPACE_GITHUB_LOGIN`), owner (`github.org`), bots (`github.bots`) and owner
+   teams (`github.owner_teams`) are not in it — `kit_profile.py review-facts` reads them and names any unset key.
 8. **Verify:** `make -C .claude/context-db kit-verify` (env store complete), then `/kit-health` in a
    session — it lists the skills that are not applicable here (a `requires:` flag you set false —
    `kb.py migrate --off` prints the same list at any time, both from `kb.unmet_units`), the

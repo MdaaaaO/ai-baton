@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, trap KB, Opus pass, walks findings, posts one review, replies in threads; a trivial PR auto-approves via Sonnet, an opt-in auto-COMMENT path skips the walk. Use when reviewing a PR pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "42"
+  version: "43"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"

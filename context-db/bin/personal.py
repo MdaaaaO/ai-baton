@@ -8,7 +8,7 @@ command and zero questions.
 Everything is DISCOVERED, nothing asked: identity from `gh api user` (login, display name), the tracked repos from the
 clones under the workspace root (their `origin` remotes; `gh repo list` when there are none), the timezone from the OS.
 A store whose `environment` is already named is left untouched (a blank one is filled), a filled `settings.local.json`
-or a set pr-review `login` is never overwritten, and the one fact row is written only when absent — so the command is
+or set pr-review `sweep_repos` are never overwritten, and the one fact row is written only when absent — so the command is
 idempotent and safe on an existing machine. Every
 `systems.*` flag stays false: a skill that needs Jira, Slack or a warehouse stops with one "not applicable" line here,
 and a corporate machine keeps the full path (`docs/new-environment.md`). What no tool settles (no `gh`, not logged in)
@@ -238,19 +238,14 @@ def apply_settings(path: Path, example: Path, facts: dict, dry_run: bool = False
 
 
 def apply_pr_review(path: Path, example: Path, facts: dict, dry_run: bool = False) -> list[str]:
-    """pr-review config.json: `login`, `owner` and `sweep_repos` from the facts where they are still placeholders."""
+    """pr-review config.json: `sweep_repos` from the facts where they are still placeholders. The login, owner and
+    bots are not config keys (#48) — the scripts read them through `kit_profile.py review-facts`: the login from the
+    settings filled above, the owner from `github.org` set by `personalize`."""
     src = path if path.is_file() else example
     d = _read_json(src)
     if d is None:
         return [f"{path.name}: not valid JSON — left alone"]
     lines: list[str] = []
-    login = facts.get("login") or ""
-    if login and _is_blank(d.get("login")):
-        d["login"] = login
-        lines.append(f"login = {login}")
-    if login and _is_blank(d.get("owner")):
-        d["owner"] = login
-        lines.append(f"owner = {login}")
     sweep = d.get("sweep_repos")
     if facts.get("repos") and (not isinstance(sweep, list) or all(_is_blank(s) for s in sweep)):
         d["sweep_repos"] = list(facts["repos"])

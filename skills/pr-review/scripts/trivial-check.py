@@ -9,10 +9,11 @@ Reads .context/state/pr-review/config.json `auto_approve` (PR_REVIEW_HOME overri
 `--head SHA` refuses (reason "head moved") when the live head differs — submit-review.sh --auto passes the reviewed head.
 `--head SHA` / `--head=SHA` with an empty or non-40-hex value (an unset shell variable in the caller), a
 repeated --head, or any other `--` flag exits 2: nothing disarms the check or is dropped silently.
-A missing or unparsable config.json, or one without a `login`, is a setup problem: the same error shape
+A missing or unparsable config.json, or no GitHub login (`kit_profile.py review-facts`: the login, the bot list and
+`github.owner_teams` are facts, never config.json keys), is a setup problem: the same error shape
 ({"eligible": false, "error": true, "reasons": [...]}, the message also on stderr) and exit 3 — never a traceback.
 Never posts anything. A PR is eligible only if EVERY gate passes:
-  - the user is a requested reviewer (login in requested_reviewers, or a requested team in auto_approve.owner_teams) — repo-sweep PRs never qualify
+  - the user is a requested reviewer (login in requested_reviewers, or a requested team in github.owner_teams) — repo-sweep PRs never qualify
   - open, not draft, base == default branch (no stacked PRs), author != login, no human CHANGES_REQUESTED, 0 unresolved review threads
   - no file matches an exclude glob; files <= max_files; non-lock lines <= max_lines
   - class docs: every file is a docs path (md/rst/txt outside manifests, docs/**); agent instructions
@@ -46,28 +47,43 @@ try:
 except Exception:  # env store missing — no bot gate
     REVIEW_BOT = os.environ.get("PR_WATCH_BOT_LOGIN", "")
 
-def load_config():
-    """Read config.json under ROOT, or print the error shape a failed gh call prints
-    ({"eligible": false, "error": true, "reasons": [...]}) and exit 3 — never a traceback. Exit 3, not
-    1: the setup is wrong, a retry will not help."""
-    path = os.path.join(ROOT, "config.json")
-    try:
-        with open(path) as f:
-            cfg = json.load(f)
-        if isinstance(cfg, dict) and cfg.get("login"):
-            return cfg
-        msg = f"config.json at {path} has no login"
-    except FileNotFoundError:
-        msg = f"no config.json at {path}"
-    except (OSError, ValueError) as e:  # ValueError: bad JSON, or bytes that are not UTF-8
-        msg = f"config.json at {path} is unreadable: {e}"
+def setup_error(msg):
+    """Print the error shape a failed gh call prints ({"eligible": false, "error": true, "reasons": [...]})
+    and exit 3 — never a traceback. Exit 3, not 1: the setup is wrong, a retry will not help."""
     print(f"error: {msg}", file=sys.stderr)
     print(json.dumps({"eligible": False, "error": True, "reasons": [msg]}))
     sys.exit(3)
 
+def load_config():
+    """config.json under ROOT (tuning only: the `auto_approve` block), or setup_error."""
+    path = os.path.join(ROOT, "config.json")
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+        if isinstance(cfg, dict):
+            return cfg
+        msg = f"config.json at {path} is not a JSON object"
+    except FileNotFoundError:
+        msg = f"no config.json at {path}"
+    except (OSError, ValueError) as e:  # ValueError: bad JSON, or bytes that are not UTF-8
+        msg = f"config.json at {path} is unreadable: {e}"
+    setup_error(msg)
+
+def load_facts():
+    """login, bots and owner_teams through the kit's one reader (#48), or setup_error naming where the login is set."""
+    try:
+        facts = kit_profile.review_facts()
+    except SystemExit as e:  # an unreadable env store is one line, not a traceback
+        setup_error(f"env store unreadable: {e.code}")
+    missing = kit_profile.review_facts_missing(facts, ["login"])
+    if missing:
+        setup_error("; ".join(missing))
+    return facts
+
 CFG = load_config()
 AA = CFG.get("auto_approve", {})
-ME = CFG["login"]
+FACTS = load_facts()
+ME = FACTS["login"]
 
 def gh(*args, paginate=False, allow_fail=False):
     cmd = ["gh", "api"] + (["--paginate"] if paginate else []) + list(args)
@@ -269,7 +285,7 @@ def main():
     req_users = [u["login"] for u in p.get("requested_reviewers", [])]
     req_teams = [t["slug"] for t in p.get("requested_teams", [])]
     res["requested"] = {"users": req_users, "teams": req_teams}
-    if ME not in req_users and not (set(req_teams) & set(AA.get("owner_teams", []))):
+    if ME not in req_users and not (set(req_teams) & set(FACTS["owner_teams"])):
         res["reasons"].append("not in the user's review scope (requested: " + ", ".join(req_users + ["@"+t for t in req_teams]) + ")")
     res["files"] = p["changed_files"]
     if p["changed_files"] > AA.get("max_files", 10): res["reasons"].append(f"files {p['changed_files']} > max_files")
@@ -311,7 +327,7 @@ def main():
         res["reasons"].append("mixed or non-trivial file set")
     # reviews / threads
     reviews = gh(f"repos/{repo}/pulls/{pr}/reviews?per_page=100", paginate=True)
-    bots = set(CFG.get("bots", []))
+    bots = set(FACTS["bots"])
     last = {}
     for rv in reviews:
         u = rv["user"]["login"]

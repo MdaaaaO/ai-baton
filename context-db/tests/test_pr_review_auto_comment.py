@@ -87,7 +87,7 @@ class AutoCommentSubmit(unittest.TestCase):
 
     def write_config(self, auto_comment_mode: str) -> None:
         self.state_dir.joinpath("config.json").write_text(json.dumps({
-            "login": ME, "footer": "", "submitted_retention_days": 14,
+            "footer": "", "submitted_retention_days": 14,
             "auto_approve": {"mode": "off"},
             "auto_comment": {"mode": auto_comment_mode, "prios": [1], "max_per_tick": 3},
         }))
@@ -96,7 +96,7 @@ class AutoCommentSubmit(unittest.TestCase):
         return {
             **{k: v for k, v in os.environ.items() if k not in ("CONTEXT_ROOT", "PR_REVIEW_HOME")},
             "PATH": f"{self.tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
-            "CONTEXT_ROOT": str(self.tmp / "ws" / ".context"),
+            "CONTEXT_ROOT": str(self.tmp / "ws" / ".context"), "WORKSPACE_GITHUB_LOGIN": ME,
             "STUB_LOG": str(self.log),
             "STUB_PR_JSON": json.dumps(pr_json(pr_author)),
             "STUB_REVIEW_ID": str(REVIEW_ID),

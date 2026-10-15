@@ -2,7 +2,7 @@
 name: triage
 description: Cheap read-only triage worker (low effort, no CLAUDE.md). Use when a skill forks pr-event-brief/alerts-sweep, or any read-and-summarise delegation needs only a short brief. Never posts to GitHub, the tracker or chat and never decides for the main session.
 metadata:
-  version: "9"
+  version: "10"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
 model: haiku
@@ -46,4 +46,4 @@ what to read and what shape of brief to return. Rules that always apply:
   `github.sandbox_token_prefix` placeholder where a sandbox proxy injects credentials and nothing where `gh` is logged
   in natively. Never set a token value by hand.
   Paginate every listing (`gh api --paginate "...?per_page=100"`) — 30 items per page has hidden verdicts before.
-- The user's GitHub login is `$WORKSPACE_GITHUB_LOGIN` (also `login` in `.context/state/pr-review/config.json`); the review bot, where the env config names one, is `github.review_bot` (empty in environments with no bot). Tracker keys follow `tracker.key_regex` (`<tracker.project>-nnnn` on a `jira` tracker, `#n` on `github`).
+- The user's GitHub login is `$WORKSPACE_GITHUB_LOGIN` (`kit_profile.py review-facts` prints it with the org and bot list); the review bot, where the env config names one, is `github.review_bot` (empty in environments with no bot). Tracker keys follow `tracker.key_regex` (`<tracker.project>-nnnn` on a `jira` tracker, `#n` on `github`).

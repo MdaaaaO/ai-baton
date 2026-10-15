@@ -109,7 +109,7 @@ class FetchContextStub(unittest.TestCase):
         self.state_dir = self.tmp / "ws" / ".context" / "state" / "pr-review"
         self.state_dir.mkdir(parents=True)
         self.state_dir.joinpath("config.json").write_text(json.dumps(
-            {"login": "tester", "bots": [], "bundle_max_files": 60, "bundle_max_kb": 200}))
+            {"bundle_max_files": 60, "bundle_max_kb": 200}))
         self.log = self.tmp / "gh.log"
         self.counters = self.tmp / "counters"
         self.counters.mkdir()
@@ -128,7 +128,7 @@ class FetchContextStub(unittest.TestCase):
             STUB_FILES_JSON=json.dumps(files),
             STUB_GRAPHQL_JSON=EMPTY_THREADS_GRAPHQL,
             STUB_COUNTERS_DIR=str(self.counters),
-            PR_REVIEW_FETCH_RETRY_DELAY="0",
+            PR_REVIEW_FETCH_RETRY_DELAY="0", WORKSPACE_GITHUB_LOGIN="tester",
         )
         if extra_env:
             env.update(extra_env)
@@ -244,23 +244,30 @@ class FetchContextStub(unittest.TestCase):
         self.assertGreaterEqual(bundle["bundle"]["skipped"], 1)
         self.assertIn("skipped", r.stdout)
 
-    # --- an empty/missing login in config.json must fail fast, not run with ME="" (every "mine"/"own PR"
-    #     comparison in the script would then silently match an empty author field) ---
+    # --- #48: the login is WORKSPACE_GITHUB_LOGIN (via kit_profile.py review-facts), never a config.json key. Unset
+    #     it must fail fast naming where to set it, not run with ME="" (every "mine"/"own PR" comparison in the
+    #     script would then silently match an empty author field) ---
 
-    def test_empty_login_in_config_fails_fast(self):
-        self.state_dir.joinpath("config.json").write_text(json.dumps(
-            {"login": "", "bots": [], "bundle_max_files": 60, "bundle_max_kb": 200}))
-        r, out = self.run_fetch([])
+    def test_unset_login_fails_fast_naming_the_key(self):
+        r, out = self.run_fetch([], extra_env={"WORKSPACE_GITHUB_LOGIN": ""})
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
-        self.assertIn("no login", r.stderr)
+        self.assertIn("login is not set", r.stderr)
+        self.assertIn("WORKSPACE_GITHUB_LOGIN", r.stderr)
         self.assertFalse(out.exists())
 
-    def test_missing_login_key_in_config_fails_fast(self):
+    def test_a_leftover_login_in_config_is_not_a_source(self):
+        # the old key, still in a machine's config.json, neither stands in for the identity nor overrides it
         self.state_dir.joinpath("config.json").write_text(json.dumps(
-            {"bots": [], "bundle_max_files": 60, "bundle_max_kb": 200}))
+            {"login": "tester", "bundle_max_files": 60, "bundle_max_kb": 200}))
+        r, _ = self.run_fetch([], extra_env={"WORKSPACE_GITHUB_LOGIN": ""})
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("WORKSPACE_GITHUB_LOGIN", r.stderr)
+
+    def test_a_config_that_is_not_an_object_fails_fast(self):
+        self.state_dir.joinpath("config.json").write_text("[]")
         r, out = self.run_fetch([])
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
-        self.assertIn("no login", r.stderr)
+        self.assertFalse(out.exists())
 
     # --- incomplete review-thread pagination (a `gh api graphql` call that never comes back with data):
     #     the snapshot is still written, flagged in the manifest AND named in errors.txt, so a reader of
@@ -301,7 +308,7 @@ class TrackerKeyLint(unittest.TestCase):
         self.state_dir = self.tmp / "ws" / ".context" / "state" / "pr-review"
         self.state_dir.mkdir(parents=True)
         self.state_dir.joinpath("config.json").write_text(json.dumps({
-            "login": "tester", "footer": "", "auto_approve": {"mode": "off"}, "submitted_retention_days": 14,
+            "footer": "", "auto_approve": {"mode": "off"}, "submitted_retention_days": 14,
         }))
         (self.tmp / "bin").mkdir()
         gh = self.tmp / "bin" / "gh"
@@ -317,7 +324,7 @@ class TrackerKeyLint(unittest.TestCase):
         return {
             **{k: v for k, v in os.environ.items() if k not in ("CONTEXT_ROOT", "PR_REVIEW_HOME")},
             "PATH": f"{self.tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
-            "CONTEXT_ROOT": str(self.tmp / "ws" / ".context"),
+            "CONTEXT_ROOT": str(self.tmp / "ws" / ".context"), "WORKSPACE_GITHUB_LOGIN": "tester",
             "STUB_LOG": str(self.tmp / "gh.log"),
             "STUB_PR_JSON": json.dumps({"head": {"sha": HEAD}, "base": {"sha": BASE}, "state": "open",
                                          "user": {"login": "author"}}),
