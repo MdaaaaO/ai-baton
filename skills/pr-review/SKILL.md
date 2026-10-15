@@ -78,10 +78,9 @@ green checks gets a lighter touch (nits → body, or skip; ask the user).
 ## 2. Load what the generic pass cannot know *(runner)*
 
 Read, in this order, only the slices you need (`grep -n '^## ' file` first):
-1. `.context/pr-reviews/<repo>.md`: any `##`/`###` section whose heading contains "traps"
-   (`Known traps`, `Repo-specific traps`, …) and any section whose
-   title matches a touched path (e.g. a model or table name). **This is the
-   compounding KB** — every past review paid to verify these; check each applicable trap explicitly
+1. `.context/pr-reviews/<repo>.md`: any `##`/`###` section whose heading contains "traps" (`Known traps`,
+   `Repo-specific traps`, …) and any section whose title matches a touched path (e.g. a model or table
+   name). **This is the compounding KB** — every past review paid to verify these; check each applicable trap explicitly
    and record the result (hit / not applicable) for the triage sheet.
 2. `.context/pr-reviews/README.md` § "Review workflow" and, for `dbt/models/**`, § "Architecture pass".
 3. The repo's own review rules: its `CLAUDE.md` / `AGENTS.md` review and "PR requirements" sections —
