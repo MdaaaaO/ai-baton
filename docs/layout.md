@@ -93,7 +93,8 @@ The four fattest cells above, unabridged:
   the self-assessment charter — and never overwrites one; `--refresh-seeds` prints the diff between each seeded
   copy and its template. It removes the kit's `__pycache__` dirs and empty leftover directories, and reports
   which `CLAUDE.md` import is missing.
-- **`docs/`** — `delegation.md` (what to hand a subagent — reads and code — and which model, by size),
+- **`docs/`** — `vision.md` (what the kit is and is not — principles, non-goals, what waits for evidence),
+  `delegation.md` (what to hand a subagent — reads and code — and which model, by size),
   `env-facts.md` (the env fact store — schema, `kb.py`, how a skill resolves a fact), `new-environment.md`
   (checklist for a new environment), `commit-style.md` (the commit-subject styles and how a repo's is resolved),
   `REVIEW.md` (the review rules — what CI decides, the four lenses, grading, the one-line finding shape; the CI
