@@ -59,6 +59,7 @@ import transcripts  # noqa: E402  (the shared transcript reader)
 FIXED = session_stats.prices()[:4]  # (in, cache_write, cache_read, out) $/Mtok — the habit basis; honours
 # SESSION_STATS_PRICES the same way session_stats.py's own CLI does, instead of always the built-in table
 CHEAP = ("sonnet", "haiku")
+HAIKU = ("haiku",)  # the cheapest tier on its own: `cheap%` cannot show a Sonnet→Haiku switch (both count as cheap)
 RESERVED_BUCKET_NAMES = {"prior-7d", "rolling-7d"}  # the rolling-7 pair `report` always builds itself; a
 # `--phase`/`cost.phases` entry reusing one of these names would silently merge into (or overwrite) it.
 # A phase named like a week bucket (`YYYY-Wnn`, WK_RE below) is refused the same way — `--view weekly/all`
@@ -747,13 +748,18 @@ def _cheap(model: str) -> bool:
     return any(c in m for c in CHEAP)
 
 
+def _haiku(model: str) -> bool:
+    m = model.lower()
+    return any(c in m for c in HAIKU)
+
+
 class Bucket:
     def __init__(self, name: str, start: str, end: str):
         self.name, self.start, self.end = name, start, end
-        self.usd = self.inp = self.cached = self.cwrite = self.outp = self.cheap_outp = 0.0
+        self.usd = self.inp = self.cached = self.cwrite = self.outp = self.cheap_outp = self.haiku_outp = 0.0
         # weekday-only aggregates: every rate AND every ratio uses these, so the decomposition identity
         # $/wday = volume × habit × routing holds exactly; only the `usd` total column includes weekends
-        self.wusd = self.winp = self.wcached = self.wcwrite = self.woutp = self.wcheap_outp = self.wunk_outp = 0.0
+        self.wusd = self.winp = self.wcached = self.wcwrite = self.woutp = self.wcheap_outp = self.whaiku_outp = self.wunk_outp = 0.0
         self.days: set[str] = set(); self.wdays: set[str] = set()
         self.pr_open = self.pr_merged = self.tk_closed = 0
         self.repos: set[str] = set(); self.epics: set[str] = set()
@@ -763,12 +769,16 @@ class Bucket:
         self.usd += r["usd"]; self.inp += r["inp"]; self.cached += r["cached"]; self.cwrite += r["cwrite"]; self.outp += r["outp"]
         if _cheap(r["model"]):
             self.cheap_outp += r["outp"]
+        if _haiku(r["model"]):
+            self.haiku_outp += r["outp"]
         self.days.add(r["d"])
         if _is_wday(r["d"]):
             self.wdays.add(r["d"])
             self.wusd += r["usd"]; self.winp += r["inp"]; self.wcached += r["cached"]; self.wcwrite += r["cwrite"]; self.woutp += r["outp"]
             if _cheap(r["model"]):
                 self.wcheap_outp += r["outp"]
+            if _haiku(r["model"]):
+                self.whaiku_outp += r["outp"]
             if _model_unknown(r["model"]):
                 self.wunk_outp += r["outp"]
         if r.get("billed"):
@@ -797,6 +807,8 @@ class Bucket:
             "usd_per_mout": div(self.wusd, mout), "fixed_usd_per_mout": div(fixed, mout),
             # None (rendered –) when any weekday output has no model: unknown is not 0% cheap
             "cheap_share": None if self.wunk_outp else div(self.wcheap_outp, self.woutp),
+            # the Haiku-only slice of the same denominator: the trial's keep/revert figure (#55)
+            "haiku_share": None if self.wunk_outp else div(self.whaiku_outp, self.woutp),
             "unknown_model_outp": round(self.wunk_outp),
             "pr_open": self.pr_open, "pr_merged": self.pr_merged, "repos": len(self.repos), "tk_closed": self.tk_closed,
             "epics": sorted(self.epics),
@@ -977,11 +989,11 @@ def render_md(o: dict) -> str:
           f"| Control | {b['control']} |", f"| PRs | {b['prs']} |", f"| Tickets | {b['tickets']} |",
           f"| Phases | {b['phases'] if isinstance(b['phases'], str) else ', '.join(p['name'] + ' ' + p['start'] + '..' + p['end'] for p in b['phases'])} |",
           f"| Skipped | {'; '.join(b['skipped'])} |", f"| Names | {b['names']} |", ""]
-    hdr = "| Bucket | window | wdays | $ | $/wday | Mout/wday | in/out | $/Mout | fixed $/Mout | cheap% | PRs open | merged | tk closed | $/PR | $/tk | basis |"
-    sep = "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    hdr = "| Bucket | window | wdays | $ | $/wday | Mout/wday | in/out | $/Mout | fixed $/Mout | cheap% | haiku% | PRs open | merged | tk closed | $/PR | $/tk | basis |"
+    sep = "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
     row = lambda m: (f"| {m['bucket']} | {m['start']}..{m['end']} | {m['wdays']} | {num(m['usd'])} | {num(m['usd_per_wday'])} | "
                      f"{num(m['out_mtok_per_wday'], 2)} | {num(m['in_out'])} | {num(m['usd_per_mout'])} | {num(m['fixed_usd_per_mout'])} | "
-                     f"{pct(m['cheap_share']).lstrip('+')} | {m['pr_open']} | {m['pr_merged']} | {m['tk_closed']} | {num(m['usd_per_pr'])} | {num(m['usd_per_tk'])} | {m['cost_basis']} |")  # noqa: E731
+                     f"{pct(m['cheap_share']).lstrip('+')} | {pct(m['haiku_share']).lstrip('+')} | {m['pr_open']} | {m['pr_merged']} | {m['tk_closed']} | {num(m['usd_per_pr'])} | {num(m['usd_per_tk'])} | {m['cost_basis']} |")  # noqa: E731
     foot = ("_`$` is the all-days total; every other column is weekday-only (ISO 1–5), so `$` ÷ output from this "
             "table does not reproduce `$/Mout`._")
     if o["buckets"]:
@@ -1005,6 +1017,7 @@ def render_md(o: dict) -> str:
           "- **fixed $/Mout** reprices every token at one list price, so it moves only with habit, never with model routing.",
           "- **$/Mout** is billed (or estimated) $ per million output tokens — habit × routing.",
           "- **cheap%** = share of output tokens on Sonnet/Haiku — the routing signal.",
+          "- **haiku%** = share of output tokens on Haiku alone (same weekday denominator) — a Sonnet→Haiku switch moves this, never cheap%.",
           "- **$/PR, $/ticket** are noisy under ~10 units; read them per phase, never on one week.",
           "- **avoided $/wday** = the after-period output priced at the before-period $/Mout, minus actual.", ""]
     return "\n".join(L)

@@ -30,7 +30,7 @@ An `Agent` call without `model` inherits the main session's model: the most expe
 
 When unsure, start with `sonnet` and escalate the one ticket that comes back uncertain.
 
-The kit's own read-and-classify forks (`triage` and the `pr-scan`, `pr-event-brief`, `alerts-sweep` skills) set `model: haiku` in their frontmatter as a trial while `CLAUDE_CODE_SUBAGENT_MODEL` stays `sonnet` for every other worker; `cost-report` shows the keep/revert evidence after a week.
+The kit's own read-and-classify forks (`triage` and the `pr-scan`, `pr-event-brief`, `alerts-sweep` skills) set `model: haiku` in their frontmatter as a trial; the pool stays the `sonnet` default for workers without a `model:` line. After a week the `cost-report` `haiku%` column (Haiku's share of weekday output; `cheap%` counts Sonnet too and cannot see the switch) shows the keep/revert evidence.
 
 ## The Sizing line — the call, written once, read at pickup
 

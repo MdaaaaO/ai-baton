@@ -908,6 +908,52 @@ class ReservedPhaseNameRefused(unittest.TestCase):
         self.assertEqual(rc, 0)
 
 
+class HaikuShare(unittest.TestCase):
+    """The Haiku trial (#55) is judged on `haiku%`: `cheap%` counts Sonnet and Haiku together, so moving
+    the sweeps from Sonnet to Haiku leaves it flat. The Haiku-only share must move on its own."""
+
+    @staticmethod
+    def _bucket(rows: list[tuple[str, str, float]]) -> dict:
+        b = cost_report.Bucket("t", "2026-10-05", "2026-10-09")
+        for d, model, outp in rows:
+            b.add({"d": d, "model": model, "usd": 1.0, "inp": 1.0, "cached": 0.0, "cwrite": 0.0, "outp": outp})
+        return b.metrics()
+
+    def test_haiku_share_is_its_own_slice_of_weekday_output(self):
+        m = self._bucket([("2026-10-05", "claude-opus-4", 50.0), ("2026-10-06", "claude-sonnet-4", 30.0),
+                          ("2026-10-07", "claude-haiku-4", 20.0), ("2026-10-10", "claude-haiku-4", 999.0)])  # Saturday: ignored
+        self.assertAlmostEqual(m["cheap_share"], 0.5)
+        self.assertAlmostEqual(m["haiku_share"], 0.2)
+
+    def test_sonnet_to_haiku_switch_moves_haiku_but_not_cheap(self):
+        before = self._bucket([("2026-10-05", "claude-opus-4", 60.0), ("2026-10-06", "claude-sonnet-4", 40.0)])
+        after = self._bucket([("2026-10-05", "claude-opus-4", 60.0), ("2026-10-06", "claude-haiku-4", 40.0)])
+        self.assertAlmostEqual(before["cheap_share"], after["cheap_share"])
+        self.assertEqual(before["haiku_share"], 0.0)
+        self.assertAlmostEqual(after["haiku_share"], 0.4)
+
+    def test_unknown_model_leaves_haiku_share_unknown_like_cheap(self):
+        m = self._bucket([("2026-10-05", "unknown", 10.0), ("2026-10-06", "claude-haiku-4", 10.0)])
+        self.assertIsNone(m["cheap_share"])
+        self.assertIsNone(m["haiku_share"])
+
+    def test_report_shows_a_haiku_column_and_json_key(self):
+        rows = [{"d": "2026-01-09", "model": "claude-sonnet-4", "usd": 1.0, "inp": 1, "cached": 0, "cwrite": 0, "outp": 75, "billed": True},
+                {"d": "2026-01-09", "model": "claude-haiku-4", "usd": 1.0, "inp": 1, "cached": 0, "cwrite": 0, "outp": 25, "billed": True}]
+        with tempfile.TemporaryDirectory() as d:
+            daily, out, js = Path(d) / "daily.json", Path(d) / "r.md", Path(d) / "r.json"
+            daily.write_text(json.dumps(rows), encoding="utf-8")
+            args = ns(daily=str(daily), control=None, prs=None, tickets=None, phase=[], view="rolling7",
+                      until=None, out=str(out), json=str(js))
+            with unittest.mock.patch("builtins.print", lambda *a, **k: None):
+                rc = cost_report.cmd_report(args)
+            md, data = out.read_text(encoding="utf-8"), json.loads(js.read_text(encoding="utf-8"))
+        self.assertEqual(rc, 0)
+        self.assertIn("| cheap% | haiku% |", md)
+        self.assertIn("25%", md)
+        self.assertAlmostEqual(data["buckets"][-1]["haiku_share"], 0.25)
+
+
 class DocstringLooseCoupling(unittest.TestCase):
     def test_module_docstring_lists_every_subcommand(self):
         # `sub.add_parser(...)` in main() is the one place subcommands are registered; the docstring
