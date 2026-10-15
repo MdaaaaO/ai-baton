@@ -173,7 +173,7 @@ def recorded_install_mode() -> str:
     return str(kit.get("install_mode") or "").strip() if isinstance(kit, dict) else ""
 
 
-def context_root() -> Path:
+def context_root(ignore_env: bool = False) -> Path:
     """The engine's ONE content-root resolver: every script (kb, session, gen_index, gen_sessions, verify, new.sh via
     `kit_profile.py context`, the Makefile's CONTEXT) asks this function and keeps no copy of its own. The order is
     documented once, in docs/layout.md's "Content root" paragraph.
@@ -183,8 +183,9 @@ def context_root() -> Path:
     the nearest env store above the current directory — the Bash tool starts in the project dir but is not handed
     `CLAUDE_PROJECT_DIR` (#3). The walk-up is the last resort and a plugin install's only: it runs when neither
     variable is set, requires a real env store (`config.json`, not just a `.context/` dir), stops below `$HOME`, and
-    the nearest store wins — as git picks the nearest repo. A clone never walks up (its store is beside the kit)."""
-    env = os.environ.get("CONTEXT_ROOT", "").strip()
+    the nearest store wins — as git picks the nearest repo. A clone never walks up (its store is beside the kit).
+    `ignore_env=True` skips `CONTEXT_ROOT`: the workspace's live store, whatever a caller pointed this process at."""
+    env = "" if ignore_env else os.environ.get("CONTEXT_ROOT", "").strip()
     if env:
         return Path(env)
     for base in (KIT.parent, KIT.parent.parent):
@@ -209,6 +210,18 @@ def context_root() -> Path:
         except OSError:  # an ancestor we may not stat (EACCES): not a workspace, keep walking
             continue
     return KIT.parent / ".context"
+
+
+def is_live_store() -> bool:
+    """True when the store this process writes (`context_root()`) is the workspace's live one: `CONTEXT_ROOT` unset, or
+    naming the directory the resolver finds without it. A fixture, a README walkthrough or a test points `CONTEXT_ROOT`
+    elsewhere — what it writes must not reach per-session state (the scratch `session-name`) of the real session."""
+    if not os.environ.get("CONTEXT_ROOT", "").strip():
+        return True
+    try:
+        return context_root().resolve() == context_root(ignore_env=True).resolve()
+    except OSError:
+        return False
 
 
 ENV_DIR = context_root() / "reference" / "env"
@@ -752,13 +765,43 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
 FOOTER = "session `{}`"  # the bare self-identifier — no AI attribution anywhere (owner decision, 2026-09-28)
 
 
+_STALE_WARNED: set = set()
+
+
+def _session_row_live(name: str) -> bool:
+    """False only when the store was read and has no `sessions/<name>.md`, or its frontmatter `status` is `ended`.
+    True when the row is active — and when the store cannot be read (a transient error must not make the footer
+    disappear)."""
+    root = context_root()
+    try:
+        text = (root / "sessions" / f"{name}.md").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return not root.is_dir()  # no store at all = unreadable, not "no row"
+    except (OSError, UnicodeDecodeError):
+        return True
+    m = re.match(r"---\r?\n(.*?)\r?\n---", text, re.S)
+    st = re.search(r"^status:[ \t]*[\"']?([^\"'\s#]*)", m.group(1), re.M) if m else None
+    return not (st and st.group(1) == "ended")
+
+
 def session_name() -> str:
-    """The registry name of the running session (`session-register` writes it to the session's scratch dir), or ""."""
+    """The registry name of the running session (`session-register` writes it to the session's scratch dir), or "".
+    Cross-checked against the store: a recorded name whose `sessions/<name>.md` is missing or `ended` is stale (a
+    walkthrough or fixture once wrote it) and reads as "" with one stderr line — a wrong name never reaches a PR
+    body silently. An unreadable store keeps the recorded name."""
     try:
         p = scratch() / "session-name"
-        return p.read_text(encoding="utf-8").strip() if p.is_file() else ""
+        n = p.read_text(encoding="utf-8").strip() if p.is_file() else ""
     except (OSError, ScratchError):
         return ""
+    if n and not _session_row_live(n):
+        if n in _STALE_WARNED:  # `footer` and the resolved-profile block both ask: one line per process
+            return ""
+        _STALE_WARNED.add(n)
+        print(f"kit_profile: ignoring the recorded session name {n!r} ({p}): no active sessions/{n}.md in "
+              f"{context_root()} — stale scratch file, footer left bare", file=sys.stderr)
+        return ""
+    return n
 
 
 def footer() -> str:

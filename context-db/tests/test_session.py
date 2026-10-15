@@ -12,13 +12,15 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+from tests import live_workspace
+
 BIN = Path(__file__).resolve().parents[1] / "bin"
 
 
-def run(script: str, *args: str, root: Path, env: dict | None = None) -> subprocess.CompletedProcess:
+def run(script: str, *args: str, root: Path, env: dict | None = None, bin_dir: Path = BIN) -> subprocess.CompletedProcess:
     e = {k: v for k, v in os.environ.items() if k not in ("WORKSPACE_TZ", "CLAUDE_CODE_SESSION_ID")}
     e.update({"CONTEXT_ROOT": str(root), **(env or {})})
-    return subprocess.run([sys.executable, str(BIN / script), *args], env=e, cwd=BIN, capture_output=True, text=True)
+    return subprocess.run([sys.executable, str(bin_dir / script), *args], env=e, cwd=bin_dir, capture_output=True, text=True)
 
 
 class NoStore(unittest.TestCase):
@@ -446,13 +448,47 @@ class NameConventionAndFooter(unittest.TestCase):
 
     def test_the_footer_names_the_registered_session(self):
         # no attribution anywhere (owner decision, 2026-09-28): without a registered session, the footer is bare
-        r = run("kit_profile.py", "footer", root=self.root, env=self.env)
+        bin_dir, live = live_workspace(self.tmp.name)  # a register only records the name against the live store
+        kw = {"root": live, "env": self.env, "bin_dir": bin_dir}
+        r = run("kit_profile.py", "footer", **kw)
         self.assertEqual(r.stdout.strip(), "")
-        self.assertEqual(run("kit_profile.py", "session-name", root=self.root, env=self.env).returncode, 1)
-        run("session.py", "register", "--name", "kit-footer-test", "--no-stats", root=self.root, env=self.env)
-        self.assertEqual(run("kit_profile.py", "session-name", root=self.root, env=self.env).stdout.strip(), "kit-footer-test")
-        self.assertEqual(run("kit_profile.py", "footer", root=self.root, env=self.env).stdout.strip(),
-                          "session `kit-footer-test`")
+        self.assertEqual(run("kit_profile.py", "session-name", **kw).returncode, 1)
+        run("session.py", "register", "--name", "kit-footer-test", "--no-stats", **kw)
+        self.assertEqual(run("kit_profile.py", "session-name", **kw).stdout.strip(), "kit-footer-test")
+        self.assertEqual(run("kit_profile.py", "footer", **kw).stdout.strip(), "session `kit-footer-test`")
+
+    def test_a_register_against_a_fixture_store_leaves_the_live_footer_name_alone(self):
+        # #551: a worker walking the README against a throw-away store overwrote the main session's name
+        self.scratch.mkdir()
+        recorded = self.scratch / "session-name"
+        recorded.write_text("kit-live\n", encoding="utf-8")
+        bin_dir, live = live_workspace(self.tmp.name)
+        fixture = Path(self.tmp.name) / "walkthrough" / ".context"  # CONTEXT_ROOT names another directory
+        r = run("session.py", "register", "--name", "demo-first", "--no-stats", root=fixture, env=self.env, bin_dir=bin_dir)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(recorded.read_text(encoding="utf-8"), "kit-live\n")
+        self.assertIn("not recording the footer name", r.stderr)
+        self.assertIn("not the live store", r.stderr)
+        self.assertTrue((fixture / "sessions" / "demo-first.md").is_file())  # the register itself still ran
+        # the stock engine copy (its live store is this workspace's, CONTEXT_ROOT is the suite's blank one) agrees
+        r = run("session.py", "register", "--name", "demo-second", "--no-stats", root=fixture, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(recorded.read_text(encoding="utf-8"), "kit-live\n")
+
+    def test_a_register_against_the_live_store_records_the_name(self):
+        bin_dir, live = live_workspace(self.tmp.name)
+        recorded = self.scratch / "session-name"
+        for root_env in (str(live), ""):   # CONTEXT_ROOT naming the live store, and CONTEXT_ROOT unset
+            if recorded.exists():
+                recorded.unlink()
+            e = {**os.environ, "KIT_SCRATCH": str(self.scratch), "CONTEXT_ROOT": root_env}
+            e.pop("CLAUDE_CODE_SESSION_ID", None)
+            r = subprocess.run([sys.executable, str(bin_dir / "session.py"), "register", "--name", "kit-live-store",
+                                "--no-stats"], env=e, cwd=bin_dir, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, (root_env, r.stderr))
+            self.assertEqual(recorded.read_text(encoding="utf-8"), "kit-live-store\n", root_env)
+            self.assertNotIn("not recording", r.stderr)
+            (live / "sessions" / "kit-live-store.md").unlink()
 
 
 class NoPrivateValueInName(unittest.TestCase):

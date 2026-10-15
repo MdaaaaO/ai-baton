@@ -160,8 +160,14 @@ def record_name(name: str) -> None:
     can say which session wrote a PR or a comment. Per session (`CLAUDE_CODE_SESSION_ID` keys the scratch dir);
     a failure only costs the footer its session part, so it is reported, never fatal. Only a name that follows the
     convention is recorded: the footer is public, and a grandfathered name was never chosen to be (it gets the bare
-    footer until the lane re-registers under a conforming name)."""
+    footer until the lane re-registers under a conforming name). Only the workspace's live store may write it: a
+    register against a fixture or walkthrough store (`CONTEXT_ROOT` elsewhere) must not overwrite the real
+    session's name (#551)."""
     if not CONVENTION_RE.match(name) or len(name) > CONVENTION_MAX:
+        return
+    if not profile.is_live_store():
+        print(f"session.py: not recording the footer name — registering against {profile.context_root()}, "
+              f"not the live store", file=sys.stderr)
         return
     try:
         (profile.scratch() / "session-name").write_text(name + "\n", encoding="utf-8")

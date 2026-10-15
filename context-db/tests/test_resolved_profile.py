@@ -21,16 +21,17 @@ HERE = Path(__file__).resolve().parent
 BIN = HERE.parent / "bin"
 sys.path.insert(0, str(BIN))
 import kit_profile  # noqa: E402
+from tests import live_workspace  # noqa: E402
 
 
-def run(script: str, *args: str, root: Path, env: dict | None = None) -> subprocess.CompletedProcess:
+def run(script: str, *args: str, root: Path, env: dict | None = None, bin_dir: Path = BIN) -> subprocess.CompletedProcess:
     # CLAUDE_PROJECT_DIR is stripped too (not just the two session-scoped variables): the resolved-profile
     # gate reads it directly (`_workspace_env_root`), so an ambient value from the calling process must
     # never leak into a probe that means to test "no kit workspace" — a test opts back in explicitly.
     e = {k: v for k, v in os.environ.items()
          if k not in ("WORKSPACE_TZ", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PROJECT_DIR")}
     e.update({"CONTEXT_ROOT": str(root), **(env or {})})
-    return subprocess.run([sys.executable, str(BIN / script), *args], env=e, cwd=BIN, capture_output=True, text=True)
+    return subprocess.run([sys.executable, str(bin_dir / script), *args], env=e, cwd=bin_dir, capture_output=True, text=True)
 
 
 def write_config(root: Path, cfg: dict) -> None:
@@ -80,15 +81,18 @@ class HookOutput(unittest.TestCase):
         self.assertNotIn("junk-bot[bot]", out)
 
     def test_footer_line_follows_session_register(self):
-        write_config(self.root, {"environment": "junk-env", "systems": dict(BLANK_SYSTEMS)})
+        # the name is only recorded by a register against the live store (#551): the workspace's own store, here a copy
+        bin_dir, live = live_workspace(self.tmp.name)
+        env = {**self.env, "CLAUDE_PROJECT_DIR": str(live.parent)}
+        write_config(live, {"environment": "junk-env", "systems": dict(BLANK_SYSTEMS)})
         envfile = Path(self.tmp.name) / "envfile"
-        r = run("kit_profile.py", "session-env", "--update", str(envfile), root=self.root, env=self.env)
+        r = run("kit_profile.py", "session-env", "--update", str(envfile), root=live, env=env, bin_dir=bin_dir)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("footer: none yet — `session-register` records the name", r.stdout)
-        (self.root / "sessions").mkdir(parents=True, exist_ok=True)
-        r = run("session.py", "register", "--name", "kit-resolved-profile-test", "--no-stats", root=self.root, env=self.env)
+        r = run("session.py", "register", "--name", "kit-resolved-profile-test", "--no-stats", root=live, env=env,
+                bin_dir=bin_dir)
         self.assertEqual(r.returncode, 0, r.stderr)
-        r = run("kit_profile.py", "session-env", "--update", str(envfile), root=self.root, env=self.env)
+        r = run("kit_profile.py", "session-env", "--update", str(envfile), root=live, env=env, bin_dir=bin_dir)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("footer: session `kit-resolved-profile-test`", r.stdout)
 
