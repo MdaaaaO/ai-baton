@@ -27,7 +27,7 @@ trigger suite.
 **Behaviour cases.** Tagged `behaviour` instead of `trigger` (so `eval_check.py` counts them as "other
 cases", never against a trigger suite's minimums) with a single `criteria.md` grader, same shape as
 `kit-review-*`: no `fired.md`, since the point isn't whether the skill fires but what it does once it has.
-Three kinds live here: (1) the seven gated skills (`metadata.requires` set) each get one case whose prompt
+Three kinds live here: (1) the six gated skills (`metadata.requires` set) each get one case whose prompt
 states the required `systems.*` flag is false and asks for the skill's work anyway — the pass criterion is
 the skill's own one-line stop (quoted from its SKILL.md), never an improvised substitute; (2) the four
 create/merge/sign paths whose gates are easy to get wrong under pressure — `pr-watch` merging only once
@@ -58,8 +58,8 @@ the suite is the acceptance test for shortening or rewording a trigger.
 
 ## Coverage
 
-One row per skill: its trigger suite size (positive+near-miss) and its behaviour cases, if any (22 total,
-counting every `evals/*behaviour*` directory: the seven gated skills' one-line stop, the four create/merge/sign
+One row per skill: its trigger suite size (positive+near-miss) and its behaviour cases, if any (21 total,
+counting every `evals/*behaviour*` directory: the six gated skills' one-line stop, the four create/merge/sign
 paths, `pr-review`'s Explainability small-fix gate, the cold-reader brief's two cases, the `pr-event-brief`
 diagrams-line pair, `ticket-update`'s Pivot-restates-not-delta near miss, `session-handoff`'s first-handoff
 case, and the assumption-register near miss — a session proceeds on an unstated assumption and the PR body
@@ -89,8 +89,7 @@ suite or a behaviour case is added or renamed.
 | `session-handoff` | 7+6 | `session-handoff-behaviour-first-handoff` |
 | `session-register` | 5+5 | `session-register-behaviour-narrate-back-first`, `session-register-behaviour-no-work-before-narrate-back` |
 | `session-retro` | 5+5 | — |
-| `sign-queue` | 5+5 | `sign-queue-behaviour-enqueue-not-paste`, `sign-queue-behaviour-not-applicable` |
-| `signed-git-commits` | 5+5 | `signed-git-commits-behaviour-not-applicable` |
+| `sign-queue` | 8+4 | `sign-queue-behaviour-enqueue-not-paste`, `sign-queue-behaviour-not-applicable` |
 | `slack-draft` | 5+5 | `slack-draft-behaviour-not-applicable` |
 | `ticket-carousel` | 5+5 | `ticket-carousel-behaviour-no-create-before-walk-ends` |
 | `ticket-close` | 5+5 | — |

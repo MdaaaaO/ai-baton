@@ -4,8 +4,16 @@
 #   enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-file> --by <session> [--rebase] [--new-branch] [--files <path> [--files <path> ...] | --files "<paths>" | --all]
 #
 #   --rebase       fetch origin <branch> and rebase -S onto FETCH_HEAD before pushing (remote is ahead,
-#                  e.g. after a GitHub "Update branch" click). Default: plain push.
-#   --new-branch   first push of the branch (push -u).
+#                  e.g. after a GitHub "Update branch" click). Decided here when not given: the remote tip
+#                  (`ls-remote`) not in HEAD's history (`merge-base --is-ancestor`) adds it — except with
+#                  --onto or --force-with-lease, which rewrite history on purpose. A remote commit this branch
+#                  once had (its reflog) and rewrote away (amend/fixup/reset after a push) is refused
+#                  instead: pass --force-with-lease <tip>. Given, it is forced on.
+#   --new-branch   first push of the branch (push -u). Decided here when not given: no `refs/heads/<branch>`
+#                  on origin adds it (never with --force-with-lease). Given, it is forced on.
+#                  A worktree with no `origin` remote, or whose remote is not reachable from here (no SSH
+#                  identity, offline: a note, never a refusal), decides neither; one in the middle of a rebase
+#                  (`rebase-merge` / `rebase-apply` in its git dir) is refused.
 #   --files        stage this one path, relative to the worktree. Repeat the flag for more than one path:
 #                  each occurrence is staged as exactly the path given (spaces and all) — never split —
 #                  and quoted in the job script as a single argument. Given exactly once, the legacy
@@ -44,8 +52,8 @@
 #                  candidate already has a drain log or a parked `.failed` — it was attempted, not just queued,
 #                  and dropping it would lose that history. A round the owner has not drained yet stays one job.
 #
-# The job is a self-contained POSIX sh script under .context/state/sign-queue/ that sign.sh runs on the
-# host. Before enqueuing, verify `git -C <wt> status --short` shows exactly what the commit should
+# The job is a self-contained POSIX sh script under .context/state/sign-queue/ that `make sign` (signq.py)
+# runs on the host. Before enqueuing, verify `git -C <wt> status --short` shows exactly what the commit should
 # contain and that the message file exists. One job = one commit.
 set -eu
 # WORKSPACE_* from plugin userConfig, if set — a failed lookup stops here instead of queuing a job without an identity (#123)
@@ -106,6 +114,16 @@ fi
 no_nl worktree "$wt"; no_nl branch "$br"; no_nl "message path" "$msg"; no_nl --onto "$onto"; no_nl --by "$by"
 [ -d "$wt/.git" ] || [ -f "$wt/.git" ] || { echo "no worktree at $wt" >&2; exit 2; }
 [ -f "$msg" ] || { echo "no message file at $msg" >&2; exit 2; }
+# a rebase stopped half-way (conflict, or started here without a signing key) is not a state to commit on:
+# the job's `commit -S` would land in the middle of it. --git-path: a linked worktree keeps its own git dir.
+for st in rebase-merge rebase-apply; do
+  stp=$(git -C "$wt" rev-parse --git-path "$st") || { echo "enqueue.sh: git rev-parse failed in $wt" >&2; exit 2; }
+  case "$stp" in /*) ;; *) stp="$wt/$stp";; esac
+  if [ -e "$stp" ]; then
+    echo "enqueue.sh: a rebase is in progress in $wt ($st) — \`git rebase --abort\` and enqueue again (the job rebases with -S when the remote moved), or finish it first" >&2
+    exit 2
+  fi
+done
 # commit style (WORKSPACE.md § Rules): Conventional Commits unless the repo overrides it — resolved by
 # commit_style.py from the worktree's repo marker / commitlint / env config. SIGN_QUEUE_SKIP_STYLE=1 = deliberate one-off.
 if [ "${SIGN_QUEUE_SKIP_STYLE:-0}" != "1" ]; then
@@ -124,23 +142,38 @@ if [ "${SIGN_QUEUE_SKIP_STYLE:-0}" != "1" ]; then
     exit 2
   fi
 fi
-if [ -z "$(git -C "$wt" status --short)" ]; then
-  # clean worktree: allow a push-only retry (commit already made on a previous drain, push failed)
-  # origin/<branch> may not exist (single-branch clone) — compare against the remote tip via ls-remote.
-  # ls-remote piped straight into cut (the old shape) hides a real network/auth failure behind cut's own
-  # (near-always-zero) exit status: capture ls-remote's own output and exit code first, so a lookup that
-  # actually failed is never read as "branch doesn't exist yet" (empty output, exit 0, is the real "none").
-  # stderr goes to its own file: git and ssh also write there on success (a redirect warning, a new
-  # known-hosts line), and that text must never end up in the tip.
+# The remote tip of <branch>, read once: it decides --new-branch / --rebase below and a clean worktree's
+# push-only retry. origin/<branch> may not exist (single-branch clone) — ls-remote asks the remote itself.
+# ls-remote piped straight into cut (the old shape) hides a real network/auth failure behind cut's own
+# (near-always-zero) exit status: capture ls-remote's own output and exit code first, so a lookup that
+# actually failed is never read as "branch doesn't exist yet" (empty output, exit 0, is the real "none").
+# stderr goes to its own file: git and ssh also write there on success (a redirect warning, a new
+# known-hosts line), and that text must never end up in the tip. Only the exact ref counts: the pattern
+# `<branch>` also matches `refs/heads/<x>/<branch>`. A dirty worktree with no `origin` remote at all
+# (nothing to ask) skips the lookup and decides nothing; a clean one still needs it for the retry check.
+# A failed lookup on a dirty worktree never refuses the enqueue: an SSH remote refuses a process with no
+# identity (the case this queue exists for), and an offline session is no different. It decides nothing
+# (explicit flags still hold) and the drain, which can reach the remote, catches a non-fast-forward.
+# Only the clean push-only retry stops on it: with no tip it cannot tell whether anything is left to push.
+clean=0; [ -n "$(git -C "$wt" status --short)" ] || clean=1
+remote_tip=""; remote_read=0
+if [ $clean = 1 ] || git -C "$wt" remote get-url origin >/dev/null 2>&1; then
   ls_remote_err=$(mktemp)
   if ls_remote_out=$(git -C "$wt" ls-remote --heads origin "$br" 2>"$ls_remote_err"); then
     rm -f "$ls_remote_err"
-    remote_tip=$(printf '%s' "$ls_remote_out" | cut -f1)
-  else
+    remote_tip=$(printf '%s\n' "$ls_remote_out" | awk -v r="refs/heads/$br" '$2 == r { print $1; exit }')
+    remote_read=1
+  elif [ $clean = 1 ]; then
     echo "enqueue.sh: git ls-remote origin $br failed: $(cat "$ls_remote_err")" >&2
     rm -f "$ls_remote_err"
     exit 2
+  else
+    rm -f "$ls_remote_err"
+    echo "note: remote not reachable here: --new-branch/--rebase not decided; pass them yourself if needed (a moved remote parks the job)" >&2
   fi
+fi
+if [ $clean = 1 ]; then
+  # clean worktree: allow a push-only retry (commit already made on a previous drain, push failed)
   if [ -n "$remote_tip" ] && git -C "$wt" cat-file -e "$remote_tip^{commit}" 2>/dev/null; then
     ahead=$(git -C "$wt" rev-list --count "$remote_tip..HEAD" 2>/dev/null || echo 0)
   else
@@ -187,6 +220,38 @@ fi
 if [ -n "$lease" ]; then
   case "$lease" in *[!0-9a-f]*|"") echo "--force-with-lease expects the remote tip sha" >&2; exit 2;; esac
   [ $newbr = 0 ] || { echo "--force-with-lease and --new-branch are exclusive" >&2; exit 2; }
+fi
+# --new-branch / --rebase decided from the remote, never left to the caller's guess (#50). Only ever turned
+# on: a flag given explicitly stays on. --force-with-lease and --onto rewrite history on purpose, so the
+# remote tip being "outside HEAD" is expected there and adds no rebase.
+if [ $remote_read = 1 ]; then
+  if [ -z "$remote_tip" ]; then
+    if [ $newbr = 0 ] && [ -z "$lease" ]; then
+      newbr=1; echo "note: origin has no branch $br yet -> --new-branch (push -u)" >&2
+    fi
+  elif [ $rebase = 0 ] && [ -z "$onto" ] && [ -z "$lease" ] \
+       && ! git -C "$wt" merge-base --is-ancestor "$remote_tip" HEAD 2>/dev/null; then
+    # Not in HEAD's history. Two causes, opposite answers. The remote moved on its own (someone pushed, an
+    # "Update branch" click): this branch never had those commits, so rebasing onto them is right. This
+    # worktree rewrote history (amend, fixup, reset after a push): a commit the remote still has was once on
+    # this branch (its reflog) and is no longer in HEAD's history; a rebase would replay the rewrite on top
+    # of the old commits and push it fast-forward, undoing it (a removed file comes back). That case is
+    # refused: rewriting a pushed branch is a lease decision. Checked on the remote-only commits
+    # (`rev-list <tip> --not HEAD`), so a rewrite is caught even when someone pushed on top of it since;
+    # A tip not fetched here yet cannot be walked: only a rewrite buried under someone else's newer push
+    # slips through then (a `git fetch` before enqueuing closes that gap). A missing or disabled reflog
+    # (`core.logAllRefUpdates=false`, a fresh clone of the branch) leaves branch_log empty too: the reflog is the
+    # only record of what this branch once pointed at, so the guard is off then and the rebase goes ahead.
+    branch_log=$(git -C "$wt" reflog show --format=%H "refs/heads/$br" 2>/dev/null | sort -u)
+    if [ -n "$branch_log" ] && git -C "$wt" cat-file -e "$remote_tip^{commit}" 2>/dev/null \
+       && git -C "$wt" rev-list "$remote_tip" --not HEAD 2>/dev/null | grep -qxF -e "$branch_log"; then
+      echo "enqueue.sh: origin/$br (at $(printf '%.12s' "$remote_tip")) still has commits this branch rewrote away (amend/fixup/reset after a push) — a plain push would be rejected and an auto --rebase would undo the rewrite. Pass --force-with-lease $remote_tip yourself if the rewrite is meant, or rebase onto the remote tip" >&2
+      exit 2
+    fi
+    # never had here, or not even present (someone pushed after the last fetch): either way the push
+    # would be rejected as non-fast-forward without a rebase onto the remote tip first
+    rebase=1; echo "note: origin/$br is at $(printf '%.12s' "$remote_tip"), not in HEAD's history -> --rebase" >&2
+  fi
 fi
 files=""
 if [ "$files_count" -gt 0 ]; then
@@ -236,7 +301,7 @@ if [ "$files_count" -gt 0 ]; then
   files=$kept
 fi
 # one staging rule: explicit paths are the norm (--files); `git add -A` is the fallback, always flagged so it is
-# never mistaken for a deliberate choice — the incident that motivated this (signed-git-commits skill, handoff-incidents.md)
+# never mistaken for a deliberate choice — the incident that motivated this (sign-queue reference/discipline.md)
 # was exactly a `git add -A` sweeping in a leftover file nobody meant to commit.
 if [ -z "$files" ]; then
   if [ $all = 1 ]; then echo "enqueue.sh: --all — staging $wt with \`git add -A\`" >&2
@@ -319,9 +384,9 @@ tmp="$job.tmp.$$"
     # FETCH_HEAD, not origin/$BR: a single-branch / partial clone (refspec = main only)
     # never creates refs/remotes/origin/<branch>, so origin/$BR is an "invalid upstream".
     # -f/--force-rebase: without it, a rebase whose upstream did not move since the branch was last
-    # based on it is a no-op — git leaves every existing commit exactly as it is, sandbox-made ones
+    # based on it is a no-op — git leaves every existing commit exactly as it is, ones made without a signing key
     # included, instead of replaying (and re-signing) them. -f always replays the range, so a commit
-    # made unsigned in a sandbox comes out signed on this, the host side of the queue.
+    # made unsigned by a session comes out signed on this, the host side of the queue.
     echo 'git -C "$WT" rebase -S -f FETCH_HEAD'
   fi
   if [ -n "$onto" ]; then
@@ -329,7 +394,7 @@ tmp="$job.tmp.$$"
     echo '# stacked branch: replay our commits on the upstream branch'"'"'s pushed tip, dropping the local placeholder'
     echo 'git -C "$WT" fetch origin "$UP"'
     # -f: same trap as --rebase above — a re-stack whose upstream tip has not moved since the last
-    # enqueue is otherwise a no-op and leaves sandbox-made commits unsigned.
+    # enqueue is otherwise a no-op and leaves commits made without a signing key unsigned.
     echo 'git -C "$WT" rebase -S -f --onto FETCH_HEAD "$OLD_BASE"'
   fi
   # Belt and braces on top of -f above: verify every commit about to be pushed, not just HEAD (a
