@@ -35,7 +35,8 @@ Sections:
   6. stamp      — last green run of THIS environment: `.context/kit-health/HEALTH-<env>.md` (local; each
                   machine keeps its own; records kit_commit, kit_version and install_mode)
 --stamp writes that HEALTH file (kit_commit) when there are no errors and no un-accepted leak hit (other
-warnings are recorded, not fatal). Every reported value is redacted to `<kind>:<first2>…`.
+warnings are recorded, not fatal). `--archive-logs [--keep-logs N]` (step 5, after the day's log exists) sets the
+older `kit-health/<date>-<env>` logs to `status: archived` through the ctx adapter. Every reported value is redacted to `<kind>:<first2>…`.
 Stdlib only. Never prints an identity value (plugin option or settings.local.json).
 """
 from __future__ import annotations
@@ -1433,6 +1434,37 @@ def sweep_scratch(root: Path | None = None, ctx_root: Path | None = None, keep: 
     return removed, failed
 
 
+def archive_old_logs(envname: str, keep: int = 1, today: str | None = None,
+                     ctx_root: Path | None = None) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+    """Step 5's tidy-up (#503): once today's `kit-health/<YYYY-MM-DD>-<env>` log exists, every older log of this
+    environment is set to `status: archived` through `ctx_adapter.py ctx fm` (audited; never a raw write), so the
+    INDEX folds them into one line. Returns (archived, kept, failed): doc keys archived now, unarchived logs left
+    alone, and (doc key, why) for each write that failed. Never touches the HEALTH stamp or another environment's
+    or a differently named doc; an already archived log is skipped (a second run changes nothing). The `keep`
+    newest unarchived logs by the date in the slug stay, and today's (`today`, default the local date) always does."""
+    root_ = (ctx() if ctx_root is None else ctx_root) / "kit-health"
+    pat = re.compile(r"^(\d{4}-\d{2}-\d{2})-" + re.escape(envname) + r"$")
+    today = today or dt.datetime.now(kit_profile.zone()[0]).strftime("%Y-%m-%d")
+    logs = sorted((m.group(1), p.stem) for p in root_.glob("*.md") if (m := pat.match(p.stem)))
+    live = [(day, stem) for day, stem in logs if frontmatter(root_ / f"{stem}.md").get("status") != "archived"]
+    keepers = {stem for _day, stem in live[::-1][:max(keep, 1)]} | {stem for day, stem in live if day == today}
+    kept = [stem for _day, stem in live if stem in keepers]
+    archived: list[str] = []
+    failed: list[tuple[str, str]] = []
+    env = {"CONTEXT_ROOT": str(root_.parent)}
+    for _day, stem in live:
+        if stem in keepers:
+            continue
+        key = f"kit-health/{stem}"
+        rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "ctx", "fm", key, "status", "archived"],
+                          env=env, timeout=60)
+        if rc == 0:
+            archived.append(key)
+        else:
+            failed.append((key, both(out, err)[-200:] or f"exit {rc}"))
+    return archived, [f"kit-health/{s}" for s in kept], failed
+
+
 def pr_review_example_edited(example: Path | None = None) -> list[str]:
     """Keys in `pr-review/config.example.json` that no longer hold their placeholder shape (a leading `<`) —
     a sign the file itself was hand-edited instead of the seeded `.context/state/pr-review/config.json`
@@ -2049,6 +2081,11 @@ def main() -> int:
                     help="remove the scratch dirs of ended sessions (what section 4 lists), print what went, and exit")
     ap.add_argument("--grace-seconds", type=float, default=GRACE_SECONDS, metavar="S",
                     help=f"with --sweep-scratch: leave a dir alone when anything in it changed within S seconds (default {GRACE_SECONDS})")
+    ap.add_argument("--archive-logs", action="store_true",
+                    help="step 5: set every older `kit-health/<date>-<env>` log of this environment to status archived "
+                         "(through the ctx adapter), keep the newest --keep-logs and today's, print what changed, and exit")
+    ap.add_argument("--keep-logs", type=int, default=1, metavar="N",
+                    help="with --archive-logs: leave the N newest unarchived logs alone (default 1; today's log always stays)")
     ap.add_argument("--ci", action="store_true", help="CI mode: leak scan + env-store config only, against the checkout and the blank "
                                                        "store CI builds; nothing under .context/ is written; exit 2 on an error or a leak hit, else 0")
     a = ap.parse_args()
@@ -2066,6 +2103,15 @@ def main() -> int:
         for name, path in failed:
             print(f"could not remove `{name}` (stuck at {path})", file=sys.stderr)
         return 1 if failed else 0
+    if a.archive_logs:
+        if a.keep_logs < 1:
+            print("kit-health: --keep-logs must be at least 1", file=sys.stderr)
+            return 2
+        archived, kept, failed = archive_old_logs(kit_profile.name(), a.keep_logs)
+        print(f"archived {len(archived)} older log(s), kept {len(kept)}" + (": " + ", ".join(archived) if archived else ""))
+        for key, why in failed:  # a failed write is reported, never fatal: the log stays active and the next run retries
+            print(f"could not archive `{key}`: {why}", file=sys.stderr)
+        return 0
     r = Report()
     try:
         return run(a, r)

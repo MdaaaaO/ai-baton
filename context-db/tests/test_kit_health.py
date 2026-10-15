@@ -3,6 +3,7 @@ tracker-aware ticket shape, anchored allow-list, loader errors reported, a plain
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -2041,6 +2042,134 @@ class CtxDependency(unittest.TestCase):
             return [what for rx, what in pats if rx.search(line) and "<repo>" in what]
         self.assertEqual(hits(f'CTX_REPO = "https://github.com/{org}/ctx-store"'), [])
         self.assertTrue(hits(f"see https://github.com/{org}/private-thing"))
+
+
+FAKE_FM_CTX = f"""#!{sys.executable}
+import os, re, sys
+a = sys.argv[1:]
+root, (verb, doc, field, value) = a[a.index("--store") + 1], a[a.index("--store") + 2:][:4]
+assert verb == "fm", a
+if doc == os.environ.get("FAKE_CTX_FAIL_DOC"):
+    sys.stderr.write("boom: store locked\\n")
+    sys.exit(3)
+path = os.path.join(root, doc + ".md")
+text = open(path, encoding="utf-8").read()
+open(path, "w", encoding="utf-8").write(re.sub(r"(?m)^" + field + r": .*$", field + ": " + value, text, count=1))
+with open(os.environ["FAKE_CTX_LOG"], "a", encoding="utf-8") as f:
+    f.write(doc + "\\n")
+"""
+
+
+class ArchiveOldLogs(unittest.TestCase):
+    """#503: step 5 archives the environment's older daily logs through `ctx fm`, on a throw-away store and a fake
+    `ctx` (KIT_CTX) that rewrites the status line — never the live store, never the real tool."""
+
+    ENV = "envx"
+    DAYS = ("2026-10-13", "2026-10-14", "2026-10-15")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        t = Path(self.tmp.name)
+        self.ctx = t / ".context"
+        self.dir = self.ctx / "kit-health"
+        self.dir.mkdir(parents=True)
+        for day in self.DAYS:
+            self.doc(f"{day}-{self.ENV}")
+        self.doc(f"HEALTH-{self.ENV}", status="reference")
+        self.doc(f"{self.DAYS[0]}-other")               # another environment's log
+        self.doc("2026-10-01-audit-docs")               # a differently named doc
+        fake = t / "bin" / "ctx"
+        fake.parent.mkdir()
+        fake.write_text(FAKE_FM_CTX, encoding="utf-8")
+        fake.chmod(0o755)
+        self.log = t / "ctx.log"
+        env = {k: v for k, v in os.environ.items() if k not in ("CTX_STORE", "CTX_ACTOR", "KIT_CTX", "FAKE_CTX_FAIL_DOC")}
+        env.update(KIT_CTX=str(fake), FAKE_CTX_LOG=str(self.log), CONTEXT_ROOT=str(self.ctx))
+        patcher = mock.patch.dict(os.environ, env, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.kh = load_kit_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def doc(self, stem, status="active"):
+        (self.dir / f"{stem}.md").write_text(f"---\ntitle: {stem}\ntype: log\ndomain: kit-health\nstatus: {status}\n---\n\n# {stem}\n",
+                                             encoding="utf-8")
+
+    def status(self, stem):
+        return self.kh.frontmatter(self.dir / f"{stem}.md")["status"]
+
+    def statuses(self):
+        return {p.stem: self.status(p.stem) for p in sorted(self.dir.glob("*.md"))}
+
+    def run_archive(self, keep=1):
+        return self.kh.archive_old_logs(self.ENV, keep, today=self.DAYS[-1], ctx_root=self.ctx)
+
+    def test_two_older_logs_archived_today_and_health_stay(self):
+        archived, kept, failed = self.run_archive()
+        self.assertEqual(archived, [f"kit-health/{d}-{self.ENV}" for d in self.DAYS[:2]])
+        self.assertEqual((kept, failed), ([f"kit-health/{self.DAYS[2]}-{self.ENV}"], []))
+        st = self.statuses()
+        self.assertEqual([st[f"{d}-{self.ENV}"] for d in self.DAYS], ["archived", "archived", "active"])
+        self.assertEqual(st[f"HEALTH-{self.ENV}"], "reference")
+        self.assertEqual((st[f"{self.DAYS[0]}-other"], st["2026-10-01-audit-docs"]), ("active", "active"))
+
+    def test_keep_logs_two_keeps_one_more(self):
+        archived, kept, _ = self.run_archive(keep=2)
+        self.assertEqual(archived, [f"kit-health/{self.DAYS[0]}-{self.ENV}"])
+        self.assertEqual(len(kept), 2)
+        self.assertEqual([self.status(f"{d}-{self.ENV}") for d in self.DAYS], ["archived", "active", "active"])
+
+    def test_second_run_changes_nothing(self):
+        self.run_archive()
+        before, calls = self.statuses(), self.log.read_text()
+        archived, kept, failed = self.run_archive()
+        self.assertEqual((archived, failed), ([], []))
+        self.assertEqual(kept, [f"kit-health/{self.DAYS[2]}-{self.ENV}"])
+        self.assertEqual((self.statuses(), self.log.read_text()), (before, calls))   # no further fm call at all
+
+    def test_archived_logs_do_not_count_toward_keep(self):
+        self.doc(f"{self.DAYS[1]}-{self.ENV}", status="archived")
+        archived, kept, _ = self.run_archive(keep=2)   # live: the 13th and the 15th, both inside the 2 newest
+        self.assertEqual((archived, len(kept)), ([], 2))
+        archived, _, _ = self.run_archive(keep=1)       # the already archived 14th is skipped, only the 13th is written
+        self.assertEqual(archived, [f"kit-health/{self.DAYS[0]}-{self.ENV}"])
+        self.assertEqual(self.log.read_text().split(), [f"kit-health/{self.DAYS[0]}-{self.ENV}"])
+
+    def test_todays_log_is_kept_even_when_a_later_one_exists(self):
+        self.doc(f"2026-10-16-{self.ENV}")
+        archived, kept, _ = self.run_archive()   # keep=1 -> the 16th; today (15th) stays too
+        self.assertEqual(archived, [f"kit-health/{d}-{self.ENV}" for d in self.DAYS[:2]])
+        self.assertEqual(kept, [f"kit-health/{self.DAYS[2]}-{self.ENV}", f"kit-health/2026-10-16-{self.ENV}"])
+
+    def test_a_failed_write_is_reported_and_the_rest_go_on(self):
+        with mock.patch.dict(os.environ, {"FAKE_CTX_FAIL_DOC": f"kit-health/{self.DAYS[0]}-{self.ENV}"}):
+            archived, _, failed = self.run_archive()
+        self.assertEqual(archived, [f"kit-health/{self.DAYS[1]}-{self.ENV}"])
+        self.assertEqual([k for k, _ in failed], [f"kit-health/{self.DAYS[0]}-{self.ENV}"])
+        self.assertIn("boom", failed[0][1])
+        self.assertEqual(self.status(f"{self.DAYS[0]}-{self.ENV}"), "active")
+
+    def test_cli_prints_what_changed_and_exits_zero_on_a_failed_write(self):
+        out = io.StringIO()
+        err = io.StringIO()
+        with mock.patch.object(self.kh.kit_profile, "name", return_value=self.ENV), \
+                mock.patch.object(self.kh, "ctx", return_value=self.ctx), \
+                mock.patch.dict(os.environ, {"FAKE_CTX_FAIL_DOC": f"kit-health/{self.DAYS[0]}-{self.ENV}"}), \
+                mock.patch.object(sys, "argv", ["kit-health.py", "--archive-logs"]), \
+                mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+            rc = self.kh.main()
+        self.assertEqual(rc, 0)
+        self.assertIn("archived 1 older log(s)", out.getvalue())
+        self.assertIn(f"could not archive `kit-health/{self.DAYS[0]}-{self.ENV}`", err.getvalue())
+
+    def test_cli_rejects_keep_logs_below_one(self):
+        err = io.StringIO()
+        with mock.patch.object(sys, "argv", ["kit-health.py", "--archive-logs", "--keep-logs", "0"]), mock.patch("sys.stderr", err):
+            self.assertEqual(self.kh.main(), 2)
+        self.assertIn("--keep-logs", err.getvalue())
+        self.assertEqual(self.status(f"{self.DAYS[0]}-{self.ENV}"), "active")
 
 
 if __name__ == "__main__":
