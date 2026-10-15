@@ -108,6 +108,7 @@ PRs/tickets touched — derived from its transcript on every heartbeat with zero
 [`SESSION_INDEX.md`](SESSION_INDEX.md) is generated from all of them — the one place to see who is
 active and what each session costs. `sessions/_ledger.md` keeps one row per ended session (the
 `_` prefix marks registry side files, skipped by the index). Ended sessions that nothing waits on —
+whose hand-off was consumed (the `Register as <name>` successor in § Next session registered after the session ended, live or archived — the starter's `sessions/<name>.md` path then resolves under `sessions/archive/`),
 ended more than `SESSION_ARCHIVE_DAYS` (7) days ago, or without a next-session prompt for
 `SESSION_ARCHIVE_NOPROMPT_HOURS` (48, capped at `SESSION_ARCHIVE_DAYS`; a crashed session is ended without one,
 and `session-register` / `session-touch` / `session-end` move its file back if it is resumed later) — are

@@ -23,9 +23,10 @@ MAX_ENDED sessions get a block; older ones (still in the fold) get the path with
 session that ended with no real prompt — nothing written, blank, or a "no successor" note
 (session-handoff's wording for a lane that intentionally left nothing to hand over) — does
 not appear in the Ended table at all; `has_next_prompt()` is the one place that decides "real".
-Ended sessions with no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago, are swept to
-sessions/archive/<name>.md (listed in sessions/archive/INDEX.md) so the live registry stays short
-under a fold. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
+Ended sessions are swept to sessions/archive/<name>.md (listed in sessions/archive/INDEX.md) so the live registry
+stays short under a fold, for one of three reasons (`archive_reason()`): the hand-off was consumed (its § Next session
+names a successor, `Register as <name>`, and a session of that name registered after this one ended, live or already
+archived — age aside), no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
 § Session stats) and `sessions/_ledger.md`. `make verify` warns when the file passes
 SESSION_INDEX_WARN bytes.
 
@@ -38,13 +39,14 @@ import glob
 import os
 import re
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timezone
 
 import kit_profile as profile  # same dir — the one content-root resolver
 import frontmatter  # same dir — the one frontmatter parser
 from fsutil import atomic_write  # same dir
 from session_stats import SPEND_BASIS  # same dir — one spend-basis wording, quoted verbatim here too
-from session import NEXT_HEADING  # same dir — the writer owns the session doc's section headings
+from session import NEXT_HEADING, CONVENTION_RE, CONVENTION_MAX  # same dir — the writer owns the section headings and the naming convention
 
 CTX = str(profile.context_root())
 SESS_DIR = os.path.join(CTX, "sessions")
@@ -94,8 +96,9 @@ def rel_from_index(path: str, index_path: str) -> str:
     return os.path.relpath(path, os.path.dirname(os.path.abspath(index_path))).replace(os.sep, "/")
 
 
-# Ended sessions leave the live registry for sessions/archive/ when nothing waits on them: no next-session
-# prompt (nothing for a successor to pick up), or ended more than ARCHIVE_DAYS ago. Makefile:
+# Ended sessions leave the live registry for sessions/archive/ when nothing waits on them: the hand-off was consumed
+# (its named successor registered after it ended), no next-session prompt (nothing for a successor to pick up), or ended more than
+# ARCHIVE_DAYS ago. Makefile:
 # `make … ARCHIVE_DAYS=<n>` (exported as SESSION_ARCHIVE_DAYS); 0 sweeps every ended session; --no-archive skips.
 ARCHIVE_DIR = os.path.join(SESS_DIR, "archive")
 ARCHIVE_OUT = os.path.join(ARCHIVE_DIR, "INDEX.md")
@@ -170,8 +173,84 @@ def by_heartbeat(items: list[dict]) -> list[dict]:
     return sorted(items, key=lambda r: r.get("heartbeat", ""), reverse=True)
 
 
-def archive_reason(m: dict) -> str | None:
-    """Why an ended session leaves the live registry — None while a successor may still need it."""
+# The ways a hand-off prompt tells a successor which name to take. A name is only a name when it follows the session
+# naming convention (`<lane>-<topic>[-n]`: lower-case kebab-case, >= 2 parts, <= 32 chars), which rejects the words a
+# sentence puts in that slot ("session", "the", "NAME") and the `<name>` placeholder.
+_NAME_CHARS = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
+_SUCCESSOR_RES = (
+    # "Register as <name>", "Register as session <name>", "Register as `<name>`", "register under the name <name>"
+    re.compile(r"\bregister(?:ed)?\s+(?:as|under\s+the\s+(?:session\s+)?name)\s+(?:the\s+)?(?:session\s+)?[`'\"]?(" + _NAME_CHARS + ")",
+               re.IGNORECASE),
+    # "your name is <name>", "your session name is <name>", "session name: <name>"
+    re.compile(r"\b(?:your\s+(?:session\s+)?name\s+is|session\s+name\s*[:=]?)\s+[`'\"]?(" + _NAME_CHARS + ")",
+               re.IGNORECASE),
+)
+# "Register as the successor of <x>" names the PREDECESSOR (the starter block's own wording): never a successor.
+_DATED_SUFFIX_RE = re.compile(r"-\d{8}(?:-\d+)?$")  # archive_path()'s collision suffix
+
+
+def named_successors(m: dict) -> list[str]:
+    """The session names `m`'s § Next session asks a successor to register as, in the order written (trailing `.` of
+    a sentence dropped). Only convention-shaped names count; `Register as the successor of <x>` names none."""
+    text = m.get("_next", "") or ""
+    out: list[str] = []
+    for rx in _SUCCESSOR_RES:
+        for n in rx.findall(text):
+            n = n.rstrip(".-_")
+            if CONVENTION_RE.match(n) and len(n) <= CONVENTION_MAX and n not in out:
+                out.append(n)
+    return out
+
+
+def _hb_time(hb: str):
+    """A stored heartbeat (or `registered`) stamp as an aware UTC datetime, None when blank or unparsable."""
+    try:
+        return datetime.strptime(hb, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def registered_times(live: list[dict]) -> dict[str, datetime]:
+    """Session name -> the newest `registered` stamp of any session of that name, live (any status) or already swept
+    to sessions/archive/ (a collision-suffixed file counts for its base name). session.py stamps `registered` only when
+    a new or ended lane (re)starts — never on touch/end, nor on a re-register of a lane that is already live — so,
+    unlike the heartbeat, it says when the lane began. A row without a parsable one (blank, or written before the
+    field existed) is absent: an unknown start can never prove a registration."""
+    out: dict[str, datetime] = {}
+
+    def note(name: str, hb: str) -> None:
+        t = _hb_time(hb)
+        if name and t is not None and (name not in out or t > out[name]):
+            out[name] = t
+
+    for m in live:
+        note(m.get("session", ""), m.get("registered", ""))
+    for p in glob.glob(os.path.join(ARCHIVE_DIR, "*.md")):
+        stem = os.path.splitext(os.path.basename(p))[0]
+        if stem.startswith("_") or stem == "INDEX":
+            continue
+        try:
+            reg = parse(p).get("registered", "")
+        except (OSError, ValueError):
+            continue
+        note(stem, reg)
+        note(_DATED_SUFFIX_RE.sub("", stem), reg)
+    return out
+
+
+def archive_reason(m: dict, registered: Mapping[str, datetime] | None = None) -> str | None:
+    """Why an ended session leaves the live registry — None while a successor may still need it. `registered` maps
+    every session name that exists, live (any status) or already archived, to when it last (re)started: a hand-off
+    whose named successor REGISTERED later than this session's end was consumed, so the row goes regardless of age. A
+    lane of that name that was already on file when this session ended (an older archived lane, a parallel live one)
+    proves nothing — nobody has picked this hand-off up yet — and keeps proving nothing however often it is touched
+    afterwards: its `registered` stamp stays where it began. A lane with no stamp is unknown, never a successor."""
+    me = m.get("session", "")
+    ended_at = _hb_time(m.get("heartbeat", ""))
+    if has_next_prompt(m) and ended_at is not None and registered:
+        for succ in named_successors(m):
+            if succ != me and succ in registered and registered[succ] > ended_at:
+                return f"successor {succ} registered"
     a = age_hours(m.get("heartbeat", ""))
     if a is None:
         return None  # unparsable ended-at: never drop a row on a bad value (same stance as MAX_ENDED)
@@ -198,11 +277,13 @@ def archive_path(name: str, m: dict) -> str:
         n += 1
 
 
-def sweep(ended: list[dict], dry_run: bool) -> tuple[list[dict], int]:
-    """Move the ended sessions nothing waits on to sessions/archive/; returns (still live, moved count)."""
+def sweep(ended: list[dict], dry_run: bool, registered: Mapping[str, datetime] | None = None
+          ) -> tuple[list[dict], int]:
+    """Move the ended sessions nothing waits on to sessions/archive/; returns (still live, moved count).
+    `registered` is every session name known before the sweep (with when it last (re)started), so a chain A → B → C archives A and B in one run."""
     keep, moved = [], 0
     for m in ended:
-        why = archive_reason(m)
+        why = archive_reason(m, registered)
         if why is None:
             keep.append(m)
             continue
@@ -236,7 +317,7 @@ def write_archive_index(now: datetime) -> int:
         "# `.context/sessions/archive/` — SESSION INDEX ARCHIVE",
         "",
         "> **Generated — do not hand-edit.** Ended sessions that left the live registry (`SESSION_INDEX.md`): "
-        f"no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago. Each row's full file is "
+        f"their named successor registered, no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago. Each row's full file is "
         "`sessions/archive/<file>` (its § Next session, § Session stats); the cross-session ledger stays "
         "`sessions/_ledger.md`. Nothing here is read at session start.",
         "",
@@ -281,7 +362,8 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(timezone.utc)
     moved = 0
     if not a.no_archive:
-        ended, moved = sweep(ended, a.dry_run)
+        registered = registered_times(rows)
+        ended, moved = sweep(ended, a.dry_run, registered)
     if a.dry_run:
         print(f"dry run — {len(active)} active, {len(ended)} ended stay in the live registry")
         return 0
@@ -304,7 +386,7 @@ def main(argv: list[str] | None = None) -> int:
         "the table points at it (`sessions/<name>.md` § Next session); a session that ended with nothing "
         "to hand over is not listed here (its file and stats stay in `sessions/<name>.md` § Session stats "
         "and `sessions/_ledger.md`, and it is swept on the usual schedule). "
-        f"Ended sessions with no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago, are swept "
+        f"Ended sessions whose named successor has registered, with no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago, are swept "
         "to `sessions/archive/` (see `sessions/archive/INDEX.md`).",
         "",
         f"_generated {now.astimezone(LOCAL_TZ).strftime(profile.LOCAL_TIME_FMT)} · {len(active)} active · "

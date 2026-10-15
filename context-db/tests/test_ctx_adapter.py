@@ -625,12 +625,12 @@ class CompactBriefHelpers(unittest.TestCase):
 
     def test_split_brief_doc_separates_frontmatter_sections_line_and_body(self):
         mod = load_adapter()
-        raw = ("sessions/foo (session, 10 bytes)\nsession: foo\nstats: turns 1\nheartbeat: 2026-01-01T00:00:00Z\n"
-               "sections: Notes (5)\n\n# Session: foo\n\n## Notes\nhi\n")
+        raw = ("sessions/foo (session, 10 bytes)\nsession: foo\nstats: turns 1\nregistered: 2026-01-01T00:00:00Z\n"
+               "heartbeat: 2026-01-01T00:00:00Z\nsections: Notes (5)\n\n# Session: foo\n\n## Notes\nhi\n")
         header, fm, body = mod._split_brief_doc(raw)
         self.assertEqual(header, "sessions/foo (session, 10 bytes)")
-        self.assertEqual(fm, {"session": "foo", "stats": "turns 1", "heartbeat": "2026-01-01T00:00:00Z",
-                              "sections": "Notes (5)"})
+        self.assertEqual(fm, {"session": "foo", "stats": "turns 1", "registered": "2026-01-01T00:00:00Z",
+                              "heartbeat": "2026-01-01T00:00:00Z", "sections": "Notes (5)"})
         self.assertEqual(body, "# Session: foo\n\n## Notes\nhi")
 
     def test_split_brief_doc_on_empty_input(self):

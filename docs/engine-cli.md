@@ -38,7 +38,7 @@ Live session registry (who is working on what, right now — see SESSION_INDEX.m
   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
   make -C $BATON/context-db session-activity          # what this session did, grouped (files/commits/PRs/tickets/drafts/compactions), from the transcript
   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
-  make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
+  make -C $BATON/context-db session-archive           # sweep ended sessions (successor registered, > ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only, naming each reason
   Every session-* target refreshes the row's `stats:` line from the transcript named by
   $CLAUDE_CODE_SESSION_ID (or SESSION_ID=<uuid>); NOSTATS=1 skips it. Zero model turns.
 
@@ -348,21 +348,22 @@ one place a session reads to see who else is active and whether it must
 coordinate. Subcommands (each regenerates SESSION_INDEX.md): register
 create/update this session's entry (upsert; preserves the free-text body —
 `--note` fills only `## Notes`); stamps `session_id` with
-$CLAUDE_CODE_SESSION_ID when set, so a hook handed that id finds the row touch
-refresh heartbeat + updated only — the <=12h keep-alive end mark the session
-ended; writes the `## Session stats` block into the body and (with --next
-FILE) the `## Next session` hand-off prompt — omit --next when the session has
-nothing to hand over, and pass --next none to withdraw a prompt already on
-file — and appends one row to sessions/_ledger.md (the cross-session
-cost/activity ledger) stats print this session's stats (block) without
-touching the registry rename --from <old> --to <new>: move sessions/<old>.md
-to <new>.md, rewrite the `session:` frontmatter and the `# Session: <name>`
-title, re-record the scratch session name, and when a heartbeat was running
-for <old>, restart heartbeat.sh under the new name with the same focus (best-
-effort — a heartbeat outside a live session has nothing to attach to and is
-reported, not fatal); refuses when <new> already has an entry or does not
-follow the session naming convention. Every subcommand also refreshes the
-`stats:` field (one line: turns, context, tokens, rough spend,
+$CLAUDE_CODE_SESSION_ID when set, so a hook handed that id finds the row, and
+`registered` with the time a NEW or ended lane (re)starts — a re-register of a
+live one keeps it touch refresh heartbeat + updated only — the <=12h keep-
+alive end mark the session ended; writes the `## Session stats` block into the
+body and (with --next FILE) the `## Next session` hand-off prompt — omit
+--next when the session has nothing to hand over, and pass --next none to
+withdraw a prompt already on file — and appends one row to sessions/_ledger.md
+(the cross-session cost/activity ledger) stats print this session's stats
+(block) without touching the registry rename --from <old> --to <new>: move
+sessions/<old>.md to <new>.md, rewrite the `session:` frontmatter and the `#
+Session: <name>` title, re-record the scratch session name, and when a
+heartbeat was running for <old>, restart heartbeat.sh under the new name with
+the same focus (best-effort — a heartbeat outside a live session has nothing
+to attach to and is reported, not fatal); refuses when <new> already has an
+entry or does not follow the session naming convention. Every subcommand also
+refreshes the `stats:` field (one line: turns, context, tokens, rough spend,
 PRs/tickets/sign jobs/drafts — see session_stats.py) when the session's
 transcript is discoverable via $CLAUDE_CODE_SESSION_ID / --session-id; `--no-
 stats` skips it. Stats are derived from the transcript with zero model turns,

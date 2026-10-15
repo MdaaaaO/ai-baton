@@ -100,6 +100,31 @@ class RegistryDoc(unittest.TestCase):
         self.assertIn("working_on: x", text)
         self.assertEqual(text.count("session: t-two"), 1)
 
+    def test_registered_is_stamped_when_a_lane_starts_and_kept_by_touch_end_and_a_live_re_register(self):
+        # gen_sessions counts a hand-off consumed only when its successor REGISTERED after the end: a lane that was
+        # already live must keep its start stamp through every keep-alive, or its next touch would pass for a successor
+        r = run("session.py", "register", "--name", "t-reg", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        p = self.root / "sessions" / "t-reg.md"
+
+        def field(k: str) -> str:
+            return next(ln.split(":", 1)[1].strip() for ln in p.read_text(encoding="utf-8").splitlines()
+                        if ln.startswith(k + ":"))
+
+        self.assertEqual(field("registered"), field("heartbeat"))
+        old = "2026-01-01T00:00:00Z"
+        p.write_text(p.read_text(encoding="utf-8").replace(f"registered: {field('registered')}", f"registered: {old}", 1),
+                     encoding="utf-8")
+        for args in (("touch", "--working", "x"), ("register", "--working", "y"), ("end",)):
+            with self.subTest(step=args[0]):
+                r = run("session.py", args[0], "--name", "t-reg", "--no-stats", *args[1:], root=self.root)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(field("registered"), old)
+        r = run("session.py", "register", "--name", "t-reg", "--no-stats", root=self.root)  # an ended lane restarts
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotEqual(field("registered"), old)
+        self.assertEqual(field("registered"), field("heartbeat"))
+
     def _load_session_mod(self):
         # session.py computes CTX (and so the ledger path) from CONTEXT_ROOT at exec time — kit_profile is already
         # imported by earlier modules with the suite's store, which is fine: the ledger never goes through ENV_DIR.

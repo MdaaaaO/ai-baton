@@ -25,7 +25,7 @@
 #   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
 #   make -C $BATON/context-db session-activity          # what this session did, grouped (files/commits/PRs/tickets/drafts/compactions), from the transcript
 #   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
-#   make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
+#   make -C $BATON/context-db session-archive           # sweep ended sessions (successor registered, > ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only, naming each reason
 #   Every session-* target refreshes the row's `stats:` line from the transcript named by
 #   $CLAUDE_CODE_SESSION_ID (or SESSION_ID=<uuid>); NOSTATS=1 skips it. Zero model turns.
 #
@@ -85,8 +85,9 @@ ifeq ($(origin MAX_ENDED),undefined)
 MAX_ENDED := $(or $(SESSION_INDEX_MAX_ENDED),5)
 endif
 export SESSION_INDEX_MAX_ENDED := $(MAX_ENDED)
-# Ended sessions leave SESSION_INDEX.md for sessions/archive/ when they ended more than ARCHIVE_DAYS ago, or
-# carry no next-session prompt for NOPROMPT_HOURS (a crashed session is ended without one and may be resumed;
+# Ended sessions leave SESSION_INDEX.md for sessions/archive/ as soon as their named successor registered (the
+# § Next session says "Register as <name>" and a session of that name registered after they ended, live or archived), when they ended
+# more than ARCHIVE_DAYS ago, or carry no next-session prompt for NOPROMPT_HOURS (a crashed session is ended without one and may be resumed;
 # the window is capped at ARCHIVE_DAYS, so ARCHIVE_DAYS=1 also shrinks it to 24 h). Every session-index run
 # sweeps: make … ARCHIVE_DAYS=<n> (0 = all ended) NOPROMPT_HOURS=<h>, or SESSION_ARCHIVE_DAYS /
 # SESSION_ARCHIVE_NOPROMPT_HOURS in the shell environment as the durable knobs. session-register / session-touch /
@@ -362,7 +363,7 @@ session-index:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) gen_sessions.py $(if $(NOARCHIVE),--no-archive,)
 
 # make session-archive [ARCHIVE_DAYS=<n>] [NOPROMPT_HOURS=<h>] [DRY=1] — same sweep session-index runs, on its own;
-# DRY=1 only lists. NOARCHIVE=1 (here or on session-index) regenerates without sweeping.
+# DRY=1 only lists (each line ends in its reason: successor <name> registered, no next-session prompt, or age). NOARCHIVE=1 (here or on session-index) regenerates without sweeping.
 session-archive:
 	@cd $(BIN) && CONTEXT_ROOT="$(CONTEXT)" $(PY) gen_sessions.py $(if $(DRY),--dry-run,) $(if $(NOARCHIVE),--no-archive,)
 
