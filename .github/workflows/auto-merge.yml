@@ -22,6 +22,12 @@
 # read/write), not github.token: a merge by github.token creates a push that triggers NO workflow, so
 # `ci`, `main-guard` and `release` would never run on main. Without the secret the job says so and stops.
 #
+# The squash commit is `<PR title> (#<n>)` (what GitHub writes by default) with the PR body's trailing footer block
+# as its message — `BREAKING CHANGE: …` and the like, never the rest of the body — so the release tool sees the
+# footer that sets the bump level (docs/contributing.md § Releases). The block is cut by main's copy of
+# .github/scripts/squash-footers.jq, read through the API at the commit this run comes from; title and body are
+# data that only jq handles (--rawfile / the JSON it reads) on the way into the request, never a shell string.
+#
 # Runs on GitHub-hosted runners like every workflow (docs/contributing.md § Where CI runs). `workflow_run` always
 # executes the copy of this file on main, and the job checks out nothing — it reads PR metadata, never PR code.
 name: auto-merge
@@ -155,15 +161,31 @@ jobs:
         if: steps.gates.outputs.go == 'true'
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          READ_TOKEN: ${{ github.token }}
+          MAIN_SHA: ${{ github.sha }}  # the main commit this copy of the workflow comes from
           PR: ${{ steps.gates.outputs.pr }}
         run: |
           set -euo pipefail
+          warn() { echo "::warning title=auto-merge not merged::PR #$PR at $SHA — $1"; exit 1; }
+          tmp=$RUNNER_TEMP
+          # Reads with the job's own token. The PR's title and body stay in files; only jq touches them.
+          GH_TOKEN=$READ_TOKEN gh api "repos/$REPO/pulls/$PR" > "$tmp/pr.json" || warn "could not read the PR"
+          GH_TOKEN=$READ_TOKEN gh api -H 'Accept: application/vnd.github.raw' \
+            "repos/$REPO/contents/.github/scripts/squash-footers.jq?ref=$MAIN_SHA" > "$tmp/squash-footers.jq" \
+            || warn "could not read .github/scripts/squash-footers.jq at $MAIN_SHA"
+          jq -j '.body // ""' "$tmp/pr.json" | jq -Rjs -f "$tmp/squash-footers.jq" > "$tmp/footers.txt" \
+            || warn "could not cut the footer block from the PR body"
+          # An empty block sends no commit_message: GitHub then writes the repo's default body.
+          jq --rawfile msg "$tmp/footers.txt" \
+             '{merge_method: "squash", sha: env.SHA, commit_title: "\(.title) (#\(.number))"}
+              + (if $msg == "" then {} else {commit_message: $msg} end)' "$tmp/pr.json" > "$tmp/merge.json" \
+            || warn "could not build the merge request"
+          # Counts only: echoing PR text to the log would let it inject workflow commands.
+          echo "auto-merge: PR #$PR squash message carries $(grep -c . "$tmp/footers.txt" || true) footer line(s)"
           # REST, not `gh pr merge`: the fine-grained PAT is refused on the GraphQL `repository.pullRequest`
-          # query gh runs first. `sha` is the head the gates checked — GitHub
-          # answers 409 if it moved. Subject/body come from the repo's squash settings (PR title / PR body).
-          if out=$(gh api -X PUT "repos/$REPO/pulls/$PR/merge" -f merge_method=squash -f sha="$SHA" 2>&1); then
+          # query gh runs first. `sha` is the head the gates checked — GitHub answers 409 if it moved.
+          if out=$(gh api -X PUT "repos/$REPO/pulls/$PR/merge" --input "$tmp/merge.json" 2>&1); then
             echo "auto-merge: merged PR #$PR at $SHA"
           else
-            echo "::warning title=auto-merge not merged::PR #$PR at $SHA — $(printf '%s' "$out" | tail -1)"
-            exit 1
+            warn "$(printf '%s' "$out" | tail -1)"
           fi
