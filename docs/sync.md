@@ -69,7 +69,7 @@ refused pull is seen by the next session instead of staying silent:
 | `ok <kit@sha> unverified (<reason>)` | `--accept` applied a release tag whose manifest attestation could not be checked (no `gh` or one too old, not authenticated, a manifest.txt that could not be downloaded for any reason, or the verify call itself got no answer) | not from `sync-check.sh` — the standalone word `unverified` and the reason are in `.sync-status` and in `make claude_sync`'s output for this run only; the durable mark lives in `.sync-unverified` (see below), which `kit-health` § 1 reads and warns on, naming the command to verify by hand |
 | `held <tag>` | a newer release tag is waiting in `.sync-preview`; `make claude_sync` applies it | not from the status line — its kit check names the waiting tag for as long as `HEAD` lacks it (unless `.sync-rejected` already names this tag — see below) |
 | `offline <epoch> since <ts>` | the fetch could not resolve or reach origin; the epoch is the first run of the streak | after 3 days |
-| `error <reason>` | off `main`, dirty, ahead, fetch failed or timed out, fast-forward failed, an accepted release tag failed manifest verification, or a previously rejected tag is still waiting | always |
+| `error <reason>` | off `main`, dirty, ahead, fetch failed (the reason carries git's last 3 error lines; a release tag moved on origin names the tag and `git -C <kit> tag -d <tag>`, since the fetch never forces tags) or timed out, fast-forward failed, an accepted release tag failed manifest verification, or a previously rejected tag is still waiting | always |
 
 ## Channel: release tags or `main`
 

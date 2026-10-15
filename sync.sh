@@ -137,6 +137,35 @@ fetch_offline() {
   grep -Eqi 'could not resolve (host|hostname)|temporary failure in name resolution|name or service not known|nodename nor servname|failed to connect|couldn.t connect to server|network is unreachable|no route to host|connection (refused|timed out)|operation timed out' "$1"
 }
 
+# fetch_tail <stderr-file> — the last 3 non-blank lines of a failed fetch, trimmed and joined with " | " on
+# one line (capped), so the log line and `.sync-status` say why without opening the stderr block.
+fetch_tail() {
+  sed 's/^[[:space:]]*//;s/[[:space:]]*$//' "$1" | tr -s ' \t' '  ' | awk 'NF { a[++n] = $0 }
+    END { s = (n > 3 ? n - 2 : 1); for (i = s; i <= n; i++) printf "%s%s", (i > s ? " | " : ""), a[i] }' | cut -c1-300
+}
+
+# sq <string> — the string in single quotes (an embedded ' becomes '\''), so a printed command pastes safely.
+sq() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# fetch_remedy <stderr-file> — one line naming the fix when git rejected a ref update; empty otherwise.
+# A release tag that moved on origin is rejected (`would clobber existing tag`) and stays rejected on
+# every later run: the fetch never forces tags, since a moved release tag is what the manifest check
+# is there to catch. Deleting the local tag lets the next run fetch origin's copy.
+fetch_remedy() {
+  local tags qtags="" t here
+  tags="$(grep 'would clobber existing tag' "$1" | sed -n 's/^[[:space:]]*!\{0,1\}[[:space:]]*\[rejected\][[:space:]]*\([^[:space:]]*\).*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
+  here="$(sq "$HERE")"
+  if [ -n "$tags" ]; then
+    # shellcheck disable=SC2086  # word-split on purpose: tag names hold no whitespace (the sed stops at it)
+    for t in $tags; do qtags="${qtags:+$qtags }$(sq "$t")"; done
+    printf 'tag %s moved on origin and git will not overwrite it; check it is a legitimate retag, then git -C %s tag -d %s (the next sync fetches origin'"'"'s copy)' "$tags" "$here" "$qtags"
+  elif grep -q '\[rejected\]' "$1"; then
+    printf 'git rejected a ref update; run git -C %s fetch --tags origin by hand to see which' "$here"
+  fi
+}
+
 # gh_unreachable <stderr-file> — did a `gh` call fail without an answer to its question: the network
 # (`gh` words these its own way, Go's net errors, so fetch_offline's git wording alone would miss
 # them), a rate limit, a server error, or credentials github refused? A 404 is an answer.
@@ -412,15 +441,23 @@ sync_kit() {
   status "pending $(date -u +%s) fetch started (pid $$) — still here minutes later = the run was killed"
   local rc=0
   ERRF="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/kit-sync.$$")"
-  with_timeout "$FETCH_TIMEOUT" git fetch -q --tags origin 2>"$ERRF" 9>&- || rc=$?
-  [ -s "$ERRF" ] && cat "$ERRF" >>"$LOG"
+  # no -q: a rejected ref is reported only without it. A clean fetch's per-ref report (the `From …` line
+  # and the indented ref lines) is dropped below, so a normal run still logs nothing.
+  with_timeout "$FETCH_TIMEOUT" git fetch --tags origin 2>"$ERRF" 9>&- || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    [ -s "$ERRF" ] && cat "$ERRF" >>"$LOG"
+  else
+    grep -Ev '^(From | )' "$ERRF" >>"$LOG" || true
+  fi
   if [ "$rc" -eq 124 ]; then
     log "kit: ERROR fetch timed out after ${FETCH_TIMEOUT}s"
     FAIL="kit fetch timed out after ${FETCH_TIMEOUT}s (hung network or a credential prompt? see sync.log)"; return 1
   elif [ "$rc" -ne 0 ] && fetch_offline "$ERRF"; then
     log "kit: offline — origin unreachable, nothing pulled"; OFFLINE=1; return 0
   elif [ "$rc" -ne 0 ]; then
-    log "kit: ERROR fetch failed (exit $rc)"; FAIL="kit fetch failed (see sync.log)"; return 1
+    local tail_ remedy; tail_="$(fetch_tail "$ERRF")"; remedy="$(fetch_remedy "$ERRF")"
+    log "kit: ERROR fetch failed (exit $rc)${tail_:+: $tail_}${remedy:+ — $remedy}"
+    FAIL="kit fetch failed (exit $rc)${tail_:+: $tail_}${remedy:+ — $remedy} (see sync.log)"; return 1
   fi
   local ahead; ahead="$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)"
   if [ "$ahead" -gt 0 ]; then
