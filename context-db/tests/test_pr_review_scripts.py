@@ -183,6 +183,12 @@ class FetchContextStub(unittest.TestCase):
         for unwanted in ("note prose", "h3 other prose", "tail prose"):
             self.assertNotIn(unwanted, traps)
 
+    def test_kb_traps_does_not_keep_a_heading_that_only_contains_traps_inside_a_word(self):
+        kb = "# Title\n\n## Known traps\n- real trap\n\n## Trapsheet\nsheet prose\n"
+        traps, _ = self.traps_for(kb)
+        self.assertIn("real trap", traps)
+        self.assertNotIn("sheet prose", traps)
+
     def test_kb_traps_falls_back_to_the_whole_kb_with_a_note_when_no_traps_heading(self):
         kb = "# Title\n\n## Machinery facts\nfact one\n\n## Conventions\nconvention two\n"
         traps, stdout = self.traps_for(kb)

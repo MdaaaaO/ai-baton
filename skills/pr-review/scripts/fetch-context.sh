@@ -151,12 +151,13 @@ if [ "$bundle" = 1 ]; then
     done
   fi
   rm -rf "$BLOBERR"
-  # KB traps pre-grepped: every `## ` or `### ` section whose heading contains "traps" (case-insensitive: "Known
+  # KB traps pre-grepped: every `## ` or `### ` section whose heading contains the word "traps" (case-insensitive, word-bounded so "Trapsheet" is not kept: "Known
   # traps", "Repo-specific traps", "Traps", "Traps & machinery facts"), plus every `## ` section whose heading shares
   # a word with a touched path. A `### ` heading under a kept `## ` section stays inside it; a kept `### ` section
   # ends at the next `##`/`###` heading. When the KB has no traps heading at all the whole doc is passed, with a
   # one-line note first, so a KB that names its section differently never reaches the runner empty.
-  # Matched as a plain substring (index(), never a regex): a word taken from a filename may carry parentheses,
+  # The traps heading is a fixed word-bounded regex ("Trapsheet" is not kept); filename words are matched as a plain
+  # substring (index(), never a regex): a word taken from a filename may carry parentheses,
   # brackets or other regex metacharacters, and building a live pattern from it used to break the match (or the
   # whole awk program) silently — a fixed-string search cannot mis-parse.
   kb="$CTX/pr-reviews/$r.md"; : > "$out/kb-traps.md"; traps_note=""
@@ -165,7 +166,7 @@ if [ "$bundle" = 1 ]; then
     awk -v words="$words" 'BEGIN{n = split(words, arr, "|"); keep = 0; lvl = 0; found = 0}
       /^###? /{
         l = ($0 ~ /^### /) ? 3 : 2
-        istrap = (index(tolower($0), "traps") > 0)
+        istrap = (tolower($0) ~ /(^|[^a-z])traps([^a-z]|$)/)
         if (istrap) found = 1
         if (!(keep && l > lvl)) {
           keep = istrap
@@ -178,6 +179,9 @@ if [ "$bundle" = 1 ]; then
       }
       keep{print}
       END{exit (found ? 0 : 3)}' "$kb" > "$out/kb-traps.md"; awk_rc=$?
+    if [ "$awk_rc" -ne 0 ] && [ "$awk_rc" -ne 3 ]; then
+      echo "kb-traps awk rc=$awk_rc" >> "$ERR"
+    fi
     if [ "$awk_rc" -eq 3 ]; then
       traps_note="TRAPS: no traps section, whole KB passed"
       { echo "$traps_note"; echo ""; cat "$kb"; } > "$out/kb-traps.md"

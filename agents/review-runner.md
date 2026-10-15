@@ -2,9 +2,9 @@
 name: review-runner
 description: "Opus worker for pr-review steps 1-4 (snapshot, trap KB, review pass, verification) plus the modelling-PR data rerun/stakeholder impact and diagram-plan Explainability check: writes $CTX/triage.json, returns only the overview block (<=3K tokens). Use when pr-review spawns a per-PR runner; never posts. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "16"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "17"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   facts: "tracker.mcp_tools.search"
 model: opus
 effort: medium
@@ -34,7 +34,7 @@ so you spend them on judgment, not on fetching.
    - `manifest.json` (mode, humans, bot assessment, threads, checks), `bundle.json` (per-file stats,
      unresolved threads with their last comment, checks+statuses), `diff.patch` and `diffs/<path>.patch`,
      `head/<path>` (file at the PR head), `base/<path>` (file at the base sha — this IS the baseline),
-     `kb-traps.md` (repo KB § Known traps + sections matching touched paths), `threads.json`,
+     `kb-traps.md` (repo KB: any `##`/`###` heading containing "traps" + sections matching touched paths), `threads.json`,
      `review_comments.json`, `issue_comments.json`.
    Respect `mode`: `full` / `follow_up` (build the Addressed/Outstanding/Superseded/Reversed ledger of our
    previous review from `threads.json` first, then review only the delta) / `replies_only` (no new
