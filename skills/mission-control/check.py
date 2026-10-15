@@ -72,9 +72,9 @@ CALLS = tuple(  # (name shown, pattern): script text that opens a connection, lo
         ("new Audio", r"\bnew\s+Audio\b"),
         ("window.open", r"\bwindow\s*\.\s*open\b"),
         ("location.href|assign|replace", r"\blocation\s*\.\s*(?:href|assign|replace)\b"),
-        ("location =", r"\b(?:(?:window|document)\s*\.\s*)?location\s*\+?=(?![=>])"),  # not == (compare) or => (arrow)
+        ("location =", r"\b(?:(?:window|document)\s*\.\s*)?location\s*(?:\+|&&|\|\||\?\?)?=(?![=>])"),  # not == (compare) or => (arrow)
         ("location.host|hostname|pathname|search|port|protocol =",
-         r"\blocation\s*\.\s*(?:host|hostname|pathname|search|port|protocol)\s*\+?=(?![=>])"),
+         r"\blocation\s*\.\s*(?:host|hostname|pathname|search|port|protocol)\s*(?:\+|&&|\|\||\?\?)?=(?![=>])"),
         (".src =", r"\.\s*src\s*=(?!=)"),
         ("http(s)://", r"(?i:\bhttps?://)"),  # a remote URL spelled out; never a bare //, which is a comment
     )

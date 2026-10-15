@@ -759,6 +759,12 @@ class Constructs(Planted):
 
     SETTER = "script call: location.host|hostname|pathname|search|port|protocol = in an inline script"
 
+    def test_a_logical_compound_location_assignment_is_refused(self):
+        for code in ("location &&= x", "location ||= '/x'", "window.location ??= x"):
+            self.refuses(f"<script>{code}</script>", "script call: location = in an inline script")
+        for code in ("location.search ??= '?q'", "location.host &&= h", "location.pathname ||= '/x'"):
+            self.refuses(f"<script>{code}</script>", self.SETTER)
+
     def test_a_location_append_is_refused(self):
         for code in ("location += '#x'", "window.location+='/x'", "document.location\n+= x", "top.location += x"):
             self.refuses(f"<script>{code}</script>", "script call: location = in an inline script")
