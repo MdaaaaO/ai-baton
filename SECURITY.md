@@ -76,4 +76,6 @@ sync run. A later `make claude_sync` whose check runs and rejects the applied re
 `rejected`, which `kit-health` reports as an error until a check verifies the release or `main` moves (a
 check that cannot run does not lift it); the release itself stays applied.
 
-There is no way yet to pull back a release that turns out to be bad: the remedy today is a newer release.
+A bad release is fixed by a newer release; there is no revocation switch. Publish the fixed version: the marketplace
+ref only moves forward, and a machine takes it with `claude plugin update`. A machine that cannot update yet pins the
+last good version by its tag.
