@@ -18,11 +18,12 @@ of reading everything into context every session.
 - **[`INDEX.md`](INDEX.md) is the materialized catalog** — generated from all frontmatter,
   grouped by domain. Each domain's table holds its live rows (Doc, Title, Type, Status, Updated; tags
   stay in the frontmatter, `make find TAG=` lists by tag); `status: archived` rows, and a domain's
-  `status: reference` rows once it holds more than 20, fold into one line per domain (count + the
+  `status: reference` rows once it holds more than 12 (`INDEX_REFERENCE_FOLD`), fold into one line per domain (count + the
   `make find DOMAIN=` command that lists them), so the catalog stays flat as a domain accumulates history. **Read it first** (it's cheap), then
   open only the leaf docs your task needs. Never hand-edit it: the kit's hook regenerates it
-  after every change (`make index` by hand); `make verify` warns when its `active` rows pass 10 KB (archive finished
-  docs to bring it back under budget; reference rows do not count).
+  after every change (`make index` by hand); `make verify` warns when its `active` and `closed` rows pass 10 KB
+  (`INDEX_SIZE_WARN`; archive finished docs to bring it back under budget, reference rows do not count) or the whole
+  file passes 20 KB (`INDEX_TOTAL_SIZE_WARN`, twice that).
 - **The `Makefile` is the CLI** (see below). Claude creates, indexes, verifies, finds, and
   archives docs through it, then "manages however it wants" within these conventions. The
   engine (`Makefile` + `bin/` + `_templates/`) lives **outside** this dir, at

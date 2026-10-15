@@ -715,5 +715,19 @@ class NewSh(ContextRoot):
         self.assertIn("OVERRIDE over", Path(r.stdout.strip()).read_text(encoding="utf-8"))
 
 
+class ReadmeTemplateBudgets(unittest.TestCase):
+    """The store README template states the real fold and index budgets, so the prose cannot drift from the code."""
+
+    def test_template_names_the_default_fold_and_budgets(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("INDEX_")}
+        code = "import gen_index, verify; print(gen_index.INDEX_REFERENCE_FOLD, verify.INDEX_SIZE_WARN // 1024)"
+        out = subprocess.run([sys.executable, "-c", code], env=env, cwd=BIN, capture_output=True, text=True, check=True)
+        fold, size_kb = out.stdout.split()
+        text = " ".join((BIN.parent / "context-README.template.md").read_text(encoding="utf-8").split())
+        self.assertIn(f"more than {fold} (`INDEX_REFERENCE_FOLD`)", text)
+        self.assertIn(f"`active` and `closed` rows pass {size_kb} KB (`INDEX_SIZE_WARN`;", text)
+        self.assertIn(f"whole file passes {2 * int(size_kb)} KB (`INDEX_TOTAL_SIZE_WARN`", text)
+
+
 if __name__ == "__main__":
     unittest.main()
