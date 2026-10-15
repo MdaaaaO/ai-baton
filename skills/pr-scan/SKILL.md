@@ -149,7 +149,7 @@ auto-COMMENT path for direct review requests.
 - Skip a PR for its current head: append `{"repo":"<org>/x","pr":N,"head":"<sha>","status":"skipped","ts":"…"}` to the ledger.
 - Change repos, freshness window, bot list, or row cap: edit `.context/state/pr-review/config.json`.
 - Arm recurring: `/loop 2h /pr-scan` — the default cadence (the fork returns NO-OP on quiet ticks, so the
-  main session spends nothing beyond the ~$0.1 Sonnet tick); widen the interval, e.g. `/loop 4h /pr-scan`,
+  main session spends nothing beyond the ~$0.1 triage tick); widen the interval, e.g. `/loop 4h /pr-scan`,
   to halve that further when the queue is calm.
   Disarm by stopping the loop; the ledger keeps state across sessions. Never two sweeps at once — the
   script's `.scan.lock` refuses the second, and the ledger is shared state.

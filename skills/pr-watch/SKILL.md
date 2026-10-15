@@ -2,9 +2,9 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo/session surfaces only actionable events, triages via `pr-event-brief`, keeps branches synced, merges via `pr-merge.sh` once gates hold. Parks on sign-off, idle windows or a human-only gate. Use when your session owns an open PR."
 metadata:
-  version: "28"
-  updated: "2026-10-15"
-  reviewed: "2026-10-02"
+  version: "29"
+  updated: 2026-10-15
+  reviewed: 2026-10-15
 ---
 
 # pr-watch — stay on top of your PRs without the noise
@@ -126,11 +126,11 @@ Three park triggers, any one is enough (one idle session with three
 Stopping is `TaskStop` on the Monitor; nothing on GitHub changes. The `session-handoff` skill's step 7 is
 where the stop belongs, and step 9 records the heads the successor re-arms from.
 
-## Triage each event on Sonnet — `pr-event-brief`
+## Triage each event on the `triage` agent — `pr-event-brief`
 
 Don't read the PR yourself at full prefix when a line lands. Invoke the forked skill
-`pr-event-brief <owner/repo> <n> "<event line>"` (Skill tool; it runs on the `triage` agent — Sonnet,
-low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line brief ending in one
+`pr-event-brief <owner/repo> <n> "<event line>"` (Skill tool; it runs on the `triage` agent — the tier its
+agent file pins, low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line brief ending in one
 `ACTION:` (`REPLY+RESOLVE` / `FIX+PUSH` / `RE-REQUEST-BOT` / `UPDATE-BRANCH` / `MERGE` / `WAIT(<who>)` /
 `INVESTIGATE-CHECK` / `REDRAW`). **You perform the action** — replies, resolves, re-requests, merges post
 to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot and run

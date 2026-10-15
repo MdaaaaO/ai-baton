@@ -152,7 +152,7 @@ pre-2026-09-26 unit under `metadata:` and adds `compatibility` (idempotent).
 | key | kind | why the kit allows it at the top level |
 |---|---|---|
 | `name` `description` `license` `compatibility` `metadata` `allowed-tools` | spec | the Agent Skills spec's own fields |
-| `model` | Claude Code | the forked skills and the agents pin the model tier they are priced for (Sonnet triage, Opus review) |
+| `model` | Claude Code | the forked skills and the agents pin the model tier they are priced for (the `triage` agent for sweeps, Opus review) |
 | `effort` | Claude Code | the reasoning budget of a forked skill or agent (`low` for sweeps, `medium` for reviews) |
 | `context` | Claude Code | `fork` runs a skill in a subagent so its output never enters the main prefix (alerts-sweep, pr-scan, pr-event-brief) |
 | `agent` | Claude Code | which `agents/*.md` definition a forked skill runs under (`triage`) |
