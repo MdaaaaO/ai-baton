@@ -1,6 +1,6 @@
 ---
 name: review-runner
-description: "Opus worker for pr-review steps 1-4 (snapshot, trap KB, review pass, verification) plus the modelling-PR data rerun/stakeholder impact and diagram-plan Explainability check: writes $CTX/triage.json, returns only the overview block (<=3K tokens). Use when pr-review spawns a per-PR runner; never posts. Trivial-PR --auto goes to auto-runner."
+description: "Opus worker for pr-review steps 1-4 (snapshot, trap KB, review pass, verification) plus the modelling-PR checks: writes $CTX/triage.json, returns only the overview block. Use when pr-review spawns a per-PR runner; never posts. Trivial-PR --auto goes to auto-runner."
 metadata:
   version: "16"
   updated: "2026-10-02"

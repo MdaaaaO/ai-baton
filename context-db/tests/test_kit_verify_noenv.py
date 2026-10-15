@@ -733,8 +733,33 @@ class LoadingTable(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             self.assertIn("~ warn: descriptions total", err)
             self.assertIn("largest:", err)
+            self.assertIn(f"1 B left of {kit_verify.DESC_TOTAL_BYTES} B", err)
         finally:
             kit_verify.DESC_TOTAL_BYTES = saved_bytes
+
+    def test_description_budget_ok_line_says_bytes_left(self):
+        total = kit_verify.loading_numbers()["desc_bytes"]
+        saved_bytes = kit_verify.DESC_TOTAL_BYTES
+        kit_verify.DESC_TOTAL_BYTES = total + 5000
+        try:
+            out_buf, err_buf = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+                rc = kit_verify.main(["--no-env"])
+            self.assertEqual(rc, 0, err_buf.getvalue())
+            self.assertIn(f"descriptions {total} B (5000 B left of {total + 5000} B)", out_buf.getvalue())
+        finally:
+            kit_verify.DESC_TOTAL_BYTES = saved_bytes
+
+    def test_partial_run_ok_line_has_no_budget_remainder(self):
+        # `kit_verify.py <path>` skips the kit-wide budget, so the OK line must not report a remainder it
+        # never computed — the named units' bytes alone, no "(… B left of …)".
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            rc = kit_verify.main(["--no-env", str(kit_verify.KIT / "skills" / "pr-open")])
+        self.assertEqual(rc, 0, err_buf.getvalue())
+        out = out_buf.getvalue()
+        self.assertRegex(out, r"descriptions \d+ B")
+        self.assertNotIn("left of", out)
 
 
 if __name__ == "__main__":

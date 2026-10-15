@@ -1,6 +1,6 @@
 ---
 name: mission-control
-description: "Builds and opens the private mission-control page: the store's sessions, spend, doc catalog, priorities, queues and pointers on one local HTML file. Use when asked to open, show or rebuild the mission-control page, where the mission page is, or for an overview of sessions, spend and the store. Not for session-register, cost-report, kit-health, session-handoff or self-assessment."
+description: "Builds and opens the private mission-control page (sessions, spend, docs, priorities, queues) as one local HTML file. Use when asked to open, show or rebuild the mission page, where it is, or for an overview of sessions, spend and the store. Not for session-register, cost-report, kit-health, session-handoff or self-assessment."
 metadata:
   version: "1"
   updated: "2026-10-12"
