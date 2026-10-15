@@ -6,7 +6,12 @@ API request's `usage` block lives there) and derives cost + activity figures wit
 turn at all: turns, cached-prefix tokens, output tokens, peak/avg context, a rough list-price
 spend, tool-call mix, compactions, subagents, and what the session did to the outside world
 (PRs touched/opened, tickets touched/created/commented/transitioned, sign jobs enqueued,
-Slack drafts/sends, pr-watch monitors armed).
+Slack drafts/sends, pr-watch monitors armed). Ticket writes are counted from both tracker shapes: the
+tracker MCP tools named in `tracker.mcp_tools` (create / comment / transition), and Bash commands for
+GitHub issues — created: `gh issue create`, `gh api …/issues -X POST`; comments: `gh issue comment`,
+`gh api …/issues/<n>/comments` (POST); transitions: `gh issue close|reopen`, `gh issue edit` with
+`--add-label|--remove-label|--milestone`, `gh api …/issues/<n> -X PATCH`. A `gh api` body flag
+(`-f`/`-F`/`--field`/`--raw-field`/`--input`) implies POST. The JSON key is `tracker`.
 
 Used by session.py (registry `stats:` field on every register/touch/end, `## Session stats`
 block + ledger row on `end`) and by heartbeat.sh (so a LIVE session's row carries current
@@ -192,7 +197,8 @@ def _ticket_key(k: str) -> tuple:
     """Natural sort for any tracker: `KEY-123` → ('KEY', 123); `456` / `#456` → ('', 456)."""
     m = re.match(r"^#?([A-Za-z]*)-?(\d+)$", k)
     return (m.group(1), int(m.group(2))) if m else (k, 0)
-# MCP tool-name suffixes that count as tracker writes (create / comment / transition); Jira only today.
+# MCP tool-name suffixes that count as tracker writes (create / comment / transition) — the Jira-shaped tools.
+# The GitHub-shaped writes (`gh issue …`, `gh api …/issues…`) are Bash commands, counted by `ticket_writes`.
 _T = profile.get("tracker.mcp_tools") or {}
 TRACKER_CREATE, TRACKER_COMMENT, TRACKER_TRANSITION = (_T.get(k) or None for k in ("create", "comment", "transition"))
 PR_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
@@ -235,6 +241,54 @@ PR_COMMENT_RE = re.compile(r"(?<![\w-])gh\s+pr\s+comment\s+(\d+)")
 ISSUE_CREATE_RE = re.compile(r"(?<![\w-])gh\s+issue\s+create\b")
 ISSUE_COMMENT_RE = re.compile(r"(?<![\w-])gh\s+issue\s+comment\s+(\d+)")
 ISSUE_CLOSE_RE = re.compile(r"(?<![\w-])gh\s+issue\s+close\s+(\d+)")
+# Ticket-counter shapes beyond the activity listing: a state change is a `close` / `reopen`, or an `edit` that moves
+# a label or the milestone (the GitHub adapter's transitions); a `\`-newline continuation stays inside one command.
+_ARGS = r"(?:[^;|&\n]|\\\n)*?"
+ISSUE_REOPEN_RE = re.compile(r"(?<![\w-])gh\s+issue\s+reopen\s+(\d+)")
+ISSUE_EDIT_STATE_RE = re.compile(
+    r"(?<![\w-])gh\s+issue\s+edit\s+\d+" + _ARGS + r"--(?:add-label|remove-label|milestone)\b")
+# `gh api` command segments, analysed in `_api_ticket_write` — the method is explicit (`-X`/`--method`) or implied
+# POST by a body flag, and the endpoint decides which counter the call feeds.
+API_CMD_RE = re.compile(r"(?<![\w-])gh\s+api\b((?:[^;|&\n]|\\\n)*)")
+_API_METHOD_RE = re.compile(r"(?:-X|--method)[\s=]+['\"]?([A-Za-z]+)")
+_API_BODY_RE = re.compile(r"\s(?:-f|-F|--field|--raw-field|--input)\b")
+_API_ISSUES_RE = re.compile(r"/issues(?:/(\d+))?(/comments)?['\"]?(?=\s|$|\?)")
+
+
+def _api_ticket_write(segment: str) -> str | None:
+    """`created` / `comment` / `transition` for one `gh api` argument string, else None. Issue-collection POST =
+    created; `/issues/<n>/comments` POST = comment; `/issues/<n>` PATCH = transition (state / labels / milestone)."""
+    m = _API_METHOD_RE.search(segment)
+    method = m.group(1).upper() if m else ("POST" if _API_BODY_RE.search(segment) else "GET")
+    em = _API_ISSUES_RE.search(segment)
+    if not em:
+        return None
+    num, comments = em.group(1), em.group(2)
+    if method == "POST" and not num and not comments:
+        return "created"
+    if method == "POST" and num and comments:
+        return "comment"
+    if method == "PATCH" and num and not comments:
+        return "transition"
+    return None
+
+
+def ticket_writes(cmd: str) -> set[str]:
+    """Which ticket-counter kinds (`created`, `comment`, `transition`) one Bash command feeds — the GitHub-tracker
+    shapes: `gh issue create|comment|close|reopen|edit --add-label|--milestone` and the `gh api …/issues…` forms.
+    A kind counts once per command however often it repeats, like every other per-call counter here."""
+    kinds: set[str] = set()
+    if ISSUE_CREATE_RE.search(cmd):
+        kinds.add("created")
+    if ISSUE_COMMENT_RE.search(cmd):
+        kinds.add("comment")
+    if ISSUE_CLOSE_RE.search(cmd) or ISSUE_REOPEN_RE.search(cmd) or ISSUE_EDIT_STATE_RE.search(cmd):
+        kinds.add("transition")
+    for am in API_CMD_RE.finditer(cmd):
+        kind = _api_ticket_write(am.group(1))
+        if kind:
+            kinds.add(kind)
+    return kinds
 
 
 def _nearest_repo(path: str) -> tuple[str, str]:
@@ -409,7 +463,7 @@ def collect(path: str) -> dict:
     prs_touched: set[tuple[str, str]] = set()
     prs_opened = 0
     tickets: set[str] = set()
-    jira_created = jira_comments = jira_transitions = 0
+    tk_created = tk_comments = tk_transitions = 0
     sign_jobs = 0
     slack_drafts = slack_sends = 0
     monitors = 0
@@ -495,17 +549,21 @@ def collect(path: str) -> dict:
                     cmd = inp.get("command", "")
                     if ENQUEUE_RE.search(cmd):
                         sign_jobs += 1
+                    tw = ticket_writes(cmd)
+                    tk_created += "created" in tw
+                    tk_comments += "comment" in tw
+                    tk_transitions += "transition" in tw
                     gw = GH_WRITE_RE.search(cmd)
                     if gw:
                         gh_writes += 1
                         if gw.group("pr_verb") == "create":
                             prs_opened += 1
                 elif TRACKER_CREATE and name.endswith(TRACKER_CREATE):
-                    jira_created += 1
+                    tk_created += 1
                 elif TRACKER_COMMENT and name.endswith(TRACKER_COMMENT):
-                    jira_comments += 1
+                    tk_comments += 1
                 elif TRACKER_TRANSITION and name.endswith(TRACKER_TRANSITION):
-                    jira_transitions += 1
+                    tk_transitions += 1
                 elif name.endswith("slack_send_message_draft"):
                     slack_drafts += 1
                 elif name.endswith("slack_send_message"):
@@ -547,7 +605,7 @@ def collect(path: str) -> dict:
         "prs_opened": prs_opened,
         "gh_writes": gh_writes,
         "tickets_touched": sorted(tickets, key=_ticket_key),
-        "jira": {"created": jira_created, "comments": jira_comments, "transitions": jira_transitions},
+        "tracker": {"created": tk_created, "comments": tk_comments, "transitions": tk_transitions},
         "sign_jobs": sign_jobs,
         "slack": {"drafts": slack_drafts, "sends": slack_sends},
     }
@@ -584,7 +642,7 @@ def fmt_line(s: dict) -> str:
             f"~${s['spend_total_usd_est']:.0f} (main {s['spend_usd_est']:.0f} + {s['subagents_cost']['files']} subagents {s['subagents_cost']['spend_usd_est']:.0f}) · "
             f"{s['compactions']} compactions · {s['tool_calls']} tool calls · "
             f"{len(s['prs_touched'])} PRs ({s['prs_opened']} opened) · {len(s['tickets_touched'])} tickets "
-            f"({s['jira']['created']} created, {s['jira']['comments']} comments, {s['jira']['transitions']} transitions) · "
+            f"({s['tracker']['created']} created, {s['tracker']['comments']} comments, {s['tracker']['transitions']} transitions) · "
             f"{s['sign_jobs']} sign jobs · {s['slack']['drafts']} Slack drafts")
     hint = split_hint(s)
     return f"{line} · {hint}" if hint else line
@@ -592,7 +650,7 @@ def fmt_line(s: dict) -> str:
 
 def fmt_block(s: dict) -> str:
     """Markdown table for a session file / context doc."""
-    tk, ctx, j, p, sub = s["tokens"], s["context"], s["jira"], s["prices_per_mtok"], s["subagents_cost"]
+    tk, ctx, j, p, sub = s["tokens"], s["context"], s["tracker"], s["prices_per_mtok"], s["subagents_cost"]
     stk = sub["tokens"]
     sub_models = ", ".join(f"{m.replace('claude-', '')} {c}" for m, c in sorted(sub["models"].items(), key=lambda x: -x[1])) or "—"
     prs = ", ".join(f"{r.split('/')[-1]}#{n}" for r, n in s["prs_touched"]) or "—"

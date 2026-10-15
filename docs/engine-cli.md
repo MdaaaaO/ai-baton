@@ -550,7 +550,12 @@ API request's `usage` block lives there) and derives cost + activity figures wit
 turn at all: turns, cached-prefix tokens, output tokens, peak/avg context, a rough list-price
 spend, tool-call mix, compactions, subagents, and what the session did to the outside world
 (PRs touched/opened, tickets touched/created/commented/transitioned, sign jobs enqueued,
-Slack drafts/sends, pr-watch monitors armed).
+Slack drafts/sends, pr-watch monitors armed). Ticket writes are counted from both tracker shapes: the
+tracker MCP tools named in `tracker.mcp_tools` (create / comment / transition), and Bash commands for
+GitHub issues — created: `gh issue create`, `gh api …/issues -X POST`; comments: `gh issue comment`,
+`gh api …/issues/<n>/comments` (POST); transitions: `gh issue close|reopen`, `gh issue edit` with
+`--add-label|--remove-label|--milestone`, `gh api …/issues/<n> -X PATCH`. A `gh api` body flag
+(`-f`/`-F`/`--field`/`--raw-field`/`--input`) implies POST. The JSON key is `tracker`.
 
 Used by session.py (registry `stats:` field on every register/touch/end, `## Session stats`
 block + ledger row on `end`) and by heartbeat.sh (so a LIVE session's row carries current
