@@ -2115,6 +2115,35 @@ class ArchiveOldLogs(unittest.TestCase):
         self.assertEqual(st[f"HEALTH-{self.ENV}"], "reference")
         self.assertEqual((st[f"{self.DAYS[0]}-other"], st["2026-10-01-audit-docs"]), ("active", "active"))
 
+    def test_same_day_suffixed_log_is_archived_and_sorts_by_suffix(self):
+        self.doc(f"{self.DAYS[0]}-{self.ENV}-2")
+        self.doc(f"{self.DAYS[0]}-{self.ENV}-10")
+        archived, kept, failed = self.run_archive(keep=3)   # live order: 13th, 13th-2, 13th-10, 14th, 15th -> the two oldest go
+        self.assertEqual(archived, [f"kit-health/{self.DAYS[0]}-{self.ENV}", f"kit-health/{self.DAYS[0]}-{self.ENV}-2"])
+        self.assertEqual(failed, [])
+        self.assertEqual(len(kept), 3)
+        self.assertEqual(self.status(f"{self.DAYS[0]}-{self.ENV}-2"), "archived")
+        self.assertEqual(self.status(f"{self.DAYS[0]}-{self.ENV}-10"), "active")
+
+    def test_reference_log_is_never_a_candidate_nor_written(self):
+        self.doc(f"2026-10-12-{self.ENV}", status="reference")
+        archived, kept, _ = self.run_archive()
+        self.assertNotIn(f"kit-health/2026-10-12-{self.ENV}", archived + kept)
+        self.assertEqual(self.status(f"2026-10-12-{self.ENV}"), "reference")
+        self.assertNotIn("2026-10-12", self.log.read_text())
+
+    def test_impossible_date_is_ignored_and_takes_no_keep_slot(self):
+        self.doc(f"2026-13-45-{self.ENV}")
+        archived, kept, _ = self.run_archive()
+        self.assertEqual(archived, [f"kit-health/{d}-{self.ENV}" for d in self.DAYS[:2]])
+        self.assertEqual(kept, [f"kit-health/{self.DAYS[2]}-{self.ENV}"])
+        self.assertEqual(self.status(f"2026-13-45-{self.ENV}"), "active")
+
+    def test_write_names_the_read_store_even_when_ctx_store_is_set(self):
+        with mock.patch.dict(os.environ, {"CTX_STORE": "/elsewhere/store"}):
+            archived, _, failed = self.run_archive()
+        self.assertEqual((len(archived), failed), (2, []))   # the fake asserts `--store <ctx_root>` is in argv
+
     def test_keep_logs_two_keeps_one_more(self):
         archived, kept, _ = self.run_archive(keep=2)
         self.assertEqual(archived, [f"kit-health/{self.DAYS[0]}-{self.ENV}"])

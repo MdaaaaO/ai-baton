@@ -1437,21 +1437,34 @@ def sweep_scratch(root: Path | None = None, ctx_root: Path | None = None, keep: 
 def archive_old_logs(envname: str, keep: int = 1, today: str | None = None,
                      ctx_root: Path | None = None) -> tuple[list[str], list[str], list[tuple[str, str]]]:
     """Step 5's tidy-up (#503): once today's `kit-health/<YYYY-MM-DD>-<env>` log exists, every older log of this
-    environment is set to `status: archived` through `ctx_adapter.py ctx fm` (audited; never a raw write), so the
-    INDEX folds them into one line. Returns (archived, kept, failed): doc keys archived now, unarchived logs left
-    alone, and (doc key, why) for each write that failed. Never touches the HEALTH stamp or another environment's
-    or a differently named doc; an already archived log is skipped (a second run changes nothing). The `keep`
-    newest unarchived logs by the date in the slug stay, and today's (`today`, default the local date) always does."""
+    environment (a same-day `-<n>` suffix included) is set to `status: archived` through `ctx_adapter.py ctx fm`
+    (audited; never a raw write), so the INDEX folds them into one line. Returns (archived, kept, failed): doc keys
+    archived now, live logs left alone, and (doc key, why) for each write that failed. Only a log with
+    `status: active` is a candidate: `reference` (or any other status) and an already archived log are skipped and
+    never written, so a second run changes nothing. A name whose date is not a real date is ignored. Never touches
+    the HEALTH stamp or another environment's or a differently named doc. The `keep` newest candidates by (date,
+    suffix) stay, and today's (`today`, default the local date) always does. The write names the same store the
+    logs were read from (`--store <ctx_root>`; an ambient `CTX_STORE` is blanked for the child)."""
     root_ = (ctx() if ctx_root is None else ctx_root) / "kit-health"
-    pat = re.compile(r"^(\d{4}-\d{2}-\d{2})-" + re.escape(envname) + r"$")
+    pat = re.compile(r"^(\d{4}-\d{2}-\d{2})-" + re.escape(envname) + r"(?:-(\d+))?$")
     today = today or dt.datetime.now(kit_profile.zone()[0]).strftime("%Y-%m-%d")
-    logs = sorted((m.group(1), p.stem) for p in root_.glob("*.md") if (m := pat.match(p.stem)))
-    live = [(day, stem) for day, stem in logs if frontmatter(root_ / f"{stem}.md").get("status") != "archived"]
+    logs = []
+    for p in root_.glob("*.md"):
+        m = pat.match(p.stem)
+        if not m:
+            continue
+        try:
+            dt.date.fromisoformat(m.group(1))
+        except ValueError:
+            continue
+        logs.append((m.group(1), int(m.group(2) or 0), p.stem))
+    logs.sort()
+    live = [(day, stem) for day, _n, stem in logs if frontmatter(root_ / f"{stem}.md").get("status") == "active"]
     keepers = {stem for _day, stem in live[::-1][:max(keep, 1)]} | {stem for day, stem in live if day == today}
     kept = [stem for _day, stem in live if stem in keepers]
     archived: list[str] = []
     failed: list[tuple[str, str]] = []
-    env = {"CONTEXT_ROOT": str(root_.parent)}
+    env = {"CONTEXT_ROOT": str(root_.parent), "CTX_STORE": ""}   # the adapter then passes --store <that root>
     for _day, stem in live:
         if stem in keepers:
             continue
