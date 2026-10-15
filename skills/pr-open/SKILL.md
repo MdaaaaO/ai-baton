@@ -2,9 +2,9 @@
 name: pr-open
 description: "Checklist for opening a PR: sizing gate, body with the diagram set and a ## Verified section, public-text-check and length_check, labels, reviewers, pr-watch, tracker link, Slack review draft where enabled. Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "31"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "32"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
 ---
 
@@ -54,10 +54,9 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    Also run `python3 $BATON/context-db/bin/length_check.py <file> --surface pr --repo <o>/<r>` on the same
    file — a warning (step 7), never a blocker; a long template overrides the budget via
    `length.repos.<o>/<r>.pr_words`.
-2. **Reviewers**: the code owner(s) who must approve (CODEOWNERS for the touched paths; the user's teams
-   are `github.owner_teams`) — plus `github.review_bot` **only when it is non-empty**. Request via
-   `gh api -X POST repos/<o>/<r>/pulls/<n>/requested_reviewers -f 'reviewers[]=…'` (teams:
-   `-f 'team_reviewers[]=…'`). A solo repo with no CODEOWNERS and no bot: nothing to request — say so.
+2. **Reviewers**: `python3 $BATON/skills/pr-open/codeowners.py resolve <o>/<r> --pr <n>`: exit **0** → request exactly
+   its `team:`/`user:` lines plus a non-empty `github.review_bot` (`gh api -X POST repos/<o>/<r>/pulls/<n>/requested_reviewers`);
+   exit **3** → nothing to request; exit **2** is a failed read, never "nothing to request" — `reference/codeowners.md`.
 3. **Labels — always, in every repo, whether or not the repo asks for them** (owner decision, 2026-09-11 and
    2026-09-18: "applying tags should not be repo specific, we always want to apply tags and follow best
    practices, even if the repo itself doesn't require it"). A PR without labels is not open. Procedure:
