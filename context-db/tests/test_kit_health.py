@@ -348,6 +348,43 @@ class AutoCompactCheck(unittest.TestCase):
         self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
 
 
+class MemoryWiring(unittest.TestCase):
+    """`memory_wiring()`: § 4 runs `memory-prune`'s `memory_check.py` — past its budget one WARN naming
+    `/memory-prune`, within it an OK line, no memory dir a plain (uncounted) line. `MEMORY_DIR` names the fixture."""
+
+    def run_check(self, mem: Path, **env: str):
+        kh = load_kit_health()
+        r = kh.Report()
+        with mock.patch.dict(os.environ, dict(MEMORY_DIR=str(mem), **env)):
+            kh.memory_wiring(r)
+        return kh, r
+
+    def fixture(self, td: str, line: str) -> Path:
+        mem = Path(td) / "memory"
+        mem.mkdir()
+        (mem / "a.md").write_text('---\nname: a\ndescription: "d"\nmetadata:\n  type: user\n---\nbody\n', encoding="utf-8")
+        (mem / "MEMORY.md").write_text(f"# Memory index\n\n- [A](a.md) — {line}\n", encoding="utf-8")
+        return mem
+
+    def test_over_budget_warns_and_names_the_skill(self):
+        with tempfile.TemporaryDirectory() as td:
+            kh, r = self.run_check(self.fixture(td, "x" * 200), MEMORY_LINE_WARN="150")
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[kh.WARN], 1, text)
+        self.assertIn("/memory-prune", text)
+
+    def test_within_budget_is_ok(self):
+        with tempfile.TemporaryDirectory() as td:
+            kh, r = self.run_check(self.fixture(td, "short"), MEMORY_LINE_WARN="150")
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.OK]), (0, 1), "\n".join(r.lines))
+
+    def test_missing_dir_is_not_a_finding(self):
+        with tempfile.TemporaryDirectory() as td:
+            kh, r = self.run_check(Path(td) / "nope")
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.OK], r.counts[kh.ERR]), (0, 0, 0), "\n".join(r.lines))
+        self.assertIn("no memory dir", "\n".join(r.lines))
+
+
 class EnvFileCheck(unittest.TestCase):
     """`env_file_wiring()`: a stale `$CLAUDE_ENV_FILE` — a `BATON`/`CLAUDE_PROJECT_DIR` line whose path no
     longer exists, or an `export BATON=` line sitting outside the `kit_profile.SESSION_ENV_BEGIN`/`SESSION_ENV_END`

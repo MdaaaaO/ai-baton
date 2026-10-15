@@ -176,7 +176,7 @@ explains the clone's hooks and guards.
 
 | Category | Skills |
 |---|---|
-| Sessions and knowledge | **`kit-health`** · **`session-register`** · **`session-handoff`** · `session-retro` · `env-init` · `kit-setup` · `cost-report` · `self-assessment` · `mission-control` |
+| Sessions and knowledge | **`kit-health`** · **`session-register`** · **`session-handoff`** · `session-retro` · `memory-prune` · `env-init` · `kit-setup` · `cost-report` · `self-assessment` · `mission-control` |
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
