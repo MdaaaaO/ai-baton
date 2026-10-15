@@ -576,9 +576,20 @@ class DrainSurvives(unittest.TestCase):
             job.write_text(f'# META {{"topic": "a"}}\nprintf \'%b\\n\' \'{gh007}\'\nexit 1\n')
             out = self._drain(sq, rc=1)
         self.assertIn("GH007", out)
-        self.assertIn("<login>@users.noreply.github.com", out)
-        self.assertIn("git commit --amend --reset-author", out)
+        self.assertIn("<id>+<login>@users.noreply.github.com", out)
+        self.assertIn("git commit --amend --reset-author --no-edit -S", out)
         self.assertNotIn("remote moved", out)
+
+    def test_a_commit_subject_naming_gh007_does_not_hijack_a_moved_remote_hint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sq = self._queue(Path(tmp))
+            job = sq.Q / "20260101T000000Z-000-a.sh"
+            job.write_text('# META {"topic": "a"}\n'
+                           'echo "[feat abc1234] fix(sign-queue): name the remedy on a GH007 email privacy rejection"\n'
+                           'echo " ! [rejected]        feat -> feat (fetch first)"\nexit 1\n')
+            out = self._drain(sq, rc=1)
+        self.assertIn("remote moved", out)
+        self.assertNotIn("--amend", out)
 
     def test_a_bare_remote_rejection_gets_the_generic_hint(self):
         with tempfile.TemporaryDirectory() as tmp:
