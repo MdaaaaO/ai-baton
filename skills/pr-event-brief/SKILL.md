@@ -48,13 +48,16 @@ re-request or merge anything — the main session does that.
      **whose `commit_id` equals the current head**: its `### Assessment:` line (🟢/🟡/🔴 + one clause). A
      review on an older head is *stale*; a body without `### Assessment:` is *not a review* (drafter died /
      feedback-ingest run).
-   In every case: latest state per human reviewer (APPROVED / CHANGES_REQUESTED / COMMENTED).
+   In every case: latest state per human reviewer (APPROVED / CHANGES_REQUESTED / COMMENTED) **with its
+   `submitted_at`** — the WAIT rule below compares it against the last reply on that reviewer's threads.
 3. Unresolved threads **and** `reviewDecision` in one GraphQL call (the MERGE rule below needs
    `reviewDecision`; no REST call above returns it):
    ```
-   gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewDecision reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved comments(first:1){nodes{databaseId author{__typename login} body}}}}}}}' -F o=<owner> -F r=<repo> -F n=$pr
+   gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewDecision reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved comments(first:1){nodes{databaseId author{__typename login} body}} last:comments(last:1){nodes{author{login} createdAt}}}}}}}' -F o=<owner> -F r=<repo> -F n=$pr
    ```
-   Thread count, and for up to 5 unresolved ones `<databaseId> by <login>: <≤12 words>`. When step 2 landed
+   Thread count, and for up to 5 unresolved ones `<databaseId> by <login>: <≤12 words>`; `last` is the thread's
+   newest comment — ours, when its `author.login` is own (step 4's resolution), with the `createdAt` the WAIT
+   rule compares against the opener's `submitted_at`. When step 2 landed
    on "Bot configured and resolved" (a login to compare against), capture the author of each unresolved
    thread to check if any are bot-authored: a thread is bot-authored when its `author.login` matches that
    login either exactly or after adding/stripping a trailing `[bot]` (REST logins for an App bot are
@@ -112,8 +115,9 @@ existing FIX+PUSH / REPLY+RESOLVE rules below decide instead, exactly as they wo
 `REPLY+RESOLVE` when unresolved threads are the only gate; `UPDATE-BRANCH` when `mergeable_state` is `behind`; `MERGE`
 when `reviewDecision` APPROVED + zero unresolved threads + `clean`, **and** (bot configured: 🟢 on the
 head) or (`BOT: n/a`: no bot condition at all); `WAIT(<login>)` when a
-named human must act — not when that human already approved after our reply: their open threads are ours to
-close, so that is `REPLY+RESOLVE`; `INVESTIGATE-CHECK` for a real red check; `FIX+PUSH` when the bot or a human
+named human must act — not when that human already approved after our reply (their APPROVED `submitted_at`
+from step 2 is later than our `last` reply's `createdAt` on each of their open threads, step 3): those threads
+are ours to close, so that is `REPLY+RESOLVE`; `INVESTIGATE-CHECK` for a real red check; `FIX+PUSH` when the bot or a human
 asked for a code change; `REDRAW` whenever `DIAGRAMS:` reads `DRIFT` on a real `HEAD MOVED` event —
 this overrides every other rule above for that event (`docs/diagrams.md`'s contract), and `WHY` then
 names the check's own `<old> → <new>` (or `<bad> → <new>` on a malformed marker) rather than a fresh
