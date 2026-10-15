@@ -203,7 +203,7 @@ def named_successors(m: dict) -> list[str]:
 
 
 def _hb_time(hb: str):
-    """A stored heartbeat as an aware UTC datetime, None when blank or unparsable."""
+    """A stored heartbeat (or `registered`) stamp as an aware UTC datetime, None when blank or unparsable."""
     try:
         return datetime.strptime(hb, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (ValueError, TypeError):
@@ -211,10 +211,11 @@ def _hb_time(hb: str):
 
 
 def registered_times(live: list[dict]) -> dict[str, datetime]:
-    """Session name -> the newest heartbeat of any session of that name, live (any status) or already swept to
-    sessions/archive/ (a collision-suffixed file counts for its base name). The heartbeat is the only timestamp the
-    registry keeps: `register` and `touch` stamp it, `end` leaves it at the end. A row without a parsable one is
-    absent — it can never prove a registration."""
+    """Session name -> the newest `registered` stamp of any session of that name, live (any status) or already swept
+    to sessions/archive/ (a collision-suffixed file counts for its base name). session.py stamps `registered` only when
+    a new or ended lane (re)starts — never on touch/end, nor on a re-register of a lane that is already live — so,
+    unlike the heartbeat, it says when the lane began. A row without a parsable one (blank, or written before the
+    field existed) is absent: an unknown start can never prove a registration."""
     out: dict[str, datetime] = {}
 
     def note(name: str, hb: str) -> None:
@@ -223,26 +224,27 @@ def registered_times(live: list[dict]) -> dict[str, datetime]:
             out[name] = t
 
     for m in live:
-        note(m.get("session", ""), m.get("heartbeat", ""))
+        note(m.get("session", ""), m.get("registered", ""))
     for p in glob.glob(os.path.join(ARCHIVE_DIR, "*.md")):
         stem = os.path.splitext(os.path.basename(p))[0]
         if stem.startswith("_") or stem == "INDEX":
             continue
         try:
-            hb = parse(p).get("heartbeat", "")
+            reg = parse(p).get("registered", "")
         except (OSError, ValueError):
             continue
-        note(stem, hb)
-        note(_DATED_SUFFIX_RE.sub("", stem), hb)
+        note(stem, reg)
+        note(_DATED_SUFFIX_RE.sub("", stem), reg)
     return out
 
 
 def archive_reason(m: dict, registered: Mapping[str, datetime] | None = None) -> str | None:
     """Why an ended session leaves the live registry — None while a successor may still need it. `registered` maps
-    every session name that exists, live (any status) or already archived, to its newest heartbeat: a hand-off whose
-    named successor's heartbeat is LATER than this session's end was consumed, so the row goes regardless of age. A
-    name that was already on file when this session ended (an older archived lane, a parallel live one) proves
-    nothing — nobody has picked this hand-off up yet."""
+    every session name that exists, live (any status) or already archived, to when it last (re)started: a hand-off
+    whose named successor REGISTERED later than this session's end was consumed, so the row goes regardless of age. A
+    lane of that name that was already on file when this session ended (an older archived lane, a parallel live one)
+    proves nothing — nobody has picked this hand-off up yet — and keeps proving nothing however often it is touched
+    afterwards: its `registered` stamp stays where it began. A lane with no stamp is unknown, never a successor."""
     me = m.get("session", "")
     ended_at = _hb_time(m.get("heartbeat", ""))
     if has_next_prompt(m) and ended_at is not None and registered:
@@ -278,7 +280,7 @@ def archive_path(name: str, m: dict) -> str:
 def sweep(ended: list[dict], dry_run: bool, registered: Mapping[str, datetime] | None = None
           ) -> tuple[list[dict], int]:
     """Move the ended sessions nothing waits on to sessions/archive/; returns (still live, moved count).
-    `registered` is every session name known before the sweep (with its newest heartbeat), so a chain A → B → C archives A and B in one run."""
+    `registered` is every session name known before the sweep (with when it last (re)started), so a chain A → B → C archives A and B in one run."""
     keep, moved = [], 0
     for m in ended:
         why = archive_reason(m, registered)

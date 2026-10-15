@@ -10,7 +10,8 @@ who else is active and whether it must coordinate.
 
 Subcommands (each regenerates SESSION_INDEX.md):
   register  create/update this session's entry (upsert; preserves the free-text body — `--note` fills only `## Notes`);
-            stamps `session_id` with $CLAUDE_CODE_SESSION_ID when set, so a hook handed that id finds the row
+            stamps `session_id` with $CLAUDE_CODE_SESSION_ID when set, so a hook handed that id finds the row, and
+            `registered` with the time a NEW or ended lane (re)starts — a re-register of a live one keeps it
   touch     refresh heartbeat + updated only — the <=12h keep-alive
   end       mark the session ended; writes the `## Session stats` block into the body and
             (with --next FILE) the `## Next session` hand-off prompt — omit --next when the session has
@@ -56,7 +57,7 @@ SESS_DIR = os.path.join(CTX, "sessions")
 
 # Frontmatter fields, in emit order.
 FIELDS = ["session", "session_id", "ref", "status", "epic", "repos",
-          "working_on", "responsibilities", "stats", "heartbeat", "updated"]
+          "working_on", "responsibilities", "stats", "registered", "heartbeat", "updated"]
 STATS_HEADING = "## Session stats"
 ACTIVITY_HEADING = "## What this session did"
 NEXT_HEADING = "## Next session"
@@ -476,6 +477,7 @@ def cmd_register(a) -> None:
     if a.ref:    meta["ref"] = a.ref
     # A session that registers is active by definition: registering over an ended (or restored) doc reactivates
     # it, so the row shows under Active and the later session-end writes its stats + ledger row.
+    fresh = meta.get("status") in (None, "", "ended")  # a new doc, or an ended/archived lane coming back to life
     meta["status"] = a.status or ("active" if meta.get("status") == "ended" else meta.get("status")) or "active"
     if a.epic:   meta["epic"] = a.epic
     if a.repos:  meta["repos"] = a.repos
@@ -485,6 +487,12 @@ def cmd_register(a) -> None:
     body = _merge_duplicate_sections(body)
     _apply_stats(meta, _stats(a))
     meta["heartbeat"] = now_iso()
+    if fresh:
+        # When this lane (re)started: the one timestamp that says a successor picked a hand-off up after it ended
+        # (gen_sessions.archive_reason). Never on touch/end, and not on a re-register of a lane that is already
+        # live — its heartbeat moves on every touch, so a lane of that name that predates the hand-off would
+        # otherwise look like a successor after its next keep-alive.
+        meta["registered"] = meta["heartbeat"]
     meta["updated"] = today()
     write_doc(path, meta, body)
     record_name(a.name)

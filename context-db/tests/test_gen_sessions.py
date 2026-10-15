@@ -14,12 +14,20 @@ sys.path.insert(0, str(BIN))
 import session_stats  # noqa: E402 — same dir; the one spend-basis wording, quoted here too
 
 
-def session_file(root: Path, name: str, status: str, ended_days_ago: float, next_prompt: str, hb: str = "") -> Path:
-    hb = hb or (datetime.now(timezone.utc) - timedelta(days=ended_days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+def stamp(days_ago: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def session_file(root: Path, name: str, status: str, ended_days_ago: float, next_prompt: str, hb: str = "",
+                 registered: str | None = "") -> Path:
+    """A session doc; `registered` defaults to the heartbeat (registered, never touched since), None omits the field
+    (a doc written before session.py stamped it)."""
+    hb = hb or stamp(ended_days_ago)
+    reg = "" if registered is None else f"registered: {registered or hb}\n"
     body = f"# Session: {name}\n\n## Next session\n\n{next_prompt}\n\n## Session stats\n\nnone\n"
     p = root / "sessions" / f"{name}.md"
     p.write_text(f"---\nsession: {name}\nref: abc123\nstatus: {status}\nepic: E-1\nworking_on: x\n"
-                 f"responsibilities: y\nstats: 1 turns · 0.1h · ~$1\nheartbeat: {hb}\nupdated: 2026-09-26\n---\n\n{body}",
+                 f"responsibilities: y\nstats: 1 turns · 0.1h · ~$1\n{reg}heartbeat: {hb}\nupdated: 2026-09-26\n---\n\n{body}",
                  encoding="utf-8")
     return p
 
@@ -286,12 +294,31 @@ class ConsumedHandoff(unittest.TestCase):
         session_file(self.root, "sess-o", "ended", 5, "")
         session_file(self.root, "sess-p", "ended", 1, "Register as sess-o, continue.")
         self.assertNotIn("would archive sess-p", run(self.root, "--dry-run"))
-        # ... and a live lane of that name only counts once its heartbeat is later than the hand-off's end
+        # ... and a lane that was already live when the hand-off ended stays no successor after its next touch:
+        # the heartbeat moves past the end, the `registered` stamp does not
         session_file(self.root, "sess-q", "active", 2, "")
         session_file(self.root, "sess-r", "ended", 1, "Register as sess-q, continue.")
         self.assertNotIn("would archive sess-r", run(self.root, "--dry-run"))
-        session_file(self.root, "sess-q", "active", 0, "")  # touched since: a heartbeat after sess-r ended
-        self.assertIn("would archive sess-r", run(self.root, "--dry-run"))
+        session_file(self.root, "sess-q", "active", 0, "", registered=stamp(2))  # touched since, registered before
+        self.assertNotIn("would archive sess-r", run(self.root, "--dry-run"))
+        run(self.root)
+        self.assertIn("sess-r", self.live())
+
+    def test_a_fresh_register_after_the_end_consumes_the_hand_off(self):
+        session_file(self.root, "sess-r", "ended", 1, "Register as sess-y, continue.")
+        session_file(self.root, "sess-y", "active", 0, "", registered=stamp(0.5))  # registered after sess-r ended
+        out = run(self.root, "--dry-run")
+        self.assertIn("would archive sess-r", out)
+        self.assertIn("(successor sess-y registered)", out)
+        # an older ended lane of that name, re-registered after the end, carries the new stamp: consumed too
+        session_file(self.root, "sess-o", "ended", 1, "Register as sess-z, continue.")
+        session_file(self.root, "sess-z", "active", 0, "", registered=stamp(0.2))
+        self.assertIn("(successor sess-z registered)", run(self.root, "--dry-run"))
+
+    def test_a_lane_without_a_registered_stamp_is_never_a_successor(self):
+        session_file(self.root, "sess-r", "ended", 1, "Register as sess-y, continue.")
+        session_file(self.root, "sess-y", "active", 0, "", registered=None)  # written before the field existed
+        self.assertNotIn("would archive sess-r", run(self.root, "--dry-run"))
 
     def test_equal_timestamps_and_unparsable_ones_do_not_count(self):
         hb = "2026-10-14T10:00:00Z"

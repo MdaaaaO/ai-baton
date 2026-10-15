@@ -102,7 +102,8 @@ worktree.
    `## Open PRs` heading behind (`none` when there is nothing to list) — a predecessor file missing
    the heading entirely predates that fix and is not the same as "no PRs": treat it as unknown and
    check `gh pr list --author @me` before assuming there is nothing to re-arm. For **every open PR
-   you now own** (the `## Open PRs` list in the predecessor's session file, the context doc's *What
+   you now own** (the `## Open PRs` list in the predecessor's session file — `sessions/archive/<name>.md` once your
+   step-3 register swept it, as it does a predecessor whose prompt named you, else `sessions/<name>.md` — the context doc's *What
    was built* / *Remaining work*, or `gh pr list --author @me`), verify the current head with
    `gh api repos/<o>/<r>/pulls/<n> --jq .head.sha` and arm **one** multi-PR `pr-watch` Monitor covering
    all of them (the `pr-watch` skill;
@@ -223,7 +224,8 @@ is archived out of the index entirely after
 `SESSION_ARCHIVE_NOPROMPT_HOURS` (48, never more than `ARCHIVE_DAYS`) — that covers both a clean end with
 nothing left to do and a crash (`heartbeat.sh` ends a crashed session the same way, without a prompt). A
 session whose prompt names a successor (`Register as <name>`) is archived as soon as that successor has
-registered (its heartbeat is later than this session's end): the starter's `sessions/<name>.md` path then
+registered (it registered after this session ended; a lane of that name already live by then never counts, however
+often it touches): the starter's `sessions/<name>.md` path then
 resolves under `sessions/archive/`, age aside;
 `session-register` / `session-touch` / `session-end` move an archived file back from `sessions/archive/`
 before writing (a re-register reactivates it), so a resumed session can still add a hand-off later — a
@@ -237,5 +239,6 @@ Then do the rest of the `session-handoff` close-out (flush to the context doc th
 
 `session` (name) · `session_id` (auto: `$CLAUDE_CODE_SESSION_ID` at register — the key a hook matches on) · `ref` (ListAgents ref — the stable id) · `status` (`active`|`idle`|`ended`)
 · `epic` (the initiative's tracker key) · `repos` · `working_on` (one line) · `responsibilities` · `stats` (auto, § 2b)
+· `registered` (auto: when the lane started — set by a register that creates or reactivates the entry, never by touch/end)
 · `heartbeat` (auto) · `updated` (auto). These are operational state, **not** knowledge — the registry is
 excluded from `make index`/`make verify` and the doc DB count.
