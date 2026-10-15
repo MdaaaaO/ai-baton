@@ -26,8 +26,9 @@ Sections:
                   free disk on `/`/`$HOME`/the scratch root with the usual build/package caches (those on the
                   same filesystem) named above DISK_WARN_PCT; the scratch dirs of ended sessions with their
                   sizes (`--sweep-scratch` removes them); a stale `$CLAUDE_ENV_FILE` (a `BATON`/`CLAUDE_PROJECT_DIR` path that no longer
-                  exists, or an `export BATON=` line outside the session-env block); one legacy line: a leftover
-                  `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
+                  exists, or an `export BATON=` line outside the session-env block); the auto-memory budget
+                  (`memory-prune`'s `memory_check.py`: a WARN past it or on a secret-shaped value); one legacy
+                  line: a leftover `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
                   scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
                   and the pinned `ctx --version` answers the API the adapter expects; an environment's
@@ -1591,6 +1592,26 @@ def sync_wiring(r: Report) -> None:
         r.add(OK, "machine", f"context sync: {line}")
 
 
+def memory_wiring(r: Report) -> None:
+    """§ 4's auto-memory row: `memory-prune`'s read-only check. Past its budget or holding a secret-shaped value
+    (exit 1) one WARN naming `/memory-prune` and which of the two; within it an OK line with the summary; no memory
+    dir (exit 2) is the symlink row's business, so a plain line."""
+    rc, out, err = sh([sys.executable, str(KIT / "skills" / "memory-prune" / "memory_check.py")], timeout=60)
+    line = (out or err).splitlines()[0] if (out or err) else ""
+    if rc == 1:
+        secrets = sum(1 for x in (out or "").splitlines() if x.startswith("SECRET "))
+        why = ((["over budget"] if "OVER BUDGET" in line else [])
+               + ([f"holds {secrets} secret-shaped value(s)"] if secrets else []))
+        r.add(WARN, "machine", f"auto-memory {' and '.join(why) or 'needs a prune'} — run `/memory-prune` "
+                               f"({line.removeprefix('memory-check: ')})")
+    elif rc == 0:
+        r.add(OK, "machine", f"auto-memory within budget ({line.removeprefix('memory-check: ')})")
+    elif rc == 2:
+        r.raw(f"- auto-memory: {line.removeprefix('memory-check: ') or 'no memory dir'}")
+    else:
+        r.add(WARN, "machine", f"auto-memory: `memory_check.py` did not answer ({line or f'exit {rc}'})")
+
+
 def sec_machine(r: Report) -> str:
     r.h("4 · This machine — wiring")
     envname = kit_profile.name()
@@ -1599,6 +1620,7 @@ def sec_machine(r: Report) -> str:
     autocompact_wiring(r)
     env_file_wiring(r)
     sync_wiring(r)
+    memory_wiring(r)
     if not (ENV / "config.json").is_file():
         r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):

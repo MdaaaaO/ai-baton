@@ -76,6 +76,7 @@ suite or a behaviour case is added or renamed.
 | `gh-cli` | 5+5 | — |
 | `kit-health` | 5+5 | — |
 | `kit-setup` | 5+5 | — |
+| `memory-prune` | 6+6 | — |
 | `mission-control` | 5+5 | — |
 | `notion-page-review` | 5+5 | `notion-page-review-behaviour-not-applicable` |
 | `pr-event-brief` | 5+5 | `pr-event-brief-behaviour-head-moved-redraw`, `pr-event-brief-behaviour-stale-review-no-diagrams` |

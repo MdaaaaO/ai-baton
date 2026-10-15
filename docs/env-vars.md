@@ -60,6 +60,14 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `TITLE` | `SLUG` | `context-db/bin/new.sh` | the doc's frontmatter title | user-facing |
 | `KEY` | empty | `context-db/bin/new.sh` | an epic's tracker key, written to its `key:` frontmatter (the field `ctx resolve` matches first); `make new` takes it from the command line only | user-facing |
 
+## `memory-prune`
+
+| Name | Default | Read by | Purpose | Scope |
+|---|---|---|---|---|
+| `MEMORY_DIR` | unset (the store's `memory/`, else the harness `~/.claude/projects/<slug>/memory`) | `skills/memory-prune/memory_check.py` | the auto-memory dir to audit; `--dir` wins over it | user-facing |
+| `MEMORY_INDEX_WARN` | `12288` (bytes) | `skills/memory-prune/memory_check.py` | `MEMORY.md` size past which the check exits 1 and kit-health warns | user-facing |
+| `MEMORY_LINE_WARN` | `150` (chars) | `skills/memory-prune/memory_check.py` | index line length past which the check exits 1 and kit-health warns | user-facing |
+
 ## `sign-queue`
 
 | Name | Default | Read by | Purpose | Scope |

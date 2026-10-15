@@ -109,13 +109,14 @@ Specs: `docs/env-facts.md`, `docs/new-environment.md`.
 Only names/descriptions load each session; the body loads on invoke. **Never rely on a skill for an
 always-on rule** — those are § Rules above (and in `environment.md`). Triggers:
 
-- session start → `session-register` · a step lands / closing → `session-handoff`, then `session-retro`
+- session start → `session-register` · step lands/closing → `session-handoff`, then `session-retro`
 - own PR → `pr-open`, then `pr-watch`; a watch line → `pr-event-brief`
 - someone else's PR → `pr-scan` (queue) / `pr-review` (never the user's own)
-- tracker step → `ticket-open` / `ticket-pickup` / `ticket-update` / `ticket-close`
-- any non-trivial `gh` loop or count → `gh-cli` first · a README or CONTRIBUTING → `repo-docs`
-- `NEEDS <fact>` or a new machine → `env-init` · plugin install → `kit-setup` · after a sync or kit change → `kit-health`
-- signed-commits repos → `sign-queue` (why: `signed-git-commits`) · weekly review → `self-assessment` · spend → `cost-report`
+- tracker step → `ticket-open`/`ticket-pickup`/`ticket-update`/`ticket-close`
+- any non-trivial `gh` loop or count → `gh-cli` first · a README/CONTRIBUTING → `repo-docs`
+- `NEEDS <fact>`/new machine → `env-init` · plugin install → `kit-setup` · sync/kit change → `kit-health`;
+  memory over budget → `memory-prune`
+- signed-commits repos → `sign-queue` (why: `signed-git-commits`) · weekly → `self-assessment` · spend → `cost-report`
 - chat draft → `slack-draft` · docs-page comments → `notion-page-review` · `requires`-gated rest: `environment.md`
 
 ## Cost & context hygiene

@@ -176,14 +176,14 @@ explains the clone's hooks and guards.
 
 | Category | Skills |
 |---|---|
-| Sessions and knowledge | **`kit-health`** · **`session-register`** · **`session-handoff`** · `session-retro` · `env-init` · `kit-setup` · `cost-report` · `self-assessment` · `mission-control` |
+| Sessions and knowledge | **`kit-health`** · **`session-register`** · **`session-handoff`** · `session-retro` · `memory-prune` · `env-init` · `kit-setup` · `cost-report` · `self-assessment` · `mission-control` |
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
 | Needs a system (`systems.*`) | `sign-queue` · `signed-git-commits` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
 It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `context-db/` engine
-(`make -C $BATON/context-db help`). [`docs/skills.md`](docs/skills.md) describes each item in one line.
+(`make -C $BATON/context-db help`). [`docs/skills.md`](docs/skills.md) describes each in one line.
 
 ## Documentation
 
