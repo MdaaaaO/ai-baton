@@ -584,12 +584,12 @@ class DataShape(unittest.TestCase):
     def test_the_section_shapes(self):
         self.assertEqual(sorted(DATA["links"]), ["github_org", "repos", "tracker_kind", "tracker_url_template"])
         self.assertEqual(sorted(DATA["sessions"]), ["active", "archived", "counts", "ended", "problems"])
-        self.assertEqual(sorted(DATA["cost"]), ["basis", "ledger", "live", "totals"])
+        self.assertEqual(sorted(DATA["cost"]), ["basis", "ledger", "live", "problems", "totals"])
         self.assertEqual(sorted(DATA["cost"]["totals"]), ["by_epic", "hours", "last_30d", "last_7d", "rows", "turns", "usd"])
         self.assertEqual(sorted(DATA["catalog"]), ["counts", "docs", "domains", "problems"])
-        self.assertEqual(sorted(DATA["priorities"]), ["items", "path", "present"])
+        self.assertEqual(sorted(DATA["priorities"]), ["items", "path", "present", "problems"])
         self.assertEqual(sorted(DATA["queues"]), ["kit_health", "pr_review", "sign_queue"])
-        self.assertEqual(sorted(DATA["pointers"]), ["index", "memory", "session_index", "sources"])
+        self.assertEqual(sorted(DATA["pointers"]), ["index", "memory", "problems", "session_index", "sources"])
         entry = DATA["sessions"]["active"][0]
         self.assertEqual(sorted(entry), ["cost_usd", "crons", "epic", "epic_url", "has_prompt", "heartbeat",
                                          "heartbeat_local", "name", "open_prs", "path", "prompt", "ref", "repos",
@@ -731,13 +731,15 @@ class MissingSources(Store):
         self.assertEqual(data["pointers"]["memory"], [])
         self.assertIsNone(data["pointers"]["index"])
         self.assertIsNone(data["pointers"]["session_index"])
-        self.assertEqual(data["priorities"], {"items": [], "path": "reference/priorities.md", "present": False})
+        self.assertEqual(data["priorities"], {"items": [], "path": "reference/priorities.md", "present": False, "problems": []})
         self.assertEqual(data["cost"]["ledger"], [])
         self.assertEqual(data["cost"]["totals"], {"by_epic": [], "hours": 0, "last_30d": {"rows": 0, "usd": 0},
                                                   "last_7d": {"rows": 0, "usd": 0}, "rows": 0, "turns": 0, "usd": 0})
-        self.assertEqual(data["queues"]["pr_review"], {"by_status": {}, "last": [], "path": "state/pr-review/ledger.jsonl", "rows": 0})
-        self.assertEqual(data["queues"]["sign_queue"], {"jobs": [], "path": "state/sign-queue"})
-        self.assertEqual(data["queues"]["kit_health"], {"latest": None, "stamp": None})
+        self.assertEqual(data["queues"]["pr_review"], {"by_status": {}, "last": [], "path": "state/pr-review/ledger.jsonl",
+                                                       "problems": [], "rows": 0})
+        self.assertEqual(data["queues"]["sign_queue"], {"jobs": [], "path": "state/sign-queue", "problems": []})
+        self.assertEqual(data["queues"]["kit_health"], {"latest": None, "problems": [], "stamp": None})
+        self.assertEqual((data["cost"]["problems"], data["pointers"]["problems"]), ([], []))  # absent is not a problem
         present = {s["name"]: s["present"] for s in data["pointers"]["sources"]}
         self.assertEqual({k for k, v in present.items() if not v},
                          {"index", "kit_health", "ledger", "memory", "pr_review", "priorities", "session_index", "sign_queue"})
@@ -757,6 +759,154 @@ class MissingSources(Store):
         self.assertEqual(data["tz"], "UTC")
         self.assertIsNone(data["pointers"]["index"])
         self.assertFalse(data["priorities"]["present"])
+
+
+LEDGER_REL = "sessions/_ledger.md"
+NULL_TOTALS = {"by_epic": None, "hours": None, "last_30d": {"rows": None, "usd": None},
+               "last_7d": {"rows": None, "usd": None}, "rows": None, "turns": None, "usd": None}
+
+
+class UnreadableSources(Store):
+    """A source that is there but cannot be read is a problem in its section and null totals, never empty data:
+    `<section> · <relative path> · <error class>` (no clock), exit 0, the leak gate still running."""
+
+    def deny(self, rel: str) -> Path:
+        """`rel` made unreadable (mode 000, restored on cleanup); the test is skipped where that has no effect
+        (a root user, a file system without modes)."""
+        path = self.root / rel
+        os.chmod(path, 0o000)
+        self.addCleanup(os.chmod, path, 0o755 if path.is_dir() else 0o644)
+        try:
+            os.listdir(path) if path.is_dir() else path.read_bytes()
+        except OSError:
+            return path
+        self.skipTest("this platform or user can read a mode 000 path")
+
+    def built(self) -> dict:
+        r = self.build()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return self.data()
+
+    def other_sections_intact(self, data: dict, skip: str) -> None:
+        for name in ("sessions", "cost", "priorities", "queues", "pointers"):  # the catalog lists the doc itself
+            if name != skip:
+                self.assertEqual(data[name], DATA[name], name)
+
+    def test_an_unreadable_ledger_is_a_problem_and_null_totals(self):
+        self.deny(LEDGER_REL)
+        data = self.built()
+        cost = data["cost"]
+        self.assertEqual(cost["problems"], [f"cost · {LEDGER_REL} · PermissionError"])
+        self.assertEqual((cost["totals"], cost["ledger"]), (NULL_TOTALS, []))
+        self.assertEqual(cost["live"], DATA["cost"]["live"])
+        self.assertEqual(cost["basis"], DATA["cost"]["basis"])
+        self.assertEqual(data["sessions"], DATA["sessions"])  # the live sessions are another reader
+        self.assertEqual(data["schema"], DATA["schema"])
+
+    def test_an_unreadable_priorities_file_is_a_problem(self):
+        self.deny("reference/priorities.md")
+        data = self.built()
+        p = data["priorities"]
+        self.assertEqual(p["problems"], ["priorities · reference/priorities.md · PermissionError"])
+        self.assertEqual((p["items"], p["present"], p["path"]), ([], True, "reference/priorities.md"))
+        self.other_sections_intact(data, "priorities")
+
+    def test_an_unreadable_pr_review_ledger_is_a_problem_and_null_counts(self):
+        self.deny("state/pr-review/ledger.jsonl")
+        data = self.built()
+        q = data["queues"]["pr_review"]
+        self.assertEqual(q["problems"], ["queues.pr_review · state/pr-review/ledger.jsonl · PermissionError"])
+        self.assertEqual((q["rows"], q["by_status"], q["last"]), (None, None, []))
+        self.assertEqual(data["queues"]["sign_queue"], DATA["queues"]["sign_queue"])
+        self.assertEqual(data["queues"]["kit_health"], DATA["queues"]["kit_health"])
+
+    def test_an_unreadable_walk_log_is_a_problem_and_a_null_outcome(self):
+        self.deny("kit-health/2026-10-09-walk.md")
+        data = self.built()
+        q = data["queues"]["kit_health"]
+        self.assertEqual(q["problems"], ["queues.kit_health · kit-health/2026-10-09-walk.md · PermissionError"])
+        self.assertEqual(q["latest"], {"date": "2026-10-09", "path": "kit-health/2026-10-09-walk.md", "outcome": None})
+        self.assertEqual(q["stamp"], DATA["queues"]["kit_health"]["stamp"])
+
+    def test_an_unreadable_health_stamp_is_a_problem_and_no_stamp(self):
+        self.deny("kit-health/HEALTH-test.md")
+        q = self.built()["queues"]["kit_health"]
+        self.assertEqual(q["problems"], ["queues.kit_health · kit-health/HEALTH-test.md · PermissionError"])
+        self.assertEqual((q["stamp"], q["latest"]), (None, DATA["queues"]["kit_health"]["latest"]))
+
+    def test_an_unreadable_kit_health_directory_is_a_problem(self):
+        self.deny("kit-health")
+        q = self.built()["queues"]["kit_health"]
+        self.assertEqual(q, {"latest": None, "problems": ["queues.kit_health · kit-health · PermissionError"], "stamp": None})
+
+    def test_an_unreadable_sign_queue_directory_is_a_problem(self):
+        self.deny("state/sign-queue")
+        q = self.built()["queues"]["sign_queue"]
+        self.assertEqual(q, {"jobs": [], "path": "state/sign-queue",
+                             "problems": ["queues.sign_queue · state/sign-queue · PermissionError"]})
+
+    def test_each_pointer_source_is_a_problem_when_unreadable(self):
+        for rel, key, empty in (("memory/MEMORY.md", "memory", []), ("INDEX.md", "index", None),
+                                ("SESSION_INDEX.md", "session_index", None)):
+            with self.subTest(source=rel):
+                self.reset()
+                self.deny(rel)
+                p = self.built()["pointers"]
+                self.assertEqual(p["problems"], [f"pointers · {rel} · PermissionError"])
+                self.assertEqual(p[key], empty)
+                self.assertTrue(next(s for s in p["sources"] if s["path"] == rel)["present"])  # it is there, not missing
+
+    def test_the_problems_of_one_section_are_sorted_and_carry_no_clock_or_absolute_path(self):
+        self.deny("memory/MEMORY.md")
+        self.deny("INDEX.md")
+        first = self.built()
+        self.assertEqual(first["pointers"]["problems"],
+                         ["pointers · INDEX.md · PermissionError", "pointers · memory/MEMORY.md · PermissionError"])
+        self.assertNotIn(str(self.root), json.dumps(first))
+        self.assertNotRegex(json.dumps(first["pointers"]["problems"]), r"\d{4}-\d{2}-\d{2}|\d{2}:\d{2}")
+        again = self.build()
+        self.assertIn("unchanged", again.stdout)  # data.json is still a pure function of the store
+
+    def test_text_that_is_not_utf8_is_a_problem_for_every_reader(self):
+        cases = (
+            (LEDGER_REL, lambda d: d["cost"], "cost", lambda d: self.assertEqual(d["cost"]["totals"], NULL_TOTALS)),
+            ("reference/priorities.md", lambda d: d["priorities"], "priorities", lambda d: None),
+            ("state/pr-review/ledger.jsonl", lambda d: d["queues"]["pr_review"], "queues.pr_review",
+             lambda d: self.assertIsNone(d["queues"]["pr_review"]["rows"])),
+            ("kit-health/2026-10-09-walk.md", lambda d: d["queues"]["kit_health"], "queues.kit_health",
+             lambda d: self.assertIsNone(d["queues"]["kit_health"]["latest"]["outcome"])),
+            ("kit-health/HEALTH-test.md", lambda d: d["queues"]["kit_health"], "queues.kit_health",
+             lambda d: self.assertIsNone(d["queues"]["kit_health"]["stamp"])),
+            ("memory/MEMORY.md", lambda d: d["pointers"], "pointers", lambda d: None),
+            ("INDEX.md", lambda d: d["pointers"], "pointers", lambda d: None),
+            ("SESSION_INDEX.md", lambda d: d["pointers"], "pointers", lambda d: None))
+        for rel, section_of, section, check in cases:
+            with self.subTest(source=rel):
+                self.reset()
+                (self.root / rel).write_bytes(b"\xff\xfe not utf-8\n")
+                data = self.built()
+                self.assertEqual(section_of(data)["problems"], [f"{section} · {rel} · UnicodeDecodeError"])
+                check(data)
+
+    def test_a_directory_in_place_of_a_source_is_a_problem(self):
+        (self.root / LEDGER_REL).unlink()
+        (self.root / LEDGER_REL).mkdir()
+        cost = self.built()["cost"]
+        self.assertEqual(cost["problems"], [f"cost · {LEDGER_REL} · IsADirectoryError"])
+        self.assertEqual(cost["totals"], NULL_TOTALS)
+
+    def test_the_gate_still_runs_with_an_unreadable_source(self):
+        self.deny(LEDGER_REL)
+        plant(self.root, "memory/MEMORY.md", "Plain pointer", f"Mail {EMAIL}")
+        r = self.build()
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertTrue(r.stdout.startswith("pointers · line "), r.stdout)
+        self.assertFalse((self.out / "data.json").exists())
+
+    def test_an_absent_source_is_still_empty_data_without_a_problem(self):
+        (self.root / LEDGER_REL).unlink()
+        cost = self.built()["cost"]
+        self.assertEqual((cost["problems"], cost["totals"]["rows"], cost["totals"]["usd"]), ([], 0, 0))
 
 
 def count(text: str):
@@ -1098,7 +1248,7 @@ class Queues(unittest.TestCase):
         self.assertEqual(q["stamp"], {"path": "kit-health/HEALTH-test.md", "updated": "2026-10-09"})
 
     def test_sign_queue_is_empty_in_the_fixture(self):
-        self.assertEqual(DATA["queues"]["sign_queue"], {"jobs": [], "path": "state/sign-queue"})
+        self.assertEqual(DATA["queues"]["sign_queue"], {"jobs": [], "path": "state/sign-queue", "problems": []})
 
 
 class QueuesPlanted(Store):

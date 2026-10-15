@@ -32,6 +32,12 @@ The built-in page also uses {{AS_OF}} and {{DATA_PRETTY}}.
 The content root is CONTEXT_ROOT, else the resolver in kit_profile (see
 docs/layout.md). Exit codes: 0 ok, 1 changed / absent / leak hit, 2 usage or
 I/O error (one stderr line, never a traceback).
+
+A source the build cannot read (an OSError other than "not there", or text that is not UTF-8) is not an empty
+section: it adds `<section> · <relative path> · <error class>` (no timestamp) to the `problems` list of the data.json
+section that reads it (cost, priorities, queues.pr_review, queues.sign_queue, queues.kit_health, pointers; sessions
+and catalog list theirs in the same key) and that section's totals and counts are null, not 0. The build still exits
+0 and the gate still runs. A source that is not there stays empty data: no problem, zero totals.
 """
 from __future__ import annotations
 import argparse
@@ -286,11 +292,44 @@ def open_prs(text: str) -> list[dict]:
 
 # ── readers ───────────────────────────────────────────────────────────────────────────────────────────────────
 def read_text(path: Path) -> str:
-    """The file's text, "" when it is absent or unreadable — a missing source is an empty section, never an error."""
+    """The file's text, "" when it is absent or unreadable. For the build's own output files only (last.sha):
+    a store source goes through read_source, which says so when it cannot be read."""
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def problem(section: str, rel: str, error: Exception) -> str:
+    """`<section> · <relative path> · <error class>`: the class only, so the entry carries no clock, no absolute path
+    and no text of the file."""
+    return f"{section} · {rel} · {type(error).__name__}"
+
+
+def read_source(rel: str, section: str, problems: list[str]) -> str | None:
+    """The text of the store file `rel` (relative to the content root). "" when it is not there: an absent source
+    is an empty section. None, with a `problem` entry, when it is there and cannot be read (permissions, a
+    directory in its place, bytes that are not UTF-8): that is not an empty section, and the caller leaves its
+    totals null."""
+    try:
+        return (ROOT / rel).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+    except (OSError, UnicodeDecodeError) as e:
+        problems.append(problem(section, rel, e))
+        return None
+
+
+def list_source(rel: str, section: str, problems: list[str]) -> list[str] | None:
+    """The sorted names in the store directory `rel`: [] when it is not there, None with a `problem` entry when it
+    is there and cannot be listed."""
+    try:
+        return sorted(os.listdir(ROOT / rel))
+    except FileNotFoundError:
+        return []
+    except OSError as e:
+        problems.append(problem(section, rel, e))
+        return None
 
 
 def note(seen: list[str], value) -> None:
@@ -377,11 +416,15 @@ def ended_utc(cell: str) -> str | None:
     return stamp(t) if t else parse_local(cell)
 
 
-def read_ledger(seen: list[str]) -> list[dict]:
-    """sessions/_ledger.md as rows, in file order (newest last). The header names the columns; no header, no rows."""
+def read_ledger(seen: list[str], problems: list[str]) -> list[dict] | None:
+    """sessions/_ledger.md as rows, in file order (newest last). The header names the columns; no header, no rows.
+    None when the file cannot be read (a problem is added): zero rows would read as a true value."""
     header: list[str | None] | None = None
     rows = []
-    for line in read_text(ROOT / PATHS["ledger"]).split("\n"):
+    text = read_source(PATHS["ledger"], "cost", problems)
+    if text is None:
+        return None
+    for line in text.split("\n"):
         line = line.strip()
         if not line.startswith("|"):
             continue
@@ -413,7 +456,14 @@ def read_ledger(seen: list[str]) -> list[dict]:
     return rows
 
 
-def cost_block(ledger: list[dict], active: list[dict], as_of: str | None) -> dict:
+def cost_block(ledger: list[dict] | None, active: list[dict], as_of: str | None, problems: list[str]) -> dict:
+    live = [{"name": s["name"], "stats": s["stats"], "cost_usd": s["cost_usd"]} for s in active]
+    if ledger is None:  # unreadable: every total is unknown, not zero
+        unknown = {"rows": None, "usd": None}
+        return {"basis": SPEND_BASIS, "ledger": [], "live": live, "problems": sorted(problems),
+                "totals": {**unknown, "turns": None, "hours": None, "by_epic": None,
+                           "last_7d": dict(unknown), "last_30d": dict(unknown)}}
+
     def tally(rows: list[dict]) -> dict:
         return {"rows": len(rows), "usd": tidy(sum(r["usd"] or 0 for r in rows))}
 
@@ -435,7 +485,8 @@ def cost_block(ledger: list[dict], active: list[dict], as_of: str | None) -> dic
         "totals": {**tally(ledger), "turns": tidy(sum(r["turns"] or 0 for r in ledger)),
                    "hours": tidy(sum(r["hours"] or 0 for r in ledger)), "by_epic": by_epic,
                    "last_7d": tally(within(7)), "last_30d": tally(within(30))},
-        "live": [{"name": s["name"], "stats": s["stats"], "cost_usd": s["cost_usd"]} for s in active],
+        "live": live,
+        "problems": sorted(problems),
     }
 
 
@@ -475,8 +526,9 @@ def read_catalog(seen: list[str]) -> dict:
 
 def read_priorities() -> dict:
     path = ROOT / PATHS["priorities"]
+    problems: list[str] = []
     items, section, fenced = [], "", False
-    for line in read_text(path).split("\n"):
+    for line in (read_source(PATHS["priorities"], "priorities", problems) or "").split("\n"):
         if line.lstrip().startswith(("```", "~~~")):
             fenced = not fenced
         elif fenced:
@@ -487,12 +539,16 @@ def read_priorities() -> dict:
             m = CHECKBOX_RE.match(line)
             if m:
                 items.append({"text": m.group("text"), "done": m.group("mark") != " ", "section": section})
-    return {"present": path.is_file(), "path": PATHS["priorities"], "items": items}
+    return {"present": path.is_file(), "path": PATHS["priorities"], "items": items, "problems": problems}
 
 
 def read_pr_review(seen: list[str]) -> dict:
+    problems: list[str] = []
+    text = read_source(PATHS["pr_review"], "queues.pr_review", problems)
+    if text is None:  # unreadable: no count is known, not zero
+        return {"path": PATHS["pr_review"], "rows": None, "by_status": None, "last": [], "problems": problems}
     rows = []
-    for line in read_text(ROOT / PATHS["pr_review"]).split("\n"):
+    for line in text.split("\n"):
         try:
             row = json.loads(line) if line.strip() else None
         except ValueError:
@@ -510,26 +566,27 @@ def read_pr_review(seen: list[str]) -> dict:
         repo = str(r.get("repo") or "")
         last.append({"repo": repo, "pr": num, "url": pr_url(full_repo(repo) if repo else None, num),
                      "head": str(r.get("head") or ""), "status": str(r.get("status") or ""), "ts": str(r.get("ts") or "")})
-    return {"path": PATHS["pr_review"], "rows": len(rows), "by_status": by_status, "last": last}
+    return {"path": PATHS["pr_review"], "rows": len(rows), "by_status": by_status, "last": last, "problems": problems}
 
 
 def read_sign_queue(seen: list[str]) -> dict:
     directory = ROOT / PATHS["sign_queue"]
-    try:
-        names = sorted(n for n in os.listdir(directory) if n.endswith(".sh"))
-    except OSError:
-        names = []
+    problems: list[str] = []
+    names = [n for n in list_source(PATHS["sign_queue"], "queues.sign_queue", problems) or [] if n.endswith(".sh")]
     jobs = []
     for n in names:
         try:
             if not (directory / n).is_file():
                 continue
             mtime = stamp(datetime.fromtimestamp((directory / n).stat().st_mtime, timezone.utc))
-        except OSError:
+        except FileNotFoundError:
+            continue  # taken off the queue between the listing and the read
+        except OSError as e:
+            problems.append(problem("queues.sign_queue", f"{PATHS['sign_queue']}/{n}", e))
             continue
         jobs.append({"name": n, "mtime_utc": mtime})
         note(seen, mtime)
-    return {"path": PATHS["sign_queue"], "jobs": jobs}
+    return {"path": PATHS["sign_queue"], "jobs": jobs, "problems": sorted(problems)}
 
 
 def outcome_of(text: str) -> str:
@@ -544,45 +601,46 @@ def outcome_of(text: str) -> str:
 
 def read_kit_health(seen: list[str]) -> dict:
     directory = ROOT / PATHS["kit_health"]
-    try:
-        names = sorted(os.listdir(directory))
-    except OSError:
-        names = []
+    problems: list[str] = []
+    names = list_source(PATHS["kit_health"], "queues.kit_health", problems) or []
     logs = [n for n in names if HEALTH_LOG_RE.match(n)]
     latest = None
     if logs:
-        latest = {"path": f"{PATHS['kit_health']}/{logs[-1]}", "date": logs[-1][:10],
-                  "outcome": outcome_of(read_text(directory / logs[-1]))}
+        rel = f"{PATHS['kit_health']}/{logs[-1]}"
+        text = read_source(rel, "queues.kit_health", problems)
+        latest = {"path": rel, "date": logs[-1][:10], "outcome": None if text is None else outcome_of(text)}
         note(seen, logs[-1][:10])
     stamps = []
     for n in names:
         if n.startswith("HEALTH-") and n.endswith(".md"):
-            try:
-                meta = frontmatter.load_flat(directory / n, errors="replace") or {}
-            except OSError:
+            text = read_source(f"{PATHS['kit_health']}/{n}", "queues.kit_health", problems)
+            if text is None:
                 continue
+            parts = frontmatter.split(text)
+            meta = frontmatter.parse_flat(parts[0]) if parts else {}
             stamps.append((frontmatter.unquote(meta.get("updated", "")), n))
     newest = max(stamps) if stamps else None
     if newest:
         note(seen, newest[0])
-    return {"latest": latest,
+    return {"latest": latest, "problems": sorted(problems),
             "stamp": {"path": f"{PATHS['kit_health']}/{newest[1]}", "updated": newest[0]} if newest else None}
 
 
 def read_pointers(seen: list[str]) -> dict:
+    problems: list[str] = []
     memory = []
-    for line in read_text(ROOT / PATHS["memory"]).split("\n"):
+    for line in (read_source(PATHS["memory"], "pointers", problems) or "").split("\n"):
         m = MEMORY_RE.match(line)
         if m:
             memory.append({"title": m.group("title"), "file": m.group("file"), "hook": m.group("hook") or ""})
     index = session_index = None
-    for line in read_text(ROOT / PATHS["index"]).split("\n"):
+    for line in (read_source(PATHS["index"], "pointers", problems) or "").split("\n"):
         m = INDEX_LINE_RE.match(line.strip())
         if m:
             index = {"docs": int(m.group(1)), "generated": m.group(2)}
             note(seen, m.group(2))
             break
-    for line in read_text(ROOT / PATHS["session_index"]).split("\n"):
+    for line in (read_source(PATHS["session_index"], "pointers", problems) or "").split("\n"):
         m = SESSION_INDEX_LINE_RE.match(line.strip())
         if m:
             session_index = {"generated": m.group(1), "active": int(m.group(2)), "ended_listed": int(m.group(3)),
@@ -590,7 +648,8 @@ def read_pointers(seen: list[str]) -> dict:
             note(seen, parse_local(m.group(1)))
             break
     sources = [{"name": k, "path": v, "present": (ROOT / v).exists()} for k, v in sorted(PATHS.items())]
-    return {"memory": memory, "index": index, "session_index": session_index, "sources": sources}
+    return {"memory": memory, "index": index, "session_index": session_index, "sources": sources,
+            "problems": sorted(problems)}
 
 
 def links_block() -> dict:
@@ -602,7 +661,8 @@ def assemble() -> dict:
     """The whole of data.json as a dict: a pure function of the store (and the display-zone and tracker config)."""
     seen: list[str] = []
     sessions = read_sessions(seen)
-    ledger = read_ledger(seen)
+    cost_problems: list[str] = []
+    ledger = read_ledger(seen, cost_problems)
     catalog = read_catalog(seen)
     priorities = read_priorities()
     queues = {"pr_review": read_pr_review(seen), "sign_queue": read_sign_queue(seen),
@@ -616,7 +676,7 @@ def assemble() -> dict:
         "stale_hours": gen_sessions.STALE_HOURS,
         "links": links_block(),
         "sessions": sessions,
-        "cost": cost_block(ledger, sessions["active"], as_of),
+        "cost": cost_block(ledger, sessions["active"], as_of, cost_problems),
         "catalog": catalog,
         "priorities": priorities,
         "queues": queues,

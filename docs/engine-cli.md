@@ -729,6 +729,12 @@ The content root is CONTEXT_ROOT, else the resolver in kit_profile (see
 docs/layout.md). Exit codes: 0 ok, 1 changed / absent / leak hit, 2 usage or
 I/O error (one stderr line, never a traceback).
 
+A source the build cannot read (an OSError other than "not there", or text that is not UTF-8) is not an empty
+section: it adds `<section> · <relative path> · <error class>` (no timestamp) to the `problems` list of the data.json
+section that reads it (cost, priorities, queues.pr_review, queues.sign_queue, queues.kit_health, pointers; sessions
+and catalog list theirs in the same key) and that section's totals and counts are null, not 0. The build still exits
+0 and the gate still runs. A source that is not there stays empty data: no problem, zero totals.
+
 positional arguments:
   {build,diff,open}
     build            write the page and its data (gated, skipped when
