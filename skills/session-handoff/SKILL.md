@@ -2,9 +2,9 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "30"
+  version: "32"
   updated: "2026-10-15"
-  reviewed: "2026-10-12"
+  reviewed: "2026-10-15"
 user-invocable: true
 ---
 
@@ -127,7 +127,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       no extra turn. A session with no predecessor handoff to diff against writes `first handoff` instead
       of the block. The block sits above the cap. Then the full state as today:
       ≤12 plain lines (no code fence inside), covering the session `NAME` to register (successor of `<this
-      name>`), the epic and tickets *this session* owned, the files to read first (context doc sections,
+      name>`, as `SUCCESSOR_OF=<this name>`), the epic and tickets *this session* owned, the files to read first (context doc sections,
       exports), what it owns and must NOT touch, the first task with its ticket, open follow-ups (drafts by
       `draft_id`, pending verdicts), this session's ledger lines — the *Key decisions & gotchas* lines dated
       today, or since the last handoff, quoted verbatim (`docs/carousel.md`), and the open PRs / watchers to

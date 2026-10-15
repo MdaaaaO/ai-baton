@@ -125,6 +125,7 @@ class EmptyReviewDecision(unittest.TestCase):
         r = self.run_merge("APPROVED")
         self.assert_merged(r)
         self.assertIn("pr-merge: watching o/r#7 until merge \u2014 no separate pr-watch needed", r.stdout)
+        self.assertNotIn("watch ends", r.stderr)  # a merged PR needs no re-arm
 
     def test_required_review_approved_merges_without_the_lookup(self):
         r = self.run_merge("APPROVED")
@@ -138,6 +139,7 @@ class EmptyReviewDecision(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("MERGE FAILED", r.stdout)
         self.assertNotIn("MERGED on", r.stdout)
+        self.assertIn("pr-merge: watch ends (exit 1) \u2014 re-arm pr-watch", r.stderr)  # #351: no watcher is left behind silently
 
     def test_a_reported_success_without_merged_at_is_not_read_as_merged(self):
         r = self.run_merge("APPROVED", merged_at=None)

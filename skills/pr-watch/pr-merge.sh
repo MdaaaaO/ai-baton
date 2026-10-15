@@ -17,7 +17,10 @@ set -u
 R=$1; PR=$2
 KIT="$(cd "$(dirname "$0")/../.." && pwd)"
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
-ERRF=$(mktemp); trap 'rm -f "$ERRF"' EXIT
+# Every non-zero exit (the many `exit 1`/`exit 3` paths) ends this run, and with it the PR's watch: say so once, from the
+# EXIT trap, so the session re-arms pr-watch (or parks) instead of assuming the PR is still watched.
+on_exit(){ local rc=$?; rm -f "$ERRF"; [ $rc -eq 0 ] || echo "pr-merge: watch ends (exit $rc) — re-arm pr-watch" >&2; }
+ERRF=$(mktemp); trap on_exit EXIT
 err_line(){ echo "ERROR $R#$PR $(head -1 "$ERRF" 2>/dev/null | tr -d '\r')"; }
 # The review bot's login comes from the env config (github.review_bot); PR_WATCH_BOT_LOGIN overrides (skips the
 # lookup). `kit_profile.py get` exits 1 when the key is ABSENT (a real failure) and exits 0 printing an empty

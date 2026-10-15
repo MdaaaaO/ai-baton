@@ -196,6 +196,25 @@ def one_line(v) -> str:
     return " ".join(str(v).split("\n")).replace("\r", " ").strip()
 
 
+def _archived_candidates(name: str) -> list:
+    """`(heartbeat, filename)` for each sessions/archive/ file that is really `name`'s doc, oldest first.
+
+    The sweep suffixes a taken name with the ended date (`<name>-YYYYMMDD[-n].md`), so a reused session name may
+    have several archived files: the caller takes the newest by heartbeat (`max(...)`), never an older lane's doc."""
+    adir = os.path.join(SESS_DIR, "archive")
+    pat = re.compile(rf"^{re.escape(name)}(-(\d{{8}}|undated)(-\d+)?)?\.md$")  # archive_path's suffixes
+    cands = []
+    for fn in (os.listdir(adir) if os.path.isdir(adir) else []):
+        if pat.match(fn):
+            meta, _ = read_doc(os.path.join(adir, fn))
+            meta = meta or {}
+            # Same fallback as gen_sessions.parse (a doc without the field is its stem — only the unsuffixed
+            # file can match), so a lane that merely starts with this name is never picked.
+            if (meta.get("session") or os.path.splitext(fn)[0]) == name:
+                cands.append((meta.get("heartbeat", ""), fn))
+    return sorted(cands)
+
+
 def restore_from_archive(name: str) -> str:
     """The live path — moved back from sessions/archive/<name>.md when the sweep (gen_sessions.py) took it.
 
@@ -206,19 +225,7 @@ def restore_from_archive(name: str) -> str:
     live = path_for(name)
     if os.path.exists(live):
         return live
-    # The sweep suffixes a taken name with the ended date (`<name>-YYYYMMDD[-n].md`), so a reused session
-    # name may have several archived files: take the newest by heartbeat, never an older lane's doc.
-    adir = os.path.join(SESS_DIR, "archive")
-    pat = re.compile(rf"^{re.escape(name)}(-(\d{{8}}|undated)(-\d+)?)?\.md$")  # archive_path's suffixes
-    cands = []
-    for fn in (os.listdir(adir) if os.path.isdir(adir) else []):
-        if pat.match(fn):
-            meta, _ = read_doc(os.path.join(adir, fn))
-            meta = meta or {}
-            # Same fallback as gen_sessions.parse (a doc without the field is its stem — only the unsuffixed
-            # file can match), so a lane that merely starts with this name is never revived.
-            if (meta.get("session") or os.path.splitext(fn)[0]) == name:
-                cands.append((meta.get("heartbeat", ""), fn))
+    cands = _archived_candidates(name)
     if cands:
         _, fn = max(cands)
         try:
@@ -430,13 +437,11 @@ def _ledger_append(meta: dict, st) -> None:
 
 def _predecessor_open_prs(name: str) -> str:
     """The `predecessor <name> open PRs:` block a successor sees at registration (session-register step 4): the
-    `## Open PRs` lines of the predecessor's file, read only (live file, else the newest archived one — never
-    restored). `none` is printed as is; a file without the heading is unknown, not empty."""
+    `## Open PRs` lines of the predecessor's file, read only (live file, else the archived one with the newest
+    heartbeat — never restored). `none` is printed as is; a file without the heading is unknown, not empty."""
     live = path_for(name)
-    adir = os.path.join(SESS_DIR, "archive")
-    pat = re.compile(rf"^{re.escape(name)}(-(\d{{8}}|undated)(-\d+)?)?\.md$")
-    cands = sorted(os.path.join(adir, fn) for fn in (os.listdir(adir) if os.path.isdir(adir) else []) if pat.match(fn))
-    path = live if os.path.exists(live) else (cands[-1] if cands else "")
+    cands = _archived_candidates(name)
+    path = live if os.path.exists(live) else (os.path.join(SESS_DIR, "archive", cands[-1][1]) if cands else "")
     head = f"predecessor {name} open PRs:"
     if not path:
         return f"{head}\nunknown (no session file for {name} — check `gh pr list --author @me`)"
