@@ -99,33 +99,7 @@ The runner itself is not re-used for deep dives — it has returned and its cont
 
 ## `--auto` (trivial PRs flagged `A` by pr-scan)
 
-Docs-only PRs and dependency **patch** bumps (minor for dev tooling only, major never) skip pr-review
-steps 3–5 when the deterministic gate `scripts/trivial-check.py` passes (class, globs, size caps, CI
-green, the env config's `github.review_bot` green where required and set, no human CHANGES_REQUESTED,
-0 unresolved threads — config `auto_approve` in `.context/state/pr-review/config.json`). This is the
-single exception to `scope.md` "APPROVE is never inferred"; the user can switch it off with
-`auto_approve.mode: off`.
-
-Spawn the **Sonnet `auto-runner`** (`$BATON/agents/auto-runner.md`, ≤ 15 turns) — not the Opus review-runner;
-one per `A` row, in parallel when several. Only rows whose `src` is `direct` or `team` (the gate already
-refuses sweep rows: "not in the user's review scope").
-
-```
-Agent(subagent_type: "auto-runner", description: "auto-review <repo>#<pr>", prompt: "
-MODE: auto · CLASS: <docs|patch-bump> · REPO: <owner/repo> · PR: <n> · HEAD: <sha>
-Gate output: <the queue.json .auto object> — write it to $CTX/trivial.json first.
-Return the AUTO:/CTX:/NEEDS lines only.")
-```
-
-Main session on return — `shadow` mode: append `{"repo","pr","head","status":"shadow_approve"|"shadow_fallback","ts","reason"}`
-to the ledger (pipe the row to `bash $BATON/skills/pr-review/scripts/ledger-append.sh "$ROOT/ledger.jsonl"` — exit 0
-appended, exit 1 bad JSON, exit 3 lock timeout, exit 4 write failure; see its header) and tell the user one line ("would approve <repo>#<n> — <body>" /
-"fallback: <reason>"). A `shadow_fallback` row stays an ordinary queue row; a `shadow_approve` row drops from later sweeps
-on that head. `live` mode: on `approve`, write `$CTX/request.json` `{"event":"APPROVE","body":<body>,"comments":[]}`, run
-`submit-review.sh preview … --auto` then `submit … --confirm <digest> --auto` **without** an `AskUserQuestion` — the script
-itself re-runs `trivial-check.py --head <sha>` and refuses unless the gate still passes on that exact head and
-`auto_approve.mode == live`; it writes the `auto_approved` ledger row. Tell the user one line with the review link. On
-`fallback`, the PR stays in the queue as an ordinary row. `NEEDS` lines are handled like any other runner.
+The whole contract — classes, gate, spawn, modes, ledger, fallback — is `reference/auto-approve.md`.
 
 ## `--unattended` (direct review requests flagged `C` by pr-scan)
 
