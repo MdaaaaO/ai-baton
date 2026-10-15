@@ -106,6 +106,16 @@ class SketchLine(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(out.strip(), "Sketch: none")
 
+    def test_reads_a_fenced_marker_the_way_a_jira_ticket_carries_it(self):
+        fence = "`" * 3
+        body = f"**Sketch**\n{fence}\n[mod.py] ---> [other.py]\n{fence}\n"
+        stamped = dp.ticket_sketch.stamp_text(body, REPO, ["src/mod.py", "src/other.py"], [], "jira")
+        self.assertIn(f"{fence}\n<!-- sketch:", stamped)
+        f = write(self.tmp.name, "ticket.txt", stamped)
+        rc, out, _ = run(["--repo", REPO, "--files", "src/mod.py", "src/new.py", "--sketch", f])
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.strip(), "Sketch: differs (+src/new.py, \u2212src/other.py)")
+
     def test_none_when_the_ticket_carries_no_marker_at_all(self):
         f = write(self.tmp.name, "ticket.txt", "Sketch: SKIP (sonnet-sized, specified fix)\n")
         rc, out, _ = run(["--repo", REPO, "--files", "src/mod.py", "--sketch", f])

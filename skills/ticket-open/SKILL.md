@@ -2,8 +2,8 @@
 name: ticket-open
 description: "Checklist for CREATING a ticket (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing-gated Sketch), the cold-reader gate, public/length checks, and the matching .context/ doc. Use when creating a ticket, right before/after posting it."
 metadata:
-  version: "16"
-  updated: "2026-10-02"
+  version: "17"
+  updated: "2026-10-15"
   reviewed: "2026-10-02"
   facts: "tracker.kind"
 user-invocable: true
@@ -46,11 +46,13 @@ kind X in this environment" and stop — never improvise.
 4. **Sketch — gated on the Sizing line** (`docs/diagrams.md`, the whiteboard-defence contract; this step
    adds only this skill's own piece, it does not restate the contract). `Sizing: opus` → draw the target
    state: WHERE the change sits (placement), the target shape of WHAT changes, and one WHY row when an
-   alternative existed; Mermaid for WHERE where `tracker.kind` renders it (GitHub), else a table for WHAT
-   and a nested list for WHERE — drawn by a Sonnet worker with the brief in `docs/diagrams.md` § The
-   drawing brief; the main session validates and keeps it. Then stamp the marker onto the drawn section:
-   `python3 $BATON/skills/ticket-open/sketch.py stamp --repo-slug <owner/repo> --paths <entry>[,<entry>…] --components <name>[,<name>…]`
-   (the section on stdin) and use its stdout as the Sketch section. Every other Sizing writes one line,
+   alternative existed; Mermaid for WHERE where `tracker.kind` renders it (GitHub), else (Jira) a
+   fenced ASCII box diagram for WHERE, never a nested list, with tables for WHAT and WHY, drawn by a
+   Sonnet worker with the brief in `docs/diagrams.md` § The drawing brief; the main session validates and
+   keeps it. Then stamp the marker onto the drawn section:
+   `python3 $BATON/skills/ticket-open/sketch.py stamp --repo-slug <owner/repo> --paths <entry>[,<entry>…] --components <name>[,<name>…] --tracker <tracker.kind>`
+   (the section on stdin) and use its stdout as the Sketch section; on `jira` the marker comes back
+   inside its own fence. Every other Sizing writes one line,
    `Sketch: SKIP (<reason>)` — the Sizing model plus a few words, e.g. `sonnet-sized, specified fix` —
    and nothing else; no drawing, no marker.
 5. **Context doc.** If this ticket is its own initiative, create the context doc
@@ -82,6 +84,10 @@ Tools: `tracker.mcp_tools.create` / `.edit` / `.comment`; project `tracker.proje
    `tracker.mcp_tools.edit` if create didn't take it. The description is the durable, always-visible home; it
    is never a comment. Post a comment only to cc someone who must act, a one-line ADF mention — never
    a copy of the block.
+5. **Sketch shape.** Jira renders neither Mermaid nor HTML comments: the Sketch's WHERE is one fenced
+   ASCII box diagram, WHAT and WHY stay tables, and the marker stays in the fence `sketch.py stamp
+   --tracker jira` wraps it in (`docs/diagrams.md` § Rendering). To see what the ticket really shows,
+   read it back with `expand: renderedFields`; the markdown the connector returns hides the difference.
 
 ### Labels — the ticket vocabulary (Jira environments)
 

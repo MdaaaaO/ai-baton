@@ -222,6 +222,122 @@ class CheckAgainstARepo(unittest.TestCase):
         self.assertEqual((rc, out.strip()), (0, "SKETCH OK"))
 
 
+FENCE = "`" * 3  # built at run time so this file's own fenced text stays unambiguous
+JIRA_BODY = (
+    "**Sketch**\n"
+    f"{FENCE}\n+---------+      +---------+\n| ticket  | ---> | sketch  | [NEW]\n+---------+      +---------+\n{FENCE}\n"
+    "| Object | Before | After | Note |\n|---|---|---|---|\n| body | Goal | + Sketch | opus only |\n"
+)
+
+
+class FencedMarker(unittest.TestCase):
+    """The Jira shape: the marker run alone inside one bare fence (that tracker renders no HTML comment),
+    after a fenced ASCII WHERE block. Both shapes stamp the same hash, and `check`/`parse` read both."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        base = Path(cls.tmp.name)
+        origin = base / "origin"
+        origin.mkdir()
+        git(origin, "init", "-q", "-b", "main")
+        (origin / "keep.py").write_text("y = 2\n", encoding="utf-8")
+        git(origin, "add", "-A")
+        git(origin, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "-m", "init")
+        cls.clone = base / "clone"
+        subprocess.run(["git", "clone", "-q", str(origin), str(cls.clone)], check=True, capture_output=True,
+                        env=hermetic_env(base))
+        git(cls.clone, "remote", "set-url", "origin", f"https://example.test/{REPO_SLUG}.git")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def _write(self, text: str) -> str:
+        p = Path(tempfile.mkstemp(dir=self.tmp.name, suffix=".txt")[1])
+        p.write_text(text, encoding="utf-8")
+        return str(p)
+
+    def _stamp(self, text: str, tracker: str | None = None, slug: str = REPO_SLUG) -> str:
+        argv = ["stamp", self._write(text), "--repo-slug", slug, "--paths", "keep.py"]
+        if tracker:
+            argv += ["--tracker", tracker]
+        rc, out = run(argv)
+        self.assertEqual(rc, 0)
+        return out
+
+    def _check(self, text: str) -> tuple[int, str]:
+        rc, out = run(["check", self._write(text), "--repo-dir", str(self.clone), "--base", "main"])
+        return rc, out.strip()
+
+    def test_jira_stamp_puts_the_marker_alone_in_a_fence_after_a_blank_line(self):
+        lines = self._stamp(JIRA_BODY, "jira").split("\n")
+        self.assertEqual(lines[-1], "")
+        self.assertEqual(lines[-2], FENCE)
+        self.assertTrue(lines[-3].startswith("<!-- sketch: repo=acme/widgets "), lines[-3])
+        self.assertEqual(lines[-4], FENCE)
+        self.assertEqual(lines[-5], "")
+
+    def test_github_stamp_is_the_bare_marker_with_or_without_the_flag(self):
+        default = self._stamp(JIRA_BODY)
+        self.assertEqual(default, self._stamp(JIRA_BODY, "github"))
+        self.assertTrue(default.rstrip("\n").split("\n")[-1].startswith("<!-- sketch:"))
+        self.assertEqual(default.count(FENCE), JIRA_BODY.count(FENCE), "the bare shape adds no fence")
+
+    def test_both_shapes_carry_the_same_hash(self):
+        h = [json.loads(run(["parse", self._write(self._stamp(JIRA_BODY, t))])[1])["hash"] for t in ("github", "jira")]
+        self.assertEqual(h[0], h[1])
+
+    def test_jira_stamp_then_parse_round_trips_the_fields(self):
+        rc, out = run(["parse", self._write(self._stamp(JIRA_BODY, "jira"))])
+        self.assertEqual(rc, 0)
+        parsed = json.loads(out)
+        self.assertEqual((parsed["repo"], parsed["paths"], parsed["components"]), (REPO_SLUG, ["keep.py"], []))
+
+    def test_jira_stamp_then_check_is_sketch_ok(self):
+        self.assertEqual(self._check(self._stamp(JIRA_BODY, "jira")), (0, "SKETCH OK"))
+
+    def test_check_reads_a_hand_fenced_marker_without_calling_it_stale(self):
+        # the bare-stamped marker moved into a fence by hand, as a tracker editor would leave it
+        bare = self._stamp(JIRA_BODY).rstrip("\n").split("\n")
+        fenced = "\n".join(bare[:-1] + ["", FENCE, bare[-1], FENCE]) + "\n"
+        self.assertEqual(self._check(fenced), (0, "SKETCH OK"))
+
+    def test_editing_the_drawing_above_a_fenced_marker_is_still_stale(self):
+        edited = self._stamp(JIRA_BODY, "jira").replace("[NEW]", "[CHANGED]")
+        rc, out = self._check(edited)
+        self.assertEqual(rc, 3)
+        self.assertTrue(out.startswith("STALE SKETCH "), out)
+
+    def test_a_closing_fence_right_above_a_bare_marker_is_part_of_the_drawing(self):
+        # the ASCII WHERE block's own closing fence sits directly above a GitHub-shaped marker
+        text = f"**Sketch**\n{FENCE}\n[a] ---> [b]\n{FENCE}\n"
+        self.assertEqual(self._check(self._stamp(text)), (0, "SKETCH OK"))
+
+    def test_jira_restamp_is_idempotent_and_keeps_one_fence(self):
+        once = self._stamp(JIRA_BODY, "jira")
+        twice = self._stamp(once, "jira")
+        self.assertEqual(once, twice)
+        self.assertEqual(twice.count("<!-- sketch:"), 1)
+
+    def test_two_repos_share_one_fence_and_both_check_ok(self):
+        ab = self._stamp(self._stamp(JIRA_BODY, "jira"), "jira", slug=REPO_SLUG_B)
+        tail = ab.rstrip("\n").split("\n")[-4:]
+        self.assertEqual([tail[0], tail[3]], [FENCE, FENCE])
+        self.assertEqual(sum(ln.startswith("<!-- sketch:") for ln in tail), 2)
+        self.assertEqual(self._check(ab), (0, "SKETCH OK"))
+        self.assertEqual(self._check(self._stamp(ab, "jira")), (0, "SKETCH OK"))
+
+    def test_restamping_a_fenced_ticket_for_github_unfences_it(self):
+        out = self._stamp(self._stamp(JIRA_BODY, "jira"), "github")
+        self.assertEqual(out.count(FENCE), JIRA_BODY.count(FENCE))
+        self.assertEqual(self._check(out), (0, "SKETCH OK"))
+
+    def test_an_unknown_tracker_kind_is_bad_usage(self):
+        rc, _ = run(["stamp", "-", "--repo-slug", REPO_SLUG, "--tracker", "linear"])
+        self.assertEqual(rc, 2)
+
+
 class StampValidation(unittest.TestCase):
     def test_a_leading_slash_path_is_bad_usage(self):
         rc, _ = run(["stamp", "-", "--repo-slug", REPO_SLUG, "--paths", "/abs/path"])
@@ -323,3 +439,20 @@ class TicketPickupSketchCheckLines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TicketOpenJiraSketchShape(unittest.TestCase):
+    """`ticket-open` step 4 and docs/diagrams.md must name the Jira shape the script emits."""
+
+    def setUp(self):
+        self.skill = (KIT / "skills" / "ticket-open" / "SKILL.md").read_text(encoding="utf-8")
+        self.diagrams = (KIT / "docs" / "diagrams.md").read_text(encoding="utf-8")
+
+    def test_skill_passes_the_tracker_kind_to_stamp_and_names_the_ascii_where(self):
+        self.assertIn("--tracker <tracker.kind>", self.skill)
+        self.assertIn("fenced ASCII", self.skill)
+        self.assertNotIn("a nested list for WHERE", self.skill)
+
+    def test_diagrams_doc_names_the_fenced_shape_and_how_to_verify_it(self):
+        for needle in ("fenced ASCII", "renderedFields", "[NEW]", "DEPLOY", "--tracker jira"):
+            self.assertIn(needle, self.diagrams)

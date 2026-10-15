@@ -6,6 +6,9 @@ still matches the repo.
 
 The marker is one HTML comment per repo a ticket touches:
   <!-- sketch: repo=<owner/repo> paths=<entry>[,<entry>…] components=<name>[,<name>…] hash=<12 hex> -->
+A tracker that renders no HTML comments (Jira) shows that line as raw text, so there the marker run goes
+alone inside one bare ``` fence (`stamp --tracker jira`); the marker line itself is unchanged and the fence
+lines are not part of the hash. `check` and `parse` read both shapes.
 `paths`/`components` are comma-separated, sorted, deduplicated, or `-` for "none"; a path entry
 ending in `/` is a directory, a leading `+` is a path the ticket creates (checked by its parent
 directory instead). `hash` is the first 12 hex digits of a SHA-256 over the Sketch's own text (from
@@ -14,10 +17,14 @@ each line right-stripped, leading/trailing blank lines dropped, joined by `\n`).
 
 Usage (stdlib only, no network):
   sketch.py stamp [FILE] --repo-slug <owner/repo> [--paths <entry>[,<entry>…]] [--components <name>[,<name>…]]
+                  [--tracker github|jira]
       Reads the Sketch section from FILE, or stdin when FILE is omitted or `-`. Prints the same text
       to stdout with the `repo-slug`'s marker appended (no existing marker for that repo) or replaced
       (one already there) — the hash is always freshly computed from the text given, excluding any
-      marker line. Writes nothing to disk; the caller decides where the stamped text goes.
+      marker line and the fence around it. `--tracker` is the resolved `tracker.kind`: `jira` writes the
+      marker run inside a ``` fence after a blank line, `github` (the default) writes it bare. Every
+      marker in the output, other repos' included, takes the requested shape. Writes nothing to disk;
+      the caller decides where the stamped text goes.
   sketch.py check <file-or-text> [--repo-dir <dir>] [--base origin/main]
       `file-or-text`: an existing file's path, or the literal text itself. Reads every marker in it
       (ticket body then comments, oldest first, as the caller concatenated them) and keeps the last
@@ -50,6 +57,8 @@ MARKER_RE = re.compile(
     r"^\s*<!-- sketch: repo=(\S+) paths=(\S+) components=(\S+) hash=([0-9a-f]{12}) -->\s*$"
 )
 MARKER_PREFIX = "<!-- sketch:"
+FENCE_RE = re.compile(r"^\s*```\w*\s*$")
+TRACKERS = ("github", "jira")
 HEADING_RE = re.compile(r"^\s*(#{1,6}\s+\S.*|\*\*Sketch\*\*)\s*$")
 PATH_INVALID = re.compile(r"[ ,]")
 COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -110,12 +119,23 @@ def find_heading(lines: list[str], before: int) -> int | None:
 
 
 def marker_boundary(lines: list[str]) -> int:
-    """The index of the first marker line (any repo) — the start of the trailing run `stamp` writes
-    them as — or `len(lines)` when none are present yet. The hashed slice always ends here, for both
-    `stamp` and `check`, so a marker's hash never depends on which other repos' markers sit beside it
-    or in what order."""
+    """The index where the hashed slice ends: the first marker line (any repo) — the start of the trailing
+    run `stamp` writes them as — or `len(lines)` when none are present yet. When that first marker sits
+    alone in a ``` fence (the Jira shape: a fence line directly above and, after the marker run, another
+    directly below) the boundary is the opening fence line instead, so the fence is never hashed. The
+    slice always ends here, for both `stamp` and `check`, so a marker's hash never depends on which other
+    repos' markers sit beside it, in what order, or whether the run is fenced."""
     marker_idxs = [i for i, ln in enumerate(lines) if MARKER_RE.match(ln)]
-    return min(marker_idxs) if marker_idxs else len(lines)
+    if not marker_idxs:
+        return len(lines)
+    first = marker_idxs[0]
+    if first > 0 and FENCE_RE.match(lines[first - 1]):
+        j = first
+        while j < len(lines) and MARKER_RE.match(lines[j]):
+            j += 1
+        if j < len(lines) and FENCE_RE.match(lines[j]):
+            return first - 1
+    return first
 
 
 def malformed_line(text: str) -> str | None:
@@ -155,7 +175,7 @@ def read_file_or_text(arg: str) -> str:
 
 
 # ── stamp ────────────────────────────────────────────────────────────────────────────────────
-def stamp_text(raw: str, repo_slug: str, paths: list[str], components: list[str]) -> str:
+def stamp_text(raw: str, repo_slug: str, paths: list[str], components: list[str], tracker: str = "github") -> str:
     lines = raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     marker_idxs = [i for i, ln in enumerate(lines) if MARKER_RE.match(ln)]
     content_end = marker_boundary(lines)
@@ -168,7 +188,10 @@ def stamp_text(raw: str, repo_slug: str, paths: list[str], components: list[str]
     content = lines[:content_end]
     while content and content[-1].strip() == "":
         content.pop()
-    return "\n".join(content + kept + [new_marker]) + "\n"
+    markers = kept + [new_marker]
+    if tracker == "jira":  # that tracker's renderer has no HTML-comment node: the run goes in a code fence
+        return "\n".join(content + ["", "```"] + markers + ["```"]) + "\n"
+    return "\n".join(content + markers) + "\n"
 
 
 def cmd_stamp(a: argparse.Namespace) -> int:
@@ -178,7 +201,7 @@ def cmd_stamp(a: argparse.Namespace) -> int:
     validate_paths(paths)
     validate_components(components)
     raw = sys.stdin.read() if a.file in (None, "-") else Path(a.file).read_text(encoding="utf-8")
-    sys.stdout.write(stamp_text(raw, a.repo_slug, paths, components))
+    sys.stdout.write(stamp_text(raw, a.repo_slug, paths, components, a.tracker))
     return 0
 
 
@@ -279,6 +302,8 @@ def main(argv: list[str]) -> int:
     p_stamp.add_argument("--repo-slug", required=True, metavar="OWNER/REPO")
     p_stamp.add_argument("--paths", default="-", metavar="ENTRY[,ENTRY…]")
     p_stamp.add_argument("--components", default="-", metavar="NAME[,NAME…]")
+    p_stamp.add_argument("--tracker", default="github", choices=TRACKERS, metavar="KIND",
+                         help="the resolved tracker.kind: jira fences the marker, github (default) leaves it bare")
 
     p_check = sub.add_parser("check", help="check a ticket's sketch marker against the default branch")
     p_check.add_argument("text", metavar="FILE-OR-TEXT")
