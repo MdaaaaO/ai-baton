@@ -98,7 +98,7 @@ flowchart LR
 | A skills plugin | Skills hardcode your org, channels and ids, or ask you for them every time | An env fact store: a fact is found once, then read everywhere |
 | Nothing | Each session starts cold and forgets what the last one learned | `.context/`, an indexed markdown DB, plus a session registry and handoff docs |
 
-Use a plain `CLAUDE.md` for one repo and one person. The kit pays off past that: several repos, machines or people.
+Use a plain `CLAUDE.md` for one repo and one person. The kit pays off past that: several repos, machines or people. Non-goals: [vision](docs/vision.md).
 
 ## How it works
 
