@@ -45,7 +45,8 @@ LOCAL_PATH_RE = re.compile(r"(?<![\w/])\.context/|\.worktrees/|/Users/|/home/", 
 # (`</script>`, `<br>`). `check_html` only ever runs this on the cards a build just composed (`new_ids`),
 # never a previously published one.
 PLACEHOLDER_TAIL_RE = re.compile(r"^\s*…\s*$|\s…\s*$|\bTBD\b|\bTODO\b")  # prose may still use "…" mid-sentence
-RANGE_SEP_RE = re.compile(r"\s*[-–]\s*")  # a date range's separator: a hyphen or an en dash
+# a date range's separator: an en dash, or a hyphen set off by spaces (a bare hyphen is part of an ISO date, 2026-10-05)
+RANGE_SEP_RE = re.compile(r"\s+-\s+|\s*–\s*")
 # The placeholders `ledger-template.html` carries (and `load_page`/`refresh_masthead` fill): only these are "unfilled"
 # when left in a built page; any other `{{…}}` is a card's own text.
 PAGE_PLACEHOLDER_RE = re.compile(r"\{\{(?:TITLE|EYEBROW|REPORT_LINK|N|RANGE)\}\}")

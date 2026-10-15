@@ -604,6 +604,8 @@ def _gh(args: list[str], *, context: str = "") -> str:
         except subprocess.TimeoutExpired:
             print(f"gh {' '.join(args[:3])} timed out after 60s" + (f" ({context})" if context else ""), file=sys.stderr)
             raise SystemExit(2)
+        except OSError as e:  # gh not installed / not executable: the same skip path as a timeout, never a traceback
+            raise SystemExit(f"gh not on PATH ({e.strerror or e})")
         if r.returncode == 0:
             return r.stdout
         if attempt < GH_RATE_LIMIT_ATTEMPTS and GH_RATE_LIMIT_RE.search(r.stderr or ""):
@@ -1038,7 +1040,13 @@ def cmd_run(a) -> int:
               "(`cost_report.py sql`, then `ingest`); `run` covers private mode only", file=sys.stderr)
         return 2
     since = a.since or (date.today() - timedelta(weeks=10)).isoformat()
-    work = Path(a.workdir) if a.workdir else Path(tempfile.mkdtemp(prefix="cost-report-"))
+    if a.workdir:  # an explicit workdir is the caller's to keep; the default one is removed when the report is out
+        return _run_in(a, since, Path(a.workdir))
+    with tempfile.TemporaryDirectory(prefix="cost-report-") as tmp:
+        return _run_in(a, since, Path(tmp))
+
+
+def _run_in(a, since: str, work: Path) -> int:
     work.mkdir(parents=True, exist_ok=True)
     daily, prs, tickets = work / "daily.json", work / "prs.tsv", work / "tickets.tsv"
     if (rc := cmd_collect_private(argparse.Namespace(since=since, until=a.until, csv=a.csv, out=str(daily)))):
@@ -1073,7 +1081,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("--out"); p.add_argument("--json")
     p = sub.add_parser("run", help="private mode: collect-private, work-prs, work-tickets, report — the default run in one call")
     p.add_argument("--since", help="default: 10 weeks back"); p.add_argument("--until"); p.add_argument("--csv")
-    p.add_argument("--workdir", help="where daily.json / prs.tsv / tickets.tsv land (default: a fresh temp dir)")
+    p.add_argument("--workdir", help="where daily.json / prs.tsv / tickets.tsv land (default: a temp dir removed after the report)")
     a = ap.parse_args(argv)
     if a.cmd == "mode":
         print(json.dumps(resolve_mode(), indent=1)); return 0

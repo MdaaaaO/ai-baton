@@ -74,6 +74,12 @@ class GhTimeout(unittest.TestCase):
             self.assertEqual(cm.exception.code, 2)
         self.assertIn("timed out after 60s", buf.getvalue())
 
+    def test_gh_missing_from_path_takes_the_skip_path_not_a_traceback(self):
+        with unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=FileNotFoundError(2, "No such file or directory")):
+            with self.assertRaises(SystemExit) as cm:
+                cost_report._gh(["search", "prs"])
+        self.assertIn("gh not on PATH", str(cm.exception))
+
 
 class IngestRobustness(unittest.TestCase):
     """`ingest` normalises rows from a warehouse whose query the operator wrote, not the kit's — a row
@@ -598,6 +604,40 @@ class RunDefaultReport(unittest.TestCase):
             self.assertEqual([c[0] for c in calls], ["collect", "prs", "tickets", "report"])
             self.assertEqual(calls[-1][1:], (str(Path(d) / "prs.tsv"), None, str(Path(d) / "daily.json")))
             self.assertIn("tickets skipped: tracker.repos is empty", err.getvalue())
+
+    def test_gh_not_on_path_skips_prs_and_tickets_and_still_reports(self):
+        err, seen = io.StringIO(), {}
+
+        def report(a):
+            seen["prs"], seen["tickets"] = a.prs, a.tickets
+            return 0
+
+        def collect(a):
+            Path(a.out).write_text("{}"); return 0
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private", "github_login": "me", "github_org": "acme", "extra_repos": []}), \
+                unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                unittest.mock.patch.object(cost_report, "cmd_report", report), \
+                unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=FileNotFoundError(2, "No such file or directory")), \
+                contextlib.redirect_stderr(err):
+            rc = cost_report.cmd_run(self.args())
+        self.assertEqual((rc, seen), (0, {"prs": None, "tickets": None}))
+        self.assertIn("PRs skipped: gh not on PATH", err.getvalue())
+
+    def test_default_workdir_is_removed_after_the_report_and_an_explicit_one_kept(self):
+        dirs = []
+
+        def collect(a):
+            dirs.append(Path(a.out).parent); Path(a.out).write_text("{}"); return 0
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private"}), \
+                unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                unittest.mock.patch.object(cost_report, "cmd_work_prs", side_effect=SystemExit("x")), \
+                unittest.mock.patch.object(cost_report, "cmd_work_tickets", side_effect=SystemExit("x")), \
+                unittest.mock.patch.object(cost_report, "cmd_report", return_value=0), contextlib.redirect_stderr(io.StringIO()):
+            cost_report.cmd_run(self.args())
+            with tempfile.TemporaryDirectory() as keep:
+                cost_report.cmd_run(self.args(workdir=keep))
+                self.assertTrue((Path(keep) / "daily.json").exists())
+        self.assertFalse(dirs[0].exists())
 
     def test_a_bad_date_is_refused_before_anything_runs(self):
         with contextlib.redirect_stderr(io.StringIO()):

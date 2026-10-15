@@ -1,6 +1,8 @@
 """session_stats.py + transcripts.py on a synthetic transcript (usage de-dup, tool mix, PRs, subagents, pricing,
 the rendered line/block). Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -125,6 +127,8 @@ class Transcript(unittest.TestCase):
 
     def test_prices(self):
         with unittest.mock.patch.object(ss.profile, "get", return_value={}):  # hermetic: never this machine's config
+            ss.config_prices.cache_clear()
+            self.addCleanup(ss.config_prices.cache_clear)
             self._check_prices()
 
     def _check_prices(self):
@@ -148,6 +152,8 @@ class Transcript(unittest.TestCase):
         """`profile.get` answering `cost.prices` with `prices_cfg` (None = the key is absent)."""
         def get(path, default=None):
             return default if path != "cost.prices" or prices_cfg is None else prices_cfg
+        ss.config_prices.cache_clear()  # memoised per process: a new config must be re-read
+        self.addCleanup(ss.config_prices.cache_clear)
         return unittest.mock.patch.object(ss.profile, "get", side_effect=get)
 
     def test_prices_come_from_the_env_config(self):
@@ -172,6 +178,42 @@ class Transcript(unittest.TestCase):
                 self.assertEqual(ss.price_for("claude-sonnet-4"), (3.0, 3.75, 0.3, 15.0, 6.0), cfg)
         with self._with_config(None):
             self.assertEqual(ss.priced_at(), "")
+
+    def test_priced_at_only_when_the_config_default_is_the_row_in_use(self):
+        good = [10, 12.5, 1, 50, 20]
+        env = {"SESSION_STATS_PRICES": "1,2,3,4,9"}
+        with self._with_config({"priced_at": "2026-10-01", "default": good}), \
+                unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SESSION_STATS_PRICES", None)
+            self.assertEqual(ss.priced_at(), "2026-10-01")
+        with self._with_config({"priced_at": "2026-10-01", "default": good}), unittest.mock.patch.dict(os.environ, env):
+            self.assertEqual(ss.priced_at(), "")  # the env override won: its numbers are not the dated table's
+        for cfg in ({"priced_at": "2026-10-01", "default": [1, 2, 3]},           # malformed default: built-in row in use
+                    {"priced_at": "2026-10-01", "models": {"sonnet": [1, 2, 3, 4]}}):  # no default row at all
+            with self._with_config(cfg), unittest.mock.patch.dict(os.environ, {}, clear=False), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                os.environ.pop("SESSION_STATS_PRICES", None)
+                self.assertEqual(ss.priced_at(), "", cfg)
+                self.assertEqual(ss.prices(), ss.DEFAULT_PRICES, cfg)
+
+    def test_a_dropped_malformed_row_is_named_once_on_stderr(self):
+        cfg = {"default": [1, 2, 3], "models": {"sonnet": ["a", 1, 1, 1], "haiku": [1, 1, 1, 1], "": [1, 1, 1, 1]}}
+        err = io.StringIO()
+        with self._with_config(cfg), contextlib.redirect_stderr(err):
+            ss.config_prices(); ss.config_prices(); ss.price_for("claude-sonnet-4")  # memoised: read, and reported, once
+        lines = err.getvalue().splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertTrue(any("cost.prices.default" in l for l in lines))
+        self.assertTrue(any("cost.prices.models.sonnet" in l for l in lines))
+        err = io.StringIO()
+        with self._with_config({"default": [10, 12.5, 1, 50, 20]}), contextlib.redirect_stderr(err):
+            ss.config_prices()
+        self.assertEqual(err.getvalue(), "")  # a clean (or absent) config says nothing
+
+    def test_config_prices_is_memoised_per_process(self):
+        with self._with_config({"default": [10, 12.5, 1, 50, 20]}) as get:
+            ss.config_prices(); ss.config_prices(); ss.price_for("opus"); ss.price_for("sonnet")
+            self.assertEqual(get.call_count, 1)
 
     def test_env_override_beats_the_config_default(self):
         cfg = {"default": [10, 12.5, 1, 50, 20], "models": {"sonnet": [2, 2.5, 0.2, 10, 4]}}

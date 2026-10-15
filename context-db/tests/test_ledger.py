@@ -275,6 +275,12 @@ class MastheadRange(unittest.TestCase):
         out = self.render("Mon Jan 4 - Sun Jan 10, 2027", "Mon Jan 11 – Sun Jan 17, 2027")
         self.assertIn("<span>Jan 4 – Jan 17, 2027</span>", out)
 
+    def test_iso_date_range_keeps_its_hyphens(self):
+        out = self.render("2026-10-05 – 2026-10-11", "2026-10-12 – 2026-10-18")
+        self.assertIn("<span>2026-10-05 – 2026-10-18</span>", out)
+        out = self.render("2026-10-05 - 2026-10-11", "2026-10-12 - 2026-10-18")  # spaced hyphen between ISO dates
+        self.assertIn("<i>2026-10-05 – 2026-10-18</i>", out)
+
 
 class PageExistenceCheck(unittest.TestCase):
     """The `--page` argument names a local file the SKILL's step 10 saved from `self_assessment.ledger_url`

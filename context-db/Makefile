@@ -72,6 +72,8 @@ ENGINE  := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BIN     := $(ENGINE)bin
 # CONTEXT defaults to `kit_profile.py context` — the engine's one content-root resolver (docs/layout.md).
 PY      := python3
+# `make -C` would print "Entering directory" on stdout, ahead of a report (cost-report) or a value (profile KEY=…).
+MAKEFLAGS += --no-print-directory
 # Evaluated once, not per reference. No inline comment here: make keeps the blanks before a `#`
 # in the value, and `.context  ` is not the store.
 ifeq ($(origin CONTEXT),undefined)
