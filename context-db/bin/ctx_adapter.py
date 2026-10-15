@@ -472,7 +472,16 @@ def _adopt_state_path(root: Path) -> Path:
     return root / ADOPT_DIGEST_REL
 
 
-def _write_adopt_digest(root: Path, kept: list[str] | None = None) -> None:
+def _kept_line(f: str, older: dict) -> str:
+    """The one `differs:` line for a kept store file — `older` maps a file kept for a newer installed version to
+    `(installed, offered)`. Shared by `adopt` and `_check_record` so the two never word it differently."""
+    if f in older:
+        return (f"differs: {f} — kept (the store has version {older[f][0]}, the kit offers {older[f][1]}); "
+                "update the kit, or `ctx_adapter.py adopt --replace` to downgrade")
+    return f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's"
+
+
+def _write_adopt_digest(root: Path, kept: list[str] | None = None, older: dict | None = None) -> None:
     """Record `_kit_data_digest()`, this kit's own version (`_kit_version`) and, when `ctx init --upgrade` kept a
     locally edited store file this run (`kept`, the same list `adopt` already prints `differs:` lines for), that
     list too — under the store's ignored `state/` dir, atomically (temp file in the same directory, then
@@ -480,12 +489,16 @@ def _write_adopt_digest(root: Path, kept: list[str] | None = None) -> None:
     init`/`migrate --apply` (never on an early-return error), so the record always reflects settings and types
     `ctx` was just handed, whatever `ctx validate` finds in the docs afterwards — `kept` is recorded right
     alongside the digest, not hidden behind it, so a `--check` that finds the digest clean still sees a kept
-    file: a kept file must not read as clean just because nothing else about the store moved since."""
+    file: a kept file must not read as clean just because nothing else about the store moved since. `older`
+    (`{file: (installed, offered)}`, the kept files that are a newer installed type version) is recorded as
+    `kept_older` so `--check` words those lines exactly as the run that kept them did."""
     path = _adopt_state_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     data: dict = {"digest": _kit_data_digest(), "version": _kit_version()}
     if kept:
         data["kept"] = list(kept)
+        if older:
+            data["kept_older"] = {f: list(v) for f, v in older.items() if f in kept}
     fd, tmp = tempfile.mkstemp(prefix=".adopted-kit-", suffix=".json.tmp", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -498,8 +511,9 @@ def _write_adopt_digest(root: Path, kept: list[str] | None = None) -> None:
 
 
 def _recorded_state(root: Path) -> dict | None:
-    """The `{digest, version, kept}` the last `adopt` on this store recorded (`kept` only when it kept a file;
-    older records carry no `version`), or None — no record at all (a store adopted before this existed, or whose
+    """The `{digest, version, kept, kept_older}` the last `adopt` on this store recorded (`kept` only when it kept
+    a file, `kept_older` only when one was kept for a newer installed version; older records carry neither, nor a
+    `version`), or None — no record at all (a store adopted before this existed, or whose
     file does not parse). Either way `adopt --check` reports the store `behind` unless the record names a newer
     kit (see `adopt`): a missing record is the least surprising case to treat as behind, since one plain `adopt`
     run is all it takes to write a fresh one, and staying silent would mean a store that drifted from the kit
@@ -534,8 +548,10 @@ def _check_record(root: Path) -> tuple[bool, bool]:
     # still differs from the kit's own copy — a kept file does not stop being a local edit just because nothing
     # else about the store moved since
     kept = (rec or {}).get("kept") or []
+    older = (rec or {}).get("kept_older")
+    older = {f: v for f, v in older.items() if isinstance(v, list) and len(v) == 2} if isinstance(older, dict) else {}
     for f in kept:
-        print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
+        print(_kept_line(f, older))
     return False, bool(kept)
 
 
@@ -561,10 +577,10 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
     store = ["--store", str(root)]
     differs, blocked = False, []
     if not check and not replace:
-        # a kit older than the one the store last recorded would hand it older types — ctx-store's own
-        # `init --upgrade` does not guard against that (it diffs bytes and the last-init digest only, never a
-        # type's own `version`; see `ctxstore/bootstrap.py`'s `init`), so this adapter refuses before `init`
-        # ever runs rather than silently downgrade the store
+        # a kit older than the one the store last recorded would hand it older types — since ctx-store 0.8.0
+        # `init --upgrade` keeps a type at its higher installed version itself (reported `kept: … (version N
+        # installed, M offered)`), but this adapter still refuses before `init` ever runs: the kit-version guard
+        # is the earlier, louder one, and `--replace` is the one explicit way to downgrade
         rec_version = str((_recorded_state(root) or {}).get("version") or "")
         own_version = _kit_version()
         rec_v, own_v = _parse_semver(rec_version), _parse_semver(own_version)
@@ -598,11 +614,7 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
                     older[m.group(1)] = (m.group(2), m.group(3))
         differs = bool(kept)
         for f in kept:
-            if f in older:
-                print(f"differs: {f} — kept (the store has version {older[f][0]}, the kit offers {older[f][1]}); "
-                      "`ctx_adapter.py adopt --replace` takes the kit's")
-            else:
-                print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
+            print(_kept_line(f, older))
         # a type the kit moved to a new schema version leaves its docs MIGRATION_PENDING, and ctx refuses writes to
         # those: bring them along now (ctx's migrations are idempotent; a doc it cannot migrate is a finding below)
         m = _ctx(ctx, store, "migrate", "--apply", timeout=ADOPT_TIMEOUT)
@@ -638,7 +650,7 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
         if a.returncode not in (0, 3):
             return 2
         try:
-            _write_adopt_digest(root, kept)  # the init/migrate/validate flow above actually ran: the record is current
+            _write_adopt_digest(root, kept, older)  # the init/migrate/validate flow above actually ran: the record is current
         except OSError as e:
             print(f"warn: could not record the adopted digest under state/ ({e}) — adopt --check will keep "
                   "reading this store as behind")

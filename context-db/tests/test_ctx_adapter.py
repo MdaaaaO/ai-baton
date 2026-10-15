@@ -1299,13 +1299,51 @@ class AdoptBehind(Base):
 
     def test_a_type_kept_for_a_newer_installed_version_is_recorded_by_its_bare_name(self):
         """ctx-store 0.8.0 `init --upgrade` never installs an older type version: it keeps the file and prints
-        `kept: <file> (version N installed, M offered)`. The record and the `differs:` line carry the bare file."""
+        `kept: <file> (version N installed, M offered)`. The record carries the bare file and the two versions, and
+        `adopt --check` prints the very line the plain `adopt` did."""
         out = "kept: .ctx/types/epic.json (version 6 installed, 3 offered)\nok: 1 adopted\n"
+        line = ("differs: .ctx/types/epic.json — kept (the store has version 6, the kit offers 3); "
+                "update the kit, or `ctx_adapter.py adopt --replace` to downgrade")
         r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT=out)
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
-        self.assertIn("differs: .ctx/types/epic.json — kept (the store has version 6, the kit offers 3); "
-                      "`ctx_adapter.py adopt --replace` takes the kit's", r.stdout)
-        self.assertEqual(json.loads(self.digest_path().read_text(encoding="utf-8"))["kept"], [".ctx/types/epic.json"])
+        self.assertIn(line, r.stdout)
+        recorded = json.loads(self.digest_path().read_text(encoding="utf-8"))
+        self.assertEqual(recorded["kept"], [".ctx/types/epic.json"])
+        self.assertEqual(recorded["kept_older"], {".ctx/types/epic.json": ["6", "3"]})
+        (self.root / "ctx-store.json").write_text("{}", encoding="utf-8")  # the file test --no-validate runs
+        for flags in (("--check",), ("--check", "--no-validate")):
+            r = self.adapter("adopt", *flags, KIT_CTX=str(self.fake))
+            self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+            self.assertIn(line, r.stdout)
+
+    def test_a_plain_kept_file_and_a_version_kept_type_each_keep_their_own_wording(self):
+        out = ("kept: ctx-store.json\nkept: .ctx/types/epic.json (version 6 installed, 3 offered)\n"
+               "ok: 1 adopted\n")
+        plain = "differs: ctx-store.json — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's"
+        versioned = ("differs: .ctx/types/epic.json — kept (the store has version 6, the kit offers 3); "
+                     "update the kit, or `ctx_adapter.py adopt --replace` to downgrade")
+        r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT=out)
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn(plain, r.stdout)
+        self.assertIn(versioned, r.stdout)
+        recorded = json.loads(self.digest_path().read_text(encoding="utf-8"))
+        self.assertEqual(recorded["kept"], ["ctx-store.json", ".ctx/types/epic.json"])
+        self.assertEqual(recorded["kept_older"], {".ctx/types/epic.json": ["6", "3"]})
+        (self.root / "ctx-store.json").write_text("{}", encoding="utf-8")  # the file test --no-validate runs
+        r = self.adapter("adopt", "--check", "--no-validate", KIT_CTX=str(self.fake))
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn(plain, r.stdout)
+        self.assertIn(versioned, r.stdout)
+
+    def test_a_digest_recorded_without_kept_older_still_loads(self):
+        """A digest written before `kept_older` existed carries only `kept`: it reads as the plain wording."""
+        self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="kept: ctx-store.json\nok: 1 adopted\n")
+        recorded = json.loads(self.digest_path().read_text(encoding="utf-8"))
+        self.assertNotIn("kept_older", recorded)
+        (self.root / "ctx-store.json").write_text("{}", encoding="utf-8")  # the file test --no-validate runs
+        r = self.adapter("adopt", "--check", "--no-validate", KIT_CTX=str(self.fake))
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("differs: ctx-store.json — kept (edited here)", r.stdout)
 
     def test_a_newer_recorded_kit_version_reads_as_ahead_not_behind(self):
         """Version skew must not point `adopt` the wrong way: a store last adopted by a NEWER kit than this one is
