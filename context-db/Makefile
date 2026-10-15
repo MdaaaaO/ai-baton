@@ -17,6 +17,7 @@
 # Live session registry (who is working on what, right now — see SESSION_INDEX.md):
 #   make -C $BATON/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
 #                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
+#       (a successor adds SUCCESSOR_OF=<predecessor>: prints that session's ## Open PRs list)
 #   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
 #   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + ## What this session did + sessions/_ledger.md row
 #   make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
@@ -318,8 +319,8 @@ override sq = '$(subst ','\'',$(value $(1)))'
 SESSION_ARGS = --ref $(call sq,REF) --status $(call sq,STATUS) --epic $(call sq,EPIC) --repos $(call sq,REPOS) \
                --resp $(call sq,RESP) --note $(call sq,NOTE)
 session-register:
-	@test -n $(call sq,NAME) || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=]"; exit 2; }
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) $(STATSFLAGS)
+	@test -n $(call sq,NAME) || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=] [SUCCESSOR_OF=<predecessor>]"; exit 2; }
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) --successor-of $(call sq,SUCCESSOR_OF) $(STATSFLAGS)
 	@sh $(ENGINE)../sync-check.sh || true
 
 session-touch:

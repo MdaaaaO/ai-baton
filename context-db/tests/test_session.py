@@ -873,3 +873,52 @@ class EndWritesWhatThisSessionDid(unittest.TestCase):
         doc = (self.root / "sessions" / "t-noact.md").read_text(encoding="utf-8")
         self.assertNotIn("## What this session did", doc)
         self.assertNotIn("## Session stats", doc)  # no transcript: neither block is written
+
+
+class SuccessorSeesPredecessorOpenPRs(unittest.TestCase):
+    """#351: registering with --successor-of prints the predecessor's `## Open PRs` lines, so session-register
+    step 4 (re-arm, or drive to merge) is not skipped for want of a reminder."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        (self.root / "sessions").mkdir(parents=True)
+        (self.root / "sessions" / "kit-01.md").write_text(
+            "---\nsession: kit-01\nstatus: ended\n---\n\n## Open PRs\n\n"
+            "- o/r#10 head abc123456 \u2014 driving to merge, no watcher\n- o/r#11 head def654321 \u2014 watcher armed\n\n"
+            "## Next session\n\ncontinue\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_register_as_successor_prints_the_predecessors_open_prs(self):
+        r = run("session.py", "register", "--name", "kit-01-2", "--no-stats", "--successor-of", "kit-01", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("predecessor kit-01 open PRs:\n- o/r#10 head abc123456 \u2014 driving to merge, no watcher\n"
+                      "- o/r#11 head def654321 \u2014 watcher armed\n", r.stdout + "\n")
+        self.assertNotIn("## Next session", r.stdout)  # only the Open PRs section
+        r = run("session.py", "register", "--name", "kit-02", "--no-stats", root=self.root)
+        self.assertNotIn("predecessor", r.stdout)  # a plain registration prints nothing extra
+
+    def _archived(self, fn: str, session: str, heartbeat: str, body: str) -> None:
+        adir = self.root / "sessions" / "archive"
+        adir.mkdir(parents=True, exist_ok=True)
+        (adir / fn).write_text(f"---\nsession: {session}\nstatus: ended\nheartbeat: {heartbeat}\n---\n\n{body}", encoding="utf-8")
+
+    def test_an_archived_predecessor_is_the_newest_heartbeat_of_its_own_lane(self):
+        # the alphabetically-last file holds the OLDER heartbeat; a lane that merely starts with the name is ignored
+        self._archived("kit-05-20260102.md", "kit-05", "2026-01-02T10:00:00Z", "## Open PRs\n\n- o/r#1 head old000000 \u2014 old\n")
+        self._archived("kit-05-20260101.md", "kit-05", "2026-01-05T10:00:00Z", "## Open PRs\n\n- o/r#2 head new000000 \u2014 new\n")
+        self._archived("kit-05-20260103.md", "kit-05-other", "2026-01-09T10:00:00Z", "## Open PRs\n\n- o/r#3 head oth000000 \u2014 other lane\n")
+        r = run("session.py", "register", "--name", "kit-05-2", "--no-stats", "--successor-of", "kit-05", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("predecessor kit-05 open PRs:\n- o/r#2 head new000000 \u2014 new\n", r.stdout + "\n")
+        self.assertNotIn("o/r#1", r.stdout)
+        self.assertNotIn("o/r#3", r.stdout)
+        self.assertTrue((self.root / "sessions" / "archive" / "kit-05-20260101.md").exists())  # read only, never restored
+
+    def test_a_predecessor_without_the_heading_is_unknown_not_none(self):
+        (self.root / "sessions" / "kit-06.md").write_text("---\nsession: kit-06\nstatus: ended\n---\n\n## Next session\n\nx\n", encoding="utf-8")
+        r = run("session.py", "register", "--name", "kit-06-2", "--no-stats", "--successor-of", "kit-06", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("predecessor kit-06 open PRs:\nunknown (no ## Open PRs heading", r.stdout)

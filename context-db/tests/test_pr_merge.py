@@ -120,6 +120,13 @@ class EmptyReviewDecision(unittest.TestCase):
                                 self.review("bob", "APPROVED", "2026-01-01T12:00:00Z")])
         self.assert_stopped(r, "CHANGES_REQUESTED")
 
+    def test_it_states_that_it_counts_as_the_watch_for_the_pr(self):
+        # #351: session-register step 4 skips the separate watcher for a PR driven to merge here
+        r = self.run_merge("APPROVED")
+        self.assert_merged(r)
+        self.assertIn("pr-merge: watching o/r#7 until merge \u2014 no separate pr-watch needed", r.stdout)
+        self.assertNotIn("watch ends", r.stdout + r.stderr)  # a merged PR needs no re-arm
+
     def test_required_review_approved_merges_without_the_lookup(self):
         r = self.run_merge("APPROVED")
         self.assert_merged(r)
@@ -132,6 +139,9 @@ class EmptyReviewDecision(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("MERGE FAILED", r.stdout)
         self.assertNotIn("MERGED on", r.stdout)
+        # #351: no watcher is left behind silently, and the line is on stdout (what the Monitor reads)
+        self.assertIn("pr-merge: watch ends (exit 1) \u2014 re-arm pr-watch", r.stdout)
+        self.assertNotIn("watch ends", r.stderr)
 
     def test_a_reported_success_without_merged_at_is_not_read_as_merged(self):
         r = self.run_merge("APPROVED", merged_at=None)

@@ -2,9 +2,9 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate back and carousel when paste-started as a successor, re-arm PR-watch, rename a session, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "34"
+  version: "36"
   updated: "2026-10-15"
-  reviewed: "2026-10-12"
+  reviewed: "2026-10-15"
 user-invocable: true
 ---
 
@@ -42,7 +42,8 @@ worktree.
    (no `## Next session`, or a "no successor" note) is not listed at all — there is nothing to pick up.
    A predecessor that ended more than `SESSION_ARCHIVE_DAYS` (7) days ago is no longer in the index —
    it was swept to `sessions/archive/<name>.md` (listed in `sessions/archive/INDEX.md`, prompt intact).
-   Register under the name it proposes, read what it lists, claim what it names.
+   Register under the name it proposes, with `SUCCESSOR_OF=<name>` so the predecessor's `## Open PRs` print,
+   read what it lists, claim what it names.
    **Narrate back before touching anything else.** Right after reading `## Next session`, say the
    state back in five lines — Owns · Landed · Open · First step · Not known — before any edit,
    comment, worktree or push (only registration, the heartbeat and re-arming PR watches, steps 3-4
@@ -74,6 +75,8 @@ worktree.
         REPOS=<repo[,repo]> WORKING="<current ticket/PR in one line>" \
         RESP="<what you own; what others should coordinate with you on>"
    ```
+   A successor adds `SUCCESSOR_OF=<predecessor>`: registration then prints `predecessor <name> open PRs:` and that
+   session's `## Open PRs` lines (or `none`) — the list step 4 re-arms or drives.
    `make -C $BATON/context-db mission-build` rebuilds the private mission-control page from the registry: a local
    file, zero model turns, never a publish (the `mission-control` skill shows it).
    Then fill the body of `.context/sessions/<name>.md` (a direct `Edit`, or the ctx tools — `sessions/` is
@@ -104,6 +107,10 @@ worktree.
    `PR_WATCH_WORKTREE=<checkout> bash …/pr-watch.sh <o>/<r> <n> <head> [<n> <head> …]` under
    `Monitor`, `timeout_ms: 1800000` — the harness caps a Monitor at 30 min, and each expiry is a
    billed wake-up; one Monitor per repo, not per PR; owner decision, 2026-09-22).
+   **Carve-out:** a PR this session drives to merge itself with `skills/pr-watch/pr-merge.sh` (it counts as that
+   PR's watch) needs no Monitor; record it as `driving to merge, no watcher` in `## Open PRs`. If `pr-merge.sh`
+   exits non-zero, arm the Monitor (or park) and rewrite the `## Open PRs` line. A PR that could sit unattended
+   still gets one. One watcher per PR (a Monitor or that `pr-merge.sh` run), never two, never none.
    On expiry, re-arm with the identical call (same command and heads; the watcher stays silent) — unless the last **two** windows brought zero actionable events, in which case
    park instead: `session-handoff` and end the session (`pr-watch` § Park when the gates are not yours).
    Park at once — do not wait for two windows — the moment the user signs off, or when the only pending event
