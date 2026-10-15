@@ -56,6 +56,6 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 
 The forked workers that skills run under. Where they fit is shown in `docs/architecture.md`.
 
-- **triage** — cheap read-only Sonnet worker that summarises. It never posts.
+- **triage** — cheap read-only worker (Haiku) that summarises. It never posts.
 - **review-runner** — Opus worker that runs `pr-review` steps 1–4 for one PR.
 - **auto-runner** — Sonnet worker for the auto-approve path on trivial PRs.

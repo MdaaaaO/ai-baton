@@ -1,16 +1,16 @@
 ---
 name: pr-event-brief
-description: "Sonnet-forked triage of one pr-watch event — reads reviews, threads, checks and mergeability; returns a ≤10-line brief with one ACTION. Invoke when a pr-watch Monitor emits an actionable event line; the main session then performs the action."
+description: "Forked triage of one pr-watch event — reads reviews, threads, checks and mergeability; returns a ≤10-line brief with one ACTION. Invoke when a pr-watch Monitor emits an actionable event line; the main session then performs the action."
 metadata:
-  version: "15"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "16"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   facts: "github.review_bot"
 argument-hint: <owner/repo> <pr_number> "<event line>"
 arguments: [repo, pr, event]
 context: fork
 agent: triage
-model: sonnet
+model: haiku
 effort: low
 background: false
 ---

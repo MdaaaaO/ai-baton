@@ -1,16 +1,16 @@
 ---
 name: alerts-sweep
-description: "Sonnet-forked sweep of the airflow-alerts Slack channel: reads new messages, classifies each against the pattern KB; returns a state-advance trailer, NO-OP, a read-failed line, or `NEEDS <system>.<kind> <name>`. Use when armed with `/loop 20m /alerts-sweep`; never writes."
+description: "Forked sweep of the airflow-alerts Slack channel: reads new messages, classifies each against the pattern KB; returns a state-advance trailer, NO-OP, a read-failed line, or `NEEDS <system>.<kind> <name>`. Use when armed with `/loop 20m /alerts-sweep`; never writes."
 compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
-  version: "14"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "15"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   requires: "airflow,slack"
   facts: "slack.channel airflow-alerts,airflow.path alerts-state,airflow.path alerts-kb"
 context: fork
 agent: triage
-model: sonnet
+model: haiku
 effort: low
 ---
 

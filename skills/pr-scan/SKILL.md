@@ -1,15 +1,15 @@
 ---
 name: pr-scan
-description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts, stale, already-reviewed heads. Returns a <=8-row brief or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
+description: "Forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts, stale, already-reviewed heads. Returns a <=8-row brief or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
 metadata:
-  version: "20"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "21"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   facts: "github.display_names"
 argument-hint: "[--days N] [--limit N (enrich cap, not row count — max_rows caps rows)] [--repo owner/name]"
 context: fork
 agent: triage
-model: sonnet
+model: haiku
 effort: low
 ---
 
@@ -149,7 +149,7 @@ auto-COMMENT path for direct review requests.
 - Skip a PR for its current head: append `{"repo":"<org>/x","pr":N,"head":"<sha>","status":"skipped","ts":"…"}` to the ledger.
 - Change repos, freshness window, bot list, or row cap: edit `.context/state/pr-review/config.json`.
 - Arm recurring: `/loop 2h /pr-scan` — the default cadence (the fork returns NO-OP on quiet ticks, so the
-  main session spends nothing beyond the ~$0.1 Sonnet tick); widen the interval, e.g. `/loop 4h /pr-scan`,
+  main session spends nothing beyond the ~$0.1 triage tick); widen the interval, e.g. `/loop 4h /pr-scan`,
   to halve that further when the queue is calm.
   Disarm by stopping the loop; the ledger keeps state across sessions. Never two sweeps at once — the
   script's `.scan.lock` refuses the second, and the ledger is shared state.

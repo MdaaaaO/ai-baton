@@ -2,9 +2,9 @@
 name: cost-report
 description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7, or named phases. Org mode reports billed cost (aggregate control); private mode estimates from local transcripts. Never names anyone. Invoke when asked for a \"cost report\" or \"how efficient was last week\"."
 metadata:
-  version: "14"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "15"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
 user-invocable: true
 ---
@@ -15,7 +15,7 @@ Cost ≈ turns × prefix size, and the bill alone says nothing about whether a w
 This skill measures **habit** (how much context each output token drags along), **routing** (how
 much of the output went to a cheap model) and **volume** (how much was produced), overlays the
 **work units** the user actually shipped, and states in a **Basis** block which of these it could
-compute from which source. The ratio columns (in/out, $/Mout, cheap%) are weekday-only, so they differ
+compute from which source. The ratio columns (in/out, $/Mout, cheap%, haiku%) are weekday-only, so they differ
 slightly from a report that computes them over all days; the fixture smoke run under § Files is the reference
 a reader can check.
 
@@ -92,6 +92,7 @@ are the only work units — lines changed are never a denominator.
 | **fixed $/Mout** | every token repriced at ONE list price (`session_stats.DEFAULT_PRICES`, the top model's) ÷ Mout | habit in $, free of routing |
 | **$/Mout** | billed (or estimated) $ ÷ million output tokens | habit × routing |
 | **cheap%** | Sonnet/Haiku share of weekday output tokens; `–` when any row has no model (`unknown`, CSV without a model column) | the **routing** signal — unknown is not 0 % cheap |
+| **haiku%** | Haiku alone, same weekday denominator and `–` rule as cheap% | a Sonnet→Haiku switch moves this, never cheap%; the figure the Haiku trial (#55) is judged on |
 | **$/wday, Mout/wday** | weekday-only $ and output ÷ weekdays (ISO 1–5) | rate; every ratio above is weekday-only too, so the decomposition is an exact identity; weekend rows count only in the $ total |
 | **$/PR, $/ticket** | $ ÷ PRs opened / tickets closed in the window | noisy under ~10 units — read per phase, never per week |
 | **decomposition** | $/wday change = volume × habit × routing, log-additive shares | which lever moved; `avoided $/wday` = after-output at before-$/Mout minus actual |
