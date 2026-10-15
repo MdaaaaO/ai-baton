@@ -30,6 +30,8 @@ An `Agent` call without `model` inherits the main session's model: the most expe
 
 When unsure, start with `sonnet` and escalate the one ticket that comes back uncertain.
 
+The kit's own read-and-classify forks (`triage` and the `pr-scan`, `pr-event-brief`, `alerts-sweep` skills) set `model: haiku` in their frontmatter as a trial while `CLAUDE_CODE_SUBAGENT_MODEL` stays `sonnet` for every other worker; `cost-report` shows the keep/revert evidence after a week.
+
 ## The Sizing line — the call, written once, read at pickup
 
 The model and delegation call is made **once**, when the ticket is written, from the table above — not

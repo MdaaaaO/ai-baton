@@ -2,14 +2,14 @@
 name: pr-scan
 description: "Sonnet-forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts, stale, already-reviewed heads. Returns a <=8-row brief or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
 metadata:
-  version: "20"
-  updated: "2026-10-02"
+  version: "21"
+  updated: "2026-10-15"
   reviewed: "2026-10-02"
   facts: "github.display_names"
 argument-hint: "[--days N] [--limit N (enrich cap, not row count — max_rows caps rows)] [--repo owner/name]"
 context: fork
 agent: triage
-model: sonnet
+model: haiku
 effort: low
 ---
 

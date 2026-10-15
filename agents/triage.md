@@ -2,10 +2,10 @@
 name: triage
 description: Cheap read-only triage worker (Sonnet, low effort, no CLAUDE.md). Use when a skill forks pr-event-brief/alerts-sweep, or any read-and-summarise delegation needs only a short brief. Never posts to GitHub, the tracker or chat and never decides for the main session.
 metadata:
-  version: "8"
-  updated: "2026-10-02"
+  version: "9"
+  updated: "2026-10-15"
   reviewed: "2026-10-02"
-model: sonnet
+model: haiku
 effort: low
 omitClaudeMd: true
 maxTurns: 40

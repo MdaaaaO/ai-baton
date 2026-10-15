@@ -36,6 +36,7 @@ does: a procedure, an example exchange, a rationale, an environment value.
   history go there, not into the body. `scripts/` are run, never read into context.
 - **Agent bodies** (`agents/*.md`) load into the fork they run; `omitClaudeMd: true` keeps layer 1 out of a cheap
   worker's prefix, and a `context: fork` skill returns a brief so its reading never enters the main prefix.
+  The `triage` agent and the three read-and-classify fork skills run on Haiku (a per-agent override of the Sonnet default).
 
 ## Layer 3 — on open (only when a session reads the file)
 
