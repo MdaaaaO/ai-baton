@@ -2032,8 +2032,11 @@ def main() -> int:
     if a.sweep_scratch:
         try:
             gone, failed = sweep_scratch(grace=a.grace_seconds)
-        except Exception as e:
+        except kit_profile.ScratchError as e:
             print(f"kit-health: cannot resolve this session's own scratch dir ({e}) — not sweeping", file=sys.stderr)
+            return 2
+        except OSError as e:
+            print(f"kit-health: scratch sweep stopped ({type(e).__name__}: {e}) — not sweeping", file=sys.stderr)
             return 2
         print(f"removed {len(gone)} ended session scratch dir(s), {human_size(sum(n for _d, n in gone))}" if gone
               else "no ended session scratch dirs to remove")
