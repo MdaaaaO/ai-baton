@@ -64,8 +64,8 @@ Show the worker's table, then ask ONE `AskUserQuestion` (shape: `docs/carousel.m
 - **Prune depth** — *All verdicts* (Recommended: DROP, MERGE and SHRINK as classified) · *Conservative* (DROP and
   MERGE only; SHRINK touches the index line) · *Index only* (rewrite `MEMORY.md`, notes untouched) · *Stop* (the
   archive stays, nothing else changes).
-- **Index-line shape** — *Hook line* (Recommended: `- [Title](file.md) — <hook>` ≤ 150 chars, grouped by type
-  user → feedback → project → reference) · *Title only* (`- [Title](file.md)`, ≤ 80 chars). `preview` shows
+- **Index-line shape** — *Hook line* (Recommended: `- [Title](<note>.md) — <hook>` ≤ 150 chars, grouped by type
+  user → feedback → project → reference) · *Title only* (`- [Title](<note>.md)`, ≤ 80 chars). `preview` shows
   two sample lines of each.
 
 Send both answers to the SAME worker (`SendMessage`), with this rewrite contract:
