@@ -402,7 +402,7 @@ sync_kit() {
   if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
     # name the paths (first five, one line: the status file is one line) so a stray download is told apart
     # from real work
-    local dirty; dirty="$(git status --short 2>/dev/null | awk 'NR<=5 {printf "%s%s", (NR>1 ? ", " : ""), $0} END {if (NR>5) printf ", … +%d more", NR-5}')"
+    local dirty; dirty="$(git status --short --untracked-files=normal 2>/dev/null | awk 'NR<=5 {printf "%s%s", (NR>1 ? ", " : ""), $0} END {if (NR>5) printf ", … +%d more", NR-5}')"
     log "kit: ERROR uncommitted changes in .claude/ — pull skipped (main is PR-only): $dirty"
     FAIL="kit has uncommitted changes in .claude/ ($dirty) — main is PR-only: delete a stray file, or move real work to a branch worktree (git worktree add .worktrees/kit_<topic> -b <topic>) and open a PR"
     return 1
