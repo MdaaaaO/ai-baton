@@ -553,6 +553,57 @@ class FixedPricesHonourOverride(unittest.TestCase):
             importlib.reload(cost_report)  # restore the default basis for every other test in this process
 
 
+class PricedAtInTheBasis(unittest.TestCase):
+    def test_priced_at_is_in_the_mode_and_only_shown_when_set(self):
+        with unittest.mock.patch.object(cost_report.session_stats, "priced_at", return_value="2026-10-01"):
+            self.assertEqual(cost_report.resolve_mode()["priced_at"], "2026-10-01")
+        with unittest.mock.patch.object(cost_report.session_stats, "priced_at", return_value=""):
+            self.assertEqual(cost_report.resolve_mode()["priced_at"], "")
+
+
+class RunDefaultReport(unittest.TestCase):
+    """`run` (behind `make cost-report`) chains the SKILL's private-mode default run in one call."""
+
+    def args(self, **kw):
+        return ns(since="2026-09-01", until=None, csv=None, workdir=kw.pop("workdir", None), **kw)
+
+    def test_org_mode_stops_with_2_and_points_at_the_skill(self):
+        buf = io.StringIO()
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "org"}), contextlib.redirect_stderr(buf):
+            self.assertEqual(cost_report.cmd_run(self.args()), 2)
+        self.assertIn("SKILL.md", buf.getvalue())
+
+    def test_private_run_collects_then_reports_with_whatever_work_units_were_reachable(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as d:
+            def collect(a):
+                calls.append(("collect", a.since)); Path(a.out).write_text("{}"); return 0
+
+            def prs(a):
+                calls.append(("prs", a.since)); Path(a.out).write_text("x"); return 0
+
+            def tickets(a):
+                calls.append(("tickets", a.since)); raise SystemExit("tracker.repos is empty")
+
+            def report(a):
+                calls.append(("report", a.prs, a.tickets, a.daily)); return 0
+            err = io.StringIO()
+            with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private"}), \
+                    unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                    unittest.mock.patch.object(cost_report, "cmd_work_prs", prs), \
+                    unittest.mock.patch.object(cost_report, "cmd_work_tickets", tickets), \
+                    unittest.mock.patch.object(cost_report, "cmd_report", report), contextlib.redirect_stderr(err):
+                rc = cost_report.cmd_run(self.args(workdir=d))
+            self.assertEqual(rc, 0)
+            self.assertEqual([c[0] for c in calls], ["collect", "prs", "tickets", "report"])
+            self.assertEqual(calls[-1][1:], (str(Path(d) / "prs.tsv"), None, str(Path(d) / "daily.json")))
+            self.assertIn("tickets skipped: tracker.repos is empty", err.getvalue())
+
+    def test_a_bad_date_is_refused_before_anything_runs(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cost_report.cmd_run(ns(since="nope", until=None, csv=None, workdir=None)), 2)
+
+
 class SinceCutoffTs(unittest.TestCase):
     def test_cutoff_is_since_day_minus_one_at_utc_midnight(self):
         ts = cost_report._since_cutoff_ts("2026-09-02")

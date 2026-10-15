@@ -134,7 +134,7 @@
     "sections": []
   },
   "cost": {
-    "_comment": "cost-report skill; optional (absent = private mode). spend_table/email/filters/columns: the warehouse spend table at grain user × model × day (org mode, needs systems.datalake); extra_repos: owner/repo outside github.org that count as the user's work; phases: named before/after windows. Set as one object with `kb.py config-set cost '{…}'`.",
+    "_comment": "cost-report skill; optional (absent = private mode). spend_table/email/filters/columns: the warehouse spend table at grain user × model × day (org mode, needs systems.datalake); extra_repos: owner/repo outside github.org that count as the user's work; phases: named before/after windows; prices: the $/Mtok table behind every spend estimate, [input, cache write 5m, cache read, output, cache write 1h] per row, `default` = the Opus-class row, `models` = model-id substring -> row (checked before the built-in Sonnet/Haiku rows), `priced_at` = the date it was checked against the published list prices; absent = the table built into session_stats.py, and SESSION_STATS_PRICES still wins for the default row. Set as one object with `kb.py config-set cost '{…}'`.",
     "spend_table": "<db.schema.table or empty>",
     "email": "<the user's email as it appears in spend_table>",
     "filters": "<SQL predicate selecting the Claude Code rows, or \"\" for none>",
@@ -157,7 +157,15 @@
         "start": "YYYY-MM-DD",
         "end": "YYYY-MM-DD"
       }
-    ]
+    ],
+    "prices": {
+      "priced_at": "YYYY-MM-DD",
+      "default": [15.0, 18.75, 1.5, 75.0, 30.0],
+      "models": {
+        "sonnet": [3.0, 3.75, 0.3, 15.0, 6.0],
+        "haiku": [1.0, 1.25, 0.1, 5.0, 2.0]
+      }
+    }
   },
   "systems": {
     "jira": false,

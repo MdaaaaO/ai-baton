@@ -124,6 +124,10 @@ class Transcript(unittest.TestCase):
         self.assertIn("| Subagents | 2 transcripts · 1 API turns", block)
 
     def test_prices(self):
+        with unittest.mock.patch.object(ss.profile, "get", return_value={}):  # hermetic: never this machine's config
+            self._check_prices()
+
+    def _check_prices(self):
         self.assertEqual(ss.price_for("claude-sonnet-4"), (3.0, 3.75, 0.3, 15.0, 6.0))
         self.assertEqual(ss.price_for("claude-haiku-4"), (1.0, 1.25, 0.1, 5.0, 2.0))
         self.assertEqual(ss.price_for("claude-opus-4"), ss.DEFAULT_PRICES)
@@ -139,6 +143,49 @@ class Transcript(unittest.TestCase):
             self.assertEqual(ss.prices(), ss.DEFAULT_PRICES)
         finally:
             del os.environ["SESSION_STATS_PRICES"]
+
+    def _with_config(self, prices_cfg):
+        """`profile.get` answering `cost.prices` with `prices_cfg` (None = the key is absent)."""
+        def get(path, default=None):
+            return default if path != "cost.prices" or prices_cfg is None else prices_cfg
+        return unittest.mock.patch.object(ss.profile, "get", side_effect=get)
+
+    def test_prices_come_from_the_env_config(self):
+        cfg = {"priced_at": "2026-10-01", "default": [10, 12.5, 1, 50, 20],
+               "models": {"sonnet": [2, 2.5, 0.2, 10, 4], "Mythos": [20, 25, 2, 100, 40]}}
+        with self._with_config(cfg), unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SESSION_STATS_PRICES", None)
+            self.assertEqual(ss.prices(), (10.0, 12.5, 1.0, 50.0, 20.0))
+            self.assertEqual(ss.price_for("claude-opus-4"), (10.0, 12.5, 1.0, 50.0, 20.0))
+            self.assertEqual(ss.price_for("claude-sonnet-4"), (2.0, 2.5, 0.2, 10.0, 4.0))   # config row beats the built-in one
+            self.assertEqual(ss.price_for("claude-mythos-1"), (20.0, 25.0, 2.0, 100.0, 40.0))  # a model the built-in table lacks
+            self.assertEqual(ss.price_for("claude-haiku-4"), ss.MODEL_PRICES[0][1])           # unpriced by the config: built-in row
+            self.assertEqual(ss.priced_at(), "2026-10-01")
+            self.assertEqual(ss._cost({"input_tokens": 1_000_000}, "claude-opus-4"), 10.0)
+
+    def test_absent_or_malformed_config_falls_back_to_the_built_in_table(self):
+        for cfg in (None, {}, "nope", {"default": [1, 2, 3], "models": {"sonnet": ["a", 1, 1, 1]}},
+                    {"default": [True, 1, 1, 1, 1], "models": "x"}):
+            with self._with_config(cfg):
+                os.environ.pop("SESSION_STATS_PRICES", None)
+                self.assertEqual(ss.prices(), ss.DEFAULT_PRICES, cfg)
+                self.assertEqual(ss.price_for("claude-sonnet-4"), (3.0, 3.75, 0.3, 15.0, 6.0), cfg)
+        with self._with_config(None):
+            self.assertEqual(ss.priced_at(), "")
+
+    def test_env_override_beats_the_config_default(self):
+        cfg = {"default": [10, 12.5, 1, 50, 20], "models": {"sonnet": [2, 2.5, 0.2, 10, 4]}}
+        with self._with_config(cfg), unittest.mock.patch.dict(os.environ, {"SESSION_STATS_PRICES": "1,2,3,4,9"}):
+            self.assertEqual(ss.prices(), (1.0, 2.0, 3.0, 4.0, 9.0))
+            self.assertEqual(ss.price_for("mythos"), (1.0, 2.0, 3.0, 4.0, 9.0))
+            self.assertEqual(ss.price_for("claude-sonnet-4"), (2.0, 2.5, 0.2, 10.0, 4.0))  # the override only moves the default row
+        with self._with_config(cfg), unittest.mock.patch.dict(os.environ, {"SESSION_STATS_PRICES": "bad"}):
+            self.assertEqual(ss.prices(), (10.0, 12.5, 1.0, 50.0, 20.0))  # an unusable override falls through to the config
+
+    def test_four_number_config_row_gets_the_2x_input_one_hour_rate(self):
+        with self._with_config({"default": [7, 8, 9, 10]}):
+            os.environ.pop("SESSION_STATS_PRICES", None)
+            self.assertEqual(ss.prices(), (7.0, 8.0, 9.0, 10.0, 14.0))
 
     def test_cache_write_1h_priced_separately_from_5m(self):
         """A cache write against the 1-hour TTL must cost the 1h rate, not the 5-minute one — the bug

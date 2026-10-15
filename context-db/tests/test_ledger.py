@@ -236,6 +236,45 @@ class PlaceholderCheck(unittest.TestCase):
         problems = LEDGER.check_html(self.page([old, new]), new_ids={(2027, "W02")})
         self.assertEqual([p for p in problems if "placeholder" in p], [], problems)
 
+    # `check_html` flagged any `{{` in the page; it now flags only the template's own placeholders, so a card
+    # that quotes a mustache snippet is prose, while a left-over `{{RANGE}}` still blocks the build.
+    def test_a_bullet_quoting_double_braces_is_not_a_leftover_placeholder(self):
+        problems = LEDGER.check_html(self.page([self.card("rendered {{ user.name }} and {{unknown}} in the new email template")]))
+        self.assertEqual(problems, [])
+
+    def test_every_template_placeholder_still_blocks(self):
+        import re
+        template = (KIT / "skills" / "self-assessment" / "ledger-template.html").read_text(encoding="utf-8")
+        tokens = sorted(set(re.findall(r"\{\{[A-Za-z_]+\}\}", template)))
+        self.assertTrue(tokens)
+        for token in tokens:
+            page = self.page([self.card("fine")]).replace("</body>", f"<p>{token}</p></body>")
+            problems = LEDGER.check_html(page)
+            self.assertTrue(any(token in p for p in problems), (token, problems))
+
+
+class MastheadRange(unittest.TestCase):
+    """`refresh_masthead` split the week's date range on an en dash only; a hyphen (a hand-typed title, a
+    different keyboard) left the whole range in `start` and a mangled `end`."""
+
+    def render(self, first: str, last: str) -> str:
+        html = '<div class="mast-meta"><span>old</span></div><i>{{RANGE}}</i>'
+        data = [{"id": "W01", "dates": first}, {"id": "W02", "dates": last}]
+        return LEDGER.refresh_masthead(html, data)
+
+    def test_en_dash_range(self):
+        out = self.render("Mon Jan 4 – Sun Jan 10, 2027", "Mon Jan 11 – Sun Jan 17, 2027")
+        self.assertIn("<span>Jan 4 – Jan 17, 2027</span>", out)
+        self.assertIn("<i>Jan 4 – Jan 17, 2027</i>", out)
+
+    def test_hyphen_range(self):
+        out = self.render("Mon Jan 4 - Sun Jan 10, 2027", "Mon Jan 11 - Sun Jan 17, 2027")
+        self.assertIn("<span>Jan 4 – Jan 17, 2027</span>", out)
+
+    def test_mixed_separators(self):
+        out = self.render("Mon Jan 4 - Sun Jan 10, 2027", "Mon Jan 11 – Sun Jan 17, 2027")
+        self.assertIn("<span>Jan 4 – Jan 17, 2027</span>", out)
+
 
 class PageExistenceCheck(unittest.TestCase):
     """The `--page` argument names a local file the SKILL's step 10 saved from `self_assessment.ledger_url`

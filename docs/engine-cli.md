@@ -47,6 +47,9 @@ Mission control (the .context/ store as one local page: data.json + index.html u
   make -C $BATON/context-db mission-diff [OUT=<dir>]             # exit 0 when the built page is current, 1 when it changed or was never built
   make -C $BATON/context-db mission-open [OUT=<dir>]             # print the path of the built index.html (never starts a browser)
 
+Cost report (private mode: estimated from the local transcripts; org mode follows skills/cost-report/SKILL.md):
+  make -C $BATON/context-db cost-report [SINCE=YYYY-MM-DD] [UNTIL=YYYY-MM-DD] [CSV=<export.csv>] [WORKDIR=<dir>]  # the default run: spend rows + PRs + tickets -> the Basis-first report on stdout
+
 Kit / config (env fact store .context/reference/env/):
   make -C $BATON/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|config-set|init|path|migrate|discover|stale
   make -C $BATON/context-db kb ARGS="set slack.channel foo C0… --from tool:slack_search_channels"
@@ -591,8 +594,9 @@ Spend is a LIST-PRICE ESTIMATE priced per API request by the model that served i
 3/3.75/0.3/15/6, Haiku 1/1.25/0.1/5/2, everything else (Opus, Fable/Mythos) at the Opus-class default
 15/18.75/1.5/75/30 $/Mtok (in/cache_write_5m/cache_read/out/cache_write_1h) — a cache write against
 the 1-hour TTL (`cache_creation.ephemeral_1h_input_tokens`) is billed at its own, higher rate, not
-the 5-minute one. Override the default with SESSION_STATS_PRICES="in,cw,cr,out[,cw_1h]"; the 1h
-rate defaults to 2x the input price when the list has only 4 numbers. Subagents are billed too: every Agent/fork child writes its
+the 5-minute one. The table lives in the env config as `cost.prices` (with a `priced_at` date; absent = the
+built-in table above); override the default row with SESSION_STATS_PRICES="in,cw,cr,out[,cw_1h]", which wins over the
+config; the 1h rate defaults to 2x the input price when the list has only 4 numbers. Subagents are billed too: every Agent/fork child writes its
 own transcript under <project>/<session-id>/subagents/*.jsonl, and those are summed into
 `subagents_cost` and `spend_total_usd_est` (main + subagents). Before 2026-09-22 the figure was
 main-session only; this session's review-runners alone cost ~3.4x the main prefix, so the total

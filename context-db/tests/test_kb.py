@@ -97,3 +97,64 @@ class EmptyManifest(unittest.TestCase):
             self.assertTrue(any("x.json" in e and "empty only with a 'note'" in e for e in errs), errs)
             self.assertFalse(any("y.json" in e for e in errs), errs)
 
+
+
+class ManifestsReadOnce(unittest.TestCase):
+    """`discover --all` calls `load_manifests()` once per row (and `validate_manifests`/`discover_plan` call it too);
+    every call re-opened and re-parsed every discovery JSON. Each file must be read once until it changes."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name)
+        self.kit, self.env = base / "kit", base / "env"
+        (self.env / "_discovery").mkdir(parents=True)
+        self.kit.mkdir()
+        for stem in ("a", "b"):
+            (self.kit / f"{stem}.json").write_text(json.dumps({"system": "dbt", "requires": "dbt", "facts": [], "note": stem}), encoding="utf-8")
+        (self.env / "_discovery" / "b.json").write_text(json.dumps({"system": "dbt", "requires": "dbt", "facts": [], "note": "overlay"}), encoding="utf-8")
+        self._saved = (kb.MANIFEST_DIR, kb.ENV)
+        kb.MANIFEST_DIR, kb.ENV = self.kit, self.env
+
+    def tearDown(self):
+        kb.MANIFEST_DIR, kb.ENV = self._saved
+        self.tmp.cleanup()
+
+    def opens(self, fn):
+        import unittest.mock
+        real = Path.read_text
+        seen = []
+
+        def counting(path, *a, **kw):
+            if str(path).endswith(".json"):
+                seen.append(str(path))
+            return real(path, *a, **kw)
+        with unittest.mock.patch.object(Path, "read_text", counting):
+            fn()
+        return seen
+
+    def test_repeated_loads_read_each_manifest_once(self):
+        def many():
+            for _ in range(7):  # the 7 call sites of one `discover --all`
+                kb.load_manifests()
+        seen = self.opens(many)
+        self.assertEqual(len(seen), 3, seen)  # kit a + kit b + the store's b overlay, once each
+        self.assertEqual(len(set(seen)), 3, seen)
+
+    def test_overlay_still_wins_and_callers_get_their_own_copy(self):
+        got = kb.load_manifests()
+        self.assertEqual(got["b"]["note"], "overlay")
+        self.assertEqual(got["a"]["note"], "a")
+        got["a"]["note"] = "mutated"
+        self.assertEqual(kb.load_manifests()["a"]["note"], "a")
+
+    def test_an_edited_manifest_is_read_again(self):
+        import os
+        kb.load_manifests()
+        p = self.kit / "a.json"
+        p.write_text(json.dumps({"system": "dbt", "requires": "dbt", "facts": [], "note": "changed!"}), encoding="utf-8")
+        st = p.stat()
+        os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+        self.assertEqual(kb.load_manifests()["a"]["note"], "changed!")
+        (self.env / "_discovery" / "c.json").write_text("{not json", encoding="utf-8")
+        self.assertIn("_error", kb.load_manifests()["c"])
