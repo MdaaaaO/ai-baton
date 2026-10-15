@@ -2,7 +2,7 @@
 name: pr-event-brief
 description: "Forked triage of one pr-watch event — reads reviews, threads, checks and mergeability; returns a ≤10-line brief with one ACTION. Invoke when a pr-watch Monitor emits an actionable event line; the main session then performs the action."
 metadata:
-  version: "16"
+  version: "17"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "github.review_bot"
@@ -112,7 +112,8 @@ existing FIX+PUSH / REPLY+RESOLVE rules below decide instead, exactly as they wo
 `REPLY+RESOLVE` when unresolved threads are the only gate; `UPDATE-BRANCH` when `mergeable_state` is `behind`; `MERGE`
 when `reviewDecision` APPROVED + zero unresolved threads + `clean`, **and** (bot configured: 🟢 on the
 head) or (`BOT: n/a`: no bot condition at all); `WAIT(<login>)` when a
-named human must act; `INVESTIGATE-CHECK` for a real red check; `FIX+PUSH` when the bot or a human
+named human must act — not when that human already approved after our reply: their open threads are ours to
+close, so that is `REPLY+RESOLVE`; `INVESTIGATE-CHECK` for a real red check; `FIX+PUSH` when the bot or a human
 asked for a code change; `REDRAW` whenever `DIAGRAMS:` reads `DRIFT` on a real `HEAD MOVED` event —
 this overrides every other rule above for that event (`docs/diagrams.md`'s contract), and `WHY` then
 names the check's own `<old> → <new>` (or `<bad> → <new>` on a malformed marker) rather than a fresh
