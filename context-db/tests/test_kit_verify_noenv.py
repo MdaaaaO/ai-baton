@@ -750,6 +750,17 @@ class LoadingTable(unittest.TestCase):
         finally:
             kit_verify.DESC_TOTAL_BYTES = saved_bytes
 
+    def test_partial_run_ok_line_has_no_budget_remainder(self):
+        # `kit_verify.py <path>` skips the kit-wide budget, so the OK line must not report a remainder it
+        # never computed — the named units' bytes alone, no "(… B left of …)".
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            rc = kit_verify.main(["--no-env", "skills/pr-open"])
+        self.assertEqual(rc, 0, err_buf.getvalue())
+        out = out_buf.getvalue()
+        self.assertRegex(out, r"descriptions \d+ B")
+        self.assertNotIn("left of", out)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1120,7 +1120,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         store = f"env store `{envname}` complete" if not a.no_env else "env store not checked (--no-env)"
         print(f"OK — {len(units)} skills/agents verified, {len(kb.fact_entries())} discoverable facts, {store}, "
-              f"descriptions {desc_total} B ({DESC_TOTAL_BYTES - desc_total} B left of {DESC_TOTAL_BYTES} B)" + (f", {len(stale)} stale" if stale else "") + (f", {len(warn)} warn" if warn else ""))
+              f"descriptions {desc_total} B" + ("" if partial else f" ({DESC_TOTAL_BYTES - desc_total} B left of {DESC_TOTAL_BYTES} B)")
+              + (f", {len(stale)} stale" if stale else "") + (f", {len(warn)} warn" if warn else ""))
         return 0
     finally:
         kb.ENV = saved_kb_env
