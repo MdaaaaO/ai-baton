@@ -15,7 +15,7 @@ line marked `(#<child>)` below does not exist on this head.
 
 | Question | Answers | Form |
 |---|---|---|
-| WHERE | placement: the components or paths the change sits in, and what talks to them | Mermaid `flowchart`, or a nested list |
+| WHERE | placement: the components or paths the change sits in, and what talks to them | Mermaid `flowchart`, or a fenced ASCII box diagram where no Mermaid renders |
 | WHAT | shape before → after: tables, fields, files, resources | table `x \| before \| after \| note` |
 | RUNS | the flow when it executes | Mermaid `sequenceDiagram` or `flowchart`; PR and review only |
 | WHY | the option that lost | options table, 2–4 rows |
@@ -25,7 +25,7 @@ there was no real alternative the table is left out; never add a strawman row to
 
 | Option | Chosen | Reason |
 |---|---|---|
-| marker as an HTML comment | yes | invisible on GitHub and Jira, parsed by one regex, same shape as the plan marker |
+| marker as an HTML comment | yes | invisible on GitHub (Jira shows it as raw text unless fenced), parsed by one regex, same shape as the plan marker |
 | marker as a YAML block | no | every tracker renders it as visible text |
 
 ## Zoom and gate per surface
@@ -79,6 +79,11 @@ The last line of a Sketch, one per repo the ticket touches, an HTML comment on i
 <!-- sketch: repo=<owner/repo> paths=<entry>[,<entry>…] components=<name>[,<name>…] hash=<12 hex> -->
 ```
 
+Jira has no HTML-comment node, so it prints that line as a raw paragraph. On a Jira ticket the markers go alone
+inside one bare code fence, after a blank line (`stamp --tracker jira` writes it). The marker line, the regex and the
+hash are the same in both shapes: the fence lines are never hashed (a fence of 4+ backticks, `~~~` or with an info string such as `text` counts too), and `check`, `parse` and `diagram-plan.py
+--sketch` read either one.
+
 | Key | Grammar | Rule |
 |---|---|---|
 | `repo` | `<owner>/<repo>` | the repo whose default branch the checks read |
@@ -104,8 +109,9 @@ and nothing downstream checks it.
 | PR body | entries and components vs the PR's changed paths in substantive facets (the plan's classifier, overlay and `.ignore` included; a rename counts as its new path) | `+` = changed paths no entry covers and no component names by stem; `−` = entries and components that match no changed path; both empty → `matches`; `+` items first, sorted, more than 6 → the first 6 and `+N more` |
 | lint | each `(this PR)` node label in the body's Mermaid blocks | warns when the label contains no changed path, basename or stem; warns on every edge without a label |
 
-`sketch.py` (#384, in `skills/ticket-open/`) owns the grammar: `stamp --repo-slug <owner/repo> --paths … --components …`
-reads the section on stdin and prints the marker; `check --repo <dir> [--base origin/main] <ticket-text>` runs the
+`sketch.py` (#384, in `skills/ticket-open/`) owns the grammar: `stamp --repo-slug <owner/repo> --paths … --components …
+[--tracker github|jira]` reads the section on stdin and prints the marker (the resolved `tracker.kind`; `github` is the
+default); `check --repo <dir> [--base origin/main] <ticket-text>` runs the
 pickup check. The skill fetches the ticket text from its tracker; the script never calls a tracker. `diagram-plan.py`
 imports its parser for `--sketch <ticket-text>` (#386).
 
@@ -117,10 +123,13 @@ before, after, note) and **WHY rows**. Where it is rendered depends on the surfa
 | Surface | Rendering |
 |---|---|
 | GitHub issue, PR body, PR review (`tracker.kind: github`) | Mermaid for WHERE (and RUNS on a PR), tables for WHAT and WHY |
-| Any tracker that renders no Mermaid (Jira) | WHERE as a nested list, WHAT and WHY as tables |
+| Any tracker that renders no Mermaid (Jira) | WHERE as one fenced ASCII box diagram, WHAT and WHY as tables, the marker in its own fence |
 | Epic context doc | the nested list, because sessions read it as raw text |
 
-There is no Mermaid-to-ASCII renderer and no headless browser. The same example in both renderings:
+There is no Mermaid-to-ASCII renderer and no headless browser. Jira converts the markdown it is given through its own
+path, and the only way to see what a ticket shows is to read it back with `expand: renderedFields` (the
+`responseContentFormat: adf` read returns markdown again). A fenced block renders as a `<pre>` panel; a bullet list
+or a bare comment does not. The same example in the renderings:
 
 ```mermaid
 flowchart LR
@@ -129,6 +138,21 @@ flowchart LR
   classDef new fill:#e6f4ea,stroke:#1e7e34
   class sk new
 ```
+
+```
++-----------------------+  runs the check   +--------------------------+
+| ticket-pickup [skill] | ----------------> | sketch.py [script] [NEW] |
+|        (existing)     |                   |        (this PR)         |
++-----------------------+                   +--------------------------+
+                                                         | reads the default branch
+                                                         v
+                                            +--------------------------+
+                                            | repo clone [git]         |
+                                            |        (existing)        |
+                                            +--------------------------+
+```
+
+The epic context doc keeps the nested list, because sessions read it as raw text:
 
 - `ticket-pickup` [skill] (existing)
   - → `sketch.py` [script] (this PR): runs the check
@@ -154,7 +178,18 @@ itself (`docs/delegation.md` § Sizing). The brief has three parts:
 |---|---|
 | Inputs | the surface's row from the zoom table; the rendering; for a PR, the `diagram-plan.py` output and the diff of the substantive files; for a sketch, the ticket's Goal and Plan, `git ls-tree` of the paths it names on the default branch, and the alternatives the session weighed; this page's labels and the size limits |
 | Output | only the blocks, in WHERE → WHAT → RUNS → WHY order, each with a one-line caption; for a sketch, add `PATHS <entry> …` and `COMPONENTS <name> …` lines, never a marker; `GAP <question> <reason>` when the inputs cannot answer a question. No other prose |
-| Validation (main session) | `mermaid-check.mjs` prints OK for every block; no `LINT` warning is left unexplained; each `(existing)` element exists on the base branch; the marker comes from `sketch.py stamp` or `diagram-plan.py`, never by hand. When a check fails, fix the block or re-brief once, and never paste an unvalidated block |
+| Validation (main session) | `mermaid-check.mjs` prints OK for every Mermaid block, and an ASCII WHERE is one fenced block under 80 columns; no `LINT` warning is left unexplained; each `(existing)` element exists on the base branch; the marker comes from `sketch.py stamp` or `diagram-plan.py`, never by hand. When a check fails, fix the block or re-brief once, and never paste an unvalidated block |
+
+**ASCII box conventions (a tracker with no Mermaid).** One fenced block for WHERE, drawn with `+---+` boxes and `|`
+sides, kept under 80 columns:
+
+| Convention | Rule |
+|---|---|
+| Boxes | one per element: name, type in brackets, status label (`(existing)`, `(this PR)` or `(follow-up <key>)`) |
+| Arrows | `--->`, or `\|` and `v` going down; the intent is written on the arrow, never left off |
+| `[NEW]` | tags every box the ticket creates, beside the `(this PR)` label |
+| DEPLOY block | when the ticket ships files or resources: a box listing them, one per line |
+| Not shipped | when the ticket defers or excludes something: a column or box on the right naming it, so the edge of the scope is drawn |
 
 The worker writes nothing and posts nothing; the main session pastes.
 
