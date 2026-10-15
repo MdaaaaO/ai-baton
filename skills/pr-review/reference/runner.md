@@ -39,7 +39,7 @@ fix in the script, not a prompt to repeat.
 ```
 Review-runner for <owner/repo>#<pr>. Flags: <--deep | none>. Mode is decided by fetch-context.sh.
 Follow your agent definition ($BATON/agents/review-runner.md): pr-review steps 1–4 only, write
-$CTX/triage.json (+ traps.json, ff.json), return the REVIEW SHEET block with CTX/NEEDS/NOTE lines
+$CTX/triage.json (+ traps.json, sheet.json, ff.json), return the REVIEW SHEET block with CTX/NEEDS/NOTE lines
 and nothing else. Do not post anything anywhere and do not ask questions.
 Prefix every live `gh` read with `eval "$(python3 $BATON/context-db/bin/kit_profile.py gh-env)" &&` in the same
 command (an export does not survive into the next Bash call). An auth
@@ -138,7 +138,8 @@ or, on a clean sheet under `auto_comment.approve_on_clean`, an `APPROVE` (step 2
 
 1. **Spawn.** The normal **`review-runner`** child (§ Spawn above, not `auto-runner`) — one per `C` row,
    up to `auto_comment.max_per_tick` per tick. Skip a row whose ledger already carries `auto_commented` /
-   `shadow_comment` / `shadow_approve_clean` / `auto_approved_clean` / `skipped` / `held` for this exact head, so a quiet queue does not re-spawn a runner
+   `shadow_comment` / `auto_approved_clean` / `skipped` / `held` for this exact head (`shadow_approve_clean`
+   alone is not one — it always sits beside the `auto_commented` row of the COMMENT it rode on), so a quiet queue does not re-spawn a runner
    every tick. Never for the user's own PR — `pr-scan` already excludes every row whose author is the
    login, for every prio, before it ever reaches the `C` gate.
 2. **Decide from the sheet.** Read `$CTX/triage.json` (exactly as in the interactive path) for a STOP
@@ -149,14 +150,12 @@ or, on a clean sheet under `auto_comment.approve_on_clean`, an `APPROVE` (step 2
      the "no hand-off" this path exists for. The script re-runs its own gate at submit time (event must
      be `COMMENT`, `auto_comment.mode` must be `live`, the live PR author must not be the login) and
      refuses otherwise. Ledger status `auto_commented`.
-   - **No STOP and a clean sheet** (`triage.json` is `[]` — no finding of any severity, a NIT included) with
-     `auto_comment.approve_on_clean` ≠ `off` (2a): build `request.json` with `event: "APPROVE"`, an empty
-     `comments` array and a ≤3-line "Checked: …" body, preview, then submit with
-     `submit-review.sh submit … --auto-comment --triage $CTX/triage.json --confirm <digest>`. The script
-     re-reads the gate on the exact `--head` — `triage.json` findings == 0, no inline comments, every
-     check-run green and the combined status not red, no reviewer whose latest review is CHANGES_REQUESTED,
-     live author ≠ login, `auto_comment.mode` live — and refuses (exit 8, reason named) otherwise; a refused
-     gate falls back to the `COMMENT` above.
+   - **No STOP and a clean sheet** with `auto_comment.approve_on_clean` = `live` (2a): build `request.json`
+     with `event: "APPROVE"`, an empty `comments` array and a ≤3-line "Checked: …" body, preview, then
+     submit with `submit-review.sh submit … --auto-comment --triage $CTX/triage.json --confirm <digest>`.
+     The script re-reads the whole definition of **clean** (2a) on the exact `--head` and refuses (exit 8,
+     every reason on one line) otherwise; a refused gate falls back to the `COMMENT` above. Under
+     `shadow` the `COMMENT` above is built and submitted as usual, with `--triage $CTX/triage.json` added.
    - **Any STOP** → `on_stop` (config): `hold` (default) — post nothing; append ledger status `held` for
      this head (via `ledger-append.sh`, the same append path `shadow_comment` uses — see its exit codes
      above) so the next tick does not spawn a runner on the same head again, then the row stays an ordinary queue row
@@ -167,11 +166,37 @@ or, on a clean sheet under `auto_comment.approve_on_clean`, an `APPROVE` (step 2
      unattended REQUEST_CHANGES post (`scope.md` "APPROVE is never inferred"), so the runner always falls
      back to `hold` when it sees that value — an open owner question, not a guess this skill makes.
 2a. **`approve_on_clean`** (`off` default · `shadow` · `live`, beside `auto_comment.mode`, which must be
-   `live` for any post). `off` — a clean sheet posts the plain `COMMENT`, as before. `shadow` — the gate runs,
-   the script prints "would approve (clean)", appends ledger `shadow_approve_clean` and posts nothing; the
-   main session reports "would approve (clean) `<repo>#<n>`". `live` — the `APPROVE` is posted, ledger
-   `auto_approved_clean`. Any finding (even a NIT) keeps the `COMMENT`; a STOP keeps `on_stop`.
-   `pr-scan` drops a head carrying either status like `shadow_comment` and counts it in `done=`.
+   `live` for any post). **Clean** means all of the following, re-read by `submit-review.sh` on the exact
+   head (one missing read = refuse, never assume):
+   - **the sheet** — `$CTX/triage.json` is `[]` (no finding of any severity, a NIT included) and the
+     sidecar `$CTX/sheet.json` beside it names this repo/pr and **this head** (a sheet written on an
+     earlier head is stale; `fetch-context.sh` also deletes the runner files when the head moves), with
+     `recommend: "APPROVE-if-user-agrees"`, `needs: "nothing"`, `unverified_traps: 0`, `demoted: 0`, and
+     `traps.json` carries no `unverified` row; the request has no inline comments;
+   - **required checks** — the base branch's required contexts (classic branch protection, rulesets via
+     `rules/branches/<base>`, the branch summary) each a completed `success` check-run or `success`
+     status on the head; a required check not reported yet refuses; `skipped`/`neutral` count as green
+     only for checks that are not required; any other check pending or red, a red combined status, or a
+     head with no checks at all refuses. A protection payload that cannot be read (403, or a 404 on a
+     branch GitHub calls protected) refuses and says so;
+   - **dismiss stale reviews** on the base (classic `dismiss_stale_reviews` or a ruleset's
+     `dismiss_stale_reviews_on_push`) — otherwise the APPROVE would survive every later push. Off or
+     unknown → live refuses with "enable dismiss stale reviews on <base>, or keep approve_on_clean:
+     shadow"; shadow records the same line in its verdict;
+   - **PR state** — not a draft, no unresolved review thread (outdated ones included), no reviewer whose
+     latest review is CHANGES_REQUESTED, live author ≠ login, `mergeable_state` `clean` — or `blocked`
+     when protection requires N approvals and fewer than N are present (the block is the missing
+     approval). Any other `blocked` cannot be told apart from a signature/deployment/ruleset block, so
+     it refuses and says so; `unknown` (GitHub still computing) refuses too.
+   The head is re-read right before the POST (moved → exit 3, nothing posted) and the review is pinned to
+   it via `commit_id`. `off` — a clean sheet posts the plain `COMMENT`, as before. `shadow` — the clean
+   sheet still gets that same `COMMENT` (ledger `auto_commented`), and the script appends the gate's
+   verdict beside it: `shadow_approve_clean` ("would approve (clean)") or `shadow_approve_refused`
+   ("would refuse: <reasons>"); the main session reports the verdict line. An `APPROVE` request under
+   `shadow` is refused. `live` — the `APPROVE` is posted, ledger `auto_approved_clean`. Any finding (even
+   a NIT) keeps the `COMMENT`; a STOP keeps `on_stop`. `pr-scan` drops a head carrying
+   `auto_approved_clean` (or the shadow COMMENT's `auto_commented`) and counts it in `done=`; a later push
+   on an auto-approved head comes back as `re_review`, never `C`.
 3. **Modes** (same three-state shape as `auto_approve.mode`): `off` (default) — `pr-scan` still computes
    `.auto_comment.eligible` for visibility, nothing is spawned. `shadow` — the runner runs and the
    decision is computed, nothing is posted; a would-COMMENT decision logs ledger `shadow_comment` and the
@@ -180,8 +205,9 @@ or, on a clean sheet under `auto_comment.approve_on_clean`, an `APPROVE` (step 2
    next interactive walk whether or not the path would actually have posted. `live` — posts for real, per
    step 2.
 4. **Logging.** Same ledger as `--auto`: `.context/state/pr-review/ledger.jsonl`
-   (`{"repo","pr","head","status":"auto_commented"|"auto_approved_clean"|"shadow_comment"|"shadow_approve_clean"|"held","ts",...}`, written by
-   `submit-review.sh` for `auto_commented`, `auto_approved_clean` and `shadow_approve_clean`, by the main
+   (`{"repo","pr","head","status":"auto_commented"|"auto_approved_clean"|"shadow_comment"|"shadow_approve_clean"|"held"|"shadow_approve_refused","ts",...}`,
+   written by `submit-review.sh` for `auto_commented`, `auto_approved_clean`, `shadow_approve_clean` and
+   `shadow_approve_refused` (the last two beside the COMMENT's row, with its `comment_review_id`), by the main
    session via `ledger-append.sh` for `shadow_comment` and `held`).
 5. Step 8 KB write-back still runs for every row this path posts or shadow-decides.
 6. Kill switch: `auto_comment.mode: off` (stops the whole path); `approve_on_clean: off` (back to `COMMENT`

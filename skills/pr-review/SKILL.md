@@ -2,7 +2,7 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, trap KB, Opus pass, walks findings, posts one review, replies in threads; a trivial PR auto-approves via Sonnet, an opt-in auto-COMMENT path skips the walk. Use when reviewing a PR pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "41"
+  version: "42"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
@@ -230,7 +230,7 @@ criteria, modes and the ledger write: `reference/runner.md` § `--auto`.
 
 Chains `pr-scan` straight into a posted review with no hand-off, for the PRs `pr-scan` flags `C`
 (config block `auto_comment` in `config.json`). Not a shortcut on the review — steps 1–4 run exactly as
-in the interactive path (`--deep` included); only steps 5–6 (the walk, the Submit prompt) are skipped, and only for a `COMMENT` with no STOP finding — or an `APPROVE` when the sheet is clean: zero findings (a NIT counts), CI green on the exact head, no standing CHANGES_REQUESTED, author ≠ login (`auto_comment.approve_on_clean`: `off` default · `shadow` logs "would approve (clean)" · `live` posts; `submit-review.sh --auto-comment --triage` re-reads the gate and refuses with a named reason). Spawn, `on_stop`, modes, logging, kill switch: `reference/runner.md` § `--unattended`.
+in the interactive path (`--deep` included); only steps 5–6 (the walk, the Submit prompt) are skipped, and only for a `COMMENT` with no STOP finding — or an `APPROVE` when the sheet is clean: zero findings (a NIT counts) and a runner sidecar `sheet.json` bound to the exact head (RECOMMEND APPROVE-if-user-agrees, NEEDS nothing, no unverified trap, nothing demoted), the base branch's required checks each `success` and the rest green, dismiss stale reviews on, not a draft, no unresolved thread, no standing CHANGES_REQUESTED, `mergeable_state` clean (or blocked only by the missing approval), author ≠ login (`auto_comment.approve_on_clean`: `off` default · `shadow` posts the COMMENT and ledgers the gate's verdict beside it · `live` posts the APPROVE; `submit-review.sh --auto-comment --triage` re-reads the gate and refuses with every reason named). The full definition: `reference/runner.md` § `--unattended` 2a. Spawn, `on_stop`, modes, logging, kill switch: `reference/runner.md` § `--unattended`.
 
 ## Not in scope
 Our own PRs (`pr-open`, `pr-watch`, `pr-event-brief`); merging (`pr-merge.sh` in `pr-watch`);

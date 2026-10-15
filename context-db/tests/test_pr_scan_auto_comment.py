@@ -375,11 +375,11 @@ class AutoCommentGate(ScanHarness, unittest.TestCase):
         row302 = self.row(302)
         self.assertTrue(row302["auto_comment"]["eligible"], row302["auto_comment"])  # cap slot not stolen
 
-    # `shadow_approve_clean` / `auto_approved_clean` (approve_on_clean) are terminal for the head the same way
+    # `auto_approved_clean` (approve_on_clean live) is terminal for the head the same way
     def test_clean_approve_row_is_dropped_and_counted_in_done(self):
         self.write_config(prios=[1], max_per_tick=1)
         shadow_head = "2" * 40
-        status = "shadow_approve_clean"
+        status = "auto_approved_clean"
         fresh_head = "3" * 40
         self.write_ledger([{"repo": REPO, "pr": 301, "head": shadow_head, "status": status,
                              "ts": "2026-01-01T00:00:00Z"}])
@@ -400,6 +400,45 @@ class AutoCommentGate(ScanHarness, unittest.TestCase):
         row302 = self.row(302)
         self.assertTrue(row302["auto_comment"]["eligible"], row302["auto_comment"])  # cap slot not stolen
         self.assertRegex(r.stdout, r"done=1\b")  # counted in the summary line
+
+    # --- `shadow_approve_clean` alone is not done: shadow posts the COMMENT beside it, and only that
+    # COMMENT's `auto_commented` row ends the head — a verdict row with no COMMENT must not swallow the post
+    def test_shadow_approve_clean_alone_keeps_the_row_eligible(self):
+        self.write_config(prios=[1])
+        head = "4" * 40
+        self.write_ledger([{"repo": REPO, "pr": 303, "head": head, "status": "shadow_approve_clean",
+                            "ts": "2026-01-01T00:00:00Z"}])
+        env = self.env(
+            STUB_DIRECT_JSON=json.dumps([direct_entry(303, "alice", "2026-01-02T00:00:00Z")]),
+            STUB_PR_303_JSON=json.dumps(pr_json(303, "alice", head)),
+            STUB_REVIEWS_303_JSON="[]",
+        )
+        r = self.run_scan(env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        row = self.row(303)
+        self.assertTrue(row["auto_comment"]["eligible"], row["auto_comment"])
+        self.assertRegex(r.stdout, r"done=0\b")
+
+    # --- a push after an unattended APPROVE is a re-review of our own verdict, never a fresh `C` row
+    def test_push_after_auto_approved_clean_is_re_review_not_c(self):
+        self.write_config(prios=[1])
+        old_head = "8" * 40
+        new_head = "9" * 40
+        self.write_ledger([{"repo": REPO, "pr": 304, "head": old_head, "status": "auto_approved_clean",
+                            "ts": "2026-01-01T00:00:00Z"}])
+        env = self.env(
+            STUB_DIRECT_JSON=json.dumps([direct_entry(304, "alice", "2026-01-02T00:00:00Z")]),
+            STUB_PR_304_JSON=json.dumps(pr_json(304, "alice", new_head)),
+            STUB_REVIEWS_304_JSON=json.dumps([
+                {"user": {"login": ME}, "state": "APPROVED", "body": "Checked: nothing to flag.", "commit_id": old_head},
+            ]),
+        )
+        r = self.run_scan(env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        row = self.row(304)
+        self.assertEqual(row["kind"], "re_review")
+        self.assertFalse(row["auto_comment"]["eligible"], row["auto_comment"])
+        self.assertEqual(row["auto_comment"]["reason"], "re-review")
 
     # --- a head already `held` (an `on_stop: hold` STOP decision) must stay an ordinary queue row for the
     # next interactive `pr-review` walk, but must never be re-flagged `C` or counted toward `max_per_tick`

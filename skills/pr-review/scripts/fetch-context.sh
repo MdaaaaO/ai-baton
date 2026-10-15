@@ -30,9 +30,16 @@ fail(){ echo "error: $*" >&2; echo "FATAL: $*" >> "$ERR"; exit 1; }
 get(){ local i rc o; for i in 1 2; do o=$(gh api "$@" 2>>"$ERR"); rc=$?; if [ $rc -eq 0 ] && [ -n "$o" ]; then printf '%s' "$o"; return 0; fi; [ $i -eq 1 ] && sleep 2; done; echo "FAIL gh api $* (rc=$rc)" >> "$ERR"; return 1; }
 pages(){ local o; o=$(get --paginate "$1") || return 1; jq -sc 'add // []' <<<"$o" || return 1; }
 
+prev_head=$(jq -r '.head // ""' "$out/manifest.json" 2>/dev/null) || prev_head=""
 get "repos/$repo/pulls/$pr" > "$out/pr.json" || fail "cannot fetch repos/$repo/pulls/$pr (see $ERR)"
 jq -e .head.sha "$out/pr.json" >/dev/null || fail "pr.json has no head.sha"
 head=$(jq -r .head.sha "$out/pr.json"); base=$(jq -r .base.sha "$out/pr.json"); o=${repo%/*}; r=${repo#*/}
+# a runner sheet written for another head (or for an unknown one: no manifest) is stale — remove it, so the
+# approve_on_clean gate (submit-review.sh) can never read an old clean sheet as this head's
+if [ "$prev_head" != "$head" ]; then
+  stale=$(cd "$out" && ls triage.json sheet.json traps.json ff.json impact.json 2>/dev/null | tr '\n' ' ')
+  [ -z "$stale" ] || { (cd "$out" && rm -f triage.json sheet.json traps.json ff.json impact.json); echo "note: head ${prev_head:0:9} -> ${head:0:9}: removed the stale runner sheet (${stale% })" >&2; }
+fi
 pages "repos/$repo/pulls/$pr/files?per_page=100" > "$out/files.json" || fail "cannot fetch the file list"
 get "repos/$repo/pulls/$pr" -H 'Accept: application/vnd.github.diff' > "$out/diff.patch" || { echo "diff fetch failed (huge PR?) — per-file patches in files.json/diffs/ still apply" >> "$ERR"; : > "$out/diff.patch"; }
 pages "repos/$repo/pulls/$pr/reviews?per_page=100" > "$out/reviews.json" || fail "cannot fetch reviews — mode would be wrong"
