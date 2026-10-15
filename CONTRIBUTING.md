@@ -8,7 +8,7 @@ through an issue and a reviewed PR.
 - **Open an issue first.** Describe what, why, and which environments it affects, and give it one `area:*` label.
   If you find something else while you work, open a new issue instead of growing the PR.
 - **Title the PR as a Conventional Commit**, for example `feat(pr-open): add the diagram plan`. The title becomes the
-  squash commit.
+  squash commit; the rule is [`docs/commit-style.md`](docs/commit-style.md).
 - **Start the PR body with `Closes #N`**, or with `Refs #N` for one step of a larger issue.
 - **Run `make -C context-db ci` in your worktree** before you push. It runs every gate CI runs; it needs `origin/main`
   fetched, and a missing tool (shellcheck, the `claude` CLI) fails it unless you pass `ALLOW_SKIP=1`.

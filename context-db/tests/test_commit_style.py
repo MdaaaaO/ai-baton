@@ -2,6 +2,7 @@
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -262,6 +263,29 @@ class Resolve(BlankStore):
         self.assertEqual(usage.returncode, 2)
         types = subprocess.run([*py, "types"], capture_output=True, text=True, env=self.env)
         self.assertEqual(types.stdout.split(), list(cs.TYPES))
+
+
+class OneTypeList(unittest.TestCase):
+    """The release engine's type list is the truth; the checker and the prose table follow it."""
+    KIT = Path(__file__).resolve().parents[2]
+    # conventional-release's documented default when the toml declares no `[[types]]` table: all of these, listed.
+    ENGINE_DEFAULT = {"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"}
+
+    def toml_types(self) -> set:
+        text = (self.KIT / ".conventional-release.toml").read_text(encoding="utf-8")
+        # a regex, not tomllib (3.11+; the kit's floor is 3.9): the `type = "x"` line of each `[[types]]` entry
+        declared = set(re.findall(r'^\[\[types\]\]\s*\n(?:[^\[\n]*\n)*?type\s*=\s*"([a-z]+)"', text, re.M))
+        return declared or self.ENGINE_DEFAULT
+
+    def test_checker_types_equal_the_release_toml(self):
+        self.assertEqual(set(cs.TYPES), self.toml_types())
+        self.assertEqual(len(cs.TYPES), len(set(cs.TYPES)), "a type listed twice")
+
+    def test_prose_table_lists_the_same_types(self):
+        text = (self.KIT / "docs" / "commit-style.md").read_text(encoding="utf-8")
+        m = re.search(r"types `([a-z ]+)`", text)
+        self.assertIsNotNone(m, "docs/commit-style.md no longer names the types")
+        self.assertEqual(set(m.group(1).split()), set(cs.TYPES))
 
 
 if __name__ == "__main__":
