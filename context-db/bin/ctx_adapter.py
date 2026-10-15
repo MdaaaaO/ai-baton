@@ -206,7 +206,7 @@ SECTION_HEAD_LINES = 4  # non-blank lines of a priority section, after its headi
                         # is left filling in further lines — the fix for a long first section spending a cut
                         # brief's whole budget before a later priority section ever got to show anything
 SESSION_FM_LINE_KEYS = {"session", "session_id", "ref", "status", "epic", "repos", "working_on",
-                        "responsibilities", "stats", "heartbeat", "updated", "sections"}  # every line `ctx brief`
+                        "responsibilities", "stats", "registered", "heartbeat", "updated", "sections"}  # every line `ctx brief`
     # prints between a session doc's header and its body: its frontmatter fields plus the derived `sections: …`
     # summary line, both in the same "key: value" shape — the set this adapter's parser recognises and stops at
 HOOK_TIMEOUT = 8        # seconds one ctx call may take inside a hook (the hook entries allow 10)
