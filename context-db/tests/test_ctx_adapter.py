@@ -157,6 +157,11 @@ class Base(unittest.TestCase):
             return []
         return [json.loads(ln) for ln in self.log.read_text(encoding="utf-8").splitlines()]
 
+
+    def write_store_file(self) -> None:
+        """What `ctx init` leaves at the content root: the settings the fake received (it writes no files)."""
+        settings = [c["settings"] for c in self.calls() if c["settings"]][-1]
+        (self.root / "ctx-store.json").write_text(settings, encoding="utf-8")
     def payload(self, **kw) -> str:
         return json.dumps({"session_id": self.sid, "cwd": str(self.t), **kw})
 
@@ -1315,7 +1320,7 @@ class AdoptBehind(Base):
         recorded = json.loads(self.digest_path().read_text(encoding="utf-8"))
         self.assertEqual(recorded["kept"], [".ctx/types/epic.json"])
         self.assertEqual(recorded["kept_older"], {".ctx/types/epic.json": ["6", "3"]})
-        (self.root / "ctx-store.json").write_text("{}", encoding="utf-8")  # the file test --no-validate runs
+        self.write_store_file()  # the file test --no-validate runs, with the resolve rule adopt seeded
         for flags in (("--check",), ("--check", "--no-validate")):
             r = self.adapter("adopt", *flags, KIT_CTX=str(self.fake))
             self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
@@ -1334,7 +1339,7 @@ class AdoptBehind(Base):
         recorded = json.loads(self.digest_path().read_text(encoding="utf-8"))
         self.assertEqual(recorded["kept"], ["ctx-store.json", ".ctx/types/epic.json"])
         self.assertEqual(recorded["kept_older"], {".ctx/types/epic.json": ["6", "3"]})
-        (self.root / "ctx-store.json").write_text("{}", encoding="utf-8")  # the file test --no-validate runs
+        self.write_store_file()  # the file test --no-validate runs, with the resolve rule adopt seeded
         r = self.adapter("adopt", "--check", "--no-validate", KIT_CTX=str(self.fake))
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
         self.assertIn(plain, r.stdout)
@@ -1345,7 +1350,7 @@ class AdoptBehind(Base):
         self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="kept: ctx-store.json\nok: 1 adopted\n")
         recorded = json.loads(self.digest_path().read_text(encoding="utf-8"))
         self.assertNotIn("kept_older", recorded)
-        (self.root / "ctx-store.json").write_text("{}", encoding="utf-8")  # the file test --no-validate runs
+        self.write_store_file()  # the file test --no-validate runs, with the resolve rule adopt seeded
         r = self.adapter("adopt", "--check", "--no-validate", KIT_CTX=str(self.fake))
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
         self.assertIn("differs: ctx-store.json — kept (edited here)", r.stdout)
@@ -1636,11 +1641,6 @@ class ResolveSeed(Base):
 
     def adopt_fake(self, *args: str) -> subprocess.CompletedProcess:
         return self.adapter("adopt", *args, KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
-
-    def write_store_file(self) -> None:
-        """What `ctx init` leaves at the content root: the settings the fake received (it writes no files)."""
-        settings = [c["settings"] for c in self.calls() if c["settings"]][-1]
-        (self.root / "ctx-store.json").write_text(settings, encoding="utf-8")
 
     def test_a_jira_store_gets_the_trackers_key_shape_the_template_section_and_the_key_field(self):
         self.env_store(JIRA_ENV)
