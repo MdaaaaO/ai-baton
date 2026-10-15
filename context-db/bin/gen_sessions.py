@@ -25,8 +25,8 @@ session that ended with no real prompt — nothing written, blank, or a "no succ
 not appear in the Ended table at all; `has_next_prompt()` is the one place that decides "real".
 Ended sessions are swept to sessions/archive/<name>.md (listed in sessions/archive/INDEX.md) so the live registry
 stays short under a fold, for one of three reasons (`archive_reason()`): the hand-off was consumed (its § Next session
-names a successor, `Register as <name>`, and a session of that name is registered, live or already archived — age
-aside), no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
+names a successor, `Register as <name>`, and a session of that name registered after this one ended, live or already
+archived — age aside), no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
 § Session stats) and `sessions/_ledger.md`. `make verify` warns when the file passes
 SESSION_INDEX_WARN bytes.
 
@@ -39,13 +39,14 @@ import glob
 import os
 import re
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timezone
 
 import kit_profile as profile  # same dir — the one content-root resolver
 import frontmatter  # same dir — the one frontmatter parser
 from fsutil import atomic_write  # same dir
 from session_stats import SPEND_BASIS  # same dir — one spend-basis wording, quoted verbatim here too
-from session import NEXT_HEADING  # same dir — the writer owns the session doc's section headings
+from session import NEXT_HEADING, CONVENTION_RE, CONVENTION_MAX  # same dir — the writer owns the section headings and the naming convention
 
 CTX = str(profile.context_root())
 SESS_DIR = os.path.join(CTX, "sessions")
@@ -96,7 +97,7 @@ def rel_from_index(path: str, index_path: str) -> str:
 
 
 # Ended sessions leave the live registry for sessions/archive/ when nothing waits on them: the hand-off was consumed
-# (its named successor registered), no next-session prompt (nothing for a successor to pick up), or ended more than
+# (its named successor registered after it ended), no next-session prompt (nothing for a successor to pick up), or ended more than
 # ARCHIVE_DAYS ago. Makefile:
 # `make … ARCHIVE_DAYS=<n>` (exported as SESSION_ARCHIVE_DAYS); 0 sweeps every ended session; --no-archive skips.
 ARCHIVE_DIR = os.path.join(SESS_DIR, "archive")
@@ -172,37 +173,81 @@ def by_heartbeat(items: list[dict]) -> list[dict]:
     return sorted(items, key=lambda r: r.get("heartbeat", ""), reverse=True)
 
 
-# The handoff skill's closing form: the prompt starts "Register as <name>" (the name may be wrapped in backticks or
-# quotes). A session name is a file stem: letters, digits, `-`, `_`, `.`.
-SUCCESSOR_RE = re.compile(r"\bRegister as\s+[`'\"]?([A-Za-z0-9][A-Za-z0-9_.-]*)", re.IGNORECASE)
+# The ways a hand-off prompt tells a successor which name to take. A name is only a name when it follows the session
+# naming convention (`<lane>-<topic>[-n]`: lower-case kebab-case, >= 2 parts, <= 32 chars), which rejects the words a
+# sentence puts in that slot ("session", "the", "NAME") and the `<name>` placeholder.
+_NAME_CHARS = r"[A-Za-z0-9][A-Za-z0-9_.-]*"
+_SUCCESSOR_RES = (
+    # "Register as <name>", "Register as session <name>", "Register as `<name>`", "register under the name <name>"
+    re.compile(r"\bregister(?:ed)?\s+(?:as|under\s+the\s+(?:session\s+)?name)\s+(?:the\s+)?(?:session\s+)?[`'\"]?(" + _NAME_CHARS + ")",
+               re.IGNORECASE),
+    # "your name is <name>", "your session name is <name>", "session name: <name>"
+    re.compile(r"\b(?:your\s+(?:session\s+)?name\s+is|session\s+name\s*[:=]?)\s+[`'\"]?(" + _NAME_CHARS + ")",
+               re.IGNORECASE),
+)
+# "Register as the successor of <x>" names the PREDECESSOR (the starter block's own wording): never a successor.
 _DATED_SUFFIX_RE = re.compile(r"-\d{8}(?:-\d+)?$")  # archive_path()'s collision suffix
 
 
 def named_successors(m: dict) -> list[str]:
-    """The session names `m`'s § Next session asks a successor to register as (trailing `.` of a sentence dropped)."""
-    return [n.rstrip(".") for n in SUCCESSOR_RE.findall(m.get("_next", "") or "") if n.rstrip(".")]
+    """The session names `m`'s § Next session asks a successor to register as, in the order written (trailing `.` of
+    a sentence dropped). Only convention-shaped names count; `Register as the successor of <x>` names none."""
+    text = m.get("_next", "") or ""
+    out: list[str] = []
+    for rx in _SUCCESSOR_RES:
+        for n in rx.findall(text):
+            n = n.rstrip(".-_")
+            if CONVENTION_RE.match(n) and len(n) <= CONVENTION_MAX and n not in out:
+                out.append(n)
+    return out
 
 
-def archived_names() -> set[str]:
-    """Names of the sessions already swept to sessions/archive/ (a collision-suffixed file counts for its base name)."""
-    names: set[str] = set()
+def _hb_time(hb: str):
+    """A stored heartbeat as an aware UTC datetime, None when blank or unparsable."""
+    try:
+        return datetime.strptime(hb, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def registered_times(live: list[dict]) -> dict[str, datetime]:
+    """Session name -> the newest heartbeat of any session of that name, live (any status) or already swept to
+    sessions/archive/ (a collision-suffixed file counts for its base name). The heartbeat is the only timestamp the
+    registry keeps: `register` and `touch` stamp it, `end` leaves it at the end. A row without a parsable one is
+    absent — it can never prove a registration."""
+    out: dict[str, datetime] = {}
+
+    def note(name: str, hb: str) -> None:
+        t = _hb_time(hb)
+        if name and t is not None and (name not in out or t > out[name]):
+            out[name] = t
+
+    for m in live:
+        note(m.get("session", ""), m.get("heartbeat", ""))
     for p in glob.glob(os.path.join(ARCHIVE_DIR, "*.md")):
         stem = os.path.splitext(os.path.basename(p))[0]
         if stem.startswith("_") or stem == "INDEX":
             continue
-        names.add(stem)
-        names.add(_DATED_SUFFIX_RE.sub("", stem))
-    return names
+        try:
+            hb = parse(p).get("heartbeat", "")
+        except (OSError, ValueError):
+            continue
+        note(stem, hb)
+        note(_DATED_SUFFIX_RE.sub("", stem), hb)
+    return out
 
 
-def archive_reason(m: dict, registered: frozenset[str] | set[str] = frozenset()) -> str | None:
-    """Why an ended session leaves the live registry — None while a successor may still need it. `registered` is
-    every session name that exists, live (any status) or already archived: a hand-off whose named successor is in
-    it was consumed, so the row goes regardless of age."""
+def archive_reason(m: dict, registered: Mapping[str, datetime] | None = None) -> str | None:
+    """Why an ended session leaves the live registry — None while a successor may still need it. `registered` maps
+    every session name that exists, live (any status) or already archived, to its newest heartbeat: a hand-off whose
+    named successor's heartbeat is LATER than this session's end was consumed, so the row goes regardless of age. A
+    name that was already on file when this session ended (an older archived lane, a parallel live one) proves
+    nothing — nobody has picked this hand-off up yet."""
     me = m.get("session", "")
-    if has_next_prompt(m):
+    ended_at = _hb_time(m.get("heartbeat", ""))
+    if has_next_prompt(m) and ended_at is not None and registered:
         for succ in named_successors(m):
-            if succ != me and succ in registered:
+            if succ != me and succ in registered and registered[succ] > ended_at:
                 return f"successor {succ} registered"
     a = age_hours(m.get("heartbeat", ""))
     if a is None:
@@ -230,10 +275,10 @@ def archive_path(name: str, m: dict) -> str:
         n += 1
 
 
-def sweep(ended: list[dict], dry_run: bool, registered: frozenset[str] | set[str] = frozenset()
+def sweep(ended: list[dict], dry_run: bool, registered: Mapping[str, datetime] | None = None
           ) -> tuple[list[dict], int]:
     """Move the ended sessions nothing waits on to sessions/archive/; returns (still live, moved count).
-    `registered` is every session name known before the sweep, so a chain A → B → C archives A and B in one run."""
+    `registered` is every session name known before the sweep (with its newest heartbeat), so a chain A → B → C archives A and B in one run."""
     keep, moved = [], 0
     for m in ended:
         why = archive_reason(m, registered)
@@ -315,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(timezone.utc)
     moved = 0
     if not a.no_archive:
-        registered = {m["session"] for m in rows} | archived_names()
+        registered = registered_times(rows)
         ended, moved = sweep(ended, a.dry_run, registered)
     if a.dry_run:
         print(f"dry run — {len(active)} active, {len(ended)} ended stay in the live registry")

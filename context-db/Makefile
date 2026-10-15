@@ -86,7 +86,7 @@ MAX_ENDED := $(or $(SESSION_INDEX_MAX_ENDED),5)
 endif
 export SESSION_INDEX_MAX_ENDED := $(MAX_ENDED)
 # Ended sessions leave SESSION_INDEX.md for sessions/archive/ as soon as their named successor registered (the
-# § Next session says "Register as <name>" and a session of that name exists, live or archived), when they ended
+# § Next session says "Register as <name>" and a session of that name registered after they ended, live or archived), when they ended
 # more than ARCHIVE_DAYS ago, or carry no next-session prompt for NOPROMPT_HOURS (a crashed session is ended without one and may be resumed;
 # the window is capped at ARCHIVE_DAYS, so ARCHIVE_DAYS=1 also shrinks it to 24 h). Every session-index run
 # sweeps: make … ARCHIVE_DAYS=<n> (0 = all ended) NOPROMPT_HOURS=<h>, or SESSION_ARCHIVE_DAYS /

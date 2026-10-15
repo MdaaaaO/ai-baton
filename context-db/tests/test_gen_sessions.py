@@ -1,4 +1,5 @@
 """gen_sessions.py — the archive sweep and the two generated indexes, on a throwaway CONTEXT_ROOT."""
+import json
 import os
 import re
 import subprocess
@@ -261,16 +262,45 @@ class ConsumedHandoff(unittest.TestCase):
         self.assertEqual(self.live(), ["sess-d"])
         self.assertIn("`sess-d`", (self.root / "SESSION_INDEX.md").read_text())
 
-    def test_successor_already_archived_counts_as_registered(self):
-        session_file(self.root, "sess-f", "ended", 30, "Register as sess-g.")  # aged out, swept in the first run
-        session_file(self.root, "sess-g", "ended", 30, "")
-        run(self.root)
-        self.assertEqual(self.live(), [])
+    def archived(self, name: str, ended_days_ago: float, next_prompt: str = "") -> None:
+        """A session already swept to sessions/archive/ (written there directly, ended `ended_days_ago` ago)."""
+        p = session_file(self.root, name, "ended", ended_days_ago, next_prompt)
+        (self.root / "sessions" / "archive").mkdir(exist_ok=True)
+        p.rename(self.root / "sessions" / "archive" / p.name)
+
+    def test_successor_archived_after_the_hand_off_counts_as_registered(self):
+        self.archived("sess-f", 0.5)  # registered after sess-h ended, ran, ended and was swept
         session_file(self.root, "sess-h", "ended", 1, "Register as sess-f, continue.")
         self.assertIn("would archive sess-h", run(self.root, "--dry-run"))
         # a collision-suffixed archive file still names its base session
         (self.root / "sessions" / "archive" / "sess-f.md").rename(self.root / "sessions" / "archive" / "sess-f-20260901.md")
         self.assertIn("(successor sess-f registered)", run(self.root, "--dry-run"))
+
+    def test_name_that_predates_the_hand_off_is_not_a_successor(self):
+        self.archived("sess-f", 30)  # an older lane that happens to carry the name
+        session_file(self.root, "sess-h", "ended", 1, "Register as sess-f, continue.")
+        self.assertNotIn("would archive sess-h", run(self.root, "--dry-run"))
+        run(self.root)
+        self.assertEqual(self.live(), ["sess-h"])
+        # the same for a live ended lane that was already there when sess-h ended
+        session_file(self.root, "sess-o", "ended", 5, "")
+        session_file(self.root, "sess-p", "ended", 1, "Register as sess-o, continue.")
+        self.assertNotIn("would archive sess-p", run(self.root, "--dry-run"))
+        # ... and a live lane of that name only counts once its heartbeat is later than the hand-off's end
+        session_file(self.root, "sess-q", "active", 2, "")
+        session_file(self.root, "sess-r", "ended", 1, "Register as sess-q, continue.")
+        self.assertNotIn("would archive sess-r", run(self.root, "--dry-run"))
+        session_file(self.root, "sess-q", "active", 0, "")  # touched since: a heartbeat after sess-r ended
+        self.assertIn("would archive sess-r", run(self.root, "--dry-run"))
+
+    def test_equal_timestamps_and_unparsable_ones_do_not_count(self):
+        hb = "2026-10-14T10:00:00Z"
+        session_file(self.root, "sess-s", "ended", 0, "Register as sess-t.", hb=hb)
+        session_file(self.root, "sess-t", "active", 0, "", hb=hb)  # same second: not provably later
+        session_file(self.root, "sess-u", "ended", 0, "Register as sess-v.", hb=hb)
+        session_file(self.root, "sess-v", "active", 0, "", hb="yesterday")
+        self.assertNotIn("would archive sess-s", run(self.root, "--dry-run"))
+        self.assertNotIn("would archive sess-u", run(self.root, "--dry-run"))
 
     def test_successor_in_any_live_status_counts(self):
         session_file(self.root, "sess-i", "ended", 1, "Register as sess-j.")
@@ -290,6 +320,56 @@ class ConsumedHandoff(unittest.TestCase):
         self.assertNotIn("would archive sess-m", out)
         self.assertIn("would archive sess-n", out)
         self.assertIn("> 7d", out)
+
+    def consumed(self, prompt: str, successor: str = "sess-x1") -> bool:
+        """Whether an ended session with this § Next session is swept because `successor` registered."""
+        for p in (self.root / "sessions").glob("*.md"):
+            p.unlink()
+        session_file(self.root, "sess-w", "ended", 1, prompt)
+        session_file(self.root, successor, "active", 0, "")
+        return "would archive sess-w" in run(self.root, "--dry-run")
+
+    def test_every_register_wording_names_its_successor(self):
+        for prompt in (
+            "Register as sess-x1, pick up the parser.",
+            "Register as session sess-x1 (successor of sess-w); your prompt is below.",
+            "Register as `sess-x1`.",
+            'Register as "sess-x1" and re-arm the watch.',
+            "register under the name sess-x1, then read the doc.",
+            "Register as the successor of sess-w; your name is sess-x1.",
+            "Register as the successor of sess-w. Session name: sess-x1.",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertTrue(self.consumed(prompt))
+
+    def test_wording_that_names_no_successor_never_sweeps(self):
+        # the word in the name slot, a placeholder, the predecessor in "successor of", and non-convention names
+        for prompt in (
+            "Register as session <name> (successor of sess-w).",
+            "Register as the successor of sess-x1; your prompt is in .context/sessions/sess-w.md § Next session.",
+            "Register as NAME, then carry on.",
+            "Register as <name>.",
+            "Register as the lane successor.",
+            "Register as sess-x1-this-name-is-far-too-long-for-the-convention.",
+            "Register as sess.",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assertFalse(self.consumed(prompt))
+
+    def test_parsed_names(self):
+        cases = {
+            "Register as session kit-13 (successor of kit-12).": ["kit-13"],
+            "Register as the successor of kit-12.": [],
+            "Register as the successor of kit-12; your name is kit-14-x.": ["kit-14-x"],
+            "Register as session <name>, successor of kit-12.": [],
+            "Register as `kit-13`.": ["kit-13"],
+            "Register under the name kit-13.": ["kit-13"],
+        }
+        code = "import json, sys, gen_sessions; print(json.dumps([gen_sessions.named_successors({'_next': t}) for t in json.loads(sys.argv[1])]))"
+        r = subprocess.run([sys.executable, "-c", code, json.dumps(list(cases))], env=env_for(self.root), cwd=BIN,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), list(cases.values()))
 
     def test_archive_index_note_names_the_reason(self):
         session_file(self.root, "sess-a", "ended", 1, "Register as sess-b.")

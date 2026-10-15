@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate back and carousel when paste-started as a successor, re-arm PR-watch, rename a session, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "36"
+  version: "37"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
 user-invocable: true
@@ -40,8 +40,10 @@ worktree.
    ended sessions get a starter; an older one (still in the fold) is named with a link to the same
    path but no starter — open the file the same way. A session that ended with nothing to hand over
    (no `## Next session`, or a "no successor" note) is not listed at all — there is nothing to pick up.
-   A predecessor that ended more than `SESSION_ARCHIVE_DAYS` (7) days ago is no longer in the index —
-   it was swept to `sessions/archive/<name>.md` (listed in `sessions/archive/INDEX.md`, prompt intact).
+   A predecessor that ended more than `SESSION_ARCHIVE_DAYS` (7) days ago, or whose named successor has
+   already registered, is no longer in the index — it was swept to `sessions/archive/<name>.md` (listed in
+   `sessions/archive/INDEX.md`, prompt intact): the starter's `sessions/<name>.md` path then resolves under
+   `sessions/archive/`.
    Register under the name it proposes, with `SUCCESSOR_OF=<name>` so the predecessor's `## Open PRs` print,
    read what it lists, claim what it names.
    **Narrate back before touching anything else.** Right after reading `## Next session`, say the
@@ -219,7 +221,10 @@ whether there is one to write — a session with nothing to hand over omits `NEX
 real prompt (nothing on file, or a "no successor" note) does not appear in the Ended table at all, and
 is archived out of the index entirely after
 `SESSION_ARCHIVE_NOPROMPT_HOURS` (48, never more than `ARCHIVE_DAYS`) — that covers both a clean end with
-nothing left to do and a crash (`heartbeat.sh` ends a crashed session the same way, without a prompt);
+nothing left to do and a crash (`heartbeat.sh` ends a crashed session the same way, without a prompt). A
+session whose prompt names a successor (`Register as <name>`) is archived as soon as that successor has
+registered (its heartbeat is later than this session's end): the starter's `sessions/<name>.md` path then
+resolves under `sessions/archive/`, age aside;
 `session-register` / `session-touch` / `session-end` move an archived file back from `sessions/archive/`
 before writing (a re-register reactivates it), so a resumed session can still add a hand-off later — a
 lane that continues with follow-on work always leaves a prompt. `session-end` also writes the

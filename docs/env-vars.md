@@ -22,7 +22,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `SYNC_FETCH_TIMEOUT` | `60` (seconds) | `sync.sh` | how long the SessionEnd hook's `git fetch` may run before `sync.sh` gives up | user-facing |
 | `SYNC_LOCK_WAIT` | `30` (seconds) | `sync.sh` | how long one `sync.sh` waits for another's `flock` before giving up | user-facing |
 | `SESSION_INDEX_MAX_ENDED` | `5` | `context-db/bin/gen_sessions.py` (exported by `context-db/Makefile` from `make … MAX_ENDED=<n>`) | how many ended sessions still show as rows in `SESSION_INDEX.md` | user-facing |
-| `SESSION_ARCHIVE_DAYS` | `7` | `context-db/bin/gen_sessions.py` | how many days an ended session stays in the live index before it moves to `archive/` | user-facing |
+| `SESSION_ARCHIVE_DAYS` | `7` | `context-db/bin/gen_sessions.py` | how many days an ended session stays in the live index before it moves to `archive/` (a session whose named successor has registered, and one with no next-session prompt after `SESSION_ARCHIVE_NOPROMPT_HOURS`, move earlier; the starter's `sessions/<name>.md` path then resolves under `sessions/archive/`) | user-facing |
 | `SESSION_ARCHIVE_NOPROMPT_HOURS` | `48` | `context-db/bin/gen_sessions.py` | how many hours after ending a session archives without a confirmation prompt | user-facing |
 | `SESSION_STATS_PRICES` | the engine's built-in per-model table | `context-db/bin/session_stats.py` | override token prices as `in,cw,cr,out[,cw_1h]`, for a model the built-in table does not price | user-facing |
 | `SESSION_STATS_SPLIT_THRESHOLD` | `150000` (tokens) | `context-db/bin/session_stats.py` | avg context over the window at/above which the split hint fires | user-facing |
