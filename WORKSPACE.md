@@ -28,21 +28,22 @@ Kit reference: `$BATON/README.md`.
 **Workflow & scope**
 - A misrouted prompt (another session's lane/repo/ticket/PR) → ask before reading, editing,
   relaying or drafting.
-- Standing go: once a step is agreed and gated, start it and prep everything — stop only for
-  signing, unplanned destructive prod actions, or genuine scope changes.
-- Every PR a session opens carries labels — type + area (+ risk where it applies) from the repo's
-  label set, in every repo; a PR without labels is not open (`pr-open` step 3).
+- Standing go: once a step is agreed and gated, start it — stop only for signing, unplanned
+  destructive prod actions or genuine scope changes.
+- Every PR we open carries labels — type + area (+ risk where it applies) from the repo's label
+  set; a PR without labels is not open (`pr-open` step 3).
 - Every commit/PR title follows the repo's **commit style** — Conventional Commits
   (`type(scope): description`, tracker key inside, ≤72 chars) unless overridden;
-  `commit_style.py resolve|check|title` decides; never infer from the log or add a marker to
+  `commit_style.py resolve|check|title` decides; never infer it from the log or add a marker to
   someone else's repo. Spec: `docs/commit-style.md`.
 - A kit behaviour change bumps its `metadata.version` and `metadata.updated`.
-- Never resolve a PR review thread waiting on a named third party — the open thread is the merge gate.
+- Never resolve a PR review thread waiting on a named third party — the open thread is the merge gate —
+  unless the commenter approved after our reply; then resolve their threads ourselves.
 
 **Verification**
 - Never assert infra/data-location/deploy/run state from a proxy signal — verify against the system
   of record, or label it unverified.
-- Copying precedent code is not verification: check the documented spec or real data first.
+- Precedent code is not verification: check the documented spec or real data first.
 - Never let a swallowed error read as a negative result — check exit status separately; never
   `2>/dev/null` a query whose emptiness is meaningful.
 
@@ -66,7 +67,7 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns; don't lo
 3. **Domains are folders:** core `reference/`, `repos/`, `pr-reviews/`, `meetings/`, `1on1/`,
    `self-assessment/`, `on-call/`, `archive/`; the environment adds its own (`domains` in the env
    config). Repo deep-dives are `.context/repos/<repo>.md` (links + TLDRs; the repo's own `CLAUDE.md`
-   rules inside it). Spec: `.context/README.md`.
+   rules). Spec: `.context/README.md`.
 
 **Context doc** = the private living doc for one epic / tracking issue (not the tracker item, which
 gets its own update). One per initiative, `TYPE=epic`, fixed sections *Tracker & links · Goal · What
@@ -99,10 +100,10 @@ Specs: `docs/env-facts.md`, `docs/new-environment.md`.
 - **Register** with `session-register` and keep the ≤12 h heartbeat (each session writes only
   its own `.context/sessions/<name>.md`). If another active session owns the epic/PR/worktree, agree
   ownership in one `SendMessage` before editing — a worktree isolates branch/HEAD, not directory access.
-- **PR watches:** one multi-PR `pr-watch` Monitor per repo per session; every open PR has exactly one
-  watcher. Watches die with their session — the successor re-arms them at startup.
+- **PR watches:** one multi-PR `pr-watch` Monitor per repo per session; every open PR has one watcher.
+  Watches die with their session; the successor re-arms them.
 - **Kit changes are PR-only.** The kit checkout (`.claude/` or a clone) stays on `main`;
-  edit in `.worktrees/kit_<topic>` off `origin/main`, open a PR, the user merges (`CONTRIBUTING.md`).
+  edit in `.worktrees/kit_<topic>` off `origin/main`, open a PR (`CONTRIBUTING.md`).
 
 ## Skills
 

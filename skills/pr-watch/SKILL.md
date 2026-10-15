@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo/session surfaces only actionable events, triages via `pr-event-brief`, keeps branches synced, merges via `pr-merge.sh` once gates hold. Parks on sign-off, idle windows or a human-only gate. Use when your session owns an open PR."
 metadata:
-  version: "29"
+  version: "30"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
 ---
@@ -148,7 +148,8 @@ harmless) or wait for the rerun is the user's call, not a default — ask it per
 
 ## Rules this encodes (verified on a strict-ruleset repo with a review bot)
 
-Unresolved threads block merge (reply and resolve every one); a BEHIND PR needs `update-branch` then a
+Unresolved threads block merge (reply and resolve every one — an approver's own threads too, once they
+approved after our reply; a thread waiting on anyone else stays theirs); a BEHIND PR needs `update-branch` then a
 forced bot re-review, done yourself except on a workflow-file PR (403 → rebase + `sign-queue --rebase`);
 re-request the bot with DELETE+POST; test the bot verdict on its own, never mixed with a human's
 `APPROVED`; one watcher per PR across sessions. Full rules and the exact commands: `reference/rules.md`.

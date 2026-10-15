@@ -1,6 +1,8 @@
 # Rules this encodes (verified on a strict-ruleset repo with a review bot)
 
-- The repo blocks merge on any unresolved thread, even a non-blocking LOW one — reply and resolve every thread.
+- The repo blocks merge on any unresolved thread, even a non-blocking LOW one — reply and resolve every thread. A thread whose commenter
+  approved after our reply is ours to resolve (`WORKSPACE.md` § Rules → Workflow & scope); one waiting on a
+  named third party who has not approved stays open — it is the merge gate.
   Every reply and comment on your own PR ends with the footer line from the resolved-profile block already in
   your SessionStart context (`` footer: session `<name>` ``, the session that wrote it); once a compaction drops
   that block, or it never printed, fall back to `python3 $BATON/context-db/bin/kit_profile.py footer`. Reviews
