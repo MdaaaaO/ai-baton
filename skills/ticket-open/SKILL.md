@@ -87,7 +87,9 @@ Tools: `tracker.mcp_tools.create` / `.edit` / `.comment`; project `tracker.proje
 5. **Sketch shape.** Jira renders neither Mermaid nor HTML comments: the Sketch's WHERE is one fenced
    ASCII box diagram, WHAT and WHY stay tables, and the marker stays in the fence `sketch.py stamp
    --tracker jira` wraps it in (`docs/diagrams.md` § Rendering). To see what the ticket really shows,
-   read it back with `expand: renderedFields`; the markdown the connector returns hides the difference.
+   read it back with `tracker.mcp_tools.search` (`key = <KEY>`), passing `expand: renderedFields` where the
+   connector takes it; a connector that returns markdown only hides the difference — then open the ticket in
+   the browser instead.
 
 ### Labels — the ticket vocabulary (Jira environments)
 
