@@ -25,6 +25,7 @@ cannot drift the way a hand-kept flag list does:
   work-prs             GitHub search: PRs opened/merged by the user → a TSV
   work-tickets         tracker.kind == github only: tickets closed by the user → a TSV
   report               daily (+ control, prs, tickets) → the Basis-first Markdown/JSON report
+  run                  private mode, one call: collect-private → work-prs → work-tickets → report (`make cost-report`)
 
 Rules baked in: per-day rates use WEEKDAYS only (ISO 1–5);
 work data is CAPPED at the last spend day; a phase list may name an excluded changeover day
@@ -34,6 +35,7 @@ Stdlib only.
 """
 from __future__ import annotations
 import argparse
+import contextlib
 import csv
 import glob
 import json
@@ -42,6 +44,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -53,7 +56,7 @@ KIT = HERE.parent.parent
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
 import fsutil  # noqa: E402  (atomic_write — the engine's torn-write-free JSON writer)
 import kit_profile as profile  # noqa: E402
-import session_stats  # noqa: E402  (price_for, prices)
+import session_stats  # noqa: E402  (price_for, prices, priced_at — the table is the env config's `cost.prices`, else built in)
 import transcripts  # noqa: E402  (the shared transcript reader)
 
 FIXED = session_stats.prices()[:4]  # (in, cache_write, cache_read, out) $/Mtok — the habit basis; honours
@@ -123,6 +126,7 @@ def resolve_mode() -> dict:
         "extra_repos": c.get("extra_repos", []),
         "phases": c.get("phases", []),
         "fixed_prices": {"input": FIXED[0], "cache_write": FIXED[1], "cache_read": FIXED[2], "output": FIXED[3]},
+        "priced_at": session_stats.priced_at(),  # cost.prices.priced_at — "" while the built-in table is in use
         "why": ("systems.datalake true and cost.spend_table set" if org else
                 "no cost.spend_table (or systems.datalake false) → local transcripts"),
     }
@@ -601,6 +605,8 @@ def _gh(args: list[str], *, context: str = "") -> str:
         except subprocess.TimeoutExpired:
             print(f"gh {' '.join(args[:3])} timed out after 60s" + (f" ({context})" if context else ""), file=sys.stderr)
             raise SystemExit(2)
+        except OSError as e:  # gh not installed / not executable: the same skip path as a timeout, never a traceback
+            raise SystemExit(f"gh not on PATH ({e.strerror or e})")
         if r.returncode == 0:
             return r.stdout
         if attempt < GH_RATE_LIMIT_ATTEMPTS and GH_RATE_LIMIT_RE.search(r.stderr or ""):
@@ -957,7 +963,7 @@ def cmd_report(a) -> int:
     basis = {
         "mode": mode["mode"], "cost_basis": mode["cost_basis"], "spend_table": mode["spend_table"], "filters": mode["filters"],
         "source": source or None, "window": f"{first} .. {last}", "rates": "every rate and ratio is weekday-only (ISO 1–5): $/wday, Mout/wday, in/out, $/Mout, cheap%; only the $ total column includes weekends, so $/wday × volume × habit × routing is an exact identity",
-        "fixed_prices_usd_per_mtok": mode["fixed_prices"],
+        "fixed_prices_usd_per_mtok": mode["fixed_prices"], "priced_at": mode["priced_at"],
         "control": (f"{len(control)} weeks, anonymous aggregate per user-day" if control else "none"),
         "prs": (f"{len(prs)} PRs from GitHub search (author:{mode['github_login'] or '?'}), capped at {first}..{last}" if prs else "not supplied"),
         "tickets": (f"{len(tks)} tickets ({mode['tracker']}), closed by resolution date, capped at {first}..{last}" if tks else "not supplied"),
@@ -985,7 +991,8 @@ def render_md(o: dict) -> str:
     L += ["## Basis", "", "| Factor | This run |", "|---|---|",
           f"| Mode | **{b['mode']}** |", f"| Cost | {b['cost_basis']}" + (f" from `{b['spend_table']}` ({b['filters']})" if b['spend_table'] else "") + " |",
           f"| Rates | {b['rates']} |",
-          f"| Fixed price | in {b['fixed_prices_usd_per_mtok']['input']} · cache-write {b['fixed_prices_usd_per_mtok']['cache_write']} · cache-read {b['fixed_prices_usd_per_mtok']['cache_read']} · out {b['fixed_prices_usd_per_mtok']['output']} $/Mtok |",
+          f"| Fixed price | in {b['fixed_prices_usd_per_mtok']['input']} · cache-write {b['fixed_prices_usd_per_mtok']['cache_write']} · cache-read {b['fixed_prices_usd_per_mtok']['cache_read']} · out {b['fixed_prices_usd_per_mtok']['output']} $/Mtok"
+          + (f" (priced {b['priced_at']})" if b.get("priced_at") else "") + " |",
           f"| Control | {b['control']} |", f"| PRs | {b['prs']} |", f"| Tickets | {b['tickets']} |",
           f"| Phases | {b['phases'] if isinstance(b['phases'], str) else ', '.join(p['name'] + ' ' + p['start'] + '..' + p['end'] for p in b['phases'])} |",
           f"| Skipped | {'; '.join(b['skipped'])} |", f"| Names | {b['names']} |", ""]
@@ -1023,6 +1030,45 @@ def render_md(o: dict) -> str:
     return "\n".join(L)
 
 
+def cmd_run(a) -> int:
+    """The default report in one call (private mode): transcripts → PRs → tickets → the Basis-first report on stdout.
+    The work units are optional, as in the SKILL: a source that cannot be reached is named on stderr and left out
+    (the Basis says "not supplied"). Org mode needs the warehouse tool, which a script cannot call: it stops with 2."""
+    if (rc := _check_since_until(a)) is not None:
+        return rc
+    if resolve_mode()["mode"] == "org":
+        print("org mode: the spend rows come from the warehouse tool — follow SKILL.md § Default run "
+              "(`cost_report.py sql`, then `ingest`); `run` covers private mode only", file=sys.stderr)
+        return 2
+    since = a.since or (date.today() - timedelta(weeks=10)).isoformat()
+    if a.workdir:  # an explicit workdir is the caller's to keep; the default one is removed when the report is out
+        return _run_in(a, since, Path(a.workdir))
+    with tempfile.TemporaryDirectory(prefix="cost-report-") as tmp:
+        return _run_in(a, since, Path(tmp))
+
+
+def _run_in(a, since: str, work: Path) -> int:
+    work.mkdir(parents=True, exist_ok=True)
+    daily, prs, tickets = work / "daily.json", work / "prs.tsv", work / "tickets.tsv"
+    # the collectors print "N rows → file" progress lines; stdout is the report alone (`make cost-report > report.md`)
+    with contextlib.redirect_stdout(sys.stderr):
+        rc = cmd_collect_private(argparse.Namespace(since=since, until=a.until, csv=a.csv, out=str(daily)))
+    if rc:
+        return rc
+    sources: dict[str, str | None] = {}
+    for name, fn, path in (("PRs", cmd_work_prs, prs), ("tickets", cmd_work_tickets, tickets)):
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                rc = fn(argparse.Namespace(since=since, until=a.until, out=str(path)))
+        except SystemExit as e:
+            # a bare SystemExit(2) (gh timeout) already printed its reason; its code is not a count
+            print(f"{name} skipped: {e.code if isinstance(e.code, str) else 'see above'}", file=sys.stderr)
+            rc = 1
+        sources[name] = str(path) if rc == 0 else None
+    return cmd_report(argparse.Namespace(daily=str(daily), control=None, prs=sources["PRs"], tickets=sources["tickets"],
+                                         phase=None, view="all", until=a.until, out=None, json=None))
+
+
 # ----------------------------------------------------------------------------- main
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1039,12 +1085,15 @@ def main(argv: list[str]) -> int:
     p.add_argument("--phase", action="append", help="NAME=YYYY-MM-DD..YYYY-MM-DD (repeatable; default from cost.phases)")
     p.add_argument("--view", choices=["rolling7", "weekly", "phases", "all"], default="all"); p.add_argument("--until")
     p.add_argument("--out"); p.add_argument("--json")
+    p = sub.add_parser("run", help="private mode: collect-private, work-prs, work-tickets, report — the default run in one call")
+    p.add_argument("--since", help="default: 10 weeks back"); p.add_argument("--until"); p.add_argument("--csv")
+    p.add_argument("--workdir", help="where daily.json / prs.tsv / tickets.tsv land (default: a temp dir removed after the report)")
     a = ap.parse_args(argv)
     if a.cmd == "mode":
         print(json.dumps(resolve_mode(), indent=1)); return 0
     try:
         return {"sql": cmd_sql, "propose-columns": cmd_propose_columns, "ingest": cmd_ingest, "collect-private": cmd_collect_private, "work-prs": cmd_work_prs,
-                "work-tickets": cmd_work_tickets, "report": cmd_report}[a.cmd](a)
+                "work-tickets": cmd_work_tickets, "report": cmd_report, "run": cmd_run}[a.cmd](a)
     except StrictParseError as e:
         # a row claimed a value was a number/date and it was not: one clean line, exit 2, never a traceback
         print(str(e), file=sys.stderr)

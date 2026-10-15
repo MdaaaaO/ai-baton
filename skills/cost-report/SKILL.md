@@ -2,7 +2,7 @@
 name: cost-report
 description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7, or named phases. Org mode reports billed cost (aggregate control); private mode estimates from local transcripts. Never names anyone. Invoke when asked for a \"cost report\" or \"how efficient was last week\"."
 metadata:
-  version: "15"
+  version: "16"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
@@ -31,6 +31,7 @@ why. Everything the script branches on lives under the optional `cost` key of th
 | `cost.columns` | the table's names for `date email model cost input output cache_read cache_write` | **required** in org mode (all eight) — proposed from `DESCRIBE TABLE` (`reference/traps.md` § Column mapping); the kit has no default schema |
 | `cost.extra_repos` | `owner/repo` outside `github.org` whose PRs count (e.g. the kit repo) | `[]` |
 | `cost.phases` | `[{name,start,end}]` — named windows for before/after cuts | none → rolling 7 vs prior 7 only |
+| `cost.prices` | `{priced_at, default, models}` — the private-mode / fixed-price $/Mtok table with its date (`SESSION_STATS_PRICES` still wins for the default row) | unset → the built-in table in `session_stats.py` |
 
 **Org mode** = `systems.datalake` true **and** `cost.spend_table` set. Anything else is **private
 mode**: the cost is an *estimate* at list price per model (`context-db/bin/session_stats.py`
@@ -39,6 +40,8 @@ session's `subagents/*.jsonl` (`context-db/bin/transcripts.py`; assistant turns,
 Say which mode ran; never present an estimate as a bill.
 
 ## Default run — rolling 7 days + weekly overview
+
+Private mode in one call: `make -C $BATON/context-db cost-report` (steps 1–5 below, `SINCE=`/`UNTIL=`/`CSV=`/`WORKDIR=` optional; org mode exits 2 and sends you here). By hand:
 
 1. `python3 $BATON/skills/cost-report/cost_report.py mode` → note mode + basis.
 2. **Spend rows**
@@ -89,7 +92,7 @@ are the only work units — lines changed are never a denominator.
 | metric | definition | reads as |
 |---|---|---|
 | **in/out** | (input + cache-write + cache-read) ÷ output tokens, weekdays only | prefix dragged per output token — the **habit** number, lower is better |
-| **fixed $/Mout** | every token repriced at ONE list price (`session_stats.DEFAULT_PRICES`, the top model's) ÷ Mout | habit in $, free of routing |
+| **fixed $/Mout** | every token repriced at ONE list price (`cost.prices.default`, else `session_stats.DEFAULT_PRICES`, the top model's) ÷ Mout | habit in $, free of routing |
 | **$/Mout** | billed (or estimated) $ ÷ million output tokens | habit × routing |
 | **cheap%** | Sonnet/Haiku share of weekday output tokens; `–` when any row has no model (`unknown`, CSV without a model column) | the **routing** signal — unknown is not 0 % cheap |
 | **haiku%** | Haiku alone, same weekday denominator and `–` rule as cheap% | a Sonnet→Haiku switch moves this, never cheap%; the figure the Haiku trial (#55) is judged on |

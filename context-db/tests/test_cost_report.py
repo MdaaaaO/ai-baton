@@ -74,6 +74,12 @@ class GhTimeout(unittest.TestCase):
             self.assertEqual(cm.exception.code, 2)
         self.assertIn("timed out after 60s", buf.getvalue())
 
+    def test_gh_missing_from_path_takes_the_skip_path_not_a_traceback(self):
+        with unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=FileNotFoundError(2, "No such file or directory")):
+            with self.assertRaises(SystemExit) as cm:
+                cost_report._gh(["search", "prs"])
+        self.assertIn("gh not on PATH", str(cm.exception))
+
 
 class IngestRobustness(unittest.TestCase):
     """`ingest` normalises rows from a warehouse whose query the operator wrote, not the kit's — a row
@@ -551,6 +557,130 @@ class FixedPricesHonourOverride(unittest.TestCase):
             self.assertEqual(cost_report.FIXED, (11.0, 22.0, 33.0, 44.0))
         finally:
             importlib.reload(cost_report)  # restore the default basis for every other test in this process
+
+
+class PricedAtInTheBasis(unittest.TestCase):
+    def test_priced_at_is_in_the_mode_and_only_shown_when_set(self):
+        with unittest.mock.patch.object(cost_report.session_stats, "priced_at", return_value="2026-10-01"):
+            self.assertEqual(cost_report.resolve_mode()["priced_at"], "2026-10-01")
+        with unittest.mock.patch.object(cost_report.session_stats, "priced_at", return_value=""):
+            self.assertEqual(cost_report.resolve_mode()["priced_at"], "")
+
+
+class RunDefaultReport(unittest.TestCase):
+    """`run` (behind `make cost-report`) chains the SKILL's private-mode default run in one call."""
+
+    def args(self, **kw):
+        return ns(since="2026-09-01", until=None, csv=None, workdir=kw.pop("workdir", None), **kw)
+
+    def test_org_mode_stops_with_2_and_points_at_the_skill(self):
+        buf = io.StringIO()
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "org"}), contextlib.redirect_stderr(buf):
+            self.assertEqual(cost_report.cmd_run(self.args()), 2)
+        self.assertIn("SKILL.md", buf.getvalue())
+
+    def test_private_run_collects_then_reports_with_whatever_work_units_were_reachable(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as d:
+            def collect(a):
+                calls.append(("collect", a.since)); Path(a.out).write_text("{}"); return 0
+
+            def prs(a):
+                calls.append(("prs", a.since)); Path(a.out).write_text("x"); return 0
+
+            def tickets(a):
+                calls.append(("tickets", a.since)); raise SystemExit("tracker.repos is empty")
+
+            def report(a):
+                calls.append(("report", a.prs, a.tickets, a.daily)); return 0
+            err = io.StringIO()
+            with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private"}), \
+                    unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                    unittest.mock.patch.object(cost_report, "cmd_work_prs", prs), \
+                    unittest.mock.patch.object(cost_report, "cmd_work_tickets", tickets), \
+                    unittest.mock.patch.object(cost_report, "cmd_report", report), contextlib.redirect_stderr(err):
+                rc = cost_report.cmd_run(self.args(workdir=d))
+            self.assertEqual(rc, 0)
+            self.assertEqual([c[0] for c in calls], ["collect", "prs", "tickets", "report"])
+            self.assertEqual(calls[-1][1:], (str(Path(d) / "prs.tsv"), None, str(Path(d) / "daily.json")))
+            self.assertIn("tickets skipped: tracker.repos is empty", err.getvalue())
+
+    def test_progress_lines_go_to_stderr_and_stdout_is_the_report_alone(self):
+        def collect(a):
+            print(f"3 daily×model rows → {a.out}"); Path(a.out).write_text("{}"); return 0
+
+        def prs(a):
+            print(f"2 PRs → {a.out}"); Path(a.out).write_text("x"); return 0
+
+        def tickets(a):
+            print(f"1 closed issues → {a.out}"); Path(a.out).write_text("x"); return 0
+
+        def report(a):
+            print("# Cost report"); return 0
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private"}), \
+                unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                unittest.mock.patch.object(cost_report, "cmd_work_prs", prs), \
+                unittest.mock.patch.object(cost_report, "cmd_work_tickets", tickets), \
+                unittest.mock.patch.object(cost_report, "cmd_report", report), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cost_report.cmd_run(self.args())
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.getvalue(), "# Cost report\n")
+        for line in ("daily×model rows →", "2 PRs →", "1 closed issues →"):
+            self.assertIn(line, err.getvalue())
+
+    def test_a_gh_timeout_skip_line_does_not_look_like_a_count(self):
+        err = io.StringIO()
+
+        def collect(a):
+            Path(a.out).write_text("{}"); return 0
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private"}), \
+                unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                unittest.mock.patch.object(cost_report, "cmd_work_prs", side_effect=SystemExit(2)), \
+                unittest.mock.patch.object(cost_report, "cmd_work_tickets", side_effect=SystemExit("no repos")), \
+                unittest.mock.patch.object(cost_report, "cmd_report", return_value=0), contextlib.redirect_stderr(err):
+            cost_report.cmd_run(self.args())
+        self.assertIn("PRs skipped: see above", err.getvalue())
+        self.assertIn("tickets skipped: no repos", err.getvalue())
+
+    def test_gh_not_on_path_skips_prs_and_tickets_and_still_reports(self):
+        err, seen = io.StringIO(), {}
+
+        def report(a):
+            seen["prs"], seen["tickets"] = a.prs, a.tickets
+            return 0
+
+        def collect(a):
+            Path(a.out).write_text("{}"); return 0
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private", "github_login": "me", "github_org": "acme", "extra_repos": []}), \
+                unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                unittest.mock.patch.object(cost_report, "cmd_report", report), \
+                unittest.mock.patch.object(cost_report.subprocess, "run", side_effect=FileNotFoundError(2, "No such file or directory")), \
+                contextlib.redirect_stderr(err):
+            rc = cost_report.cmd_run(self.args())
+        self.assertEqual((rc, seen), (0, {"prs": None, "tickets": None}))
+        self.assertIn("PRs skipped: gh not on PATH", err.getvalue())
+
+    def test_default_workdir_is_removed_after_the_report_and_an_explicit_one_kept(self):
+        dirs = []
+
+        def collect(a):
+            dirs.append(Path(a.out).parent); Path(a.out).write_text("{}"); return 0
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private"}), \
+                unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                unittest.mock.patch.object(cost_report, "cmd_work_prs", side_effect=SystemExit("x")), \
+                unittest.mock.patch.object(cost_report, "cmd_work_tickets", side_effect=SystemExit("x")), \
+                unittest.mock.patch.object(cost_report, "cmd_report", return_value=0), contextlib.redirect_stderr(io.StringIO()):
+            cost_report.cmd_run(self.args())
+            with tempfile.TemporaryDirectory() as keep:
+                cost_report.cmd_run(self.args(workdir=keep))
+                self.assertTrue((Path(keep) / "daily.json").exists())
+        self.assertFalse(dirs[0].exists())
+
+    def test_a_bad_date_is_refused_before_anything_runs(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cost_report.cmd_run(ns(since="nope", until=None, csv=None, workdir=None)), 2)
 
 
 class SinceCutoffTs(unittest.TestCase):

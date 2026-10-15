@@ -34,6 +34,9 @@
 #   make -C $BATON/context-db mission-diff [OUT=<dir>]             # exit 0 when the built page is current, 1 when it changed or was never built
 #   make -C $BATON/context-db mission-open [OUT=<dir>]             # print the path of the built index.html (never starts a browser)
 #
+# Cost report (private mode: estimated from the local transcripts; org mode follows skills/cost-report/SKILL.md):
+#   make -C $BATON/context-db cost-report [SINCE=YYYY-MM-DD] [UNTIL=YYYY-MM-DD] [CSV=<export.csv>] [WORKDIR=<dir>]  # the default run: spend rows + PRs + tickets -> the Basis-first report on stdout
+#
 # Kit / config (env fact store .context/reference/env/):
 #   make -C $BATON/context-db kb ARGS="get slack.channel help"       # kb.py: get|set|rm|list|values|config|config-set|init|path|migrate|discover|stale
 #   make -C $BATON/context-db kb ARGS="set slack.channel foo C0… --from tool:slack_search_channels"
@@ -69,6 +72,8 @@ ENGINE  := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 BIN     := $(ENGINE)bin
 # CONTEXT defaults to `kit_profile.py context` — the engine's one content-root resolver (docs/layout.md).
 PY      := python3
+# `make -C` would print "Entering directory" on stdout, ahead of a report (cost-report) or a value (profile KEY=…).
+MAKEFLAGS += --no-print-directory
 # Evaluated once, not per reference. No inline comment here: make keeps the blanks before a `#`
 # in the value, and `.context  ` is not the store.
 ifeq ($(origin CONTEXT),undefined)
@@ -95,7 +100,7 @@ NOPROMPT_HOURS := $(or $(SESSION_ARCHIVE_NOPROMPT_HOURS),48)
 endif
 export SESSION_ARCHIVE_NOPROMPT_HOURS := $(NOPROMPT_HOURS)
 
-.PHONY: help new index verify find view archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check context-sync context-sync-status migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke mission-build mission-diff mission-open
+.PHONY: help new index verify find view archive test eval eval-check session-register session-touch session-end session-rename session-stats session-activity session-index session-archive kit-verify verify-skill ci profile kb sync-check context-sync context-sync-status migrate kit-health review-gate review-gate-tree review-evidence plugin-validate check-links shellcheck engine-cli-doc install-smoke mission-build mission-diff mission-open cost-report
 # An explicit `SESSION_ID=` (command line or shell environment) wins as-is; otherwise take the CURRENT, expanded
 # value of CLAUDE_CODE_SESSION_ID (`:=`, not `?=`/`=`, which would store the unexpanded reference text — `sq` below
 # reads SESSION_ID with $(value …), so a lazily-expanded default would leak the literal "$(CLAUDE_CODE_SESSION_ID)").
@@ -110,6 +115,11 @@ help:
 # make profile [KEY=dotted.key]  — the active environment, or one env-config value
 profile:
 	@$(PY) $(BIN)/kit_profile.py $(if $(KEY),get $(KEY),name)
+
+# make cost-report [SINCE=…] [UNTIL=…] [CSV=…] [WORKDIR=…]  — the cost-report skill's default run in one call (private mode;
+# org mode exits 2 and points at the SKILL, since the warehouse tool is not callable from here). SINCE defaults to 10 weeks back.
+cost-report:
+	@$(PY) $(ENGINE)../skills/cost-report/cost_report.py run $(if $(value SINCE),--since $(call sq,SINCE),) $(if $(value UNTIL),--until $(call sq,UNTIL),) $(if $(value CSV),--csv $(call sq,CSV),) $(if $(value WORKDIR),--workdir $(call sq,WORKDIR),)
 
 # make kb ARGS="…"  — the env fact store CLI (python3 bin/kb.py …)
 kb:

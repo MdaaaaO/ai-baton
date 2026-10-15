@@ -29,8 +29,9 @@ Spend is a LIST-PRICE ESTIMATE priced per API request by the model that served i
 3/3.75/0.3/15/6, Haiku 1/1.25/0.1/5/2, everything else (Opus, Fable/Mythos) at the Opus-class default
 15/18.75/1.5/75/30 $/Mtok (in/cache_write_5m/cache_read/out/cache_write_1h) — a cache write against
 the 1-hour TTL (`cache_creation.ephemeral_1h_input_tokens`) is billed at its own, higher rate, not
-the 5-minute one. Override the default with SESSION_STATS_PRICES="in,cw,cr,out[,cw_1h]"; the 1h
-rate defaults to 2x the input price when the list has only 4 numbers. Subagents are billed too: every Agent/fork child writes its
+the 5-minute one. The table lives in the env config as `cost.prices` (with a `priced_at` date; absent = the
+built-in table above); override the default row with SESSION_STATS_PRICES="in,cw,cr,out[,cw_1h]", which wins over the
+config; the 1h rate defaults to 2x the input price when the list has only 4 numbers. Subagents are billed too: every Agent/fork child writes its
 own transcript under <project>/<session-id>/subagents/*.jsonl, and those are summed into
 `subagents_cost` and `spend_total_usd_est` (main + subagents). Before 2026-09-22 the figure was
 main-session only; this session's review-runners alone cost ~3.4x the main prefix, so the total
@@ -73,7 +74,43 @@ MODEL_PRICES = (
 )
 
 
-def prices() -> tuple[float, float, float, float, float]:
+def _rates(raw) -> tuple[float, float, float, float, float] | None:
+    """`raw` as one price row — 4 or 5 numbers (a 4-number row gets the 1h cache-write rate at 2x input, the
+    ratio of the built-in table) — else None."""
+    if not isinstance(raw, (list, tuple)) or len(raw) not in (4, 5):
+        return None
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0 for x in raw):
+        return None
+    p = tuple(float(x) for x in raw)
+    return p if len(p) == 5 else p + (p[0] * 2,)  # type: ignore[return-value]
+
+
+@functools.lru_cache(maxsize=1)
+def config_prices() -> dict:
+    """The env config's `cost.prices` (`kit_profile.get`): `{"priced_at": "YYYY-MM-DD", "default": [in, cw, cr, out[, cw_1h]],
+    "models": {"<model-id substring>": [...]}}`. Absent or malformed parts are dropped (one stderr line per malformed
+    row), so the built-in table above stays the fallback for anything the config does not price:
+    `{"priced_at": str, "default": row | None, "models": [(substring, row), ...]}`. Memoised per process — a test
+    that changes the config calls `config_prices.cache_clear()`."""
+    raw = profile.get("cost.prices", {})
+    raw = raw if isinstance(raw, dict) else {}
+    default = _rates(raw.get("default"))
+    if raw.get("default") is not None and default is None:
+        print("session_stats: cost.prices.default is malformed (need 4 or 5 non-negative numbers) — dropped, built-in default row in use",
+              file=sys.stderr)
+    models = []
+    for k, v in (raw.get("models") if isinstance(raw.get("models"), dict) else {}).items():
+        if not k:
+            continue
+        if (r := _rates(v)) is None:
+            print(f"session_stats: cost.prices.models.{k} is malformed (need 4 or 5 non-negative numbers) — dropped", file=sys.stderr)
+            continue
+        models.append((str(k).lower(), r))
+    return {"priced_at": str(raw.get("priced_at") or ""), "default": default, "models": models}
+
+
+def _env_prices() -> tuple[float, float, float, float, float] | None:
+    """`SESSION_STATS_PRICES` as one price row, None when unset or unusable."""
     raw = os.environ.get("SESSION_STATS_PRICES", "")
     if raw:
         try:
@@ -84,7 +121,19 @@ def prices() -> tuple[float, float, float, float, float]:
                 return p + (p[0] * 2,)  # 1h cache-write rate not given: 2x input, same ratio as the default table
         except ValueError:
             pass
-    return DEFAULT_PRICES
+    return None
+
+
+def priced_at() -> str:
+    """The date the configured price table was last checked against the published list prices — `""` unless the
+    default row in use IS the config's (an env override, a malformed or absent config default: built-in or env numbers)."""
+    cfg = config_prices()
+    return cfg["priced_at"] if cfg["default"] and _env_prices() is None else ""
+
+
+def prices() -> tuple[float, float, float, float, float]:
+    """The default (Opus-class) row: `SESSION_STATS_PRICES` first, then `cost.prices.default`, then `DEFAULT_PRICES`."""
+    return _env_prices() or config_prices()["default"] or DEFAULT_PRICES
 
 
 SPLIT_THRESHOLD_DEFAULT = 150_000  # tokens: an avg prefix at/above this over the window is "fat"
@@ -114,7 +163,7 @@ def split_window() -> int:
 
 def price_for(model: str | None) -> tuple[float, float, float, float, float]:
     m = (model or "").lower()
-    for key, p in MODEL_PRICES:
+    for key, p in (*config_prices()["models"], *MODEL_PRICES):  # the config's rows win over the built-in ones
         if key in m:
             return p
     return prices()

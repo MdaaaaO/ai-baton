@@ -45,6 +45,11 @@ LOCAL_PATH_RE = re.compile(r"(?<![\w/])\.context/|\.worktrees/|/Users/|/home/", 
 # (`</script>`, `<br>`). `check_html` only ever runs this on the cards a build just composed (`new_ids`),
 # never a previously published one.
 PLACEHOLDER_TAIL_RE = re.compile(r"^\s*…\s*$|\s…\s*$|\bTBD\b|\bTODO\b")  # prose may still use "…" mid-sentence
+# a date range's separator: an en dash, or a hyphen set off by spaces (a bare hyphen is part of an ISO date, 2026-10-05)
+RANGE_SEP_RE = re.compile(r"\s+-\s+|\s*–\s*")
+# The placeholders `ledger-template.html` carries (and `load_page`/`refresh_masthead` fill): only these are "unfilled"
+# when left in a built page; any other `{{…}}` is a card's own text.
+PAGE_PLACEHOLDER_RE = re.compile(r"\{\{(?:TITLE|EYEBROW|REPORT_LINK|N|RANGE)\}\}")
 ANGLE_RE = re.compile(r"<[^<>]+>")
 COMPARISON_ANGLE_RE = re.compile(r"(?<=\s)[<>](?=\s)")  # a bare </> flanked by whitespace: a comparison
 GENERIC_TYPE_RE = re.compile(r"\w<[\w, ]+>")  # `Option<T>`, `List<int, str>` — a generic type, not a hint
@@ -217,8 +222,8 @@ def refresh_masthead(html: str, data: list[dict]) -> str:
     html = re.sub(r'(<p class="standfirst">)\S+( weekly updates)', rf"\g<1>{n}\g<2>", html)
     if data:
         first, last = data[0]["dates"], data[-1]["dates"]
-        start = re.sub(r"^\w{3}\s+", "", first.split("–")[0]).strip()
-        end = last.split("–")[-1].strip()
+        start = re.sub(r"^\w{3}\s+", "", RANGE_SEP_RE.split(first, maxsplit=1)[0]).strip()
+        end = RANGE_SEP_RE.split(last)[-1].strip()
         end = re.sub(r"^\w{3}\s+", "", end)
         rng = f"{start} – {end}"
         html = html.replace("{{RANGE}}", rng)
@@ -283,8 +288,9 @@ def check_html(html: str, new_ids: set[tuple[int, str]] | None = None) -> list[s
                     problems.append(f"{c['id']}: local path in a bullet — {b[:60]}…")
                 if check_placeholders and is_placeholder(b):
                     problems.append(f"{c['id']}: placeholder text in a bullet — {b[:60]}…")
-    if "{{" in html:
-        problems.append("unfilled {{placeholder}} left in the page")
+    left = sorted({m.group(0) for m in PAGE_PLACEHOLDER_RE.finditer(html)})
+    if left:
+        problems.append(f"unfilled {', '.join(left)} left in the page")
     return problems
 
 

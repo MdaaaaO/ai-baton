@@ -58,11 +58,13 @@ Stdlib only. The store is under kit_profile.context_root() (docs/layout.md's "Co
 """
 from __future__ import annotations
 import argparse
+import copy
 import datetime as dt
 import json
 import re
 import shlex
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -532,23 +534,44 @@ def drop_empty_section(system: str, kind: str) -> bool:
 
 
 # ── discovery manifests ─────────────────────────────────────────────────────────────────────
-def load_manifests() -> dict[str, dict]:
-    """{file stem: manifest} — the kit's `context-db/discovery/*.json`, overlaid by the store's `_discovery/*.json`
-    (same file name wins). A file that does not parse is kept as {'_error': …} so `--check` can report it."""
-    out: dict[str, dict] = {}
+def _manifest_signature() -> tuple[tuple[str, int, int, int], ...]:
+    """(path, mtime_ns, size, inode) of every manifest file `load_manifests` would read, kit dir then store overlay —
+    stats only, no file is opened. A rewrite (atomic or in place) changes at least one field, so it keys the cache."""
+    sig = []
     for d in (MANIFEST_DIR, ENV / "_discovery"):
         if not d.is_dir():
             continue
         for p in sorted(d.glob("*.json")):
             try:
-                m = json.loads(p.read_text(encoding="utf-8"))
-                if not isinstance(m, dict):
-                    m = {"_error": f"{p}: top level must be an object"}
-            except json.JSONDecodeError as e:
-                m = {"_error": f"{p}: invalid JSON — {e}"}
-            m["_file"] = str(p)
-            out[p.stem] = m
+                st = p.stat()
+            except OSError:
+                continue
+            sig.append((str(p), st.st_mtime_ns, st.st_size, st.st_ino))
+    return tuple(sig)
+
+
+@lru_cache(maxsize=8)
+def _read_manifests(sig: tuple[tuple[str, int, int, int], ...]) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for path, *_ in sig:
+        p = Path(path)
+        try:
+            m = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(m, dict):
+                m = {"_error": f"{p}: top level must be an object"}
+        except json.JSONDecodeError as e:
+            m = {"_error": f"{p}: invalid JSON — {e}"}
+        m["_file"] = str(p)
+        out[p.stem] = m
     return out
+
+
+def load_manifests() -> dict[str, dict]:
+    """{file stem: manifest} — the kit's `context-db/discovery/*.json`, overlaid by the store's `_discovery/*.json`
+    (same file name wins). A file that does not parse is kept as {'_error': …} so `--check` can report it.
+    Each file is read once per (path, mtime, size, inode): `discover --all` calls this per row, and an edited or
+    replaced manifest is read again on the next call. The caller gets its own copy."""
+    return copy.deepcopy(_read_manifests(_manifest_signature()))
 
 
 def validate_manifests() -> list[str]:
