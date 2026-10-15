@@ -167,7 +167,7 @@ for r in ${REPOS[@]+"${REPOS[@]}"}; do  # bash 3.2 (macOS): an empty array under
   rows=$(jq -c --arg r "$r" --arg me "$ME" --arg since "$since" --argjson bots "$BOTS" --argjson led "$LEDGER_JSON" '
     .[] | select(.author.login!=$me)
     | . as $p | .author.login as $a | ((.author.is_bot // false) or (($bots|index($a))!=null)) as $isbot
-    | ($led | map(select(.repo==$r and .pr==$p.number and .head==$p.headRefOid and (.status|IN("skipped","shadow_approve","auto_approved","shadow_comment")))) | length) as $term
+    | ($led | map(select(.repo==$r and .pr==$p.number and .head==$p.headRefOid and (.status|IN("skipped","shadow_approve","auto_approved","shadow_comment","auto_approved_clean")))) | length) as $term
     | {key: "\($r)#\(.number)", src: "sweep", updated: .updatedAt, author: $a, bot: $isbot,
        drop: (if $isbot then "bot" elif .updatedAt < $since then "stale" elif $term>0 then "done" else "" end)}' <<<"$RESP") || { FAILS=$((FAILS+1)); echo "FAIL prefilter $r: jq error on pr list output" >> "$ERR"; continue; }
   pre_bot=$((pre_bot + $(grep -c '"drop":"bot"' <<<"$rows" || true)))
@@ -231,17 +231,17 @@ while IFS= read -r row; do
   # ledger: every status ever recorded for THIS head (order-independent — no grep on serialised key order)
   lset=$(jq -c --arg repo "$repo" --argjson pr "$num" --arg h "$head" '[.[] | select(.repo==$repo and .pr==$pr and .head==$h)]' <<<"$LEDGER_JSON")
   has(){ jq -e --arg s "$1" 'map(.status) | index($s)' >/dev/null <<<"$lset"; }
-  lstatus=$(jq -r 'map(.status) | (if index("reviewed") then "reviewed" elif index("replied") then "replied" elif index("skipped") then "skipped" elif index("auto_approved") then "auto_approved" elif index("shadow_approve") then "shadow_approve" elif index("shadow_fallback") then "shadow_fallback" elif index("held") then "held" elif index("shadow_comment") then "shadow_comment" elif index("surfaced") then "surfaced" else "" end)' <<<"$lset")
+  lstatus=$(jq -r 'map(.status) | (if index("reviewed") then "reviewed" elif index("replied") then "replied" elif index("skipped") then "skipped" elif index("auto_approved") then "auto_approved" elif index("auto_approved_clean") then "auto_approved_clean" elif index("shadow_approve") then "shadow_approve" elif index("shadow_approve_clean") then "shadow_approve_clean" elif index("shadow_fallback") then "shadow_fallback" elif index("held") then "held" elif index("shadow_comment") then "shadow_comment" elif index("surfaced") then "surfaced" else "" end)' <<<"$lset")
   if [ "$my_head" = "$head" ] || has reviewed || has auto_commented; then
     vstate=$(jq -r '.state // ""' <<<"$mine_cur")
     if [ "$(jq -r .mine <<<"$threads")" != "0" ] && [ "$(jq -r .mine <<<"$threads")" != "null" ]; then kind=follow_up
-    elif has skipped || has shadow_approve || has auto_approved || has shadow_comment; then dropped_done=$((dropped_done+1)); continue
+    elif has skipped || has shadow_approve || has auto_approved || has shadow_comment || has auto_approved_clean; then dropped_done=$((dropped_done+1)); continue
     elif [ "$vstate" = APPROVED ] || [ "$vstate" = CHANGES_REQUESTED ]; then kind="done"   # our verdict stands on this head: watched while the PR is open
     elif { has reviewed || has auto_commented; } && ! jq -e '[.[] | select(.status=="surfaced" and .kind=="done")] | length > 0' >/dev/null <<<"$lset"; then kind="done"   # a review the kit posted: reported once
     else dropped_done=$((dropped_done+1)); continue; fi
   elif [ -n "$my_head" ]; then kind=re_review
   elif has skipped; then dropped_skip=$((dropped_skip+1)); continue
-  elif has shadow_approve || has auto_approved || has shadow_comment; then dropped_done=$((dropped_done+1)); continue   # shadow_fallback stays: it is an ordinary row; a `held` row stays too (interactive pr-review still needs it)
+  elif has shadow_approve || has auto_approved || has shadow_comment || has auto_approved_clean; then dropped_done=$((dropped_done+1)); continue   # shadow_fallback stays: it is an ordinary row; a `held` row stays too (interactive pr-review still needs it); shadow_approve_clean alone is not done either — only the COMMENT posted beside it (auto_commented) is
   else kind=new; fi
   if [ "$deg" = '[]' ] && [ "$approved" -gt 0 ] && [ "$src" != "direct" ] && [ "$kind" = "new" ]; then dropped_approved=$((dropped_approved+1)); continue; fi
   surfaced=$(jq -r --arg k "$kind" '[.[] | select(.status=="surfaced" and .kind==$k)] | length > 0' <<<"$lset")

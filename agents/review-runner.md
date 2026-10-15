@@ -2,7 +2,7 @@
 name: review-runner
 description: "Opus worker for pr-review steps 1-4 (snapshot, trap KB, review pass, verification) plus the modelling-PR checks: writes $CTX/triage.json, returns only the overview block. Use when pr-review spawns a per-PR runner; never posts. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "17"
+  version: "18"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "tracker.mcp_tools.search"
@@ -114,7 +114,9 @@ so you spend them on judgment, not on fetching.
    STOP → WARN → NIT, file order within a severity, `evidence` mandatory (what was run/read and what it
    showed), `comment` = the exact inline text proposed for posting (`$BATON/skills/pr-review/reference/
    review-writing.md` if you need the voice). `path`/`line` must be a line present in `diffs/<path>.patch`.
-   Also `$CTX/traps.json` (`[{trap, result: hit|n/a|unverified}]`) and, if any, `$CTX/ff.json`.
+   Also `$CTX/traps.json` (`[{trap, result: hit|n/a|unverified}]`), `$CTX/ff.json` if any, and `$CTX/sheet.json`
+   `{repo, pr, head, recommend, needs, unverified_traps, demoted}` — repo/pr/head copied from `manifest.json`,
+   `demoted` = lens claims you made body questions; the unattended approve gate refuses a stale or missing one.
    **Explainability** (`scope.md`): compare step 1's plan against `manifest.json.pr_meta.body` — every
    question the plan raises answered by a picture or table, the plan itself SKIP, or no body diagram
    contradicts the diff → `covered`; else `gap <question>[, <question>]`, one short question per missing

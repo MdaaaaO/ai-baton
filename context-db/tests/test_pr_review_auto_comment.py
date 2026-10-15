@@ -142,11 +142,12 @@ class AutoCommentSubmit(unittest.TestCase):
         self.assertEqual(r.returncode, 8, r.stdout + r.stderr)
         self.assertIn("not 'live'", r.stderr)
 
-    # --- --auto-comment is COMMENT-only: never APPROVE/REQUEST_CHANGES, whatever mode says ---
+    # --- --auto-comment never posts REQUEST_CHANGES, whatever mode says (APPROVE is the clean-sheet gate,
+    # tested in test_pr_review_approve_on_clean.py) ---
 
     def test_refuses_a_non_comment_event(self):
         self.write_config(auto_comment_mode="live")
-        req = self.write_request("req.json", {"event": "APPROVE", "body": "lgtm", "comments": []})
+        req = self.write_request("req.json", {"event": "REQUEST_CHANGES", "body": "no", "comments": []})
         r = subprocess.run(["bash", str(SUBMIT), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
                              "--request", req, "--auto-comment"], env=self.base_env(),
                             capture_output=True, text=True, timeout=30)
@@ -250,7 +251,7 @@ class HeldLedgerStatus(unittest.TestCase):
                       "re-flagged `C` and get a new runner spawned on every tick")
 
     def test_logging_schema_lists_held(self):
-        self.assertIn('"auto_commented"|"shadow_comment"|"held"', self.runner,
+        self.assertIn('"shadow_comment"|"shadow_approve_clean"|"held"', self.runner,
                       "runner.md § Logging does not list `held` among the ledger statuses this path writes")
 
 

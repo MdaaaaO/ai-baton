@@ -2,7 +2,7 @@
 name: pr-scan
 description: "Forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts, stale, already-reviewed heads. Returns a <=8-row brief or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
 metadata:
-  version: "21"
+  version: "22"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "github.display_names"
@@ -51,7 +51,7 @@ main session directly (`context: fork` means only this fork ever reads anything 
    threshold (`deep_lines` in `config.json`, 600 by default) — a `pr-review --deep` candidate. `A` = passed the trivial-PR auto-approve gate
    (`.auto.eligible` in `queue.json`; the summary line carries `auto=<n> auto_mode=<mode>`). `C` = eligible
    for the unattended auto-COMMENT path (`.auto_comment.eligible` in `queue.json`; the summary line carries
-   `auto_comment=<n> auto_comment_mode=<mode>`; § Unattended auto-COMMENT below — off by default). `HUMANS` = last state per human reviewer
+   `auto_comment=<n> auto_comment_mode=<mode>`; § Unattended auto-COMMENT below — off by default; a head approved under `auto_comment.approve_on_clean` — ledger `auto_approved_clean` — leaves the queue and counts in `done=`, a later push on it comes back as `re_review`; a `shadow_approve_clean` row alone is not done — its head leaves only through the `auto_commented` row of the COMMENT shadow posted beside it). `HUMANS` = last state per human reviewer
    (`APP`, `CHA`, `COM`). `THREADS/BOT` = unresolved threads / review-bot (`github.review_bot`) Assessment on
    this head (`🟢`/`🟡`/`🔴`, `-` if none or no bot configured). `STATE` = `.state_label` from `queue.json`
    (`row-state.py`, no `gh` call) — the row's state from its kind, the user's own review on this head and the

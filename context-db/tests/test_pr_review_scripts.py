@@ -137,6 +137,26 @@ class FetchContextStub(unittest.TestCase):
                             env=env, capture_output=True, text=True, timeout=60)
         return r, out
 
+    # --- #505: the runner's sheet is bound to a head — a re-fetch on a new head must not leave the old one
+    # beside the new bundle, or the unattended approve gate could read an earlier head's clean sheet ---
+
+    def test_a_new_head_removes_the_stale_runner_sheet(self):
+        files = [{"filename": "a.txt", "status": "added", "changes": 1, "additions": 1, "deletions": 0}]
+        sheet = ("triage.json", "sheet.json", "traps.json", "ff.json", "impact.json")
+        r, out = self.run_fetch(files)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for name in sheet:
+            (out / name).write_text("[]")
+        r, out = self.run_fetch(files)  # same head: the sheet stays
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(all((out / n).exists() for n in sheet))
+        moved = json.loads(PR_JSON)
+        moved["head"]["sha"] = "c" * 40
+        r, out = self.run_fetch(files, extra_env={"STUB_PR_JSON": json.dumps(moved)})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual([n for n in sheet if (out / n).exists()], [])
+        self.assertIn("removed the stale runner sheet", r.stderr)
+
     # --- #159: a filename word with regex metacharacters must not break (or silently truncate) the KB grep ---
 
     def test_kb_traps_matches_a_word_with_unbalanced_regex_metacharacters(self):
