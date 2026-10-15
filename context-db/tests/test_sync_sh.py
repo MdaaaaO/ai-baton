@@ -1243,11 +1243,13 @@ class SyncCheckStoreBehind(unittest.TestCase):
         (self.kit / "context-db" / "bin" / "kb.py").write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
         self.rc_file = self.tmp / "adopt-check-rc"
         self.argv_file = self.tmp / "adopt-check-argv"
+        self.out_file = self.tmp / "adopt-check-out"
         (self.kit / "context-db" / "bin" / "ctx_adapter.py").write_text(
             "#!/usr/bin/env python3\n"
             "import os, sys\n"
-            f"p = {str(self.rc_file)!r}\n"
+            f"p, o = {str(self.rc_file)!r}, {str(self.out_file)!r}\n"
             f"open({str(self.argv_file)!r}, 'w').write(' '.join(sys.argv[1:]))\n"
+            "sys.stdout.write(open(o).read() if os.path.exists(o) else '')\n"
             "sys.exit(int(open(p).read().strip()) if os.path.exists(p) else 0)\n"
         )
         self.env = _env(self.tmp)
@@ -1268,6 +1270,33 @@ class SyncCheckStoreBehind(unittest.TestCase):
         self.assertEqual(warned.count("content store"), 1)
         self.assertIn("content store predates the kit's settings/types", warned)
         self.assertIn("ctx_adapter.py adopt`", warned)
+
+    def test_rc_7_is_one_drift_line_naming_adopt_and_replace(self):
+        """Exit 7 (the store's `resolve` rule drifted from the derived one) gets its own line and remedy — a plain
+        `adopt` loops when the store's `ctx-store.json` was edited here, so the line names `--replace` too."""
+        self.set_adopt_check_rc(7)
+        self.out_file.write_text("drift: resolve.fields is null in the store, [\"key\"] from the kit — `python3 "
+                                 "$BATON/context-db/bin/ctx_adapter.py adopt`\n")
+        warned = self.check()
+        self.assertEqual(warned.count("content store"), 1, warned)
+        self.assertIn("content store's resolve rule drifted from the derived one", warned)
+        self.assertIn("ctx_adapter.py adopt` rewrites it", warned)
+        self.assertIn("`adopt --replace` when the store's ctx-store.json was edited here", warned)
+        self.assertNotIn("predates", warned)  # no `behind:` line on stdout: drifted only
+
+    def test_rc_7_with_a_behind_line_names_both(self):
+        """Drift wins the exit code over behind, so a store that is both (every store adopted before the `key`
+        field convention, once the kit's settings digest moves) answers 7 — the `behind:` line on stdout must
+        still reach the user, or the store reads as current except for its resolve rule."""
+        self.set_adopt_check_rc(7)
+        self.out_file.write_text("behind: the store's settings or types predate the kit's — `python3 "
+                                 "$BATON/context-db/bin/ctx_adapter.py adopt`\n"
+                                 "drift: resolve.fields is null in the store, [\"key\"] from the kit — `python3 "
+                                 "$BATON/context-db/bin/ctx_adapter.py adopt`\n")
+        warned = self.check()
+        self.assertEqual(warned.count("content store"), 2, warned)
+        behind = warned.index("content store predates the kit's settings/types")
+        self.assertLess(behind, warned.index("content store's resolve rule drifted"))  # the adapter's own order
 
     def test_other_exit_codes_are_not_this_warn(self):
         # 1 (not installed), 3 (findings), 4 (not adopted), 5 (differs) are kit-health's (§ 5) to report —

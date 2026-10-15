@@ -5,7 +5,8 @@
 # Each *.md doc carries YAML frontmatter (its "row"); INDEX.md is the generated catalog.
 # These targets create, index, verify, and find docs.
 #
-#   make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
+#   make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic" [KEY=KEY-123]
+#                         (KEY= fills an epic's `key:` frontmatter, the field `ctx resolve` matches first)
 #   make -C $BATON/context-db index          # regenerate INDEX.md (the PostToolUse hook runs it after every change)
 #   make -C $BATON/context-db verify         # validate frontmatter + INDEX freshness (CI-style gate)
 #   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
@@ -149,9 +150,10 @@ engine-cli-doc:
 # TITLE= is often a ticket or PR title: each value reaches new.sh unexpanded and single-quoted (`$(call sq,VAR)`),
 # and `unexport` keeps make from expanding it into the recipe environment, so `$(…)`, quotes and backticks are data (#139).
 override sq = '$(subst ','\'',$(value $(1)))'
-unexport TYPE DOMAIN SLUG TITLE
+# KEY= is read from the command line only (a stray $KEY in the shell never fills an epic's `key:`).
+unexport TYPE DOMAIN SLUG TITLE KEY
 new:
-	@dest=$$(CONTEXT_ROOT="$(CONTEXT)" TYPE=$(call sq,TYPE) DOMAIN=$(call sq,DOMAIN) SLUG=$(call sq,SLUG) TITLE=$(call sq,TITLE) sh $(BIN)/new.sh) && \
+	@dest=$$(CONTEXT_ROOT="$(CONTEXT)" TYPE=$(call sq,TYPE) DOMAIN=$(call sq,DOMAIN) SLUG=$(call sq,SLUG) TITLE=$(call sq,TITLE) KEY=$(if $(filter command line,$(origin KEY)),$(call sq,KEY),'') sh $(BIN)/new.sh) && \
 		echo "created $$dest" && \
 		$(MAKE) --no-print-directory -f $(lastword $(MAKEFILE_LIST)) index
 

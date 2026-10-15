@@ -9,6 +9,7 @@
     "domain": {
       "required": true
     },
+    "key": {},
     "status": {
       "required": true,
       "enum": [

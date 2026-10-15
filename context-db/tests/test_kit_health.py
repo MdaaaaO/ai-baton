@@ -901,6 +901,32 @@ class CtxStoreCheck(unittest.TestCase):
         self.assertIn("behind", line)
         self.assertIn("ctx_adapter.py adopt`", line)
 
+    DRIFT = ("drift: resolve.key_regex is \"x\" in the store, \"y\" from the env config — `python3 "
+             "$BATON/context-db/bin/ctx_adapter.py adopt` (`--replace` when this store's ctx-store.json was edited here)")
+
+    def test_a_drifted_resolve_rule_is_warn_quoting_the_drift_and_naming_replace(self):
+        # exit 7: not `behind` — a plain `adopt` keeps an edited ctx-store.json, so the advice must name --replace
+        level, line = self.check(7, "store /x: ok: 3 docs checked\n" + self.DRIFT)
+        self.assertEqual(level, "WARN")
+        self.assertIn('drift: resolve.key_regex is "x" in the store, "y" from the env config', line)
+        self.assertIn("ctx_adapter.py adopt --replace`", line)
+        self.assertNotIn("store behind", line)
+
+    def test_drift_next_to_behind_warns_for_both(self):
+        r = self.run_ctx_store(7, "store /x: ok\nbehind: the store's settings or types predate the kit's — `x adopt`\n"
+                                  + self.DRIFT)
+        self.assertEqual(r.counts["WARN"], 2)
+        self.assertIn("resolve rule drifted", r.lines[-2])
+        self.assertIn("store behind", r.lines[-1])
+
+    def test_findings_with_a_drift_line_forward_the_drift_too(self):
+        r = self.run_ctx_store(3, "store /x: …\nfinding: SCHEMA_VIOLATION d/bad status: schema violation\n" + self.DRIFT)
+        self.assertEqual(r.counts["WARN"], 2)
+        self.assertIn("1 finding(s)", r.lines[-2])
+        self.assertIn("resolve rule drifted", r.lines[-1])
+        self.assertIn('drift: resolve.key_regex is "x"', r.lines[-1])
+        self.assertIn("adopt --replace", r.lines[-1])
+
     def test_a_kept_file_is_ok_naming_it_not_a_warn(self):
         # exit 5: adopted, every doc validates, the recorded digest matches — but `ctx init --upgrade` kept a
         # locally edited store file at the last full adopt; that is a deliberate local edit, not drift to warn on
@@ -952,6 +978,8 @@ class SecKitSyncDedup(unittest.TestCase):
     CONTENT_STORE_LINE = ("WARN kit sync: content store predates the kit's settings/types — `python3 "
                            "$BATON/context-db/bin/ctx_adapter.py adopt` (records a fresh digest, brings the "
                            "store's settings/types forward)")
+    DRIFT_LINE = ("WARN kit sync: content store's resolve rule drifted from the derived one — `ctx resolve <key>` "
+                  "misses the context doc: `python3 $BATON/context-db/bin/ctx_adapter.py adopt` rewrites it")
     OTHER_LINE = "WARN kit sync: 2 local commit(s) on main that will never be pushed — main is PR-only"
 
     def run_sec_kit(self, sync_err: str, adopt_check: tuple[int, str, str] | None = None) -> "Report":
@@ -997,6 +1025,23 @@ class SecKitSyncDedup(unittest.TestCase):
         warn_lines = [ln for ln in r.lines if ln.startswith("- ⚠️")]
         self.assertEqual(len(warn_lines), 1)
         self.assertIn("store behind", warn_lines[0])
+
+    def test_the_drift_line_alone_adds_no_warn(self):
+        r = self.run_sec_kit(self.DRIFT_LINE)
+        self.assertEqual(r.counts["WARN"], 0)
+
+    def test_a_behind_and_drifted_store_yields_exactly_both_warns_once(self):
+        """Exit 7 with a `behind:` line: sync-check prints both lines (§ 1 drops them), § 5 adds both WARNs."""
+        r = self.run_sec_kit(self.CONTENT_STORE_LINE + "\n" + self.DRIFT_LINE, adopt_check=(
+            7, "behind: the store's settings or types predate the kit's — "
+               "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`\n"
+               "drift: resolve.fields is null in the store, [\"key\"] from the kit — "
+               "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`", ""))
+        warn_lines = [ln for ln in r.lines if ln.startswith("- ⚠️")]
+        self.assertEqual(r.counts["WARN"], 2, warn_lines)
+        self.assertTrue(any("store behind" in ln for ln in warn_lines))
+        self.assertTrue(any("store resolve rule drifted" in ln for ln in warn_lines))
+        self.assertFalse(any("content store" in ln for ln in r.lines))
 
 
 GOOD_SHA = "ab" * 32  # a made-up 64-hex wheel sha256, not a real ctx-store wheel's — only its shape matters here

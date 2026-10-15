@@ -1,6 +1,7 @@
 #!/bin/sh
 # new.sh — scaffold a new context doc from a template, with frontmatter filled in.
-# Called by `make -C .claude/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug> [TITLE="..."]`.
+# Called by `make -C .claude/context-db new TYPE=<type> DOMAIN=<domain> SLUG=<slug> [TITLE="..."] [KEY=<tracker key>]`.
+# KEY fills the epic template's `key:` frontmatter field (the one `ctx resolve` matches first); empty leaves it blank.
 #
 # The doc is placed under the CONTENT root (`kit_profile.py context`: CONTEXT_ROOT, else docs/layout.md's default);
 # templates come from the env store's overrides first (.context/reference/env/_templates/<type>.md,
@@ -22,6 +23,7 @@ TYPE="${TYPE:?set TYPE= (epic|reference|repo|meeting|1on1|oncall|self-assessment
 SLUG="${SLUG:?set SLUG= (kebab-case file slug, e.g. key-123-foo or 2026-09-11-team-sync)}"
 DOMAIN="${DOMAIN:-}"
 TITLE="${TITLE:-$SLUG}"
+KEY="${KEY:-}"
 TODAY="$(date +%F)"
 
 # SLUG and DOMAIN become path components: one lower-case name each, never `/`, `..` or a leading dot (#139)
@@ -71,6 +73,8 @@ sed -e "s|{{TITLE}}|$(sed_esc "$TITLE")|g" \
     -e "s|{{DOMAIN}}|$(sed_esc "$DOMAIN")|g" \
     -e "s|{{DATE}}|$TODAY|g" \
     -e "s|{{SLUG}}|$(sed_esc "$SLUG")|g" \
+    -e "s|{{KEY}}|$(sed_esc "$KEY")|g" \
+    -e 's|^key: $|key:|' \
     "$TMPL" > "$DEST"
 
 echo "$DEST"
