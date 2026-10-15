@@ -901,6 +901,32 @@ class CtxStoreCheck(unittest.TestCase):
         self.assertIn("behind", line)
         self.assertIn("ctx_adapter.py adopt`", line)
 
+    DRIFT = ("drift: resolve.key_regex is \"x\" in the store, \"y\" from the env config — `python3 "
+             "$BATON/context-db/bin/ctx_adapter.py adopt` (`--replace` when this store's ctx-store.json was edited here)")
+
+    def test_a_drifted_resolve_rule_is_warn_quoting_the_drift_and_naming_replace(self):
+        # exit 7: not `behind` — a plain `adopt` keeps an edited ctx-store.json, so the advice must name --replace
+        level, line = self.check(7, "store /x: ok: 3 docs checked\n" + self.DRIFT)
+        self.assertEqual(level, "WARN")
+        self.assertIn('drift: resolve.key_regex is "x" in the store, "y" from the env config', line)
+        self.assertIn("ctx_adapter.py adopt --replace`", line)
+        self.assertNotIn("store behind", line)
+
+    def test_drift_next_to_behind_warns_for_both(self):
+        r = self.run_ctx_store(7, "store /x: ok\nbehind: the store's settings or types predate the kit's — `x adopt`\n"
+                                  + self.DRIFT)
+        self.assertEqual(r.counts["WARN"], 2)
+        self.assertIn("resolve rule drifted", r.lines[-2])
+        self.assertIn("store behind", r.lines[-1])
+
+    def test_findings_with_a_drift_line_forward_the_drift_too(self):
+        r = self.run_ctx_store(3, "store /x: …\nfinding: SCHEMA_VIOLATION d/bad status: schema violation\n" + self.DRIFT)
+        self.assertEqual(r.counts["WARN"], 2)
+        self.assertIn("1 finding(s)", r.lines[-2])
+        self.assertIn("resolve rule drifted", r.lines[-1])
+        self.assertIn('drift: resolve.key_regex is "x"', r.lines[-1])
+        self.assertIn("adopt --replace", r.lines[-1])
+
     def test_a_kept_file_is_ok_naming_it_not_a_warn(self):
         # exit 5: adopted, every doc validates, the recorded digest matches — but `ctx init --upgrade` kept a
         # locally edited store file at the last full adopt; that is a deliberate local edit, not drift to warn on

@@ -1828,6 +1828,17 @@ def store_behind_warn(adapter: str) -> str:
             f"(records a fresh digest, brings the store's settings/types forward)")
 
 
+def store_drift_warn(adapter: str, out: str) -> str:
+    """The WARN text for a store whose own `ctx-store.json` carries a `resolve` rule other than the one the kit
+    derives (`adopt --check` exit 7, or `drift:` lines next to exit 3): `ctx resolve <key>` answers NO_SUCH_DOC
+    there. Quotes the adapter's `drift:` lines (their own trailing advice cut) and names the remedy — a plain
+    `adopt` is not it when the store's `ctx-store.json` was edited here, since `init --upgrade` keeps that file."""
+    drift = [ln.split(" — `", 1)[0] for ln in out.splitlines() if ln.startswith("drift: ")]
+    return (f"store resolve rule drifted: `ctx resolve <key>` misses the context doc —\n```\n"
+            + "\n".join(drift[:10]) + f"\n```\n`{adapter} adopt` rewrites the rule; when the store's `ctx-store.json` was "
+            f"kept (edited here), `{adapter} adopt --replace` takes the derived one")
+
+
 def ctx_store(r: Report) -> None:
     """Is `.context/` an adopted ctx store? Read-only (`ctx_adapter.py adopt --check`): the hooks validate, audit and
     deny direct writes only on an adopted store, so a store that is not is a finding with the one-time fix."""
@@ -1842,6 +1853,10 @@ def ctx_store(r: Report) -> None:
     elif rc == 4:
         r.add(WARN, "engine", f"store not adopted: `.context/` is not a ctx store, so the hooks neither validate nor route "
                               f"writes through ctx — `{adapter} adopt` (`ctx init`; a store file you changed is kept)")
+    elif rc == 7:
+        r.add(WARN, "engine", store_drift_warn(adapter, out))
+        if any(ln.startswith("behind: ") for ln in out.splitlines()):
+            r.add(WARN, "engine", store_behind_warn(adapter))  # drift wins the exit code; the store can be behind too
     elif rc == 6:
         r.add(WARN, "engine", store_behind_warn(adapter))
     elif rc == 5:
@@ -1855,6 +1870,8 @@ def ctx_store(r: Report) -> None:
                               + "\n".join(found[:10]) + "\n```")
         if any(ln.startswith("behind: ") for ln in out.splitlines()):
             r.add(WARN, "engine", store_behind_warn(adapter))  # findings (exit 3) must not hide a store that is also behind
+        if any(ln.startswith("drift: ") for ln in out.splitlines()):
+            r.add(WARN, "engine", store_drift_warn(adapter, out))  # ... nor one whose resolve rule drifted
     else:
         r.add(ERR, "engine", f"`ctx_adapter.py adopt --check` failed: {both(out, err)[-300:]}")
 

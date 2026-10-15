@@ -35,15 +35,18 @@ Resolve rule — the `resolve` block of the `ctx-store.json` `adopt` hands `init
 shipped verbatim (`_resolve_rule`), so `ctx resolve <key>` finds the context doc wherever the kit runs: `key_regex` is
 the env config's `tracker.key_regex` on a `jira` tracker (a `github` or `none` tracker keeps the shipped
 `<owner>/<repo>#<n>` shape — its `tracker.key_regex` reads a bare `#<n>` and cannot match the repo-qualified key a
-session's `epic:` field carries); `section` is the first `## ` heading of the epic template (the env store's
-`_templates/epic.md` override, else the engine's); `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
+session's `epic:` field carries); `section` is the `Tracker & links` heading of the epic template (the env store's
+`_templates/epic.md` override, else the engine's; picked by name, case-insensitive, `and` for `&` allowed — a template
+without it keeps `Tracker & links`, with one stderr note); `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
 match wins; the section match is the fallback for a doc without one — it collides as soon as a sub-epic doc links its
 parent there). `adopt --check` (with or without `--no-validate`) compares the store's own `ctx-store.json` with that
 rule and prints one line per setting that differs, read-only:
-  drift: resolve.<key_regex|section|fields> is <store value> in the store, <derived value> from the env config —
+  drift: resolve.<key_regex|section|fields> is <store value> in the store, <derived value> from <the env config|
+  the epic template|the kit> —
   `python3 $BATON/context-db/bin/ctx_adapter.py adopt` (`--replace` when this store's ctx-store.json was edited here)
-It counts as `behind` (exit 6); an `adopt` — `--replace` for a `ctx-store.json` edited here, which `init` keeps —
-writes the derived rule and clears it. A store whose `ctx-store.json` is missing or unreadable reports no drift.
+It has its own exit, 7 — not `behind`'s 6, whose remedy (a plain `adopt`) leaves a `ctx-store.json` edited here
+alone and would loop; an `adopt` — `--replace` for a `ctx-store.json` edited here, which `init` keeps — writes the
+derived rule and clears it. A store whose `ctx-store.json` is missing or unreadable reports no drift.
 
 Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
 — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes
@@ -140,15 +143,17 @@ Exit codes: 0 ok (one line `ahead: …` when `--check` finds the store last adop
 1 not installed · 2 usage or I/O error, one stderr line (a plain `adopt` also refuses this way, leaving the store
 untouched, when the record names a kit version newer than this one's — `--replace` overrides it; `--no-validate`
 without `--check` is the same usage error) · 3 adopted, with validation findings — a store that is also behind
-still prints its own `behind:` line alongside the findings, same exit code · 4 not adopted (`adopt --check`;
+still prints its own `behind:` and `drift:` lines alongside the findings, same exit code · 4 not adopted (`adopt --check`;
 `--no-validate` answers this from a `ctx-store.json` file test at the content root rather than asking ctx) · 5
 adopted, but a store file differs from the kit's — kept, one `differs:` line per file (`adopt --replace` takes the
 kit's); `--check` reports the same files from its own record rather than re-running `ctx init` · 6 adopted, but the
-store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap,
-or its `resolve` rule differs from the env config's (a `drift:` line)
+store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap
 (`adopt --check` only — a plain `adopt` records a fresh one; `--no-validate` skips `ctx validate` entirely and only
-compares the record, so findings cannot occur there — 0/5/6 still answer, and it never touches ctx). Precedence
-when more than one would apply: 3 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.
+compares the record, so findings cannot occur there — 0/5/6/7 still answer, and it never touches ctx) · 7 adopted,
+but the store's own `ctx-store.json` carries a `resolve` rule other than the one derived here, one `drift:` line per
+setting (`adopt --check` only; a store that is also behind prints both line kinds, `behind:` first, and answers 7;
+the remedy is `adopt`, or `adopt --replace` when that file was edited here and `init` kept it). Precedence
+when more than one would apply: 3 over 7 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.
 A hook always exits 0. Stdlib only.
 """
 from __future__ import annotations
@@ -475,6 +480,22 @@ def _epic_template_text() -> str:
         return ""
 
 
+TRACKER_SECTION = "Tracker & links"  # the shipped title of the epic template's tracker-links section
+
+
+def _tracker_section(headings: list[str]) -> str:
+    """The first `## ` heading that reads `Tracker & links` (case-insensitive; `and` for `&` allowed), as the
+    template spells it. None matches — an env template that dropped or renamed it — falls back to the shipped
+    title, never to whichever heading comes first, with one stderr note: `ctx resolve` then matches a section
+    the docs made from that template do not carry, which is the template's fault to fix."""
+    for h in headings:
+        if re.sub(r"\s+", " ", h.strip()).lower() in ("tracker & links", "tracker and links"):
+            return h.strip()
+    print(f"ctx_adapter.py: the epic template has no `## {TRACKER_SECTION}` heading — resolve.section stays "
+          f"`{TRACKER_SECTION}`; add the heading to the template", file=sys.stderr)
+    return TRACKER_SECTION
+
+
 def _resolve_rule() -> dict:
     """The `resolve` rule this store should carry: the kit's shipped one (`STORE_DATA/ctx-store.json`) with
     what the environment knows laid over it, so `ctx resolve <key>` finds the context doc in every environment.
@@ -482,8 +503,9 @@ def _resolve_rule() -> dict:
       it is a valid regex. A `github` tracker keeps the shipped `<owner>/<repo>#<n>` shape: its `tracker.key_regex`
       reads the bare `#<n>` out of free text and cannot match the repo-qualified key a session's `epic:` field and a
       context doc's links carry; `none` has no keys to derive from.
-    - `section`: the first `## ` heading of the epic template (`_epic_template_text`), where a doc lists its
-      tracker links; the fallback match, since a doc linking its parent there matches the parent's key too.
+    - `section`: the epic template's (`_epic_template_text`) `Tracker & links` heading (`_tracker_section`), where
+      a doc lists its tracker links; the fallback match, since a doc linking its parent there matches the
+      parent's key too. Picked by name, never by position: a template that dropped it keeps the shipped title.
     - `fields`: the shipped `["key"]` — a field match wins over a section match, and an epic doc's own `key:`
       frontmatter names exactly one doc per key."""
     sys.path.insert(0, str(BIN))
@@ -497,9 +519,7 @@ def _resolve_rule() -> dict:
             rule["key_regex"] = rx
         except re.error:
             pass  # a broken env regex must not break the store: the shipped shape stays, and kit-health names the config
-    headings = type_template.heading_list(_epic_template_text())
-    if headings:
-        rule["section"] = headings[0]
+    rule["section"] = _tracker_section(type_template.heading_list(_epic_template_text()))
     return rule
 
 
@@ -521,11 +541,16 @@ def _resolve_drift(root: Path) -> list[str]:
     except (OSError, ValueError, AttributeError):
         return []
     have = have if isinstance(have, dict) else {}
+    shipped = json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8")).get("resolve") or {}
     out = []
     for name, want in _resolve_rule().items():
         if have.get(name) != want:
+            # where the derived value comes from: the env config only for a key_regex that differs from the
+            # shipped one (a jira tracker's); the epic template for the section; the kit for what it ships as is
+            source = "the epic template" if name == "section" else "the kit" if want == shipped.get(name) \
+                else "the env config"
             out.append(f"drift: resolve.{name} is {json.dumps(have.get(name))} in the store, "
-                       f"{json.dumps(want)} from the env config — `python3 $BATON/context-db/bin/ctx_adapter.py "
+                       f"{json.dumps(want)} from {source} — `python3 $BATON/context-db/bin/ctx_adapter.py "
                        "adopt` (`--replace` when this store's ctx-store.json was edited here)")
     return out
 
@@ -608,11 +633,13 @@ def _recorded_state(root: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _check_record(root: Path) -> tuple[bool, bool]:
+def _check_record(root: Path) -> tuple[bool, bool, bool]:
     """Compare the store's recorded adopted-kit state (`_recorded_state`) with this kit's own
     (`_kit_data_digest`/`_kit_version`), printing the same `behind:`/`ahead:`/`differs:`/`drift:` line(s) either
     `adopt --check` or its cheap `--no-validate` sibling answers with, and returning `(behind, differs)` for the
-    caller's exit code. One implementation so the two readers can never disagree on wording."""
+    caller's exit code: `(behind, differs, drift)`. One implementation so the two readers can never disagree on
+    wording. `drift` (the store's `resolve` rule is not the derived one) is its own flag because its remedy is not
+    `behind`'s: a plain `adopt` leaves a `ctx-store.json` edited here alone, so it can loop on `--replace`."""
     rec = _recorded_state(root)
     if (rec or {}).get("digest") != _kit_data_digest():
         # the digest alone cannot tell "the kit moved on" from "a newer kit already adopted this store" — only
@@ -623,12 +650,13 @@ def _check_record(root: Path) -> tuple[bool, bool]:
         if rec_v is not None and own_v is not None and rec_v > own_v:
             print(f"ahead: the store was adopted by kit {rec_version} — this kit is {_kit_version() or 'unknown'}; "
                   "update the kit")
-            return False, False
+            return False, False, False
         print("behind: the store's settings or types predate the kit's — "
               "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
-        for line in _resolve_drift(root):
+        drift = _resolve_drift(root)
+        for line in drift:
             print(line)
-        return True, False
+        return True, False, bool(drift)
     # the digest matches, but a store file `ctx init --upgrade` kept (edited here) at the last full `adopt`
     # still differs from the kit's own copy — a kept file does not stop being a local edit just because nothing
     # else about the store moved since
@@ -642,7 +670,7 @@ def _check_record(root: Path) -> tuple[bool, bool]:
     drift = _resolve_drift(root)
     for line in drift:
         print(line)
-    return bool(drift), bool(kept)
+    return False, bool(kept), bool(drift)
 
 
 def adopt(check: bool = False, replace: bool = False, no_validate: bool = False) -> int:
@@ -658,8 +686,8 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
         if not (root / "ctx-store.json").is_file():
             print(f"not adopted: {root} is not a ctx store — run `python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
             return 4
-        behind, differs = _check_record(root)
-        return 6 if behind else 5 if differs else 0
+        behind, differs, drift = _check_record(root)
+        return 7 if drift else 6 if behind else 5 if differs else 0
     ctx, why = resolve()
     if ctx is None:
         print(why, file=sys.stderr)
@@ -730,12 +758,11 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
     for f in [] if check else blocked:
         print(f"finding: migrate: {f} (fix the doc, then re-run adopt)")
     findings = findings + ([] if check else blocked)
-    behind = False
+    behind = drift = False
     if check:
         # a mismatch (including no record at all — see `_recorded_state`) usually says the store's settings or
-        # types predate the kit's — `findings` (exit 3) still wins, same as `differs` (exit 5, below), the
-        # existing precedence stays intact
-        behind, differs = _check_record(root)
+        # types predate the kit's — `findings` (exit 3) still wins, then `drift` (7), `behind` (6), `differs` (5)
+        behind, differs, drift = _check_record(root)
     else:
         a = _ctx(ctx, store, "validate", "--changed", "--adopt", timeout=ADOPT_TIMEOUT)
         print("adopt: " + ((_lines(a.stdout) or ["ok"])[0] if a.returncode in (0, 3) else
@@ -747,7 +774,7 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
         except OSError as e:
             print(f"warn: could not record the adopted digest under state/ ({e}) — adopt --check will keep "
                   "reading this store as behind")
-    return 3 if findings else 6 if behind else 5 if differs else 0
+    return 3 if findings else 7 if drift else 6 if behind else 5 if differs else 0
 
 
 # ── the MCP server and the Bash route ──────────────────────────────────────────────────────────────────────────
@@ -1366,8 +1393,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("pin", help="report the version and wheel sha256 `install` recorded at the pinned location")
     ap = sub.add_parser("adopt", help="make the content root a ctx store with the kit's settings (ctx init)")
     ap.add_argument("--check", action="store_true",
-                     help="report only: exit 4 when not adopted, 3 on findings, 6 when the store's recorded "
-                          "settings/types digest is stale or missing (behind)")
+                     help="report only: exit 4 when not adopted, 3 on findings, 7 when its resolve rule "
+                          "drifted from the derived one, 6 when the store's recorded settings/types digest "
+                          "is stale or missing (behind)")
     ap.add_argument("--no-validate", action="store_true",
                      help="with --check: skip the whole-store `ctx validate` and only compare the recorded "
                           "digest — cheap, never touches ctx; invalid without --check")

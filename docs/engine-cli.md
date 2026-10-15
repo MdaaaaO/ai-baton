@@ -417,15 +417,18 @@ Resolve rule — the `resolve` block of the `ctx-store.json` `adopt` hands `init
 shipped verbatim (`_resolve_rule`), so `ctx resolve <key>` finds the context doc wherever the kit runs: `key_regex` is
 the env config's `tracker.key_regex` on a `jira` tracker (a `github` or `none` tracker keeps the shipped
 `<owner>/<repo>#<n>` shape — its `tracker.key_regex` reads a bare `#<n>` and cannot match the repo-qualified key a
-session's `epic:` field carries); `section` is the first `## ` heading of the epic template (the env store's
-`_templates/epic.md` override, else the engine's); `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
+session's `epic:` field carries); `section` is the `Tracker & links` heading of the epic template (the env store's
+`_templates/epic.md` override, else the engine's; picked by name, case-insensitive, `and` for `&` allowed — a template
+without it keeps `Tracker & links`, with one stderr note); `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
 match wins; the section match is the fallback for a doc without one — it collides as soon as a sub-epic doc links its
 parent there). `adopt --check` (with or without `--no-validate`) compares the store's own `ctx-store.json` with that
 rule and prints one line per setting that differs, read-only:
-  drift: resolve.<key_regex|section|fields> is <store value> in the store, <derived value> from the env config —
+  drift: resolve.<key_regex|section|fields> is <store value> in the store, <derived value> from <the env config|
+  the epic template|the kit> —
   `python3 $BATON/context-db/bin/ctx_adapter.py adopt` (`--replace` when this store's ctx-store.json was edited here)
-It counts as `behind` (exit 6); an `adopt` — `--replace` for a `ctx-store.json` edited here, which `init` keeps —
-writes the derived rule and clears it. A store whose `ctx-store.json` is missing or unreadable reports no drift.
+It has its own exit, 7 — not `behind`'s 6, whose remedy (a plain `adopt`) leaves a `ctx-store.json` edited here
+alone and would loop; an `adopt` — `--replace` for a `ctx-store.json` edited here, which `init` keeps — writes the
+derived rule and clears it. A store whose `ctx-store.json` is missing or unreadable reports no drift.
 
 Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
 — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes
@@ -522,15 +525,17 @@ Exit codes: 0 ok (one line `ahead: …` when `--check` finds the store last adop
 1 not installed · 2 usage or I/O error, one stderr line (a plain `adopt` also refuses this way, leaving the store
 untouched, when the record names a kit version newer than this one's — `--replace` overrides it; `--no-validate`
 without `--check` is the same usage error) · 3 adopted, with validation findings — a store that is also behind
-still prints its own `behind:` line alongside the findings, same exit code · 4 not adopted (`adopt --check`;
+still prints its own `behind:` and `drift:` lines alongside the findings, same exit code · 4 not adopted (`adopt --check`;
 `--no-validate` answers this from a `ctx-store.json` file test at the content root rather than asking ctx) · 5
 adopted, but a store file differs from the kit's — kept, one `differs:` line per file (`adopt --replace` takes the
 kit's); `--check` reports the same files from its own record rather than re-running `ctx init` · 6 adopted, but the
-store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap,
-or its `resolve` rule differs from the env config's (a `drift:` line)
+store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap
 (`adopt --check` only — a plain `adopt` records a fresh one; `--no-validate` skips `ctx validate` entirely and only
-compares the record, so findings cannot occur there — 0/5/6 still answer, and it never touches ctx). Precedence
-when more than one would apply: 3 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.
+compares the record, so findings cannot occur there — 0/5/6/7 still answer, and it never touches ctx) · 7 adopted,
+but the store's own `ctx-store.json` carries a `resolve` rule other than the one derived here, one `drift:` line per
+setting (`adopt --check` only; a store that is also behind prints both line kinds, `behind:` first, and answers 7;
+the remedy is `adopt`, or `adopt --replace` when that file was edited here and `init` kept it). Precedence
+when more than one would apply: 3 over 7 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.
 A hook always exits 0. Stdlib only.
 
 positional arguments:

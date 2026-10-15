@@ -1661,11 +1661,28 @@ class ResolveSeed(Base):
         self.assertEqual(self.handed_rule(), {"key_regex": SHIPPED_SHAPE, "section": "Tracker & links",
                                               "fields": ["key"]})
 
-    def test_the_section_is_the_first_heading_of_the_env_epic_template(self):
-        self.env_store(JIRA_ENV, "---\ntitle: {{TITLE}}\n---\n# {{TITLE}}\n\n```\n## not a heading\n```\n\n"
-                                 "## Links\n\n## Goal\n")
-        self.assertEqual(self.adopt_fake().returncode, 0)
-        self.assertEqual(self.handed_rule()["section"], "Links")
+    def test_the_section_is_picked_by_name_wherever_it_sits_in_the_env_epic_template(self):
+        self.env_store(JIRA_ENV, "---\ntitle: {{TITLE}}\n---\n# {{TITLE}}\n\n```\n## Tracker & links\n```\n\n"
+                                 "## Goal\n\n## tracker AND  links\n\n## Tracker & links\n")
+        r = self.adopt_fake()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.handed_rule()["section"], "tracker AND  links")  # first match, fenced one skipped
+        self.assertNotIn("no `## Tracker & links`", r.stderr)
+
+    def test_a_template_without_the_heading_keeps_the_shipped_title_and_says_so(self):
+        """Never the first heading by position: a template that dropped the section must not turn `Goal` into it."""
+        self.env_store(JIRA_ENV, "---\ntitle: {{TITLE}}\n---\n# {{TITLE}}\n\n## Goal\n\n## Links\n")
+        r = self.adopt_fake()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.handed_rule()["section"], "Tracker & links")
+        self.assertEqual(r.stderr.count("has no `## Tracker & links` heading"), 1, r.stderr)
+
+    def test_a_template_with_no_headings_keeps_the_shipped_title_and_says_so(self):
+        self.env_store(JIRA_ENV, "---\ntitle: {{TITLE}}\n---\n# {{TITLE}}\n\nplain text only\n")
+        r = self.adopt_fake()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.handed_rule()["section"], "Tracker & links")
+        self.assertEqual(r.stderr.count("has no `## Tracker & links` heading"), 1, r.stderr)
 
     def test_a_broken_env_regex_leaves_the_shipped_shape(self):
         self.env_store({"environment": "ex", "tracker": {"kind": "jira", "key_regex": "(KEY-"}})
@@ -1696,7 +1713,7 @@ class ResolveSeed(Base):
         self.env_store(JIRA_ENV)
         for args in (("--check",), ("--check", "--no-validate")):
             r = self.adopt_fake(*args)
-            self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
+            self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
             self.assertIn(f'drift: resolve.key_regex is "{SHIPPED_SHAPE}" in the store, '
                           f'{json.dumps(JIRA_ENV["tracker"]["key_regex"])} from the env config — '
                           "`python3 $BATON/context-db/bin/ctx_adapter.py adopt` (`--replace` when this store's "
@@ -1710,14 +1727,57 @@ class ResolveSeed(Base):
         del stored["resolve"]["fields"]  # a store adopted by the kit before the `key` field convention
         (self.root / "ctx-store.json").write_text(json.dumps(stored), encoding="utf-8")
         r = self.adopt_fake("--check", "--no-validate")
+        self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
+        self.assertIn('drift: resolve.fields is null in the store, ["key"] from the kit', r.stdout)
+
+    def test_the_wording_names_where_each_derived_value_comes_from(self):
+        """`fields` and a github store's `key_regex` are the kit's own; only a jira `tracker.key_regex` is the env
+        config's; the section comes from the epic template."""
+        self.env_store(GITHUB_ENV)
+        self.adopt_fake()
+        stored = json.loads([c["settings"] for c in self.calls() if c["settings"]][-1])
+        stored["resolve"] = {"key_regex": "x", "section": "Other", "fields": ["id"]}
+        (self.root / "ctx-store.json").write_text(json.dumps(stored), encoding="utf-8")
+        out = self.adopt_fake("--check", "--no-validate").stdout
+        self.assertIn(f'{json.dumps(SHIPPED_SHAPE)} from the kit', out)
+        self.assertIn('"Tracker & links" from the epic template', out)
+        self.assertIn('["key"] from the kit', out)
+        self.assertNotIn("from the env config", out)
+
+    def test_drift_next_to_a_behind_store_answers_7_with_both_line_kinds(self):
+        self.adopt_fake()
+        self.write_store_file()
+        self.env_store(JIRA_ENV)
+        (self.root / "state" / "ctx-adapter" / "adopted-kit.json").write_text("{}", encoding="utf-8")  # a stale record
+        for args in (("--check",), ("--check", "--no-validate")):
+            r = self.adopt_fake(*args)
+            self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
+            self.assertIn("behind: ", r.stdout)
+            self.assertIn("drift: resolve.key_regex", r.stdout)
+
+    def test_findings_still_win_and_carry_the_drift_line(self):
+        self.adopt_fake()
+        self.write_store_file()
+        self.env_store(JIRA_ENV)
+        r = self.adapter("adopt", "--check", KIT_CTX=str(self.fake), FAKE_CTX_RC="3",
+                         FAKE_CTX_ERR="SCHEMA_VIOLATION d/bad status\n")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("finding: SCHEMA_VIOLATION d/bad status", r.stdout)
+        self.assertIn("drift: resolve.key_regex", r.stdout)
+
+    def test_a_behind_store_without_drift_still_answers_6(self):
+        self.adopt_fake()
+        self.write_store_file()
+        (self.root / "state" / "ctx-adapter" / "adopted-kit.json").write_text("{}", encoding="utf-8")
+        r = self.adopt_fake("--check", "--no-validate")
         self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
-        self.assertIn('drift: resolve.fields is null in the store, ["key"] from the env config', r.stdout)
+        self.assertNotIn("drift", r.stdout)
 
     def test_adopt_clears_the_drift(self):
         self.adopt_fake()
         self.write_store_file()
         self.env_store(JIRA_ENV)
-        self.assertEqual(self.adopt_fake("--check").returncode, 6)
+        self.assertEqual(self.adopt_fake("--check").returncode, 7)
         self.assertEqual(self.adopt_fake().returncode, 0)  # hands the derived rule to init
         self.write_store_file()
         r = self.adopt_fake("--check")
