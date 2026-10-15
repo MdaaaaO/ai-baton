@@ -357,6 +357,149 @@ class Transcript(unittest.TestCase):
                 os.environ["CLAUDE_CODE_SESSION_ID"] = saved
 
 
+class TicketCounters(unittest.TestCase):
+    """The created / comments / transitions counters count the GitHub-tracker Bash shapes beside the Jira-shaped
+    MCP tools, from one canned transcript line per shape."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def counts(self, *blocks):
+        path = write_transcript(self.dir, "sess-tk", [
+            {"type": "user", "timestamp": "2026-09-28T09:00:00Z", "message": {"content": "go"}},
+            assistant("t1", "2026-09-28T09:00:01Z", list(blocks)),
+        ])
+        t = ss.collect(str(path))["tracker"]
+        return t["created"], t["comments"], t["transitions"]
+
+    def bash(self, cmd):
+        return self.counts(tool("Bash", command=cmd))
+
+    def test_gh_issue_create(self):
+        self.assertEqual(self.bash("gh issue create -R example/repo --title x --body-file b.md"), (1, 0, 0))
+
+    def test_gh_issue_comment(self):
+        self.assertEqual(self.bash("gh issue comment 12 -R example/repo --body-file b.md"), (0, 1, 0))
+
+    def test_gh_issue_close(self):
+        self.assertEqual(self.bash("gh issue close 12 -R example/repo --reason completed"), (0, 0, 1))
+
+    def test_gh_issue_reopen(self):
+        self.assertEqual(self.bash("gh issue reopen 12 -R example/repo"), (0, 0, 1))
+
+    def test_gh_issue_edit_label_or_milestone_is_a_transition(self):
+        self.assertEqual(self.bash("gh issue edit 12 -R example/repo --add-label in-progress"), (0, 0, 1))
+        self.assertEqual(self.bash("gh issue edit 12 --milestone v1"), (0, 0, 1))
+
+    def test_gh_issue_edit_without_a_state_flag_is_not_a_transition(self):
+        self.assertEqual(self.bash("gh issue edit 12 --title y"), (0, 0, 0))
+
+    def test_remove_label_and_remove_milestone_are_transitions(self):
+        self.assertEqual(self.bash("gh issue edit 12 --remove-label blocked"), (0, 0, 1))
+        self.assertEqual(self.bash("gh issue edit 12 --remove-milestone"), (0, 0, 1))
+
+    def test_repo_flag_before_the_number(self):
+        self.assertEqual(self.bash("gh issue comment -R example/repo 12 --body x"), (0, 1, 0))
+        self.assertEqual(self.bash("gh issue close --repo example/repo 12"), (0, 0, 1))
+        self.assertEqual(self.bash("gh issue reopen -R example/repo 12"), (0, 0, 1))
+        self.assertEqual(self.bash("gh issue edit -R example/repo 12 --add-label x"), (0, 0, 1))
+
+    def test_gh_api_labels_with_method_equals_is_a_transition(self):
+        self.assertEqual(self.bash("gh api --method=POST repos/example/repo/issues/12/labels -f 'labels[]=x'"), (0, 0, 1))
+        self.assertEqual(self.bash("gh api repos/example/repo/issues/12/labels"), (0, 0, 0))  # a read
+
+    def test_a_quoted_mention_is_not_a_write(self):
+        for cmd in ("git commit -m 'fix: gh issue close 12'",
+                    "gh pr create --title x --body 'see gh issue comment 9 for context'",
+                    "echo gh issue create",
+                    "git commit -m 'gh api repos/o/r/issues -X POST'"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(ss.ticket_writes(cmd), set())
+                self.assertEqual(self.bash(cmd), (0, 0, 0))
+
+    def test_a_command_start_after_a_separator_or_env_prefix_counts(self):
+        for cmd in ("cd x && gh issue close 3", "echo hi; gh issue close 3", "(gh issue close 3)",
+                    "echo $(gh issue close 3)", "true\ngh issue close 3", "GH_TOKEN=x gh issue close 3",
+                    "  gh issue close 3"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.bash(cmd), (0, 0, 1))
+
+    def test_counters_and_activity_agree_for_every_shape(self):
+        shapes = {
+            "gh issue create --title x": "created",
+            "gh issue comment 12 --body x": "comment",
+            "gh issue comment -R o/r 12 --body x": "comment",
+            "gh issue close 12": "transition",
+            "gh issue reopen 12": "transition",
+            "gh issue edit 12 --add-label x": "transition",
+            "gh issue edit 12 --remove-label x": "transition",
+            "gh issue edit 12 --milestone v1": "transition",
+            "gh issue edit 12 --remove-milestone": "transition",
+            "gh api repos/o/r/issues -X POST -f title=x": "created",
+            "gh api repos/o/r/issues/12/comments -f body=x": "comment",
+            "gh api repos/o/r/issues/12 -X PATCH -f state=closed": "transition",
+            "gh api --method=POST repos/o/r/issues/12/labels -f 'labels[]=x'": "transition",
+        }
+        counter = {"created": 0, "comment": 1, "transition": 2}
+        for cmd, kind in shapes.items():
+            with self.subTest(cmd=cmd):
+                want = [0, 0, 0]
+                want[counter[kind]] = 1
+                self.assertEqual(self.bash(cmd), tuple(want))
+                path = write_transcript(self.dir, "sess-ev", [assistant("t3", "2026-09-28T09:00:01Z", [tool("Bash", command=cmd)])])
+                groups = ss.collect_activity(str(path))
+                self.assertEqual([g["header"] for g in groups], ["Tickets"])
+                self.assertEqual(groups[0]["count"], 1)
+
+    def test_gh_api_issue_create(self):
+        self.assertEqual(self.bash("gh api repos/example/repo/issues -X POST -f title=x"), (1, 0, 0))
+        self.assertEqual(self.bash("gh api repos/example/repo/issues -f title=x"), (1, 0, 0))  # a body flag implies POST
+
+    def test_gh_api_issue_comment(self):
+        self.assertEqual(self.bash("gh api repos/example/repo/issues/12/comments -f body=hi"), (0, 1, 0))
+        self.assertEqual(self.bash("gh api -X POST repos/example/repo/issues/12/comments --input body.json"), (0, 1, 0))
+
+    def test_gh_api_issue_patch_is_a_transition(self):
+        self.assertEqual(self.bash("gh api repos/example/repo/issues/12 -X PATCH -f state=closed"), (0, 0, 1))
+
+    def test_reads_and_other_writes_are_not_counted(self):
+        for cmd in ("gh issue view 12", "gh issue list", "gh pr comment 5 --body x", "gh pr close 5",
+                    "gh api repos/example/repo/issues/12/comments",         # a read (GET)
+                    "gh api repos/example/repo/issues/12",
+                    "gh api repos/example/repo/pulls -X POST -f title=x",
+                    "gh api repos/example/repo/issues; curl -X POST http://example.com/issues"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.bash(cmd), (0, 0, 0))
+
+    def test_chained_commands_count_each_kind_once_per_call(self):
+        cmd = "gh issue create --title x && gh issue comment 3 --body y && gh issue comment 4 --body z"
+        self.assertEqual(self.bash(cmd), (1, 1, 0))
+
+    def test_several_calls_add_up_and_agree_with_the_activity_listing(self):
+        blocks = [tool("Bash", command="gh issue create --title x"), tool("Bash", command="gh issue comment 5 --body y"),
+                  tool("Bash", command="gh issue close 5")]
+        self.assertEqual(self.counts(*blocks), (1, 1, 1))
+        path = write_transcript(self.dir, "sess-agree", [assistant("t2", "2026-09-28T09:00:01Z", blocks)])
+        s = ss.collect(str(path))
+        self.assertIn("1 created, 1 comments, 1 transitions", ss.fmt_line(s))
+        self.assertIn("1 created · 1 comments · 1 transitions", ss.fmt_block(s))
+        rendered = "\n".join(ss.fmt_activity(ss.collect_activity(str(path))))
+        self.assertIn("- created", rendered)
+        self.assertIn("- commented #5", rendered)
+
+    def test_jira_mcp_tools_still_count(self):
+        with unittest.mock.patch.object(ss, "TRACKER_CREATE", "createIssue"), \
+             unittest.mock.patch.object(ss, "TRACKER_COMMENT", "addComment"), \
+             unittest.mock.patch.object(ss, "TRACKER_TRANSITION", "transitionIssue"):
+            got = self.counts(tool("mcp__tracker__createIssue", summary="x"), tool("mcp__tracker__addComment", body="y"),
+                              tool("mcp__tracker__addComment", body="z"), tool("mcp__tracker__transitionIssue", id="1"))
+        self.assertEqual(got, (1, 2, 1))
+
+
 class Activity(unittest.TestCase):
     """session_stats.py --activity / collect_activity + fmt_activity: what a session did, grouped
     (files/commits/PRs/tickets/drafts/compactions), derived from the transcript at flush time — never
