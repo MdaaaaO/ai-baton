@@ -873,3 +873,29 @@ class EndWritesWhatThisSessionDid(unittest.TestCase):
         doc = (self.root / "sessions" / "t-noact.md").read_text(encoding="utf-8")
         self.assertNotIn("## What this session did", doc)
         self.assertNotIn("## Session stats", doc)  # no transcript: neither block is written
+
+
+class SuccessorSeesPredecessorOpenPRs(unittest.TestCase):
+    """#351: registering with --successor-of prints the predecessor's `## Open PRs` lines, so session-register
+    step 4 (re-arm, or drive to merge) is not skipped for want of a reminder."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        (self.root / "sessions").mkdir(parents=True)
+        (self.root / "sessions" / "kit-01.md").write_text(
+            "---\nsession: kit-01\nstatus: ended\n---\n\n## Open PRs\n\n"
+            "- o/r#10 head abc123456 \u2014 driving to merge, no watcher\n- o/r#11 head def654321 \u2014 watcher armed\n\n"
+            "## Next session\n\ncontinue\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_register_as_successor_prints_the_predecessors_open_prs(self):
+        r = run("session.py", "register", "--name", "kit-01-2", "--no-stats", "--successor-of", "kit-01", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("predecessor kit-01 open PRs:\n- o/r#10 head abc123456 \u2014 driving to merge, no watcher\n"
+                      "- o/r#11 head def654321 \u2014 watcher armed\n", r.stdout + "\n")
+        self.assertNotIn("## Next session", r.stdout)  # only the Open PRs section
+        r = run("session.py", "register", "--name", "kit-02", "--no-stats", root=self.root)
+        self.assertNotIn("predecessor", r.stdout)  # a plain registration prints nothing extra

@@ -428,6 +428,31 @@ def _ledger_append(meta: dict, st) -> None:
             f.write(row + "\n")
 
 
+def _predecessor_open_prs(name: str) -> str:
+    """The `predecessor <name> open PRs:` block a successor sees at registration (session-register step 4): the
+    `## Open PRs` lines of the predecessor's file, read only (live file, else the newest archived one — never
+    restored). `none` is printed as is; a file without the heading is unknown, not empty."""
+    live = path_for(name)
+    adir = os.path.join(SESS_DIR, "archive")
+    pat = re.compile(rf"^{re.escape(name)}(-(\d{{8}}|undated)(-\d+)?)?\.md$")
+    cands = sorted(os.path.join(adir, fn) for fn in (os.listdir(adir) if os.path.isdir(adir) else []) if pat.match(fn))
+    path = live if os.path.exists(live) else (cands[-1] if cands else "")
+    head = f"predecessor {name} open PRs:"
+    if not path:
+        return f"{head}\nunknown (no session file for {name} — check `gh pr list --author @me`)"
+    _, body = read_doc(path)
+    lines = (body or "").rstrip("\n").split("\n")
+    for i, ln in enumerate(lines):
+        if ln.strip() == OPEN_PRS_HEADING:
+            sec = []
+            for nxt in lines[i + 1:]:
+                if nxt.startswith("## "):
+                    break
+                sec.append(nxt.rstrip())
+            return head + "\n" + ("\n".join(x for x in sec if x.strip()) or "none")
+    return f"{head}\nunknown (no {OPEN_PRS_HEADING} heading — check `gh pr list --author @me`)"
+
+
 def cmd_register(a) -> None:
     path = restore_from_archive(a.name)  # a successor re-registering a swept name continues that doc, not a new one
     meta, body = read_doc(path)
@@ -458,6 +483,8 @@ def cmd_register(a) -> None:
     write_doc(path, meta, body)
     record_name(a.name)
     print(f"registered {os.path.relpath(path, CTX)}")
+    if getattr(a, "successor_of", ""):
+        print(_predecessor_open_prs(check_name(a.successor_of)))
 
 
 def cmd_touch(a) -> None:
@@ -717,6 +744,9 @@ def main() -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("register", "touch", "end", "stats"):
         sp = sub.add_parser(name)
+        if name == "register":
+            sp.add_argument("--successor-of", default="", help="the predecessor's session name: print its `## Open PRs` "
+                            "list after registering (step 4 of session-register re-arms or drives each one)")
         sp.add_argument("--name", required=(name != "stats"))
         sp.add_argument("--session-id", default="", help="transcript to derive stats from (default $CLAUDE_CODE_SESSION_ID)")
         sp.add_argument("--no-stats", action="store_true", help="do not refresh the stats field")

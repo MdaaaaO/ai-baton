@@ -2,9 +2,9 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo/session surfaces only actionable events, triages via `pr-event-brief`, keeps branches synced, merges via `pr-merge.sh` once gates hold. Parks on sign-off, idle windows or a human-only gate. Use when your session owns an open PR."
 metadata:
-  version: "28"
+  version: "29"
   updated: "2026-10-15"
-  reviewed: "2026-10-02"
+  reviewed: "2026-10-15"
 ---
 
 # pr-watch — stay on top of your PRs without the noise

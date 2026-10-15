@@ -101,6 +101,7 @@ wait_verdict(){
 H=$(head_of); [ -n "$H" ] || { err_line; exit 1; }
 if [ -n "$bot" ]; then echo "pr-merge: bot mode — gating on $bot Assessment + CI + human review"
 else echo "pr-merge: no-bot mode (github.review_bot empty) — gating on CI + human review only"; fi
+echo "pr-merge: watching $R#$PR until merge — no separate pr-watch needed"  # this run IS the PR's watch (session-register step 4)
 echo "phase 1: head $H"
 if [ -n "$bot" ]; then wait_verdict "$H"; wvrc=$?; [ $wvrc -eq 0 ] || { [ $wvrc -eq 3 ] && exit 3; exit 1; }; fi
 ot=$(open_threads); [ $? -eq 0 ] || { err_line; exit 1; }
