@@ -620,7 +620,7 @@ class DiskCheck(unittest.TestCase):
             (home / ".npm").mkdir()  # present but empty — no size, no line
             with mock.patch.object(kh.shutil, "disk_usage", return_value=Usage(total=100, used=96, free=4)), \
                  mock.patch.object(kh.Path, "home", return_value=home):
-                kh.disk_wiring(r, targets=[("/", Path("/a")), ("$HOME", Path("/b"))])
+                kh.disk_wiring(r, targets=[("/", home), ("$HOME", home / ".cache")])
         text = "\n".join(r.lines)
         self.assertEqual(r.counts[kh.WARN], 2)  # both targets over DISK_WARN_PCT
         self.assertIn("96% full on `/`", text)
@@ -629,6 +629,94 @@ class DiskCheck(unittest.TestCase):
         self.assertIn("rm -rf ~/.cache/go-build", text)
         self.assertEqual(text.count("safe to remove"), 1)  # listed once, not once per over-threshold target
         self.assertNotIn("~/.npm`", text)  # empty cache dir: no size to report, no line at all
+
+    def test_caches_on_another_filesystem_are_not_pointed_at(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        Usage = type(kh.shutil.disk_usage(Path.cwd()))
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".cache" / "go-build").mkdir(parents=True)
+            (home / ".cache" / "go-build" / "b.o").write_bytes(b"x" * 4096)
+            full = home / "full"
+            full.mkdir()
+            real_stat = os.stat
+
+            def fake_stat(p, *a, **k):  # `full` is its own filesystem
+                st = real_stat(p, *a, **k)
+                if str(p).startswith(str(full)):
+                    return os.stat_result((st.st_mode, st.st_ino, st.st_dev + 1) + tuple(st)[3:])
+                return st
+            with mock.patch.object(kh.shutil, "disk_usage", return_value=Usage(total=100, used=96, free=4)), \
+                 mock.patch.object(kh.Path, "home", return_value=home), mock.patch.object(kh.os, "stat", fake_stat):
+                kh.disk_wiring(r, targets=[("scratch", full)])
+                text_other = "\n".join(r.lines)
+                r2 = kh.Report()
+                kh.disk_wiring(r2, targets=[("$HOME", home)])
+        self.assertEqual(r.counts[kh.WARN], 1)
+        self.assertNotIn("go-build", text_other)
+        self.assertIn("go-build", "\n".join(r2.lines))
+
+
+class EndedSessionScratch(unittest.TestCase):
+    """Section 4 lists ended sessions' scratch dirs with sizes and `--sweep-scratch` removes exactly those —
+    on throw-away scratch and content roots, never the live ones."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        t = Path(self.tmp.name)
+        self.root = t / "scratch"
+        self.ctx = t / "ctx"
+        (self.ctx / "sessions" / "archive").mkdir(parents=True)
+
+        def session(dirname, name, status, size, id_only=False, archived=False):
+            d = self.root / dirname
+            d.mkdir(parents=True)
+            (d / "blob.bin").write_bytes(b"x" * size)
+            (d / "next.md").write_text("p\n")
+            if not id_only:
+                (d / "session-name").write_text(name + "\n")
+            if name:
+                where = self.ctx / "sessions" / ("archive" if archived else "")
+                (where / f"{name}.md").write_text(f"---\nsession: {name}\nsession_id: {dirname}\nstatus: {status}\n---\n")
+        session("sid-ended", "alpha-ended", "ended", 3000)
+        session("sid-byid", "beta-byid", "ended", 2000, id_only=True)   # no session-name file: matched by session_id
+        session("sid-archived", "gamma-arch", "ended", 1000, archived=True)  # row already swept to archive/
+        session("sid-live", "delta-live", "active", 5000)
+        session("sid-anon", "", "", 4000)                                # never registered
+        session("sid-self", "eps-self", "ended", 6000)                   # this session's own dir
+        (self.root / "stray-link").symlink_to(t)
+        self.keep = self.root / "sid-self"
+        self.kh = load_kit_health()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_lists_ended_dirs_with_sizes_and_the_fix(self):
+        r = self.kh.Report()
+        self.kh.scratch_wiring(r, self.root, self.ctx, self.keep)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[self.kh.WARN], 1)
+        self.assertIn("3 ended session(s)", text)
+        for n in ("alpha-ended", "beta-byid", "gamma-arch"):
+            self.assertIn(f"`{n}`", text)
+        for n in ("delta-live", "sid-anon", "eps-self"):
+            self.assertNotIn(n, text)
+        self.assertIn("--sweep-scratch", text)
+        self.assertIn("2 other dir(s) kept", text)  # live + unregistered; own dir and the symlink are not counted
+
+    def test_all_clear_when_nothing_ended(self):
+        r = self.kh.Report()
+        self.kh.scratch_wiring(r, self.root / "absent", self.ctx, self.keep)
+        self.assertEqual(r.counts[self.kh.WARN], 0)
+        self.assertIn("no ended session", "\n".join(r.lines))
+
+    def test_sweep_removes_only_ended_dirs(self):
+        gone = self.kh.sweep_scratch(self.root, self.ctx, self.keep)
+        self.assertEqual(sorted(n for n, _ in gone), ["sid-archived", "sid-byid", "sid-ended"])
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["sid-anon", "sid-live", "sid-self", "stray-link"])
+        self.assertTrue((self.root.parent / "ctx" / "sessions").is_dir())
+        self.assertEqual(self.kh.sweep_scratch(self.root, self.ctx, self.keep), [])
 
 
 class ReadOnlyRun(unittest.TestCase):

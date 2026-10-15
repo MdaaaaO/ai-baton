@@ -4,7 +4,7 @@
 Deterministic part of the `kit-health` skill (the judgement part — re-reading flagged skills — is the
 skill's Sonnet fork). Prints a markdown report; exit 0 = green, 1 = warnings only, 2 = errors.
 
-  python3 $BATON/skills/kit-health/kit-health.py [--stale N] [--stamp] [--report FILE] [--quiet] [--ci]
+  python3 $BATON/skills/kit-health/kit-health.py [--stale N] [--stamp] [--report FILE] [--quiet] [--ci] [--sweep-scratch]
 
 Sections:
   1. kit        — kit_verify (frontmatter + env store), stale units, install mode vs the recorded one (#34),
@@ -23,8 +23,9 @@ Sections:
   4. machine    — this machine's wiring: environment name, CLAUDE.md imports, Makefile include, memory
                   symlink, pr-review config vs github.org, required CLIs, systems.* reachable from a shell,
                   the auto-compact backstop (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW`),
-                  free disk on `/`/`$HOME`/the scratch root with the usual build/package caches named above
-                  DISK_WARN_PCT; a stale `$CLAUDE_ENV_FILE` (a `BATON`/`CLAUDE_PROJECT_DIR` path that no longer
+                  free disk on `/`/`$HOME`/the scratch root with the usual build/package caches (those on the
+                  same filesystem) named above DISK_WARN_PCT; the scratch dirs of ended sessions with their
+                  sizes (`--sweep-scratch` removes them); a stale `$CLAUDE_ENV_FILE` (a `BATON`/`CLAUDE_PROJECT_DIR` path that no longer
                   exists, or an `export BATON=` line outside the session-env block); one legacy line: a leftover
                   `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
@@ -1220,13 +1221,22 @@ def disk_targets() -> list[tuple[str, Path]]:
     return targets
 
 
+def same_filesystem(a: Path, b: Path) -> bool:
+    """True when `a` and `b` are on one filesystem (same `st_dev`); False when either cannot be read."""
+    try:
+        return os.stat(a).st_dev == os.stat(b).st_dev
+    except OSError:
+        return False
+
+
 def disk_wiring(r: Report, targets: list[tuple[str, Path]] | None = None) -> None:
     """`df -P` on `/`, `$HOME` and the scratch root — the free-disk check kit-health lacked: a sandbox root
     overlay filled silently from `~/.cache/go-build` (~4 GB) plus the npm cache, and the first symptom was an
     ENOSPC inside an unrelated skill step, because nothing here looked at the machine, only at the kit. Above
-    `DISK_WARN_PCT` full, names the usual caches with their size and the safe command to clear each one; a `du`
-    walk of those caches only runs once a filesystem IS tight, never on a healthy machine."""
-    shown_caches = False
+    `DISK_WARN_PCT` full, names the usual caches with their size and the safe command to clear each one — each
+    only under a filesystem it actually sits on (clearing a cache elsewhere frees nothing here) and once across
+    targets; a `du` walk of those caches only runs once a filesystem IS tight, never on a healthy machine."""
+    listed: set[str] = set()
     for label, path in (disk_targets() if targets is None else targets):
         try:
             usage = shutil.disk_usage(path)
@@ -1237,15 +1247,112 @@ def disk_wiring(r: Report, targets: list[tuple[str, Path]] | None = None) -> Non
             r.add(OK, "machine", f"disk {pct:.0f}% full on `{label}`")
             continue
         r.add(WARN, "machine", f"disk {pct:.0f}% full on `{label}` ({human_size(usage.used)} / {human_size(usage.total)})")
-        if shown_caches:
-            continue
-        shown_caches = True
         for clabel, cmd in CACHE_DIRS:
             p = Path(clabel.replace("~", str(Path.home()), 1))
-            if p.is_dir():
-                size = du(p)
-                if size:
-                    r.raw(f"  - `{clabel}`: {human_size(size)} — safe to remove: `{cmd}`")
+            if clabel in listed or not p.is_dir() or not same_filesystem(p, path):
+                continue
+            size = du(p)
+            if size:
+                listed.add(clabel)
+                r.raw(f"  - `{clabel}`: {human_size(size)} — safe to remove: `{cmd}`")
+
+
+SESSION_ENDED = "ended"
+
+
+def session_scratch_status(ctx_root: Path, d: Path) -> tuple[str, str]:
+    """(registry name, status) of the session whose scratch dir is `d`; status is "unregistered" when no row
+    can be found. The name comes from the dir's `session-name` file (written by `session-register`), else from a row
+    whose `session_id` is the dir's name; the status from `<ctx_root>/sessions/<name>.md`, and a row moved to
+    `sessions/archive/` counts as ended."""
+    sess = ctx_root / "sessions"
+    name = ""
+    try:
+        name = (d / "session-name").read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+    if not re.fullmatch(r"[A-Za-z0-9][\w.-]{0,63}", name) or ".." in name:
+        name = ""
+        if sess.is_dir():
+            for f in sorted(sess.glob("*.md")):
+                try:
+                    sid = frontmatter(f).get("session_id", "")
+                except OSError:
+                    continue
+                if sid and re.sub(r"[^\w.-]", "_", sid) == d.name:
+                    name = f.stem
+                    break
+    if not name:
+        return "", "unregistered"
+    row = sess / f"{name}.md"
+    if row.is_file():
+        try:
+            return name, frontmatter(row).get("status", "") or "unregistered"
+        except OSError:
+            return name, "unregistered"
+    if (sess / "archive" / f"{name}.md").is_file():
+        return name, SESSION_ENDED
+    return name, "unregistered"
+
+
+def session_scratch_dirs(root: Path | None, ctx_root: Path, keep: Path | None = None) -> list[tuple[Path, str, str, int]]:
+    """(dir, name, status, bytes) for every session scratch dir directly under `root` (symlinks skipped, `keep` —
+    this session's own dir — left out), biggest first. [] when there is no root."""
+    if root is None or not root.is_dir() or root.is_symlink():
+        return []
+    out = []
+    for d in sorted(root.iterdir()):
+        if d.is_symlink() or not d.is_dir() or (keep is not None and d.resolve() == keep.resolve()):
+            continue
+        name, status = session_scratch_status(ctx_root, d)
+        out.append((d, name, status, kit_profile.tree_bytes(d)))
+    return sorted(out, key=lambda t: -t[3])
+
+
+SWEEP_FIX = "python3 $BATON/skills/kit-health/kit-health.py --sweep-scratch"
+
+
+def scratch_wiring(r: Report, root: Path | None = None, ctx_root: Path | None = None, keep: Path | None = None) -> None:
+    """Lists the scratch dirs of ended sessions with their sizes and names the sweep as the Fix (nothing here
+    removes anything); dirs of live or unregistered sessions are only counted. The defaults are this machine's
+    scratch root, the content root and this session's own dir; a test passes throw-away ones."""
+    if root is None:
+        root = kit_profile.session_scratch_root()
+    if keep is None:
+        try:
+            keep = kit_profile.scratch()
+        except Exception:
+            keep = None
+    dirs = session_scratch_dirs(root, ctx() if ctx_root is None else ctx_root, keep)
+    ended = [t for t in dirs if t[2] == SESSION_ENDED]
+    other = len(dirs) - len(ended)
+    if not ended:
+        r.add(OK, "machine", f"no ended session leaves scratch behind ({other} other session dir(s))")
+        return
+    total = sum(t[3] for t in ended)
+    r.add(WARN, "machine", f"{len(ended)} ended session(s) left {human_size(total)} of scratch ({other} other dir(s) kept) — Fix: `{SWEEP_FIX}`")
+    for d, name, _status, size in ended:
+        r.raw(f"  - `{name or d.name}`: {human_size(size)}")
+
+
+def sweep_scratch(root: Path | None = None, ctx_root: Path | None = None, keep: Path | None = None) -> list[tuple[str, int]]:
+    """Removes the scratch dirs of ended sessions (what `scratch_wiring` lists) and returns (dir name, bytes)
+    for each. Only a real directory directly under `root` is ever removed — never `root` itself, a symlink, this
+    session's own dir (`keep`) or a dir whose session is live or unregistered."""
+    if root is None:
+        root = kit_profile.session_scratch_root()
+    if keep is None:
+        try:
+            keep = kit_profile.scratch()
+        except Exception:
+            keep = None
+    gone = []
+    for d, _name, status, size in session_scratch_dirs(root, ctx() if ctx_root is None else ctx_root, keep):
+        if status != SESSION_ENDED or d.parent.resolve() != root.resolve():
+            continue
+        shutil.rmtree(d, ignore_errors=True)
+        gone.append((d.name, size))
+    return gone
 
 
 def pr_review_example_edited(example: Path | None = None) -> list[str]:
@@ -1511,6 +1618,7 @@ def sec_machine(r: Report) -> str:
     if mcp:
         r.raw(f"- MCP-backed systems ({', '.join(mcp)}): not probeable from a shell — the skill's step 3 checks the servers are connected in this session")
     disk_wiring(r)
+    scratch_wiring(r)
     return envname
 
 
@@ -1842,9 +1950,16 @@ def main() -> int:
     ap.add_argument("--stamp", action="store_true", help="write the HEALTH.md stamp for this environment when there are no errors")
     ap.add_argument("--report", help="also write the report to this file")
     ap.add_argument("--quiet", action="store_true", help="print only the summary line")
+    ap.add_argument("--sweep-scratch", action="store_true",
+                    help="remove the scratch dirs of ended sessions (what section 4 lists), print what went, and exit")
     ap.add_argument("--ci", action="store_true", help="CI mode: leak scan + env-store config only, against the checkout and the blank "
                                                        "store CI builds; nothing under .context/ is written; exit 2 on an error or a leak hit, else 0")
     a = ap.parse_args()
+    if a.sweep_scratch:
+        gone = sweep_scratch()
+        print(f"removed {len(gone)} ended session scratch dir(s), {human_size(sum(n for _d, n in gone))}" if gone
+              else "no ended session scratch dirs to remove")
+        return 0
     r = Report()
     try:
         return run(a, r)

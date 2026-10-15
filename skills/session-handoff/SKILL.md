@@ -2,8 +2,8 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "29"
-  updated: "2026-10-12"
+  version: "30"
+  updated: "2026-10-15"
   reviewed: "2026-10-12"
 user-invocable: true
 ---
@@ -103,6 +103,8 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    the stats block + ledger row of step 8. (Setup: the `session-register` skill.) After `session-end` (here or in
    step 10), run `make -C $BATON/context-db mission-build` so the private mission-control page shows the ended
    row: a local file, zero model turns, never a publish.
+   Then free the review snapshots: `python3 $BATON/context-db/bin/kit_profile.py scratch --sweep-pr-review` removes only this
+   session's own `pr-review/` scratch (`next.md` and `session-name` stay).
 10. **Next-session prompt — only when there is one to write (owner decision, 2026-09-19; a closing session
     with nothing to hand over does not force one).** Decide first: does *this* session own follow-on work
     — an open PR, a ticket still in progress, or an agreed next step on its own epic? Work that belongs to

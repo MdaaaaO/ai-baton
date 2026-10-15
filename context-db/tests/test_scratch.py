@@ -69,3 +69,62 @@ class ScratchRoot(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SweepPrReview(unittest.TestCase):
+    """`scratch --sweep-pr-review` removes the session's own pr-review/ subtree and nothing else."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.t = Path(self.tmp.name)
+        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_JOB_DIR", "KIT_SCRATCH", "XDG_RUNTIME_DIR")}
+        env.update(TMPDIR=str(self.t), CLAUDE_CODE_SESSION_ID="s-1")
+        self.env = env
+        self.mine = self.t / f"ai-baton-kit-{os.getuid()}" / "s-1"
+        self.other = self.t / f"ai-baton-kit-{os.getuid()}" / "s-2"
+        for d in (self.mine, self.other):
+            (d / "pr-review" / "acme_widgets" / "7").mkdir(parents=True)
+            (d / "pr-review" / "acme_widgets" / "7" / "diff.patch").write_bytes(b"x" * 2048)
+            (d / "next.md").write_text("prompt\n")
+            (d / "session-name").write_text("a-session\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_cli(self):
+        return subprocess.run([sys.executable, str(BIN / "kit_profile.py"), "scratch", "--sweep-pr-review"],
+                              env=self.env, capture_output=True, text=True)
+
+    def test_removes_only_the_sessions_own_pr_review_subtree(self):
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("2048 bytes", r.stdout)
+        self.assertFalse((self.mine / "pr-review").exists())
+        self.assertEqual(sorted(p.name for p in self.mine.iterdir()), ["next.md", "session-name"])
+        self.assertTrue((self.other / "pr-review" / "acme_widgets" / "7" / "diff.patch").is_file())  # another session's
+
+    def test_nothing_to_remove_is_ok_and_idempotent(self):
+        self.run_cli()
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no pr-review scratch", r.stdout)
+
+    def test_a_symlinked_pr_review_is_refused_and_its_target_kept(self):
+        victim = self.t / "victim"
+        victim.mkdir()
+        (victim / "keep.txt").write_text("k")
+        import shutil
+        shutil.rmtree(self.mine / "pr-review")
+        (self.mine / "pr-review").symlink_to(victim)
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("symlink", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertTrue((victim / "keep.txt").is_file())
+        self.assertTrue((self.mine / "pr-review").is_symlink())
+
+    def test_session_scratch_root_is_none_under_an_override(self):
+        with mock.patch.dict(os.environ, dict(self.env, KIT_SCRATCH=str(self.t / "own")), clear=True):
+            self.assertIsNone(kit_profile.session_scratch_root())
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            self.assertEqual(kit_profile.session_scratch_root(), self.t / f"ai-baton-kit-{os.getuid()}")
