@@ -14,6 +14,9 @@ Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & g
 then has `→`) but is missing its `; not <rejected>` clause. Any other line in that section (a
 free-form gotcha, an arrow in prose, a date in parentheses) never warns.
 
+Also warns (non-fatal) when an `environment.md` states who owns code (`CODEOWNERS =`, "code owner"): the
+live CODEOWNERS file is the only source (`skills/pr-open/codeowners.py`), prose about it goes stale.
+
 Operates on the content root gen_index takes from kit_profile.context_root() (docs/layout.md's
 "Content root" paragraph). Run via `make -C $BATON/context-db verify`. Stdlib only.
 """
@@ -84,6 +87,27 @@ def ledger_warnings(root: str, rows: list[dict]) -> list[tuple[str, str]]:
                 continue  # not ledger-shaped (a free-form gotcha, or a date in parentheses) — never warns
             if LEDGER_REJECTED not in candidate:
                 found.append((r["_path"], line))  # a ledger line without its rejected options
+    return found
+
+
+# An environment doc must not carry a CODEOWNERS fact: pr-open derives reviewers from the repo's live file, and
+# a line of prose naming an owner outlives the file's own edits. Matches `CODEOWNERS =`/`CODEOWNERS:` and the
+# phrase "code owner(s)" / "code-owner(s)", any case.
+OWNER_CLAIM_RE = re.compile(r"CODEOWNERS\s*[=:]|code[ -]owners?\b", re.IGNORECASE)
+
+
+def owner_claim_warnings(root: str, rows: list[dict]) -> list[tuple[str, str]]:
+    """(path, line) for each line of an `environment.md` doc that claims who owns code."""
+    found = []
+    for r in rows:
+        if os.path.basename(r["_path"]) != "environment.md":
+            continue
+        try:
+            with open(os.path.join(root, r["_path"]), encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        found += [(r["_path"], l.strip()) for l in lines if OWNER_CLAIM_RE.search(l)]
     return found
 
 
@@ -166,6 +190,13 @@ def main() -> int:
         print(f"⚠ {len(bad_ledger)} Key decisions & gotchas line(s) look ledger-shaped (a date, "
               f"then `→`) but miss the `; not <rejected>` clause:", file=sys.stderr)
         for p, line in bad_ledger:
+            print(f"  - {p}: {line}", file=sys.stderr)
+
+    claims = owner_claim_warnings(gi.ROOT, rows)
+    if claims:
+        print(f"⚠ {len(claims)} environment.md line(s) state who owns code — drop them; pr-open reads the repo's "
+              f"live CODEOWNERS file (skills/pr-open/codeowners.py), and prose about it goes stale:", file=sys.stderr)
+        for p, line in claims:
             print(f"  - {p}: {line}", file=sys.stderr)
 
     if errors:

@@ -288,6 +288,37 @@ class LedgerWarnings(ContextRoot):
         self.assertNotIn(free_form, v.stderr)
 
 
+class OwnerClaimWarnings(ContextRoot):
+    """verify.py warns when an environment.md states who owns code: that fact lives in the repo's CODEOWNERS file."""
+
+    def env_doc(self, body: str) -> None:
+        p = self.root / "reference" / "environment.md"
+        p.write_text("---\ntitle: Environment\ntype: reference\ndomain: reference\nstatus: reference\n"
+                     f"updated: 2026-10-15\n---\n\n# Environment\n\n{body}\n", encoding="utf-8")
+        run(self.root, "gen_index.py")
+
+    def test_claims_warn_once_each_and_stay_non_fatal(self):
+        claim = "Review routing: `acme/widgets` CODEOWNERS = @example/team-a and @example/team-b"
+        phrase = "The Code Owner for the pipeline is @octocat."
+        self.env_doc(f"- {claim}\n- {phrase}\n- Chat channel: the team reads #widgets.")
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.assertIn("2 environment.md line(s) state who owns code", v.stderr)
+        self.assertIn(f"reference/environment.md: - {claim}", v.stderr)
+        self.assertIn(phrase, v.stderr)
+        self.assertNotIn("#widgets", v.stderr)
+
+    def test_a_clean_environment_doc_and_other_docs_do_not_warn(self):
+        self.env_doc("- Tracker: GitHub issues.")
+        (self.root / "repos" / "owners.md").write_text(
+            "---\ntitle: Owners\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-10-15\n---\n\n"
+            "CODEOWNERS = a repo doc may say this\n", encoding="utf-8")
+        run(self.root, "gen_index.py")
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.assertNotIn("state who owns code", v.stderr)
+
+
 class NewSh(ContextRoot):
     def new(self, **env: str) -> subprocess.CompletedProcess:
         return subprocess.run(["sh", str(BIN / "new.sh")], env=env_for(self.root, **env), capture_output=True, text=True)
