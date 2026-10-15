@@ -14,9 +14,10 @@ Reads the page with the stdlib HTML parser (no browser, no network) and reports 
   - in an inline <script> (the JSON blocks apart), in an on... attribute or in a javascript: URL, a whole-word
     match for fetch(, XMLHttpRequest, sendBeacon, WebSocket, EventSource, import(, new Worker, serviceWorker,
     importScripts, new Image, new Audio (connections and loads), document.write, innerHTML, outerHTML,
-    insertAdjacentHTML (markup writes), window.open, an assignment to location (also window.location and
-    document.location), location.href, location.assign or location.replace (navigation); an assignment to
-    .src; or a literal http:// or https:// URL;
+    insertAdjacentHTML (markup writes), window.open, an assignment to location or an append to it (location =
+    and location +=, also on window.location and document.location), an assignment or append to location.host,
+    .hostname, .pathname, .search, .port or .protocol, location.href, location.assign or location.replace
+    (navigation); an assignment to .src; or a literal http:// or https:// URL;
   - an attribute value starting http://, https:// or // anywhere but on an <a href> whose host is github.com,
     the host of the store's tracker.url_template, or one given with --allow-host.
 
@@ -71,7 +72,9 @@ CALLS = tuple(  # (name shown, pattern): script text that opens a connection, lo
         ("new Audio", r"\bnew\s+Audio\b"),
         ("window.open", r"\bwindow\s*\.\s*open\b"),
         ("location.href|assign|replace", r"\blocation\s*\.\s*(?:href|assign|replace)\b"),
-        ("location =", r"\b(?:(?:window|document)\s*\.\s*)?location\s*=(?!=)"),  # == and === only compare
+        ("location =", r"\b(?:(?:window|document)\s*\.\s*)?location\s*\+?=(?![=>])"),  # not == (compare) or => (arrow)
+        ("location.host|hostname|pathname|search|port|protocol =",
+         r"\blocation\s*\.\s*(?:host|hostname|pathname|search|port|protocol)\s*\+?=(?![=>])"),
         (".src =", r"\.\s*src\s*=(?!=)"),
         ("http(s)://", r"(?i:\bhttps?://)"),  # a remote URL spelled out; never a bare //, which is a comment
     )
