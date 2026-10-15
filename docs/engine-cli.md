@@ -429,6 +429,8 @@ rule and prints one line per setting that differs, read-only:
 It has its own exit, 7 — not `behind`'s 6, whose remedy (a plain `adopt`) leaves a `ctx-store.json` edited here
 alone and would loop; an `adopt` — `--replace` for a `ctx-store.json` edited here, which `init` keeps — writes the
 derived rule and clears it. A store whose `ctx-store.json` is missing or unreadable reports no drift.
+`sync-check.sh` (exit code only, at sync and session registration) warns on 7 and, when 7's stdout also carries a
+`behind:` line, on behind too — so a store that is both is never read as current.
 
 Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
 — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes

@@ -978,6 +978,8 @@ class SecKitSyncDedup(unittest.TestCase):
     CONTENT_STORE_LINE = ("WARN kit sync: content store predates the kit's settings/types — `python3 "
                            "$BATON/context-db/bin/ctx_adapter.py adopt` (records a fresh digest, brings the "
                            "store's settings/types forward)")
+    DRIFT_LINE = ("WARN kit sync: content store's resolve rule drifted from the derived one — `ctx resolve <key>` "
+                  "misses the context doc: `python3 $BATON/context-db/bin/ctx_adapter.py adopt` rewrites it")
     OTHER_LINE = "WARN kit sync: 2 local commit(s) on main that will never be pushed — main is PR-only"
 
     def run_sec_kit(self, sync_err: str, adopt_check: tuple[int, str, str] | None = None) -> "Report":
@@ -1023,6 +1025,23 @@ class SecKitSyncDedup(unittest.TestCase):
         warn_lines = [ln for ln in r.lines if ln.startswith("- ⚠️")]
         self.assertEqual(len(warn_lines), 1)
         self.assertIn("store behind", warn_lines[0])
+
+    def test_the_drift_line_alone_adds_no_warn(self):
+        r = self.run_sec_kit(self.DRIFT_LINE)
+        self.assertEqual(r.counts["WARN"], 0)
+
+    def test_a_behind_and_drifted_store_yields_exactly_both_warns_once(self):
+        """Exit 7 with a `behind:` line: sync-check prints both lines (§ 1 drops them), § 5 adds both WARNs."""
+        r = self.run_sec_kit(self.CONTENT_STORE_LINE + "\n" + self.DRIFT_LINE, adopt_check=(
+            7, "behind: the store's settings or types predate the kit's — "
+               "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`\n"
+               "drift: resolve.fields is null in the store, [\"key\"] from the kit — "
+               "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`", ""))
+        warn_lines = [ln for ln in r.lines if ln.startswith("- ⚠️")]
+        self.assertEqual(r.counts["WARN"], 2, warn_lines)
+        self.assertTrue(any("store behind" in ln for ln in warn_lines))
+        self.assertTrue(any("store resolve rule drifted" in ln for ln in warn_lines))
+        self.assertFalse(any("content store" in ln for ln in r.lines))
 
 
 GOOD_SHA = "ab" * 32  # a made-up 64-hex wheel sha256, not a real ctx-store wheel's — only its shape matters here

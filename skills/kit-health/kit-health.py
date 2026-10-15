@@ -212,6 +212,10 @@ def rel(p: Path) -> str:
     return str(p)
 
 
+# the `sync-check.sh` content-store WARNs § 5 (`ctx_store`) already reports under its own fix
+STORE_SYNC_LINES = ("content store predates the kit's settings/types", "content store's resolve rule drifted")
+
+
 # ── 1. kit ──────────────────────────────────────────────────────────────────────────────────
 def sec_kit(r: Report, stale: int) -> None:
     r.h("1 · Kit — frontmatter, env store, git")
@@ -232,9 +236,11 @@ def sec_kit(r: Report, stale: int) -> None:
     install_mode_check(r, mode)
     rc, out, err = sh(["sh", str(KIT / "sync-check.sh")])
     out = both(out, err)  # sync-check warns on stderr
-    # the content-store-behind line is § 5's own WARN below (ctx_store, exit 6) — forwarding it here too would
-    # be the same finding twice; sync-check.sh's own output (session registration reads it directly) is untouched
-    lines = [ln for ln in out.splitlines() if "content store predates the kit's settings/types" not in ln]
+    # the content-store lines — behind (exit 6, or a `behind:` line next to 7) and resolve-rule drift (exit 7) —
+    # are § 5's own WARNs below (ctx_store reads the same `adopt --check` and adds both for a store that is both):
+    # forwarding them here too would be each finding twice; sync-check.sh's own output (session registration reads
+    # it directly) is untouched
+    lines = [ln for ln in out.splitlines() if not any(m in ln for m in STORE_SYNC_LINES)]
     if lines:
         for line in lines:
             r.add(WARN, "kit", line.replace("WARN kit sync: ", "sync: "))

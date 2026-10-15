@@ -47,6 +47,8 @@ rule and prints one line per setting that differs, read-only:
 It has its own exit, 7 — not `behind`'s 6, whose remedy (a plain `adopt`) leaves a `ctx-store.json` edited here
 alone and would loop; an `adopt` — `--replace` for a `ctx-store.json` edited here, which `init` keeps — writes the
 derived rule and clears it. A store whose `ctx-store.json` is missing or unreadable reports no drift.
+`sync-check.sh` (exit code only, at sync and session registration) warns on 7 and, when 7's stdout also carries a
+`behind:` line, on behind too — so a store that is both is never read as current.
 
 Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
 — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes
@@ -636,8 +638,8 @@ def _recorded_state(root: Path) -> dict | None:
 def _check_record(root: Path) -> tuple[bool, bool, bool]:
     """Compare the store's recorded adopted-kit state (`_recorded_state`) with this kit's own
     (`_kit_data_digest`/`_kit_version`), printing the same `behind:`/`ahead:`/`differs:`/`drift:` line(s) either
-    `adopt --check` or its cheap `--no-validate` sibling answers with, and returning `(behind, differs)` for the
-    caller's exit code: `(behind, differs, drift)`. One implementation so the two readers can never disagree on
+    `adopt --check` or its cheap `--no-validate` sibling answers with, and returning `(behind, differs, drift)` for
+    the caller's exit code. One implementation so the two readers can never disagree on
     wording. `drift` (the store's `resolve` rule is not the derived one) is its own flag because its remedy is not
     `behind`'s: a plain `adopt` leaves a `ctx-store.json` edited here alone, so it can loop on `--replace`."""
     rec = _recorded_state(root)
@@ -1184,8 +1186,8 @@ def _resolve_epic_doc(ctx: Path, store: list[str], epic_key: str, remaining: Cal
     `resolve` rule (`ctx resolve`) — None when there is no key, the store sets no `resolve.key_regex`, the key
     matches no doc, or the call fails (a compact brief degrades, it does not go silent over one extra read).
     The store's rule is seeded by `adopt` (`_resolve_rule`): a field match on an epic doc's own `key:`
-    frontmatter wins, and the doc's `resolve.section` (its first template section, *Tracker & links* in the
-    kit's) is the fallback for a doc without one. The field is `key`, not `epic`: a session row carries the
+    frontmatter wins, and the doc's `resolve.section` (its *Tracker & links* section, picked by name) is the
+    fallback for a doc without one. The field is `key`, not `epic`: a session row carries the
     key in its own `epic:` field, so naming `epic` there would resolve to the session instead of the context doc.
     Less than 1.5s of `remaining()` left raises `subprocess.TimeoutExpired` rather than making the
     call, the same signal a call that actually timed out would raise — let through, not swallowed, so the

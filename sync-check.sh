@@ -6,7 +6,8 @@
 # sync silently failed, whether local commits on main can never leave this machine (main is
 # PR-only), or whether origin has moved on (a release tag is waiting; on `kit.channel main`, a PR
 # merged) — and, beyond git, whether the env store or content store has fallen behind the kit's own
-# capability flags or settings/types. Exit 0 always; the WARN lines are the signal —
+# capability flags or settings/types, or the content store's resolve rule drifted from the derived one.
+# Exit 0 always; the WARN lines are the signal —
 # silence means "in step". So every state that is NOT "in step" says so: not a git checkout (outside a plugin install,
 # which kit-health reports itself), no origin/main to compare with, or a git call that failed.
 #
@@ -102,7 +103,14 @@ check_kit "$HERE"
 rc=0; python3 "$HERE/context-db/bin/kb.py" migrate --check >/dev/null 2>&1 || rc=$?
 [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ] && warn "\`kb.py migrate --check\` failed (exit $rc) — no or unreadable env store? \`python3 \$BATON/context-db/bin/kb.py init --blank\` creates one"
 [ "$rc" -eq 3 ] && warn "env store predates the kit's capability flags — \`python3 \$BATON/context-db/bin/kb.py migrate\` (keeps values, lists what it changed)"
-# content store behind the kit's settings/types: a cheap record comparison only, no whole-store `ctx validate`
-rc=0; python3 "$HERE/context-db/bin/ctx_adapter.py" adopt --check --no-validate >/dev/null 2>&1 || rc=$?
-[ "$rc" -eq 6 ] && warn "content store predates the kit's settings/types — \`python3 \$BATON/context-db/bin/ctx_adapter.py adopt\` (records a fresh digest, brings the store's settings/types forward)"
+# content store behind the kit's settings/types (exit 6), or its `resolve` rule drifted from the derived one
+# (exit 7): a cheap record comparison only, no whole-store `ctx validate`. Drift wins the exit code over behind,
+# so a store that is both answers 7 — its stdout still carries a `behind:` line (printed first), read here so
+# neither finding hides the other
+rc=0; adopt_out=$(python3 "$HERE/context-db/bin/ctx_adapter.py" adopt --check --no-validate 2>/dev/null) || rc=$?
+store_behind=""
+[ "$rc" -eq 6 ] && store_behind=1
+[ "$rc" -eq 7 ] && printf '%s\n' "$adopt_out" | grep -q '^behind: ' && store_behind=1
+[ -n "$store_behind" ] && warn "content store predates the kit's settings/types — \`python3 \$BATON/context-db/bin/ctx_adapter.py adopt\` (records a fresh digest, brings the store's settings/types forward)"
+[ "$rc" -eq 7 ] && warn "content store's resolve rule drifted from the derived one — \`ctx resolve <key>\` misses the context doc: \`python3 \$BATON/context-db/bin/ctx_adapter.py adopt\` rewrites it (\`adopt --replace\` when the store's ctx-store.json was edited here); \`adopt --check\` names each setting"
 exit 0

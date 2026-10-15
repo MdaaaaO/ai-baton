@@ -1755,6 +1755,24 @@ class ResolveSeed(Base):
             self.assertIn("behind: ", r.stdout)
             self.assertIn("drift: resolve.key_regex", r.stdout)
 
+    def test_a_stale_record_and_no_fields_setting_name_both_behind_first(self):
+        """The case every store adopted before the `key` field convention is in once the kit's settings digest
+        moves: behind AND drifted. Exit 7 alone would hide the behind half from a reader of the code only, so the
+        `behind:` line must start its own stdout line ahead of the `drift:` one — `sync-check.sh` greps for it."""
+        self.adopt_fake()
+        stored = json.loads([c["settings"] for c in self.calls() if c["settings"]][-1])
+        del stored["resolve"]["fields"]
+        (self.root / "ctx-store.json").write_text(json.dumps(stored), encoding="utf-8")
+        (self.root / "state" / "ctx-adapter" / "adopted-kit.json").write_text("{}", encoding="utf-8")
+        r = self.adopt_fake("--check", "--no-validate")
+        self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
+        lines = r.stdout.splitlines()
+        behind = [i for i, ln in enumerate(lines) if ln.startswith("behind: ")]
+        drift = [i for i, ln in enumerate(lines) if ln.startswith("drift: resolve.fields is null in the store")]
+        self.assertEqual(len(behind), 1, r.stdout)
+        self.assertEqual(len(drift), 1, r.stdout)
+        self.assertLess(behind[0], drift[0])
+
     def test_findings_still_win_and_carry_the_drift_line(self):
         self.adopt_fake()
         self.write_store_file()
