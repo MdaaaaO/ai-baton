@@ -459,10 +459,20 @@ MILESTONES = [
 FAIL_HINTS = [
     (re.compile(r"^UNSIGNED "), "a commit below HEAD would have pushed unsigned — the job refused the push "
      "before it landed; a sandbox-made commit surviving a no-op re-stack is the usual cause"),
+    # GitHub refuses a commit whose author e-mail is private (`remote: error: GH007: …` followed by
+    # ` ! [remote rejected] …`). The commit already exists with that e-mail, so a rebase or a plain
+    # re-push cannot help; it has to be rewritten. Listed before the generic remote-rejected entry.
+    # anchored to the remote's own lines: a commit subject echoed into the tail may mention the word
+    (re.compile(r"remote: error: GH007|push declined due to email privacy"),
+     "GH007: the commit author e-mail is private on the account — set `user.email` to the no-reply address on "
+     "github.com/settings/emails (`<id>+<login>@users.noreply.github.com`), then `git commit --amend --reset-author "
+     "--no-edit -S` in the worktree (HEAD only: several unpushed commits need `git rebase --exec`) and re-enqueue"),
     # anchored to git's own push-rejection line (`! [rejected]        branch -> branch (…)`) — a bare
     # "rejected" also matches a commit subject that happens to contain the word (e.g. a fix for rejected
     # payments), which used to trigger this hint on an unrelated failure.
     (re.compile(r"non-fast-forward|fetch first|! \[rejected\]"), "remote moved: re-enqueue with --rebase (or --force-with-lease after a rewrite)"),
+    (re.compile(r"! \[remote rejected\]"), "the remote refused the push: read the `remote:` lines above "
+     "(ruleset, signature or e-mail rule); a rebase does not fix a remote-side rejection"),
     (re.compile(r"CONFLICT|could not apply"), "rebase conflict: the owning session resolves in the worktree, then re-enqueues"),
     (re.compile(r"gpg failed to sign|signing failed|No secret key|Couldn't load public key|failed to write commit object"),
      "signing failed: the signing key is not available (a drain only works on the host)"),
