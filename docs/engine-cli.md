@@ -687,7 +687,7 @@ Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & g
 then has `→`) but is missing its `; not <rejected>` clause. Any other line in that section (a
 free-form gotcha, an arrow in prose, a date in parentheses) never warns.
 
-Also warns (non-fatal) when an `environment.md` states who owns code (`CODEOWNERS =`, "code owner"): the
+Also warns (non-fatal) when an `environment.md` states who owns code (`CODEOWNERS =`, "code owner is @x"): the
 live CODEOWNERS file is the only source (`skills/pr-open/codeowners.py`), prose about it goes stale.
 
 Operates on the content root gen_index takes from kit_profile.context_root() (docs/layout.md's

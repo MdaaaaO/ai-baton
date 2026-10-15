@@ -308,6 +308,13 @@ class OwnerClaimWarnings(ContextRoot):
         self.assertIn(phrase, v.stderr)
         self.assertNotIn("#widgets", v.stderr)
 
+    def test_a_plain_mention_of_code_owners_is_not_a_claim(self):
+        self.env_doc("- Reviewers: pr-open requests the code owners GitHub resolves from the repo's CODEOWNERS file.\n"
+                     "- The CODEOWNERS file decides review routing; never restate it here.")
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.assertNotIn("state who owns code", v.stderr)
+
     def test_a_clean_environment_doc_and_other_docs_do_not_warn(self):
         self.env_doc("- Tracker: GitHub issues.")
         (self.root / "repos" / "owners.md").write_text(

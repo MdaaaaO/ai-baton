@@ -14,7 +14,7 @@ Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & g
 then has `→`) but is missing its `; not <rejected>` clause. Any other line in that section (a
 free-form gotcha, an arrow in prose, a date in parentheses) never warns.
 
-Also warns (non-fatal) when an `environment.md` states who owns code (`CODEOWNERS =`, "code owner"): the
+Also warns (non-fatal) when an `environment.md` states who owns code (`CODEOWNERS =`, "code owner is @x"): the
 live CODEOWNERS file is the only source (`skills/pr-open/codeowners.py`), prose about it goes stale.
 
 Operates on the content root gen_index takes from kit_profile.context_root() (docs/layout.md's
@@ -91,9 +91,14 @@ def ledger_warnings(root: str, rows: list[dict]) -> list[tuple[str, str]]:
 
 
 # An environment doc must not carry a CODEOWNERS fact: pr-open derives reviewers from the repo's live file, and
-# a line of prose naming an owner outlives the file's own edits. Matches `CODEOWNERS =`/`CODEOWNERS:` and the
-# phrase "code owner(s)" / "code-owner(s)", any case.
-OWNER_CLAIM_RE = re.compile(r"CODEOWNERS\s*[=:]|code[ -]owners?\b", re.IGNORECASE)
+# a line of prose naming an owner outlives the file's own edits. Matches CLAIM shapes only, any case:
+# `CODEOWNERS =`/`CODEOWNERS:`, "code owner(s) is/are/:", and "code owner" / "CODEOWNERS file|entry" / "owns" /
+# "owner of" followed on the same line by an `@owner`. A line that merely mentions code owners never warns.
+OWNER_CLAIM_RE = re.compile(
+    r"CODEOWNERS\s*[=:]"
+    r"|\bcode[ -]owners?\s*(?:is|are|:|=)\s"
+    r"|(?:\bcode[ -]owners?\b|\bCODEOWNERS\s+(?:file|entry)\b|\bowns\b|\bowner\s+of\b)[^\n]*?@[\w-]",
+    re.IGNORECASE)
 
 
 def owner_claim_warnings(root: str, rows: list[dict]) -> list[tuple[str, str]]:

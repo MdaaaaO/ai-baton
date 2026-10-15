@@ -4,7 +4,7 @@ description: "Checklist for opening a PR: sizing gate, body with the diagram set
 metadata:
   version: "32"
   updated: "2026-10-15"
-  reviewed: "2026-10-02"
+  reviewed: "2026-10-15"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
 ---
 
@@ -54,10 +54,14 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    Also run `python3 $BATON/context-db/bin/length_check.py <file> --surface pr --repo <o>/<r>` on the same
    file — a warning (step 7), never a blocker; a long template overrides the budget via
    `length.repos.<o>/<r>.pr_words`.
-2. **Reviewers**: `python3 $BATON/skills/pr-open/codeowners.py resolve <o>/<r> --pr <n>`; request exactly its
-   `team:`/`user:` lines plus a non-empty `github.review_bot` via `gh api -X POST
-   repos/<o>/<r>/pulls/<n>/requested_reviewers` (`reviewers[]=`, `team_reviewers[]=`). Exit 3: nothing to
-   request, say so. `github.owner_teams` only names the approval you cannot give yourself.
+2. **Reviewers**: `python3 $BATON/skills/pr-open/codeowners.py resolve <o>/<r> --pr <n>` (reads CODEOWNERS on
+   the PR's base branch). Exit **0** → request exactly its `team:`/`user:` lines plus a non-empty
+   `github.review_bot` via `gh api -X POST repos/<o>/<r>/pulls/<n>/requested_reviewers` (`reviewers[]=`,
+   `team_reviewers[]=`). Exit **3** → the repo is readable but no CODEOWNERS line owns a changed path (or
+   there is no file): nothing to request, say so (the bot is still requested). Exit **2** → the read failed
+   (stderr `FAIL …` says why) — never "nothing to request": retry once, then request by hand from the
+   CODEOWNERS file you can see, or say the reviewer step is blocked. `github.owner_teams` only names the
+   approval you cannot give yourself.
 3. **Labels — always, in every repo, whether or not the repo asks for them** (owner decision, 2026-09-11 and
    2026-09-18: "applying tags should not be repo specific, we always want to apply tags and follow best
    practices, even if the repo itself doesn't require it"). A PR without labels is not open. Procedure:
