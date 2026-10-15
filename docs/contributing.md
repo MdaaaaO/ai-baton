@@ -35,7 +35,7 @@ Every change is traceable both ways: **issue → PR → squash commit → releas
 | **3. PR** | Before opening it: `git fetch origin main && make -C context-db ci` in the worktree (every gate CI runs — the review gate on the branch, the validator, a blank-store kit-verify, tests, parse checks, shellcheck, install smoke; a missing tool fails unless `ALLOW_SKIP=1`; one unit: `make -C context-db verify-skill UNIT=skills/<name>`). Title = a Conventional Commit (it becomes the squash subject). Body starts with `Closes #N` (finishes the issue) or `Refs #N` (one step of it; the issue stays open). Labels: a type label + the area label. | `pr-open` skill · CI checks **`pr-title`** and **`pr-issue`** (`.github/scripts/check-pr-issue.sh`) |
 | **4. Checks** | `kit-verify --no-env` on the bare checkout (the env-free validator), then `kit-verify` (frontmatter schema — § Skill frontmatter — and manifests) against a blank env store, the engine's unittest suite (`make -C context-db test`), the plugin manifests through `claude plugin validate` where the CLI exists (`make plugin-validate`; strict but for the accepted root-`CLAUDE.md` warning, `docs/packaging.md`), `py_compile`, `bash -n`. Then **`install-smoke`** replays README.md's clone and plugin install blocks on a fresh runner, from this checkout, ending in kit-health (`make -C context-db install-smoke` locally, #98). | CI checks **`kit-verify`**, **`install-smoke (clone)`**, **`install-smoke (plugin)`** |
 | **5. Review** | Claude reviews the PR when it opens and again on every push (only what changed since its last review). See *Code review*. | `claude-review` workflow |
-| **6. Merge** | Squash only. `auto-merge.yml` merges as soon as the six checks (`kit-verify`, `pr-title`, `pr-issue`, `claude-review`, both `install-smoke` legs) are green, the review verdict on the head is `approve` and every thread is resolved; a PR that misses a gate waits for the owner. GitHub closes every `Closes` issue. | `auto-merge` workflow · owner as fallback |
+| **6. Merge** | Squash only. `auto-merge.yml` merges as soon as the six checks (`kit-verify`, `pr-title`, `pr-issue`, `claude-review`, both `install-smoke` legs) are green, the review verdict on the head is `approve` and every thread is resolved; a PR that misses a gate waits for the owner. The squash is `<title> (#<n>)` plus the body's footer block (§ Releases). GitHub closes every `Closes` issue. | `auto-merge` workflow · owner as fallback |
 | **7. Sync** | `make claude_sync` on each machine; then `/kit-health` there if the PR says an environment needs a step. | owner, per machine |
 
 Exempt from step 1/3's issue link: dependabot PRs and release PRs (title `chore(release): …`).
@@ -244,6 +244,21 @@ One changelog: the root `CHANGELOG.md`, the **release log**, generated from the 
 version is its `metadata.version`; a step a machine must take is a `BREAKING CHANGE:` footer, which the release notes carry
 (§ Versioning). The hand-written per-unit changelog (`docs/CHANGELOG.md`) is retired; its history is in git.
 
+**The footer reaches `main` only through the squash.** The squash commit is `<PR title> (#<n>)` with the PR body's
+*footer block* as its message: the run of `Token: value` / `Token #N` lines (`BREAKING CHANGE: …`, `Refs #N`) at the
+very end of the body, after a blank line — one line per footer, nothing else of the body. `auto-merge.yml` sends
+exactly that (`.github/scripts/squash-footers.jq` cuts the block); merging by hand, send the same:
+
+```sh
+.github/scripts/check-pr-footers.sh "<title>" body.md > footers.txt   # also prints the footer block
+gh pr merge <n> --squash --subject '<title> (#<n>)' --body-file footers.txt
+```
+
+A PR with a step every machine must take (§ Machines names one, or the title carries `!`) ends its body with
+`BREAKING CHANGE: <step>`. The `pr-title` check runs `check-pr-footers.sh` and fails a `!` title without that footer,
+and a `BREAKING CHANGE:` line anywhere but the footer block (the squash would drop it). Whether § Machines' prose
+names such a step is the reviewer's call: a step there without the footer is a review finding.
+
 ## Labels
 
 | axis | labels |
@@ -291,7 +306,8 @@ test loads. It covers `kb.py`
 schema, env-store checks, `--stale`, `--no-env`), `gen_index.py` / `verify.py` / `new.sh` on a throw-away
 `CONTEXT_ROOT`, `gen_sessions.py`, `mission.py`, `commit_style.py`, `eval_check.py` (on a throw-away kit), `session_stats.py` + `transcripts.py` on a synthetic
 transcript, `frontmatter.py` + `migrate_frontmatter.py`, and the pure functions of `pr-review/scripts/trivial-check.py`
-and `pr-open/diagram-plan.py`, the `pr-issue` parser (`.github/scripts/check-pr-issue.sh`, with a stub `gh`),
+and `pr-open/diagram-plan.py`, the `pr-issue` parser (`.github/scripts/check-pr-issue.sh`, with a stub `gh`), the squash footer block
+(`squash-footers.jq`, `check-pr-footers.sh`, and auto-merge's merge step against a stub `gh`),
 and the `main-guard` retry loop (`.github/scripts/main-guard.sh`, with a stub `gh` and no pause).
 
 - **A fix PR adds the regression test** that fails before the fix and passes after it — in the module that owns the

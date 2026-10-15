@@ -2,8 +2,8 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo/session surfaces only actionable events, triages via `pr-event-brief`, keeps branches synced, merges via `pr-merge.sh` once gates hold. Parks on sign-off, idle windows or a human-only gate. Use when your session owns an open PR."
 metadata:
-  version: "27"
-  updated: "2026-10-02"
+  version: "28"
+  updated: "2026-10-15"
   reviewed: "2026-10-02"
 ---
 
@@ -175,6 +175,9 @@ leaves `merged_at` unset is not read as merged. Exit 0 = confirmed merged; exit 
 the merge call failed, or `merged_at` came back unset (one-line reason: head moved, open threads,
 not green, approval missing — read it and rerun after acting); exit 3 = gave up (CLEAN + APPROVED
 never held within the deadline).
+
+`pr-merge.sh` squashes with the repository's default message: a body ending in a `BREAKING CHANGE:` footer
+needs the hand merge with the footer lines only (`reference/rules.md`, the squash footers rule).
 
 ## Staleness rules — why the scripts look the way they do
 

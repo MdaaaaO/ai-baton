@@ -1,9 +1,10 @@
 name: pr-title
 
 # Kit PRs are squash-merged, so the PR title becomes the commit subject on main — and that subject becomes
-# the CHANGELOG.md line of the next release (docs/contributing.md § Releases). Two checks, one job:
+# the CHANGELOG.md line of the next release (docs/contributing.md § Releases). Three checks, one job:
 #   conventional-release check-title — the types .conventional-release.toml knows (what the changelog groups by)
 #   commit_style.py title            — the kit's own rule on top (≤ 72 chars, no trailing period; docs/commit-style.md)
+#   check-pr-footers.sh              — a breaking change sits in the body's footer block, the squash commit's message
 # Inline rather than conventional-release's reusable pr-title.yml, so the kit's own rule runs in the same job.
 # Runs on GitHub-hosted runners like every workflow (docs/contributing.md § Where CI runs).
 
@@ -49,6 +50,19 @@ jobs:
         run: |
           uvx --from "conventional-release==$CONVENTIONAL_RELEASE_VERSION" conventional-release check-title "$TITLE"
           python3 context-db/bin/commit_style.py title --style conventional "$TITLE"
+      # The squash commit's message is the body's trailing footer block (auto-merge.yml), so a breaking change
+      # must sit there as a `BREAKING CHANGE:` footer. Base copy, as above; a base that predates the script skips.
+      - name: A breaking change carries its footer
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ -f .github/scripts/check-pr-footers.sh ]; then
+            ./.github/scripts/check-pr-footers.sh
+          else
+            echo "pr-footers: the base predates .github/scripts/check-pr-footers.sh — skipped"
+          fi
 
   # Every change comes from an issue (docs/contributing.md, "From issue to merge"). The rule and the
   # parser live in .github/scripts/check-pr-issue.sh — run it locally before `gh pr create`. A change to

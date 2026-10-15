@@ -10,6 +10,11 @@
   the env store could not be loaded, so the check did not run; fix the store or check the reply by hand before
   posting; a no-op when `<o>/<r>` is one of `tracker.repos` or not public.
 - Strict required checks: a PR that is BEHIND main is refused; `PUT pulls/N/update-branch` first (GitHub-signed merge commit), then the bot must review the new head. **Do this yourself** — it works with the token `gh` runs with for every PR that does not touch `.github/workflows/**`. **Exception:** a PR carrying a workflow-file change gets 403 where that token lacks the `workflow` scope (a proxy-injected token usually does). Then rebase the worktree onto `origin/main` yourself and enqueue a `sign-queue` job with `--rebase` so the user's routine `make sign` pushes it; only if that is impractical hand them the one command for their own machine, `cd <abs repo> && gh pr update-branch <n>`. The merge itself never needs the user's machine: once `mergeable_state` is `clean`, `gh pr merge <n> --repo <o>/<r> --squash` goes through with the same token (`pr-merge.sh` runs the same command — no `--auto`).
+- Squash footers: `pr-merge.sh` squashes with the repository's default message. A PR whose body ends in a
+  conventional footer block (`BREAKING CHANGE: <step>`, after a blank line) in a repository whose default drops the
+  body: once the gates hold, merge it by hand with the footer lines only, never the whole body —
+  `gh pr merge <n> --repo <o>/<r> --squash --subject '<title> (#<n>)' --body-file <footers>` — or the footer, and with
+  it the release's bump level and notes, never reaches the default branch.
 - Re-request the bot with `DELETE` + `POST pulls/N/requested_reviewers` (the env config's `github.review_bot`). A run that finishes in ~20 s without posting = re-request again; `gh pr ready --undo && gh pr ready` is the fallback.
 - Before an automated merge, test the bot verdict **on its own** — `bot-verdict.sh` prints a plain `green`/`yellow`/`red`/`none`, so `case "$v" in green) …` never risks matching a combined string against the human `reviewDecision` `APPROVED`, the bug the old ad hoc regex had to guard against.
 - Do not watch PRs another session owns — one watcher per PR *across sessions*. Within your own session
