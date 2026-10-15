@@ -245,9 +245,11 @@ version is its `metadata.version`; a step a machine must take is a `BREAKING CHA
 (§ Versioning). The hand-written per-unit changelog (`docs/CHANGELOG.md`) is retired; its history is in git.
 
 **The footer reaches `main` only through the squash.** The squash commit is `<PR title> (#<n>)` with the PR body's
-*footer block* as its message: the run of `Token: value` / `Token #N` lines (`BREAKING CHANGE: …`, `Refs #N`) at the
-very end of the body, after a blank line — one line per footer, nothing else of the body. `auto-merge.yml` sends
-exactly that (`.github/scripts/squash-footers.jq` cuts the block); merging by hand, send the same:
+*footer block* as its message: the run of footer lines (`BREAKING CHANGE: …`, `Refs #N`, `Closes #N`, `Fixes #N`,
+`Resolves #N`, `Co-authored-by:`, `Signed-off-by:`, `Reviewed-by:`; one line each) that ends the body, after a blank
+line. Only the `<!-- diagram-plan: … -->` marker and the session line `pr-open` appends may come after the block —
+the parser sets those aside. Nothing else of the body reaches the commit. `auto-merge.yml` sends exactly that
+(`.github/scripts/squash-footers.jq` cuts the block); merging by hand, send the same:
 
 ```sh
 .github/scripts/check-pr-footers.sh "<title>" body.md > footers.txt   # also prints the footer block

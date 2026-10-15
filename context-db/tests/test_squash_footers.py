@@ -53,6 +53,27 @@ class FooterBlock(unittest.TestCase):
         self.assertEqual(footers("x\n\n- [x] done\nhttps://example.com/a"), "")
 
 
+    # What pr-open appends after the body: the diagram-plan marker and the session footer line.
+    MARKER = "<!-- diagram-plan: facets=ci,docs dominant=ci intent=bugfix runs=ci -->"
+    SESSION = "session `kit-01`"
+
+    def test_footer_before_the_marker_and_the_session_line(self):
+        body = f"Closes #1\n\n## Machines\n\nRun it.\n\nBREAKING CHANGE: run kb.py migrate\n\n{self.MARKER}\n\n{self.SESSION}\n\n"
+        self.assertEqual(footers(body), "BREAKING CHANGE: run kb.py migrate")
+
+    def test_footer_block_glued_to_the_session_line(self):
+        body = f"Prose.\n\nBREAKING CHANGE: run kb.py migrate\nRefs #2\n{self.SESSION}"
+        self.assertEqual(footers(body), "BREAKING CHANGE: run kb.py migrate\nRefs #2")
+
+    def test_marker_directly_above_the_block(self):
+        body = f"Prose.\n\n{self.MARKER}\nBREAKING CHANGE: run kb.py migrate\n\n{self.SESSION}"
+        self.assertEqual(footers(body), "BREAKING CHANGE: run kb.py migrate")
+
+    def test_only_known_tokens_are_footers(self):
+        self.assertEqual(footers("Prose.\n\nResult: 16 OK"), "")
+        self.assertEqual(footers("Prose.\n\nNote: see above\nBREAKING CHANGE: x"), "")
+        self.assertEqual(footers("Prose.\n\nco-authored-by: a <a@example.com>\nCloses #3"), "co-authored-by: a <a@example.com>\nCloses #3")
+
 @unittest.skipUnless(shutil.which("jq"), "jq not installed")
 class CheckPrFooters(unittest.TestCase):
     def run_check(self, title: str, body: str, author: str = "someone"):
@@ -81,6 +102,23 @@ class CheckPrFooters(unittest.TestCase):
         p = self.run_check("feat(x): y", body)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(p.stdout, "")
+
+    def test_pr_open_tails_pass_a_breaking_title(self):
+        m, s = FooterBlock.MARKER, FooterBlock.SESSION
+        for body in (f"Closes #1\n\nProse.\n\nBREAKING CHANGE: run x\n\n{m}\n\n{s}\n",
+                     f"Closes #1\n\nProse.\n\nBREAKING CHANGE: run x\n{s}",
+                     f"Closes #1\n\nProse.\n\n{m}\nBREAKING CHANGE: run x\n\n{s}"):
+            p = self.run_check("feat(x)!: y", body)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(p.stdout, "BREAKING CHANGE: run x\n")
+
+    def test_a_fence_closes_only_on_its_own_marker(self):
+        body = "Closes #1\n\n~~~\n```\nBREAKING CHANGE: inside the tilde fence\n~~~\n\nAll prose.\n"
+        p = self.run_check("feat(x): y", body)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        p = self.run_check("feat(x): y", "Closes #1\n\n```\n~~~\n```\nBREAKING CHANGE: after the fence\n\nprose")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("outside the footer block", p.stderr)
 
     def test_the_pr_template_passes(self):
         body = (KIT / ".github" / "pull_request_template.md").read_text(encoding="utf-8").replace("Closes #", "Closes #1")

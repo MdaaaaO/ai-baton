@@ -31,10 +31,15 @@ fi
 footers="$(printf '%s' "$body" | jq -Rjs -f "$(dirname "$0")/squash-footers.jq")"
 breaking='^BREAKING[ -]CHANGE: '
 
-# Lines of prose only: fenced code and HTML comments (the PR template's own hints) do not count.
+# Lines of prose only: fenced code (closed by its own marker, ``` or ~~~) and HTML comments (the PR
+# template's own hints) do not count.
 prose="$(printf '%s\n' "$body" | tr -d '\r' | awk '
-  /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
-  fence { next }
+  match($0, /^[[:space:]]*(```|~~~)/) {
+    mark = substr($0, RSTART + RLENGTH - 3, 3)
+    if (fence == "") { fence = mark; next }
+    if (mark == fence) { fence = ""; next }
+  }
+  fence != "" { next }
   {
     line = $0; out = ""
     while (line != "") {

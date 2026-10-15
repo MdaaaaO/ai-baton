@@ -26,9 +26,10 @@ Closes #
 ## Machines
 
 <!-- What a machine must do after `make claude_sync` — usually "nothing". A step every machine must take (a `kb.py migrate`,
-     a `config-set`, a re-run of setup) also ends this body as a `BREAKING CHANGE: <step>` footer — the last line, after
-     a blank line: the squash commit carries that footer block and nothing else of the body, and the release notes and
-     the bump level come from it (docs/contributing.md § Releases; the pr-title check). -->
+     a `config-set`, a re-run of setup) also ends this body as a `BREAKING CHANGE: <step>` footer, after a blank line —
+     below § Verified how, only the diagram-plan marker and the session line may follow it: the squash commit carries
+     that footer block and nothing else of the body, and the release notes and the bump level come from it
+     (docs/contributing.md § Releases; the pr-title check). -->
 
 ## Verified how
 
