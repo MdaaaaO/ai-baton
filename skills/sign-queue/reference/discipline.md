@@ -10,7 +10,9 @@ merge, so `--no-gpg-sign` is never a fix — it only makes a commit that has to 
 
 Work in a dedicated `git worktree add <path> [<branch>]`, never in a checkout the user also has open: that
 checkout has one HEAD, and a `checkout -b`, `switch` or `reset` you run there moves what is on the user's screen
-without warning. Everything after the `worktree add` happens inside the worktree, where ordinary git is safe.
+without warning. You usually cannot see whether they have it open, so assume the checkout is shared unless you
+cloned it yourself — never switch branches or reset in one you did not. Everything after the `worktree add`
+happens inside the worktree, where ordinary git is safe.
 
 ## 2. Exact staging
 
@@ -43,10 +45,10 @@ single-branch clone does not have). `enqueue.sh` refuses a worktree with `rebase
 git dir.
 
 **The signing trap.** Once a rebase starts, its sign flag is frozen in `.git/rebase-merge/gpg_sign_opt`; config
-changes are ignored until it ends. If `--continue` on the host does not ask for a signature, remove that file
-(emptying it still counts) before continuing. A rebase whose upstream has not moved is a no-op that keeps old
-unsigned commits — hence the job's `-f`, and its check of every commit before the push
-(`reference/enqueue-flags.md` § The flags, the no-op re-stack trap).
+changes are ignored until it ends, so a rebase started here (no key) stays unsigned however it is continued. That
+is why it is never handed on: `git rebase --abort` and enqueue — the job starts its own rebase with `-S`.
+A rebase whose upstream has not moved is a no-op that keeps old unsigned commits — hence the job's `-f`, and its
+check of every commit before the push (`reference/enqueue-flags.md` § The flags, the no-op re-stack trap).
 
 ## 6. A parked job
 

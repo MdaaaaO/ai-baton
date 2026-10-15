@@ -25,7 +25,7 @@ own machine ("the host") holds; an SSH `push` needs the same. So sessions **enqu
 
 `reference/discipline.md` is the why and the recovery for each step:
 
-1. Work in your own `git worktree`, never a checkout the user has open.
+1. Work in your own `git worktree`; assume any checkout you did not clone yourself is one the user has open.
 2. `git -C <wt> status --short` shows exactly the files the commit should carry; pass each as `--files <path>`.
 3. The message is a file at an absolute path under `<workspace root>/.worktrees/` — outside the worktree — and
    its subject follows the repo's commit style (`commit_style.py check` runs at enqueue).
@@ -42,7 +42,8 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
 - `topic` is `[A-Za-z0-9._-]`; `--by` (or `SIGN_QUEUE_BY`) is required — a failed job is routed back by it alone.
 - **`enqueue.sh` decides the push shape itself:** no `<branch>` on origin → `--new-branch` (`push -u`); the
   remote tip not in HEAD's history → `--rebase` (the job fetches and runs `rebase -S -f FETCH_HEAD`). It prints a
-  `note:` line for each. Passing either flag forces it on.
+  `note:` line for each. Passing either flag forces it on. A remote it cannot reach from here decides neither
+  (one `note:`, never a refusal); a pushed history you rewrote (amend, fixup) is refused until you pass a lease.
 - `--force-with-lease <remote-sha>` for an already-pushed branch whose history is rewritten; `--onto
   <upstream>:<placeholder-sha>` for a stacked branch; `--supersede` folds a fix into your own pending job of
   the same topic; `--all` stages everything on purpose. Spec: `reference/enqueue-flags.md`.

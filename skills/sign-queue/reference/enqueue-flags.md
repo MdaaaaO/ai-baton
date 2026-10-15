@@ -8,13 +8,17 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
 
 ## What `enqueue.sh` decides itself
 
-It reads `refs/heads/<branch>` on `origin` once (`git ls-remote`; a lookup that fails stops the enqueue with
-git's own error, never read as "no branch"):
+It reads `refs/heads/<branch>` on `origin` once (`git ls-remote`, exact ref: `refs/heads/x/<branch>` does not
+count). A lookup that fails — an SSH remote this process has no identity for, or no network — is never read as
+"no branch" and never refuses a dirty worktree: it prints `note: remote not reachable here: no
+--new-branch/--rebase decided; the sign job decides` and adds neither (explicit flags still hold). Only a clean
+worktree's push-only retry stops on it with git's own error, since it cannot tell whether anything is left to push.
 
 | remote state | added | unless |
 |---|---|---|
 | no `<branch>` on origin | `--new-branch` (`push -u`) | `--force-with-lease` given |
 | tip not in HEAD's history (`merge-base --is-ancestor` false, or the tip is not even fetched here) | `--rebase` | `--onto` or `--force-with-lease` given — both rewrite history on purpose |
+| tip not in HEAD's history, and a commit only the remote has was once on this branch (its reflog: an amend, fixup or reset after a push) | — refused, exit 2: pass `--force-with-lease <tip>` if the rewrite is meant | `--onto` or `--force-with-lease` given |
 | a `rebase-merge` / `rebase-apply` dir in the worktree's git dir | — refused, exit 2 | never |
 
 A flag passed explicitly is always kept (forced on). A worktree with no `origin` remote at all decides

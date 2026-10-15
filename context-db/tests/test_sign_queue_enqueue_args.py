@@ -373,6 +373,196 @@ class RemoteDecidesFlags(unittest.TestCase):
                     self.assertEqual(list(ctx.rglob("*.sh")), [], "a refused enqueue must not queue a job")
 
 
+def _git(root: Path, wt: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(wt), "-c", "user.name=t", "-c", "user.email=t", *args], check=True,
+                          env=_env(root), capture_output=True, text=True).stdout.strip()
+
+
+# an SSH remote this process has no identity for: what ls-remote meets in the session the queue exists for
+_NO_SSH_IDENTITY = {"GIT_SSH_COMMAND": "sh -c 'echo Permission denied \\(publickey\\) >&2; exit 255'"}
+_PLAIN_REBASE = 'git -C "$WT" rebase -S -f FETCH_HEAD'
+
+
+class RemoteDecisionGuards(unittest.TestCase):
+    """The guards behind RemoteDecidesFlags (#50 review): a remote that cannot be reached from here never
+    refuses a dirty enqueue, a history rewrite is never auto-rebased back over itself, --onto and
+    --force-with-lease are exempt, a dirty worktree with no origin asks nothing, and only the exact
+    `refs/heads/<branch>` counts as the branch."""
+
+    def _ssh_origin(self, tmp: Path):
+        ctx = tmp / "ws" / ".context"
+        ctx.mkdir(parents=True)
+        wt = _seed_repo(tmp / "ws")
+        subprocess.run(["git", "-C", str(wt), "remote", "add", "origin", "git@github.com:owner/repo.git"],
+                       check=True, env=_env(tmp))
+        return ctx, wt
+
+    def test_an_unreachable_remote_notes_and_queues_a_dirty_worktree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt = self._ssh_origin(tmp)
+            (wt / "a.txt").write_text("a\n")
+            r = _enqueue(tmp, wt, ctx, "ssh", "--files", "a.txt", "--by", "t", env_extra=_NO_SSH_IDENTITY)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("note: remote not reachable here: no --new-branch/--rebase decided; the sign job decides",
+                          r.stderr)
+            self.assertEqual(r.stderr.count("remote not reachable here"), 1)
+            lines = _job_lines(r)
+            self.assertIn('git -C "$WT" push origin "$BR"', lines)
+            self.assertNotIn('git -C "$WT" push -u origin "$BR"', lines)
+            self.assertNotIn(_PLAIN_REBASE, lines)
+
+    def test_an_unreachable_remote_still_honours_explicit_flags(self):
+        for flag, expect in (("--rebase", _PLAIN_REBASE), ("--new-branch", 'git -C "$WT" push -u origin "$BR"')):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as tmp:
+                tmp = Path(tmp)
+                ctx, wt = self._ssh_origin(tmp)
+                (wt / "a.txt").write_text("a\n")
+                r = _enqueue(tmp, wt, ctx, "ssh-flag", "--files", "a.txt", "--by", "t", flag,
+                             env_extra=_NO_SSH_IDENTITY)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn(expect, _job_lines(r))
+
+    def test_an_unreachable_remote_still_stops_a_clean_push_only_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt = self._ssh_origin(tmp)
+            r = _enqueue(tmp, wt, ctx, "ssh-clean", "--by", "t", env_extra=_NO_SSH_IDENTITY)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("ls-remote origin main failed", r.stderr)
+
+    def _amended_after_push(self, tmp: Path):
+        ctx = tmp / "ws" / ".context"
+        ctx.mkdir(parents=True)
+        wt, origin = _with_origin(tmp / "ws")
+        (wt / "drop.txt").write_text("x\n")
+        (wt / "keep.txt").write_text("k\n")
+        _git(tmp, wt, "add", "drop.txt", "keep.txt")
+        _git(tmp, wt, "commit", "-q", "-m", "feat: b")
+        _git(tmp, wt, "push", "-q", "origin", "main")
+        _git(tmp, wt, "rm", "-q", "drop.txt")
+        _git(tmp, wt, "commit", "-q", "--amend", "-m", "feat: b without drop")
+        (wt / "a.txt").write_text("a\n")
+        return ctx, wt, origin
+
+    def test_an_amend_after_a_push_is_refused_not_auto_rebased(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, origin = self._amended_after_push(tmp)
+            r = _enqueue(tmp, wt, ctx, "amend", "--files", "a.txt", "--by", "t")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("rewrote away", r.stderr)
+            self.assertIn("--force-with-lease", r.stderr)
+            self.assertNotIn("-> --rebase", r.stderr)
+            self.assertEqual(list(ctx.rglob("*.sh")), [], "a refused enqueue must not queue a job")
+
+    def test_an_amend_under_someone_elses_newer_push_is_refused_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, origin = self._amended_after_push(tmp)
+            _move_origin(tmp / "ws", origin)
+            _git(tmp, wt, "fetch", "-q", "origin")
+            r = _enqueue(tmp, wt, ctx, "amend-moved", "--files", "a.txt", "--by", "t")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("rewrote away", r.stderr)
+
+    def test_an_amend_with_a_lease_is_queued_without_a_rebase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, origin = self._amended_after_push(tmp)
+            tip = subprocess.run(["git", "--git-dir", str(origin), "rev-parse", "main"], check=True,
+                                 env=_env(tmp), capture_output=True, text=True).stdout.strip()
+            r = _enqueue(tmp, wt, ctx, "amend-lease", "--files", "a.txt", "--by", "t", "--force-with-lease", tip)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn(_PLAIN_REBASE, _job_lines(r))
+
+    def test_an_unpushed_amend_still_rebases_onto_a_moved_remote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt, origin = _with_origin(tmp / "ws")
+            (wt / "b.txt").write_text("b\n")
+            _git(tmp, wt, "add", "b.txt")
+            _git(tmp, wt, "commit", "-q", "-m", "feat: b")
+            _git(tmp, wt, "commit", "-q", "--amend", "-m", "feat: b, reworded")  # never pushed: no rewrite of the remote
+            _move_origin(tmp / "ws", origin)
+            _git(tmp, wt, "fetch", "-q", "origin")
+            (wt / "a.txt").write_text("a\n")
+            r = _enqueue(tmp, wt, ctx, "unpushed-amend", "--files", "a.txt", "--by", "t")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn(_PLAIN_REBASE, _job_lines(r))
+
+    def test_onto_is_never_turned_into_a_plain_rebase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt, origin = _with_origin(tmp / "ws")
+            _move_origin(tmp / "ws", origin)
+            head = _git(tmp, wt, "rev-parse", "HEAD")
+            (wt / "a.txt").write_text("a\n")
+            r = _enqueue(tmp, wt, ctx, "onto", "--files", "a.txt", "--by", "t", "--onto", "main:" + head)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            lines = _job_lines(r)
+            self.assertNotIn(_PLAIN_REBASE, lines)
+            self.assertIn('git -C "$WT" rebase -S -f --onto FETCH_HEAD "$OLD_BASE"', lines)
+
+    def test_a_dirty_worktree_with_no_origin_asks_nothing_and_decides_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt = _seed_repo(tmp / "ws")
+            (wt / "a.txt").write_text("a\n")
+            r = _enqueue(tmp, wt, ctx, "no-origin", "--files", "a.txt", "--by", "t")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn("ls-remote", r.stderr)
+            self.assertNotIn("remote not reachable", r.stderr)
+            lines = _job_lines(r)
+            self.assertIn('git -C "$WT" push origin "$BR"', lines)
+            self.assertNotIn(_PLAIN_REBASE, lines)
+
+    def test_a_lease_on_a_branch_missing_on_the_remote_adds_no_new_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt, _ = _with_origin(tmp / "ws", push=False)
+            (wt / "a.txt").write_text("a\n")
+            r = _enqueue(tmp, wt, ctx, "lease-missing", "--files", "a.txt", "--by", "t",
+                         "--force-with-lease", _git(tmp, wt, "rev-parse", "HEAD"))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            lines = _job_lines(r)
+            self.assertNotIn('git -C "$WT" push -u origin "$BR"', lines)
+            self.assertIn('git -C "$WT" push --force-with-lease="refs/heads/$BR:$LEASE" origin "$BR"', lines)
+
+    def test_only_the_exact_ref_counts_as_the_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt, origin = _with_origin(tmp / "ws", push=False)
+            _git(tmp, wt, "push", "-q", "origin", "HEAD:refs/heads/x/main")  # matches the `main` pattern, is not main
+            (wt / "a.txt").write_text("a\n")
+            r = _enqueue(tmp, wt, ctx, "exact-ref", "--files", "a.txt", "--by", "t")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            lines = _job_lines(r)
+            self.assertIn('git -C "$WT" push -u origin "$BR"', lines)
+            self.assertNotIn(_PLAIN_REBASE, lines)
+
+    def test_explicit_new_branch_stays_on_against_an_existing_remote_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx = tmp / "ws" / ".context"
+            ctx.mkdir(parents=True)
+            wt, _ = _with_origin(tmp / "ws")
+            (wt / "a.txt").write_text("a\n")
+            r = _enqueue(tmp, wt, ctx, "forced-new", "--files", "a.txt", "--by", "t", "--new-branch")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn('git -C "$WT" push -u origin "$BR"', _job_lines(r))
+
+
 @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can write through directory permissions")
 class ReadOnlyQueueDir(unittest.TestCase):
     """A queue directory that cannot be written stops before the claim loop ever runs, naming the directory

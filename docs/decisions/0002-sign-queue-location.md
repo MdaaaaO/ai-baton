@@ -37,6 +37,6 @@ creates it on first use. Job logs live alongside it, at
 - `skills/sign-queue/signq.py` (`KIT`, `Q`, `LEGACY_Q` — the location and the (#7) migration
   comment) and the `migrate`-on-run logic
 - `skills/sign-queue/README.md` (**Needs** / queue location paragraph)
-- `skills/sign-queue/SKILL.md` § User side — drain (job-file location, `logs/`) and § Why (the owner
-  decision behind the queue's existence, 2026-09-10)
+- `skills/sign-queue/reference/drain.md` § Jobs (job-file location) and § What a drain prints (`logs/`);
+  `skills/sign-queue/reference/discipline.md` § Incidents (the owner decision behind the queue's existence, 2026-09-10)
 - `skills/sign-queue/reference/discipline.md` (the discipline before a job; until #50 a separate `signed-git-commits` skill)

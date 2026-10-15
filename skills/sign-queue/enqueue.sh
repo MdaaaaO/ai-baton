@@ -6,10 +6,13 @@
 #   --rebase       fetch origin <branch> and rebase -S onto FETCH_HEAD before pushing (remote is ahead,
 #                  e.g. after a GitHub "Update branch" click). Decided here when not given: the remote tip
 #                  (`ls-remote`) not in HEAD's history (`merge-base --is-ancestor`) adds it — except with
-#                  --onto or --force-with-lease, which rewrite history on purpose. Given, it is forced on.
+#                  --onto or --force-with-lease, which rewrite history on purpose. A remote commit this branch
+#                  once had (its reflog) and rewrote away (amend/fixup/reset after a push) is refused
+#                  instead: pass --force-with-lease <tip>. Given, it is forced on.
 #   --new-branch   first push of the branch (push -u). Decided here when not given: no `refs/heads/<branch>`
 #                  on origin adds it (never with --force-with-lease). Given, it is forced on.
-#                  A worktree with no `origin` remote decides neither; one in the middle of a rebase
+#                  A worktree with no `origin` remote, or whose remote is not reachable from here (no SSH
+#                  identity, offline: a note, never a refusal), decides neither; one in the middle of a rebase
 #                  (`rebase-merge` / `rebase-apply` in its git dir) is refused.
 #   --files        stage this one path, relative to the worktree. Repeat the flag for more than one path:
 #                  each occurrence is staged as exactly the path given (spaces and all) — never split —
@@ -148,6 +151,10 @@ fi
 # known-hosts line), and that text must never end up in the tip. Only the exact ref counts: the pattern
 # `<branch>` also matches `refs/heads/<x>/<branch>`. A dirty worktree with no `origin` remote at all
 # (nothing to ask) skips the lookup and decides nothing; a clean one still needs it for the retry check.
+# A failed lookup on a dirty worktree never refuses the enqueue: an SSH remote refuses a process with no
+# identity (the case this queue exists for), and an offline session is no different. It decides nothing
+# (explicit flags still hold) and the drain, which can reach the remote, catches a non-fast-forward.
+# Only the clean push-only retry stops on it: with no tip it cannot tell whether anything is left to push.
 clean=0; [ -n "$(git -C "$wt" status --short)" ] || clean=1
 remote_tip=""; remote_read=0
 if [ $clean = 1 ] || git -C "$wt" remote get-url origin >/dev/null 2>&1; then
@@ -156,10 +163,13 @@ if [ $clean = 1 ] || git -C "$wt" remote get-url origin >/dev/null 2>&1; then
     rm -f "$ls_remote_err"
     remote_tip=$(printf '%s\n' "$ls_remote_out" | awk -v r="refs/heads/$br" '$2 == r { print $1; exit }')
     remote_read=1
-  else
+  elif [ $clean = 1 ]; then
     echo "enqueue.sh: git ls-remote origin $br failed: $(cat "$ls_remote_err")" >&2
     rm -f "$ls_remote_err"
     exit 2
+  else
+    rm -f "$ls_remote_err"
+    echo "note: remote not reachable here: no --new-branch/--rebase decided; the sign job decides" >&2
   fi
 fi
 if [ $clean = 1 ]; then
@@ -221,7 +231,22 @@ if [ $remote_read = 1 ]; then
     fi
   elif [ $rebase = 0 ] && [ -z "$onto" ] && [ -z "$lease" ] \
        && ! git -C "$wt" merge-base --is-ancestor "$remote_tip" HEAD 2>/dev/null; then
-    # not an ancestor, or not even present here (someone pushed after the last fetch): either way the push
+    # Not in HEAD's history. Two causes, opposite answers. The remote moved on its own (someone pushed, an
+    # "Update branch" click): this branch never had those commits, so rebasing onto them is right. This
+    # worktree rewrote history (amend, fixup, reset after a push): a commit the remote still has was once on
+    # this branch (its reflog) and is no longer in HEAD's history; a rebase would replay the rewrite on top
+    # of the old commits and push it fast-forward, undoing it (a removed file comes back). That case is
+    # refused: rewriting a pushed branch is a lease decision. Checked on the remote-only commits
+    # (`rev-list <tip> --not HEAD`), so a rewrite is caught even when someone pushed on top of it since;
+    # A tip not fetched here yet cannot be walked: only a rewrite buried under someone else's newer push
+    # slips through then (a `git fetch` before enqueuing closes that gap).
+    branch_log=$(git -C "$wt" reflog show --format=%H "refs/heads/$br" 2>/dev/null | sort -u) || branch_log=""
+    if [ -n "$branch_log" ] && git -C "$wt" cat-file -e "$remote_tip^{commit}" 2>/dev/null \
+       && git -C "$wt" rev-list "$remote_tip" --not HEAD 2>/dev/null | grep -qxF -e "$branch_log"; then
+      echo "enqueue.sh: origin/$br (at $(printf '%.12s' "$remote_tip")) still has commits this branch rewrote away (amend/fixup/reset after a push) — a plain push would be rejected and an auto --rebase would undo the rewrite. Pass --force-with-lease $remote_tip yourself if the rewrite is meant, or rebase onto the remote tip" >&2
+      exit 2
+    fi
+    # never had here, or not even present (someone pushed after the last fetch): either way the push
     # would be rejected as non-fast-forward without a rebase onto the remote tip first
     rebase=1; echo "note: origin/$br is at $(printf '%.12s' "$remote_tip"), not in HEAD's history -> --rebase" >&2
   fi
