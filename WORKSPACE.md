@@ -6,6 +6,46 @@ Everything below holds everywhere; environment differences live in the env store
 Identity is `WORKSPACE_*` (`/plugin configure ai-baton`, else `.claude/settings.local.json`), never here.
 Kit reference: `$BATON/README.md`.
 
+## Rules (always on)
+
+**Communication**
+- Open decisions go in one `AskUserQuestion` carousel (top option marked `(Recommended)`), never a
+  prose question; no tool → a numbered `Decisions` block (`docs/carousel.md`).
+- No AI attribution anywhere; own PRs/comments end with `kit_profile.py footer` only.
+- Asks/status pings default to 1–3 plain sentences — link + one clause + who must act, no bold
+  templates; point to existing detail, don't restate it. Save headers/bullets/tables for messages
+  that bundle several items.
+- Refer to work by its tracker key (`ABC-123`, `#123`), never a bare nickname; every tracker key and
+  PR reference is a **clickable link on every surface** (`[KEY](url)`); only PR titles stay bare.
+- Right-size to the reader: experts get the TLDR only; hold detail until asked.
+- Don't pester: one ask in the right channel, no nudge DMs, batch per person, prefer removing the
+  dependency over chasing it.
+- Never cite local `.context/` or workspace paths on any external surface — link the ticket/PR or
+  inline the evidence.
+- Never print secret values (parameter-store, tokens, `settings.local.json`) into the transcript —
+  compare in-shell, print only match/no-match.
+
+**Workflow & scope**
+- A misrouted prompt (another session's lane/repo/ticket/PR) → ask before reading, editing,
+  relaying or drafting.
+- Standing go: once a step is agreed and gated, start it and prep everything — stop only for
+  signing, unplanned destructive prod actions, or genuine scope changes.
+- Every PR a session opens carries labels — type + area (+ risk where it applies) from the repo's
+  label set, in every repo; a PR without labels is not open (`pr-open` step 3).
+- Every commit/PR title follows the repo's **commit style** — Conventional Commits
+  (`type(scope): description`, tracker key inside, ≤72 chars) unless overridden;
+  `commit_style.py resolve|check|title` decides; never infer from the log or add a marker to
+  someone else's repo. Spec: `docs/commit-style.md`.
+- A kit behaviour change bumps its `metadata.version` and `metadata.updated`.
+- Never resolve a PR review thread waiting on a named third party — the open thread is the merge gate.
+
+**Verification**
+- Never assert infra/data-location/deploy/run state from a proxy signal — verify against the system
+  of record, or label it unverified.
+- Copying precedent code is not verification — check it against the documented spec or real data first.
+- Never let a swallowed error read as a negative result — check exit status separately; never
+  `2>/dev/null` a query whose emptiness is meaningful.
+
 ## Layout
 
 The workspace root holds the repos, `CLAUDE.md`, a `Makefile` and infra dirs `.claude/` (this kit),
@@ -66,7 +106,7 @@ Specs: `docs/env-facts.md`, `docs/new-environment.md`.
 ## Skills
 
 Only names/descriptions load each session; the body loads on invoke. **Never rely on a skill for an
-always-on rule** — those are § Rules below (and in `environment.md`). Triggers:
+always-on rule** — those are § Rules above (and in `environment.md`). Triggers:
 
 - session start → `session-register` · a step lands / closing → `session-handoff`, then `session-retro`
 - own PR → `pr-open`, then `pr-watch`; a watch line → `pr-event-brief`
@@ -76,46 +116,6 @@ always-on rule** — those are § Rules below (and in `environment.md`). Trigger
 - `NEEDS <fact>` or a new machine → `env-init` · plugin install → `kit-setup` · after a sync or kit change → `kit-health`
 - signed-commits repos → `sign-queue` (why: `signed-git-commits`) · weekly review → `self-assessment` · spend → `cost-report`
 - chat draft → `slack-draft` · docs-page comments → `notion-page-review` · `requires`-gated rest: `environment.md`
-
-## Rules (always on)
-
-**Communication**
-- Open decisions go in one `AskUserQuestion` carousel (top option marked `(Recommended)`), never a
-  prose question; no tool → a numbered `Decisions` block (`docs/carousel.md`).
-- No AI attribution anywhere; own PRs/comments end with `kit_profile.py footer` only.
-- Asks/status pings default to 1–3 plain sentences — link + one clause + who must act, no bold
-  templates; point to existing detail, don't restate it. Save headers/bullets/tables for messages
-  that bundle several items.
-- Refer to work by its tracker key (`ABC-123`, `#123`), never a bare nickname; every tracker key and
-  PR reference is a **clickable link on every surface** (`[KEY](url)`); only PR titles stay bare.
-- Right-size to the reader: experts get the TLDR only; hold detail until asked.
-- Don't pester: one ask in the right channel, no nudge DMs, batch per person, prefer removing the
-  dependency over chasing it.
-- Never cite local `.context/` or workspace paths on any external surface — link the ticket/PR or
-  inline the evidence.
-- Never print secret values (parameter-store, tokens, `settings.local.json`) into the transcript —
-  compare in-shell, print only match/no-match.
-
-**Workflow & scope**
-- A misrouted prompt (another session's lane/repo/ticket/PR) → ask before reading, editing,
-  relaying or drafting.
-- Standing go: once a step is agreed and gated, start it and prep everything — stop only for
-  signing, unplanned destructive prod actions, or genuine scope changes.
-- Every PR a session opens carries labels — type + area (+ risk where it applies) from the repo's
-  label set, in every repo; a PR without labels is not open (`pr-open` step 3).
-- Every commit/PR title follows the repo's **commit style** — Conventional Commits
-  (`type(scope): description`, tracker key inside, ≤72 chars) unless overridden;
-  `commit_style.py resolve|check|title` decides; never infer from the log or add a marker to
-  someone else's repo. Spec: `docs/commit-style.md`.
-- A kit behaviour change bumps its `metadata.version` and `metadata.updated`.
-- Never resolve a PR review thread waiting on a named third party — the open thread is the merge gate.
-
-**Verification**
-- Never assert infra/data-location/deploy/run state from a proxy signal — verify against the system
-  of record, or label it unverified.
-- Copying precedent code is not verification — check it against the documented spec or real data first.
-- Never let a swallowed error read as a negative result — check exit status separately; never
-  `2>/dev/null` a query whose emptiness is meaningful.
 
 ## Cost & context hygiene
 
