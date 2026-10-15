@@ -16,6 +16,7 @@ Prints one summary line, then one line per finding, `<KIND> <file>[:<line>] <det
   DANGLING       a `[[link]]` names no note in the dir
   FRONTMATTER    a note without a valid `name` / `description` / `metadata.type` block
   RULES_QUOTE    a note body repeats a WORKSPACE.md § Rules line verbatim (>= 12 consecutive words)
+                 (or, once per run, `§ Rules not found, quote check skipped` when the file or heading is missing)
   SECRET         a secret-shaped string (`leak_shapes.SECRET_SHAPES`) — the kind and line only, never the value
   LARGE          a note over 10 KB (the classifier judges it per section)
 
@@ -221,6 +222,8 @@ def check(mem: Path, workspace: Path, index_warn: int = INDEX_WARN, line_warn: i
     findings += secret_hits(INDEX, index_text)
 
     rules = rules_lines(workspace)
+    if not rules:  # an unreadable path or a renamed heading must not read as "no quotes"
+        findings.append(f"RULES_QUOTE {workspace.name} — § Rules not found, quote check skipped")
     grams = shingles(rules)
     body_bytes = 0
     for p in notes:

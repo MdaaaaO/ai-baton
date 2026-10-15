@@ -177,6 +177,14 @@ class Findings(Fixture):
         self.assertEqual(len(mc.rules_lines(self.ws)), 2)
         self.assertEqual(mc.rules_lines(self.root / "missing.md"), [])
 
+    def test_missing_rules_section_is_reported_not_silent(self):
+        self.write("a.md", note("a", "Nothing quoted here."))
+        self.ws.write_text("# Workspace\n\n## Not the rules\n\n- Short rule.\n", encoding="utf-8")
+        rc, out = self.run_check()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.kinds(out), ["RULES_QUOTE"], out)
+        self.assertIn("§ Rules not found, quote check skipped", out)
+
     def test_secret_shape_is_named_never_printed(self):
         token = "gh" + "p_" + "A1b2C3d4" * 4
         self.write("a.md", note("a", f"fixture: {token}"))
