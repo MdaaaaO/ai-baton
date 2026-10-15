@@ -52,8 +52,9 @@ no ctx executable at all, so it can never take long or time out; "is this an ado
 The same version record
 also guards a plain `adopt`: one whose own kit is older than what the store last recorded refuses outright (exit
 2, naming both versions, `--replace` overrides) rather than hand the store an older release's types — ctx-store's
-own `init --upgrade` does not check a type's `version` against what is already installed (it diffs bytes and the
-last-init digest only, `ctxstore/bootstrap.py`'s `init`), so nothing else would catch a silent downgrade.
+own `init --upgrade` (0.8.0 on) never writes a type schema at a lower version than the installed one either: it keeps
+it and reports it `kept: <file> (version N installed, M offered)` (`downgraded` in --json), handled like any kept file
+below; this guard is the kit-version one, and refuses before `init` runs at all.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
@@ -151,8 +152,8 @@ import time
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-CTX_VERSION = "0.7.0"  # the ctx-store release (its PyPI version) the kit's adapters are written against — bump here only
-CTX_WHEEL_SHA256 = "ad6f32570971fdc118a72324bd672bc09b73296d5ec85a684912c77225094f0c"  # sha256 of that release's
+CTX_VERSION = "0.8.0"  # the ctx-store release (its PyPI version) the kit's adapters are written against — bump here only
+CTX_WHEEL_SHA256 = "2b12616125816ea5c8594d1256dec04e7ccf13bbdcf8e3b6f5f179c37e6c6218"  # sha256 of that release's
                          # `py3-none-any` wheel on PyPI — bump together with CTX_VERSION, from the downloaded file's
                          # own hash (`sha256sum ctx_store-<version>-py3-none-any.whl`), never from PyPI's JSON alone:
                          # that digest comes from the same server as the file, so it cannot be the pin
@@ -161,6 +162,7 @@ CTX_API = 1            # the ctx API `ctx --version` must report (its `(api N)` 
                          # exposes it so kit-health can catch a pinned install answering a different one
 CTX_REPO = "https://github.com/MdaaaaO/ctx-store"  # the upstream project (named, not fetched: `install` reads PyPI)
 CTX_PYPI_JSON = "https://pypi.org/pypi/ctx-store/{version}/json"  # PyPI's JSON API for one release: its file list
+KEPT_OLDER = re.compile(r"^(.+?) \(version (\d+) installed, (\d+) offered\)$")  # 0.8.0: a kept newer type
 WHEEL_TAG = "-py3-none-any.whl"  # the one wheel `install` takes: pure Python, any interpreter, any platform
 WHEEL_MAX_BYTES = 50 * 1024 * 1024  # a download larger than this is refused before it is hashed (the wheel is ~80KB)
 BRIEF_BUDGET = 2048     # bytes of a SessionStart brief (ctx's default is 4096; the start of a session is prime context)
@@ -584,10 +586,23 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
             return 2
         out = _lines(r.stdout)
         print((out or [f"ok: store {root}"])[0])
-        kept = [ln.split(":", 1)[1].strip() for ln in out if ln.startswith("kept:")]  # edited here: it stays
+        # a `kept:` line is a store file edited here (it stays) or, since ctx-store 0.8.0, a type schema the store
+        # holds at a higher version than the kit offers: `kept: <file> (version N installed, M offered)` — the
+        # recorded name is always the bare file
+        kept, older = [], {}
+        for ln in out:
+            if ln.startswith("kept:"):
+                m = KEPT_OLDER.match(ln.split(":", 1)[1].strip())
+                kept.append(m.group(1) if m else ln.split(":", 1)[1].strip())
+                if m:
+                    older[m.group(1)] = (m.group(2), m.group(3))
         differs = bool(kept)
         for f in kept:
-            print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
+            if f in older:
+                print(f"differs: {f} — kept (the store has version {older[f][0]}, the kit offers {older[f][1]}); "
+                      "`ctx_adapter.py adopt --replace` takes the kit's")
+            else:
+                print(f"differs: {f} — kept (edited here); `ctx_adapter.py adopt --replace` takes the kit's")
         # a type the kit moved to a new schema version leaves its docs MIGRATION_PENDING, and ctx refuses writes to
         # those: bring them along now (ctx's migrations are idempotent; a doc it cannot migrate is a finding below)
         m = _ctx(ctx, store, "migrate", "--apply", timeout=ADOPT_TIMEOUT)

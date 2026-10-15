@@ -1297,6 +1297,16 @@ class AdoptBehind(Base):
                       "takes the kit's", r.stdout)
         self.assertEqual(json.loads(self.digest_path().read_text(encoding="utf-8")), recorded)  # --check wrote nothing
 
+    def test_a_type_kept_for_a_newer_installed_version_is_recorded_by_its_bare_name(self):
+        """ctx-store 0.8.0 `init --upgrade` never installs an older type version: it keeps the file and prints
+        `kept: <file> (version N installed, M offered)`. The record and the `differs:` line carry the bare file."""
+        out = "kept: .ctx/types/epic.json (version 6 installed, 3 offered)\nok: 1 adopted\n"
+        r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT=out)
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("differs: .ctx/types/epic.json — kept (the store has version 6, the kit offers 3); "
+                      "`ctx_adapter.py adopt --replace` takes the kit's", r.stdout)
+        self.assertEqual(json.loads(self.digest_path().read_text(encoding="utf-8"))["kept"], [".ctx/types/epic.json"])
+
     def test_a_newer_recorded_kit_version_reads_as_ahead_not_behind(self):
         """Version skew must not point `adopt` the wrong way: a store last adopted by a NEWER kit than this one is
         not `behind` — this kit is the one out of date, so `--check` says `ahead` and exits 0, never `adopt`'s
