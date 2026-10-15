@@ -2,7 +2,7 @@
 name: mission-control
 description: "Builds and opens the private mission-control page (sessions, spend, docs, priorities, queues) as one local HTML file. Use when asked to open, show or rebuild the mission page, where it is, or for an overview of sessions, spend and the store. Not for session-register, cost-report, kit-health, session-handoff or self-assessment."
 metadata:
-  version: "2"
+  version: "3"
   updated: "2026-10-15"
   reviewed: "2026-10-12"
 user-invocable: true
@@ -42,7 +42,8 @@ leaves the machine. This skill checks that the page is current, rebuilds it when
 4. Run `python3 $BATON/skills/mission-control/check.py <that path>`. Exit 0 means all six sections and both JSON
    blocks are present and a text scan of the markup, the styles and the inline scripts found none of: a remote load,
    a connection or loader call (`fetch(`, `new Worker`, `new Audio` and the like), a markup write (`innerHTML`,
-   `outerHTML`, `insertAdjacentHTML`, `document.write`), a navigation (`window.open`, a `location =` assignment,
+   `outerHTML`, `insertAdjacentHTML`, `document.write`), a navigation (`window.open`, a `location =` or `location +=`
+   assignment, a `location.host`, `.hostname`, `.pathname`, `.search`, `.port` or `.protocol` assignment,
    `location.href`, `.assign`, `.replace`), a `.src =` assignment, a literal `http(s)://` URL in a script. It reads
    the page, it does not run it.
    Exit 1 prints one finding per line: a defect in the page shell (the template, a part or the generator's output),

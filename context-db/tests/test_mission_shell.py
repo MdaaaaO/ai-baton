@@ -414,6 +414,10 @@ class Findings(unittest.TestCase):
         "<script>var h = location.hash.replace(/^#/, ''); var q = location.search, p = location.pathname;</script>",
         "<script>if (location == x || location === y || location != z || location !== w) go(); const h = location.hash;"
         " var relocation = 1, locations = 2, xlocation = 3, locationX = 4;</script>",
+        "<script>var f = location => 1, g = (location) => location, h = async location => location;"
+        " if (location.search == a || location.host === b || location.port != c || location.protocol !== d"
+        " || location.hostname >= e || location.pathname <= f) go();"
+        " var s = location.search, p = location.pathname, o = x.search = 1, r = xlocation.port = 2;</script>",
         "<script>var n = 1; // a plain comment, no address\nvar s = '//', t = 'http', u = 'https:', "
         "v = 'xhttps://', w = 'ahttp://';</script>",
     ]
@@ -753,6 +757,43 @@ class Constructs(Planted):
                      "window . location\n= '/x'", "top.location = x"):
             self.refuses(f"<script>{code}</script>", "script call: location = in an inline script")
 
+    SETTER = "script call: location.host|hostname|pathname|search|port|protocol = in an inline script"
+
+    def test_a_logical_compound_location_assignment_is_refused(self):
+        for code in ("location &&= x", "location ||= '/x'", "window.location ??= x"):
+            self.refuses(f"<script>{code}</script>", "script call: location = in an inline script")
+        for code in ("location.search ??= '?q'", "location.host &&= h", "location.pathname ||= '/x'"):
+            self.refuses(f"<script>{code}</script>", self.SETTER)
+
+    def test_a_location_append_is_refused(self):
+        for code in ("location += '#x'", "window.location+='/x'", "document.location\n+= x", "top.location += x"):
+            self.refuses(f"<script>{code}</script>", "script call: location = in an inline script")
+
+    def test_a_location_host_assignment_is_refused(self):
+        for code in ("location.host = 'evil.example'", "window.location.host='evil.example'", "location . host += x"):
+            self.refuses(f"<script>{code}</script>", self.SETTER)
+
+    def test_a_location_hostname_assignment_is_refused(self):
+        for code in ("location.hostname = 'evil.example'", "document.location.hostname='evil.example'",
+                     "location\n.hostname\n+= x"):
+            self.refuses(f"<script>{code}</script>", self.SETTER)
+
+    def test_a_location_pathname_assignment_is_refused(self):
+        for code in ("location.pathname = '/x'", "window.location.pathname='/x'", "location . pathname += 'x'"):
+            self.refuses(f"<script>{code}</script>", self.SETTER)
+
+    def test_a_location_search_assignment_is_refused(self):
+        for code in ("location.search = '?q=1'", "window.location.search='?q=1'", "location . search += '&q=1'"):
+            self.refuses(f"<script>{code}</script>", self.SETTER)
+
+    def test_a_location_port_assignment_is_refused(self):
+        for code in ("location.port = '8080'", "window.location.port=8080", "location . port += 1"):
+            self.refuses(f"<script>{code}</script>", self.SETTER)
+
+    def test_a_location_protocol_assignment_is_refused(self):
+        for code in ("location.protocol = 'http:'", "document.location.protocol='http:'", "location . protocol += x"):
+            self.refuses(f"<script>{code}</script>", self.SETTER)
+
     def test_a_src_assignment_is_refused(self):
         for code in ("img.src = '/x.png'", "s.src='/x.js'", "el . src =x", "el.\nsrc\n= x"):
             self.refuses(f"<script>{code}</script>", "script call: .src = in an inline script")
@@ -770,6 +811,8 @@ class Constructs(Planted):
         ("window.open", "window.open('a.html')"),
         ("location.href|assign|replace", "location.href = 'a.html'"),
         ("location =", "location = 'a.html'"),
+        ("location =", "location += 'a.html'"),
+        ("location.host|hostname|pathname|search|port|protocol =", "location.search = '?a=1'"),
         (".src =", "el.src = 'a.png'"),
         ("http(s)://", "go('https://cdn.example/a.js')"),
     )
