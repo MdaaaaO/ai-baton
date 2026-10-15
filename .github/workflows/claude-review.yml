@@ -160,7 +160,7 @@ jobs:
           python3 "$base_kit/context-db/bin/review_evidence.py" "$@" || warn "review_evidence.py failed"
 
       - if: steps.token.outputs.enabled == 'true'
-        uses: anthropics/claude-code-action@12dd8d74c712f5f3669365b2369b558c495b1104 # v1
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_sticky_comment: true
@@ -289,7 +289,7 @@ jobs:
           persist-credentials: false
 
       - if: steps.token.outputs.enabled == 'true'
-        uses: anthropics/claude-code-action@12dd8d74c712f5f3669365b2369b558c495b1104 # v1
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # No prompt → tag mode: answers the @claude comment in context. "@claude review" is a
