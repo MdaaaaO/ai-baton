@@ -18,7 +18,8 @@ folder (override with CONTEXT=; the default content root is docs/layout.md's "Co
 Each *.md doc carries YAML frontmatter (its "row"); INDEX.md is the generated catalog.
 These targets create, index, verify, and find docs.
 
-  make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic"
+  make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=key-123-foo TITLE="Foo epic" [KEY=KEY-123]
+                        (KEY= fills an epic's `key:` frontmatter, the field `ctx resolve` matches first)
   make -C $BATON/context-db index          # regenerate INDEX.md (the PostToolUse hook runs it after every change)
   make -C $BATON/context-db verify         # validate frontmatter + INDEX freshness (CI-style gate)
   make -C $BATON/context-db find TAG=pii            # docs carrying a tag
@@ -412,6 +413,20 @@ kit carries an `mcp` that kit wrote in itself: the next `adopt` finds it unchang
 marker predates that write, so the first kit settings change after it reports `ctx-store.json` kept once —
 `adopt --replace` takes the kit's and the record lines up from then on.)
 
+Resolve rule — the `resolve` block of the `ctx-store.json` `adopt` hands `init` is seeded from the environment, not
+shipped verbatim (`_resolve_rule`), so `ctx resolve <key>` finds the context doc wherever the kit runs: `key_regex` is
+the env config's `tracker.key_regex` on a `jira` tracker (a `github` or `none` tracker keeps the shipped
+`<owner>/<repo>#<n>` shape — its `tracker.key_regex` reads a bare `#<n>` and cannot match the repo-qualified key a
+session's `epic:` field carries); `section` is the first `## ` heading of the epic template (the env store's
+`_templates/epic.md` override, else the engine's); `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
+match wins; the section match is the fallback for a doc without one — it collides as soon as a sub-epic doc links its
+parent there). `adopt --check` (with or without `--no-validate`) compares the store's own `ctx-store.json` with that
+rule and prints one line per setting that differs, read-only:
+  drift: resolve.<key_regex|section|fields> is <store value> in the store, <derived value> from the env config —
+  `python3 $BATON/context-db/bin/ctx_adapter.py adopt` (`--replace` when this store's ctx-store.json was edited here)
+It counts as `behind` (exit 6); an `adopt` — `--replace` for a `ctx-store.json` edited here, which `init` keeps —
+writes the derived rule and clears it. A store whose `ctx-store.json` is missing or unreadable reports no drift.
+
 Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
 — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes
 through a verb): a digest of the kit's store settings and type schemas (`ctx-store.json` plus every `types/*.json`,
@@ -511,7 +526,8 @@ still prints its own `behind:` line alongside the findings, same exit code · 4 
 `--no-validate` answers this from a `ctx-store.json` file test at the content root rather than asking ctx) · 5
 adopted, but a store file differs from the kit's — kept, one `differs:` line per file (`adopt --replace` takes the
 kit's); `--check` reports the same files from its own record rather than re-running `ctx init` · 6 adopted, but the
-store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap
+store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap,
+or its `resolve` rule differs from the env config's (a `drift:` line)
 (`adopt --check` only — a plain `adopt` records a fresh one; `--no-validate` skips `ctx validate` entirely and only
 compares the record, so findings cannot occur there — 0/5/6 still answer, and it never touches ctx). Precedence
 when more than one would apply: 3 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.

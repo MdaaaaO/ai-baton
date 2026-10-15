@@ -18,7 +18,10 @@
   ],
   "resolve": {
     "key_regex": "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+",
-    "section": "Tracker & links"
+    "section": "Tracker & links",
+    "fields": [
+      "key"
+    ]
   },
   "mcp": {
     "actors": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"

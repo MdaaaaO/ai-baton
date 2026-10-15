@@ -2,6 +2,7 @@
 title: {{TITLE}}
 type: epic
 domain: {{DOMAIN}}
+key: {{KEY}}
 tags: []
 status: active
 updated: {{DATE}}
@@ -10,8 +11,9 @@ updated: {{DATE}}
 # {{TITLE}}
 
 The **context doc** for this initiative — the local living handoff doc (created with
-`TYPE=epic`, one per tracker epic / tracking issue; *not* the ticket itself). Keep it current at
-the end of any session that touches the initiative (the `session-handoff` skill walks the
+`TYPE=epic`, one per tracker epic / tracking issue; *not* the ticket itself). `key:` is that epic's
+tracker key (`KEY=` on `make new`): `ctx resolve <key>` matches it first, the links below second. Keep it
+current at the end of any session that touches the initiative (the `session-handoff` skill walks the
 close-out). Long historical detail goes to `archive/{{SLUG}}-log.md`; this doc stays the lean
 current state.
 

@@ -58,6 +58,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `SLUG` | none (required) | `context-db/bin/new.sh` | the new doc's kebab-case file slug | user-facing |
 | `DOMAIN` | per-type default (e.g. `meetings`), else empty | `context-db/bin/new.sh` | the `.context/` domain folder the doc is placed under | user-facing |
 | `TITLE` | `SLUG` | `context-db/bin/new.sh` | the doc's frontmatter title | user-facing |
+| `KEY` | empty | `context-db/bin/new.sh` | an epic's tracker key, written to its `key:` frontmatter (the field `ctx resolve` matches first); `make new` takes it from the command line only | user-facing |
 
 ## `sign-queue`
 

@@ -857,13 +857,18 @@ class Adopt(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         data = KIT / "context-db" / "ctx-store"
         calls = self.calls()
+        settings_arg = calls[0]["argv"][4]  # a temp file: the kit's settings with the env-derived `resolve` laid over
+        self.assertNotEqual(settings_arg, str(data / "ctx-store.json"))
+        self.assertFalse(Path(settings_arg).exists())  # … removed once init returned
         self.assertEqual([c["argv"][2:] for c in calls],
-                         [["init", "--settings", str(data / "ctx-store.json"), "--types", str(data / "types"),
-                           "--upgrade"],
+                         [["init", "--settings", settings_arg, "--types", str(data / "types"), "--upgrade"],
                           ["migrate", "--apply"], ["validate"], ["validate", "--changed", "--adopt"]])
         self.assertEqual({c["argv"][1] for c in calls}, {str(self.root)})
-        # the kit's own settings file, `mcp` included: `init` takes every key itself, the kit edits none of them
+        # the kit's own settings, `mcp` included: `init` takes every key itself; with no env store the handed
+        # `resolve` rule is the kit's shipped one, so the whole file is the kit's
         self.assertIn("mcp", json.loads(calls[0]["settings"]))
+        self.assertEqual(json.loads(calls[0]["settings"]),
+                         json.loads((data / "ctx-store.json").read_text(encoding="utf-8")))
         self.assertFalse((self.root / "ctx-store.json").exists())
         self.assertFalse((self.root / ".ctx").exists())
 
@@ -1460,7 +1465,12 @@ class AdoptNoValidate(Base):
         its own, never ctx's own `init`)."""
         r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        (self.root / "ctx-store.json").write_text("{}\n", encoding="utf-8")
+        self.stand_in_store_file()
+
+    def stand_in_store_file(self) -> None:
+        """What `ctx init` would have written: the settings the fake just received (its resolve rule included)."""
+        settings = [c["settings"] for c in self.calls() if c["settings"]][-1]
+        (self.root / "ctx-store.json").write_text(settings, encoding="utf-8")
 
     def test_without_check_is_exit_2(self):
         r = self.adapter("adopt", "--no-validate")
@@ -1496,7 +1506,7 @@ class AdoptNoValidate(Base):
     def test_a_kept_file_on_record_is_differs(self):
         r = self.adapter("adopt", KIT_CTX=str(self.fake), FAKE_CTX_OUT="kept: .ctx/types/epic.json\nok: 1 adopted\n")
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
-        (self.root / "ctx-store.json").write_text("{}\n", encoding="utf-8")
+        self.stand_in_store_file()
         r = self.adapter("adopt", "--check", "--no-validate")
         self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
         self.assertIn("differs: .ctx/types/epic.json — kept (edited here); `ctx_adapter.py adopt --replace` "
@@ -1567,11 +1577,11 @@ class SemverParsing(unittest.TestCase):
 
 
 class ResolveRule(Base):
-    """The kit's `resolve.fields` names no field: a field match would outrank the context doc's own
-    `resolve.section` match (`Tracker & links`), and every session doc carries the same key in its own
-    `epic:` frontmatter field, so a field match would always win and `ctx resolve <key>` would always name
-    the querying session, never the context doc the key belongs to. Proven against the pinned ctx, not a
-    fake: a stub could not show which doc the store's own settings make `ctx resolve` prefer."""
+    """The kit's `resolve.fields` names `key`, never `epic`: a field match outranks the context doc's own
+    `resolve.section` match (`Tracker & links`), and every session doc carries the epic's key in its own `epic:`
+    frontmatter field, so naming `epic` would make `ctx resolve <key>` answer with the querying session, never the
+    context doc the key belongs to. Proven against the pinned ctx, not a fake: a stub could not show which doc the
+    store's own settings make `ctx resolve` prefer."""
 
     @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
     def test_resolve_returns_the_epic_doc_not_the_session_row(self):
@@ -1592,6 +1602,198 @@ class ResolveRule(Base):
         r = self.adapter("ctx", "resolve", key, **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(r.stdout.splitlines()[0].split(" · ", 1)[0].strip(), "gadgets/rollout")
+
+
+JIRA_ENV = {"environment": "ex", "tracker": {"kind": "jira", "key_regex": "\\b((?:KEY|ABC)-\\d+)\\b"}}
+GITHUB_ENV = {"environment": "ex", "tracker": {"kind": "github", "key_regex": "(?:^|[^\\w/])#(\\d+)\\b",
+                                               "repos": ["example/repo"]}}
+SHIPPED_SHAPE = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+"
+
+
+def epic_doc(title: str, key: str | None, links: str) -> str:
+    """An epic context doc: `key:` frontmatter when `key` is given, and `links` under *Tracker & links*."""
+    return (f"---\ntitle: {title}\ntype: epic\ndomain: d\n" + (f"key: {key}\n" if key else "") +
+            "status: active\nupdated: 2026-01-05\n---\n# " + title + "\n\n## Tracker & links\n\n" + links +
+            "\n\n## Goal\n\ng\n\n## Key decisions & gotchas\n\n## Remaining work\n\n## Session log\n\n"
+            "- 2026-01-05 — first\n")
+
+
+class ResolveSeed(Base):
+    """`adopt` seeds the store's `resolve` rule from the env config instead of shipping the generic shape: the
+    env config's `tracker.key_regex` on a jira tracker, the first `## ` heading of the epic template, and the
+    `key` frontmatter field. `adopt --check` reports a store whose rule differs from that as `drift:`."""
+
+    def env_store(self, cfg: dict, template: str | None = None) -> None:
+        env = self.root / "reference" / "env"
+        (env / "_templates").mkdir(parents=True)
+        (env / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        if template is not None:
+            (env / "_templates" / "epic.md").write_text(template, encoding="utf-8")
+
+    def handed_rule(self) -> dict:
+        """The `resolve` block of the settings the last `adopt` handed `ctx init`."""
+        return json.loads([c["settings"] for c in self.calls() if c["settings"]][-1])["resolve"]
+
+    def adopt_fake(self, *args: str) -> subprocess.CompletedProcess:
+        return self.adapter("adopt", *args, KIT_CTX=str(self.fake), FAKE_CTX_OUT="ok: 0 docs checked\n")
+
+    def write_store_file(self) -> None:
+        """What `ctx init` leaves at the content root: the settings the fake received (it writes no files)."""
+        settings = [c["settings"] for c in self.calls() if c["settings"]][-1]
+        (self.root / "ctx-store.json").write_text(settings, encoding="utf-8")
+
+    def test_a_jira_store_gets_the_trackers_key_shape_the_template_section_and_the_key_field(self):
+        self.env_store(JIRA_ENV)
+        self.assertEqual(self.adopt_fake().returncode, 0)
+        self.assertEqual(self.handed_rule(), {"key_regex": JIRA_ENV["tracker"]["key_regex"],
+                                              "section": "Tracker & links", "fields": ["key"]})
+
+    def test_a_github_store_keeps_the_repo_qualified_shape(self):
+        """The github env regex reads a bare `#<n>`: it cannot match the `<owner>/<repo>#<n>` a session's `epic:`
+        field carries, so deriving from it would make every lookup answer NO_SUCH_DOC."""
+        self.env_store(GITHUB_ENV)
+        self.assertEqual(self.adopt_fake().returncode, 0)
+        self.assertEqual(self.handed_rule(), {"key_regex": SHIPPED_SHAPE, "section": "Tracker & links",
+                                              "fields": ["key"]})
+
+    def test_no_env_store_keeps_the_shipped_rule(self):
+        self.assertEqual(self.adopt_fake().returncode, 0)
+        self.assertEqual(self.handed_rule(), {"key_regex": SHIPPED_SHAPE, "section": "Tracker & links",
+                                              "fields": ["key"]})
+
+    def test_the_section_is_the_first_heading_of_the_env_epic_template(self):
+        self.env_store(JIRA_ENV, "---\ntitle: {{TITLE}}\n---\n# {{TITLE}}\n\n```\n## not a heading\n```\n\n"
+                                 "## Links\n\n## Goal\n")
+        self.assertEqual(self.adopt_fake().returncode, 0)
+        self.assertEqual(self.handed_rule()["section"], "Links")
+
+    def test_a_broken_env_regex_leaves_the_shipped_shape(self):
+        self.env_store({"environment": "ex", "tracker": {"kind": "jira", "key_regex": "(KEY-"}})
+        self.assertEqual(self.adopt_fake().returncode, 0)
+        self.assertEqual(self.handed_rule()["key_regex"], SHIPPED_SHAPE)
+
+    def test_the_kits_own_settings_file_is_not_edited(self):
+        self.env_store(JIRA_ENV)
+        before = (KIT / "context-db" / "ctx-store" / "ctx-store.json").read_bytes()
+        self.adopt_fake()
+        self.assertEqual((KIT / "context-db" / "ctx-store" / "ctx-store.json").read_bytes(), before)
+        self.assertEqual(json.loads(before)["resolve"]["fields"], ["key"])
+
+    def test_check_is_clean_when_the_store_carries_the_derived_rule(self):
+        self.env_store(JIRA_ENV)
+        self.adopt_fake()
+        self.write_store_file()
+        for args in (("--check",), ("--check", "--no-validate")):
+            r = self.adopt_fake(*args)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn("drift", r.stdout)
+
+    def test_check_reports_a_store_still_on_the_generic_rule_as_drift(self):
+        """A store adopted before the env config named a jira tracker: the generic rule is still in its
+        `ctx-store.json` and the record is current, so only the drift line says why `ctx resolve` misses."""
+        self.adopt_fake()  # no env store yet: the shipped rule
+        self.write_store_file()
+        self.env_store(JIRA_ENV)
+        for args in (("--check",), ("--check", "--no-validate")):
+            r = self.adopt_fake(*args)
+            self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
+            self.assertIn(f'drift: resolve.key_regex is "{SHIPPED_SHAPE}" in the store, '
+                          f'{json.dumps(JIRA_ENV["tracker"]["key_regex"])} from the env config — '
+                          "`python3 $BATON/context-db/bin/ctx_adapter.py adopt` (`--replace` when this store's "
+                          "ctx-store.json was edited here)", r.stdout)
+            self.assertNotIn("drift: resolve.section", r.stdout)  # only the setting that differs is named
+            self.assertNotIn("drift: resolve.fields", r.stdout)
+
+    def test_check_reports_a_store_without_the_fields_setting(self):
+        self.adopt_fake()
+        stored = json.loads([c["settings"] for c in self.calls() if c["settings"]][-1])
+        del stored["resolve"]["fields"]  # a store adopted by the kit before the `key` field convention
+        (self.root / "ctx-store.json").write_text(json.dumps(stored), encoding="utf-8")
+        r = self.adopt_fake("--check", "--no-validate")
+        self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
+        self.assertIn('drift: resolve.fields is null in the store, ["key"] from the env config', r.stdout)
+
+    def test_adopt_clears_the_drift(self):
+        self.adopt_fake()
+        self.write_store_file()
+        self.env_store(JIRA_ENV)
+        self.assertEqual(self.adopt_fake("--check").returncode, 6)
+        self.assertEqual(self.adopt_fake().returncode, 0)  # hands the derived rule to init
+        self.write_store_file()
+        r = self.adopt_fake("--check")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_missing_store_file_is_not_drift_and_check_never_writes(self):
+        self.env_store(JIRA_ENV)
+        self.adopt_fake()
+        r = self.adopt_fake("--check")
+        self.assertNotIn("drift", r.stdout)
+        self.assertFalse((self.root / "ctx-store.json").exists())
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_resolve_finds_each_epic_uniquely_on_a_jira_store(self):
+        """End to end on the pinned ctx: a sub-epic links its parent under *Tracker & links*, which made the
+        section match answer AMBIGUOUS_SELECTOR for the parent; the `key:` field settles both."""
+        self.env_store(JIRA_ENV)
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        (self.root / "d" / "parent.md").write_text(epic_doc("Parent", "KEY-123", "- Epic: KEY-123"), encoding="utf-8")
+        (self.root / "d" / "child.md").write_text(epic_doc("Child", "KEY-456", "- Epic: KEY-456\n- Parent: KEY-123"),
+                                                  encoding="utf-8")
+        (self.root / "d" / "keyless.md").write_text(epic_doc("Keyless", None, "- Epic: ABC-123"), encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        self.assertEqual(self.adapter("adopt", "--check", **env).returncode, 0)
+        for key, doc in (("KEY-123", "d/parent"), ("KEY-456", "d/child"), ("ABC-123", "d/keyless")):
+            r = self.adapter("ctx", "resolve", key, **env)
+            self.assertEqual(r.returncode, 0, f"{key}: {r.stdout}{r.stderr}")
+            self.assertEqual(r.stdout.splitlines()[0].split(" · ", 1)[0].strip(), doc)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_resolve_finds_the_epic_on_a_github_store(self):
+        self.env_store(GITHUB_ENV)
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        (self.root / "d" / "parent.md").write_text(epic_doc("Parent", "example/repo#7", "- Epic: example/repo#7"),
+                                                   encoding="utf-8")
+        (self.root / "d" / "child.md").write_text(
+            epic_doc("Child", "example/repo#8", "- Epic: example/repo#8\n- Parent: example/repo#7"), encoding="utf-8")
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        for key, doc in (("example/repo#7", "d/parent"), ("example/repo#8", "d/child")):
+            r = self.adapter("ctx", "resolve", key, **env)
+            self.assertEqual(r.returncode, 0, f"{key}: {r.stdout}{r.stderr}")
+            self.assertEqual(r.stdout.splitlines()[0].split(" · ", 1)[0].strip(), doc)
+
+
+class NewEpicKey(Base):
+    """`make new TYPE=epic KEY=<key>` writes the epic's `key:` frontmatter (blank without KEY)."""
+
+    def new(self, *extra: str) -> Path:
+        r = subprocess.run(["make", "-C", str(ENGINE), "new", "TYPE=epic", "DOMAIN=d", "SLUG=proj-123-x", *extra,
+                            f"CONTEXT={self.root}"], env={k: v for k, v in self.env.items() if k not in MAKE_VARS},
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return self.root / "d" / "proj-123-x.md"
+
+    def test_key_fills_the_frontmatter(self):
+        self.assertIn("\nkey: KEY-123\n", self.new("KEY=KEY-123").read_text(encoding="utf-8"))
+
+    def test_no_key_leaves_it_blank_without_trailing_space(self):
+        self.assertIn("\nkey:\n", self.new().read_text(encoding="utf-8"))
+
+    def test_a_key_in_the_shell_environment_is_not_taken(self):
+        self.env["KEY"] = "KEY-456"
+        self.assertIn("\nkey:\n", self.new().read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_the_scaffold_validates_and_resolves(self):
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.env["KIT_CTX"], self.env["CTX_NO_WALK"] = env["KIT_CTX"], env["CTX_NO_WALK"]
+        self.new("KEY=example/repo#5")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.adapter("ctx", "resolve", "example/repo#5", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(r.stdout.startswith("d/proj-123-x"), r.stdout)
 
 
 SESSION_FOR_BRIEF = (

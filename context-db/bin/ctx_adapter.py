@@ -31,6 +31,20 @@ kit carries an `mcp` that kit wrote in itself: the next `adopt` finds it unchang
 marker predates that write, so the first kit settings change after it reports `ctx-store.json` kept once —
 `adopt --replace` takes the kit's and the record lines up from then on.)
 
+Resolve rule — the `resolve` block of the `ctx-store.json` `adopt` hands `init` is seeded from the environment, not
+shipped verbatim (`_resolve_rule`), so `ctx resolve <key>` finds the context doc wherever the kit runs: `key_regex` is
+the env config's `tracker.key_regex` on a `jira` tracker (a `github` or `none` tracker keeps the shipped
+`<owner>/<repo>#<n>` shape — its `tracker.key_regex` reads a bare `#<n>` and cannot match the repo-qualified key a
+session's `epic:` field carries); `section` is the first `## ` heading of the epic template (the env store's
+`_templates/epic.md` override, else the engine's); `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
+match wins; the section match is the fallback for a doc without one — it collides as soon as a sub-epic doc links its
+parent there). `adopt --check` (with or without `--no-validate`) compares the store's own `ctx-store.json` with that
+rule and prints one line per setting that differs, read-only:
+  drift: resolve.<key_regex|section|fields> is <store value> in the store, <derived value> from the env config —
+  `python3 $BATON/context-db/bin/ctx_adapter.py adopt` (`--replace` when this store's ctx-store.json was edited here)
+It counts as `behind` (exit 6); an `adopt` — `--replace` for a `ctx-store.json` edited here, which `init` keeps —
+writes the derived rule and clears it. A store whose `ctx-store.json` is missing or unreadable reports no drift.
+
 Behind — a full `adopt` also records, under the store's own ignored `state/` dir (`state/ctx-adapter/adopted-kit.json`
 — `state/**` is in `ctx-store.json`'s own `ignore` list, so this is never a file `ctx` itself tracks or writes
 through a verb): a digest of the kit's store settings and type schemas (`ctx-store.json` plus every `types/*.json`,
@@ -130,7 +144,8 @@ still prints its own `behind:` line alongside the findings, same exit code · 4 
 `--no-validate` answers this from a `ctx-store.json` file test at the content root rather than asking ctx) · 5
 adopted, but a store file differs from the kit's — kept, one `differs:` line per file (`adopt --replace` takes the
 kit's); `--check` reports the same files from its own record rather than re-running `ctx init` · 6 adopted, but the
-store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap
+store's recorded digest of the kit's settings/types is missing or stale, and no newer-kit record explains the gap,
+or its `resolve` rule differs from the env config's (a `drift:` line)
 (`adopt --check` only — a plain `adopt` records a fresh one; `--no-validate` skips `ctx validate` entirely and only
 compares the record, so findings cannot occur there — 0/5/6 still answer, and it never touches ctx). Precedence
 when more than one would apply: 3 over 6 over 5 over 0. `ctx` and `mcp` exit as ctx does.
@@ -203,6 +218,7 @@ SYNC_LOCK_WAIT = 8      # seconds that pass waits for another session's pass on 
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
 BIN = Path(__file__).resolve().parent
 KIT_ROOT = BIN.parent.parent  # context-db/bin -> context-db -> the kit root, where .claude-plugin/plugin.json lives
+ENGINE_TEMPLATES = BIN.parent / "_templates"  # the engine's own doc templates (an env store may override one)
 STORE_DATA = BIN.parent / "ctx-store"  # the kit's store settings + type schemas, handed to `ctx init` by `adopt`
 ADOPT_TIMEOUT = 300     # seconds `adopt` gives one ctx call (a whole-store validate; not a hook)
 INSTALL_TIMEOUT = 120   # seconds `install` gives the whole PyPI fetch, JSON and wheel (setup.sh runs it unattended)
@@ -447,6 +463,73 @@ def _kit_data_digest() -> str:
     return h.hexdigest()
 
 
+def _epic_template_text() -> str:
+    """The epic template a new context doc is scaffolded from: the env store's override
+    (`reference/env/_templates/epic.md`, `kit_profile.template`) when it ships one, else the engine's own."""
+    sys.path.insert(0, str(BIN))
+    import kit_profile  # same dir
+    path = kit_profile.template("epic") or ENGINE_TEMPLATES / "epic.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _resolve_rule() -> dict:
+    """The `resolve` rule this store should carry: the kit's shipped one (`STORE_DATA/ctx-store.json`) with
+    what the environment knows laid over it, so `ctx resolve <key>` finds the context doc in every environment.
+    - `key_regex`: a `jira` tracker's own `tracker.key_regex` (the shape its keys have in this environment), when
+      it is a valid regex. A `github` tracker keeps the shipped `<owner>/<repo>#<n>` shape: its `tracker.key_regex`
+      reads the bare `#<n>` out of free text and cannot match the repo-qualified key a session's `epic:` field and a
+      context doc's links carry; `none` has no keys to derive from.
+    - `section`: the first `## ` heading of the epic template (`_epic_template_text`), where a doc lists its
+      tracker links; the fallback match, since a doc linking its parent there matches the parent's key too.
+    - `fields`: the shipped `["key"]` — a field match wins over a section match, and an epic doc's own `key:`
+      frontmatter names exactly one doc per key."""
+    sys.path.insert(0, str(BIN))
+    import kit_profile  # same dir
+    import type_template
+    rule = dict(json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8")).get("resolve") or {})
+    rx = kit_profile.get("tracker.key_regex")
+    if kit_profile.get("tracker.kind") == "jira" and isinstance(rx, str) and rx.strip():
+        try:
+            re.compile(rx)
+            rule["key_regex"] = rx
+        except re.error:
+            pass  # a broken env regex must not break the store: the shipped shape stays, and kit-health names the config
+    headings = type_template.heading_list(_epic_template_text())
+    if headings:
+        rule["section"] = headings[0]
+    return rule
+
+
+def _store_settings() -> dict:
+    """The kit's `ctx-store.json` with `_resolve_rule()` in place of its generic `resolve` — what `adopt` hands
+    `ctx init --settings`."""
+    data = json.loads((STORE_DATA / "ctx-store.json").read_text(encoding="utf-8"))
+    data["resolve"] = _resolve_rule()
+    return data
+
+
+def _resolve_drift(root: Path) -> list[str]:
+    """One `drift:` line per `resolve` setting in the store's own `ctx-store.json` that differs from
+    `_resolve_rule()` — the case where `ctx resolve <key>` answers `NO_SUCH_DOC` on a store whose rule predates
+    the env config (or the env config moved since). Read-only; [] when the store file is missing or does not
+    parse (not assessable here: `adopt` itself reports an unadopted store)."""
+    try:
+        have = json.loads((root / "ctx-store.json").read_text(encoding="utf-8")).get("resolve")
+    except (OSError, ValueError, AttributeError):
+        return []
+    have = have if isinstance(have, dict) else {}
+    out = []
+    for name, want in _resolve_rule().items():
+        if have.get(name) != want:
+            out.append(f"drift: resolve.{name} is {json.dumps(have.get(name))} in the store, "
+                       f"{json.dumps(want)} from the env config — `python3 $BATON/context-db/bin/ctx_adapter.py "
+                       "adopt` (`--replace` when this store's ctx-store.json was edited here)")
+    return out
+
+
 def _parse_semver(text: str) -> tuple[int, ...] | None:
     """`'0.7.0'` / `'v0.7.0'` -> `(0, 7, 0)`; None for anything else (blank, a pre-release, a `+N` suffix) — a
     version that cannot be parsed compares as unknown, never numerically, both for this kit's own version and a
@@ -527,7 +610,7 @@ def _recorded_state(root: Path) -> dict | None:
 
 def _check_record(root: Path) -> tuple[bool, bool]:
     """Compare the store's recorded adopted-kit state (`_recorded_state`) with this kit's own
-    (`_kit_data_digest`/`_kit_version`), printing the same `behind:`/`ahead:`/`differs:` line(s) either
+    (`_kit_data_digest`/`_kit_version`), printing the same `behind:`/`ahead:`/`differs:`/`drift:` line(s) either
     `adopt --check` or its cheap `--no-validate` sibling answers with, and returning `(behind, differs)` for the
     caller's exit code. One implementation so the two readers can never disagree on wording."""
     rec = _recorded_state(root)
@@ -543,6 +626,8 @@ def _check_record(root: Path) -> tuple[bool, bool]:
             return False, False
         print("behind: the store's settings or types predate the kit's — "
               "`python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
+        for line in _resolve_drift(root):
+            print(line)
         return True, False
     # the digest matches, but a store file `ctx init --upgrade` kept (edited here) at the last full `adopt`
     # still differs from the kit's own copy — a kept file does not stop being a local edit just because nothing
@@ -552,7 +637,12 @@ def _check_record(root: Path) -> tuple[bool, bool]:
     older = {f: v for f, v in older.items() if isinstance(v, list) and len(v) == 2} if isinstance(older, dict) else {}
     for f in kept:
         print(_kept_line(f, older))
-    return False, bool(kept)
+    # the record is current, but the store's `resolve` rule may still not be the one the env config derives (the
+    # env config moved since the last `adopt`, or the store file was edited): `ctx resolve` then misses the doc
+    drift = _resolve_drift(root)
+    for line in drift:
+        print(line)
+    return bool(drift), bool(kept)
 
 
 def adopt(check: bool = False, replace: bool = False, no_validate: bool = False) -> int:
@@ -594,8 +684,11 @@ def adopt(check: bool = False, replace: bool = False, no_validate: bool = False)
             print(f"not adopted: {root} is not a ctx store — run `python3 $BATON/context-db/bin/ctx_adapter.py adopt`")
             return 4
     else:
-        r = _ctx(ctx, store, "init", "--settings", str(STORE_DATA / "ctx-store.json"),
-                 "--types", str(STORE_DATA / "types"), "--replace" if replace else "--upgrade", timeout=ADOPT_TIMEOUT)
+        with tempfile.TemporaryDirectory(prefix="ctx-adopt-") as tmp:
+            settings = Path(tmp) / "ctx-store.json"
+            settings.write_text(json.dumps(_store_settings(), indent=2) + "\n", encoding="utf-8")
+            r = _ctx(ctx, store, "init", "--settings", str(settings), "--types", str(STORE_DATA / "types"),
+                     "--replace" if replace else "--upgrade", timeout=ADOPT_TIMEOUT)
         if r.returncode != 0:
             print(f"ctx_adapter.py adopt: ctx init failed: {(_lines(r.stderr) or [f'exit {r.returncode}'])[0]}",
                   file=sys.stderr)
@@ -1063,11 +1156,11 @@ def _resolve_epic_doc(ctx: Path, store: list[str], epic_key: str, remaining: Cal
     """The context doc `epic_key` (a session's `epic:` frontmatter field) names, through the store's own
     `resolve` rule (`ctx resolve`) — None when there is no key, the store sets no `resolve.key_regex`, the key
     matches no doc, or the call fails (a compact brief degrades, it does not go silent over one extra read).
-    The kit's `resolve.fields` names no field: a field match would outrank the context doc's own
-    `resolve.section` match (`Tracker & links`) — which is the only match that can ever apply, since no doc's
-    frontmatter is ever searched by field — so `ctx resolve` always answers with the context doc the key's
-    *Tracker & links* section names, never the session row that merely carries the key in its own `epic:`
-    field. Less than 1.5s of `remaining()` left raises `subprocess.TimeoutExpired` rather than making the
+    The store's rule is seeded by `adopt` (`_resolve_rule`): a field match on an epic doc's own `key:`
+    frontmatter wins, and the doc's `resolve.section` (its first template section, *Tracker & links* in the
+    kit's) is the fallback for a doc without one. The field is `key`, not `epic`: a session row carries the
+    key in its own `epic:` field, so naming `epic` there would resolve to the session instead of the context doc.
+    Less than 1.5s of `remaining()` left raises `subprocess.TimeoutExpired` rather than making the
     call, the same signal a call that actually timed out would raise — let through, not swallowed, so the
     caller (`_compact_brief`) tells a timeout, which it must report as skipped, from an ordinary no-match,
     which it must not."""
@@ -1083,8 +1176,8 @@ def _resolve_epic_doc(ctx: Path, store: list[str], epic_key: str, remaining: Cal
         return None
     row = _lines(r.stdout)
     doc = row[0].split(" · ", 1)[0].strip() if row else ""
-    # a session row here means the store still carries the old `resolve.fields` (adopted before the kit
-    # dropped it, not re-adopted since): no context doc is a truer answer than the session naming itself
+    # a session row here means the store still carries an old `resolve.fields` naming `epic` (adopted before the
+    # kit dropped it, not re-adopted since): no context doc is a truer answer than the session naming itself
     return doc if doc and not doc.startswith("sessions/") else None
 
 
