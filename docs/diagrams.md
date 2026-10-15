@@ -81,7 +81,7 @@ The last line of a Sketch, one per repo the ticket touches, an HTML comment on i
 
 Jira has no HTML-comment node, so it prints that line as a raw paragraph. On a Jira ticket the markers go alone
 inside one bare code fence, after a blank line (`stamp --tracker jira` writes it). The marker line, the regex and the
-hash are the same in both shapes: the fence lines are never hashed, and `check`, `parse` and `diagram-plan.py
+hash are the same in both shapes: the fence lines are never hashed (a fence of 4+ backticks, `~~~` or with an info string such as `text` counts too), and `check`, `parse` and `diagram-plan.py
 --sketch` read either one.
 
 | Key | Grammar | Rule |
@@ -178,18 +178,18 @@ itself (`docs/delegation.md` § Sizing). The brief has three parts:
 |---|---|
 | Inputs | the surface's row from the zoom table; the rendering; for a PR, the `diagram-plan.py` output and the diff of the substantive files; for a sketch, the ticket's Goal and Plan, `git ls-tree` of the paths it names on the default branch, and the alternatives the session weighed; this page's labels and the size limits |
 | Output | only the blocks, in WHERE → WHAT → RUNS → WHY order, each with a one-line caption; for a sketch, add `PATHS <entry> …` and `COMPONENTS <name> …` lines, never a marker; `GAP <question> <reason>` when the inputs cannot answer a question. No other prose |
-| Validation (main session) | `mermaid-check.mjs` prints OK for every block; no `LINT` warning is left unexplained; each `(existing)` element exists on the base branch; the marker comes from `sketch.py stamp` or `diagram-plan.py`, never by hand. When a check fails, fix the block or re-brief once, and never paste an unvalidated block |
+| Validation (main session) | `mermaid-check.mjs` prints OK for every Mermaid block, and an ASCII WHERE is one fenced block under 80 columns; no `LINT` warning is left unexplained; each `(existing)` element exists on the base branch; the marker comes from `sketch.py stamp` or `diagram-plan.py`, never by hand. When a check fails, fix the block or re-brief once, and never paste an unvalidated block |
 
 **ASCII box conventions (a tracker with no Mermaid).** One fenced block for WHERE, drawn with `+---+` boxes and `|`
 sides, kept under 80 columns:
 
 | Convention | Rule |
 |---|---|
-| Boxes | one per element: name, type in brackets, status label (`(existing)` or `(this PR)`) |
-| Arrows | `--->` or `|` and `v`; the intent is written on the arrow, never left off |
+| Boxes | one per element: name, type in brackets, status label (`(existing)`, `(this PR)` or `(follow-up <key>)`) |
+| Arrows | `--->`, or `\|` and `v` going down; the intent is written on the arrow, never left off |
 | `[NEW]` | tags every box the ticket creates, beside the `(this PR)` label |
-| DEPLOY block | a box listing the files or resources the change ships, one per line |
-| Not shipped | a column or box on the right naming what the ticket leaves out, so the edge of the scope is drawn |
+| DEPLOY block | when the ticket ships files or resources: a box listing them, one per line |
+| Not shipped | when the ticket defers or excludes something: a column or box on the right naming it, so the edge of the scope is drawn |
 
 The worker writes nothing and posts nothing; the main session pastes.
 

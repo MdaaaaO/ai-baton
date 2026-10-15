@@ -333,6 +333,34 @@ class FencedMarker(unittest.TestCase):
         self.assertEqual(out.count(FENCE), JIRA_BODY.count(FENCE))
         self.assertEqual(self._check(out), (0, "SKETCH OK"))
 
+    def _hand_fenced(self, opener: str, closer: str) -> str:
+        bare = self._stamp(JIRA_BODY).rstrip("\n").split("\n")
+        return "\n".join(bare[:-1] + ["", opener, bare[-1], closer]) + "\n"
+
+    def test_every_fence_flavour_parses_and_checks_ok(self):
+        tilde, longer = "~" * 3, "`" * 4
+        for opener, closer in ((FENCE + "text", FENCE), (longer, longer), (tilde, tilde), (longer + "json", longer)):
+            with self.subTest(opener=opener):
+                text = self._hand_fenced(opener, closer)
+                rc, out = run(["parse", self._write(text)])
+                self.assertEqual(rc, 0)
+                self.assertEqual(json.loads(out)["repo"], REPO_SLUG)
+                self.assertEqual(self._check(text), (0, "SKETCH OK"))
+
+    def test_a_shorter_closer_does_not_close_a_longer_fence(self):
+        # four-backtick opener, three-backtick line below: the fence is not closed, so it is no marker fence
+        text = self._hand_fenced("`" * 4, FENCE)
+        rc, out = self._check(text)
+        self.assertEqual(rc, 3)
+        self.assertTrue(out.startswith("STALE SKETCH "), out)
+
+    def test_a_fence_line_after_a_bare_marker_does_not_fence_it(self):
+        # GitHub shape: the WHERE block's closing fence sits right above a bare marker and a comment that
+        # starts with a fence is joined to it by one newline — the marker is still bare, not fenced
+        bare = self._stamp(f"**Sketch**\n{FENCE}\n[a] ---> [b]\n{FENCE}\n")
+        joined = bare + f"{FENCE}\nnote\n{FENCE}\n"
+        self.assertEqual(self._check(joined), (0, "SKETCH OK"))
+
     def test_an_unknown_tracker_kind_is_bad_usage(self):
         rc, _ = run(["stamp", "-", "--repo-slug", REPO_SLUG, "--tracker", "linear"])
         self.assertEqual(rc, 2)
@@ -437,10 +465,6 @@ class TicketPickupSketchCheckLines(unittest.TestCase):
         self.assertIn("never read the empty stdout as `NO SKETCH`", squeezed)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TicketOpenJiraSketchShape(unittest.TestCase):
     """`ticket-open` step 4 and docs/diagrams.md must name the Jira shape the script emits."""
 
@@ -456,3 +480,8 @@ class TicketOpenJiraSketchShape(unittest.TestCase):
     def test_diagrams_doc_names_the_fenced_shape_and_how_to_verify_it(self):
         for needle in ("fenced ASCII", "renderedFields", "[NEW]", "DEPLOY", "--tracker jira"):
             self.assertIn(needle, self.diagrams)
+
+
+if __name__ == "__main__":
+    unittest.main()
+

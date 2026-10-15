@@ -8,7 +8,8 @@ The marker is one HTML comment per repo a ticket touches:
   <!-- sketch: repo=<owner/repo> paths=<entry>[,<entry>…] components=<name>[,<name>…] hash=<12 hex> -->
 A tracker that renders no HTML comments (Jira) shows that line as raw text, so there the marker run goes
 alone inside one bare ``` fence (`stamp --tracker jira`); the marker line itself is unchanged and the fence
-lines are not part of the hash. `check` and `parse` read both shapes.
+lines are not part of the hash. `check` and `parse` read both shapes, and a fence of 4+ backticks, `~~~` or
+with an info string (```text) as well.
 `paths`/`components` are comma-separated, sorted, deduplicated, or `-` for "none"; a path entry
 ending in `/` is a directory, a leading `+` is a path the ticket creates (checked by its parent
 directory instead). `hash` is the first 12 hex digits of a SHA-256 over the Sketch's own text (from
@@ -57,7 +58,7 @@ MARKER_RE = re.compile(
     r"^\s*<!-- sketch: repo=(\S+) paths=(\S+) components=(\S+) hash=([0-9a-f]{12}) -->\s*$"
 )
 MARKER_PREFIX = "<!-- sketch:"
-FENCE_RE = re.compile(r"^\s*```\w*\s*$")
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})([^`]*)$")  # an opening or closing code fence line; group 2 = info string
 TRACKERS = ("github", "jira")
 HEADING_RE = re.compile(r"^\s*(#{1,6}\s+\S.*|\*\*Sketch\*\*)\s*$")
 PATH_INVALID = re.compile(r"[ ,]")
@@ -118,22 +119,43 @@ def find_heading(lines: list[str], before: int) -> int | None:
     return None
 
 
+def fence_open_at(lines: list[str], upto: int) -> tuple[str, int, int] | None:
+    """The code fence still open after `lines[:upto]` as (fence char, length, opening line index), else None.
+    A fence closes on a line of the same char, at least as long, with no info string — the Markdown rule, so
+    a longer fence (4+ backticks), a `~~~` fence and an info string (```text) all count."""
+    state: tuple[str, int, int] | None = None
+    for i in range(upto):
+        m = FENCE_RE.match(lines[i])
+        if not m:
+            continue
+        run, info = m.groups()
+        if state is None:
+            state = (run[0], len(run), i)
+        elif run[0] == state[0] and len(run) >= state[1] and not info.strip():
+            state = None
+    return state
+
+
 def marker_boundary(lines: list[str]) -> int:
     """The index where the hashed slice ends: the first marker line (any repo) — the start of the trailing
     run `stamp` writes them as — or `len(lines)` when none are present yet. When that first marker sits
-    alone in a ``` fence (the Jira shape: a fence line directly above and, after the marker run, another
-    directly below) the boundary is the opening fence line instead, so the fence is never hashed. The
-    slice always ends here, for both `stamp` and `check`, so a marker's hash never depends on which other
-    repos' markers sit beside it, in what order, or whether the run is fenced."""
+    alone in a code fence (the Jira shape: the fence opens on the line directly above it and closes on the
+    line after the marker run) the boundary is the opening fence line instead, so the fence is never
+    hashed. A fence line above the marker that closes the drawing's own block (an even number of fence
+    lines precede it) is not an opener and stays in the hashed text. The slice always ends here, for both
+    `stamp` and `check`, so a marker's hash never depends on which other repos' markers sit beside it, in
+    what order, or whether the run is fenced."""
     marker_idxs = [i for i, ln in enumerate(lines) if MARKER_RE.match(ln)]
     if not marker_idxs:
         return len(lines)
     first = marker_idxs[0]
-    if first > 0 and FENCE_RE.match(lines[first - 1]):
+    state = fence_open_at(lines, first)
+    if state is not None and state[2] == first - 1:
         j = first
         while j < len(lines) and MARKER_RE.match(lines[j]):
             j += 1
-        if j < len(lines) and FENCE_RE.match(lines[j]):
+        m = FENCE_RE.match(lines[j]) if j < len(lines) else None
+        if m and m.group(1)[0] == state[0] and len(m.group(1)) >= state[1] and not m.group(2).strip():
             return first - 1
     return first
 

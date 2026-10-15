@@ -4,7 +4,7 @@ description: "Checklist for CREATING a ticket (Jira or GitHub issues): placement
 metadata:
   version: "17"
   updated: "2026-10-15"
-  reviewed: "2026-10-02"
+  reviewed: "2026-10-15"
   facts: "tracker.kind"
 user-invocable: true
 ---
