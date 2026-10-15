@@ -697,9 +697,12 @@ Generate INDEX.md — the materialized catalog of the context DB.
 
 Walks every *.md doc under the content root (except the engine files), reads its
 YAML frontmatter "row" (title/type/domain/tags/status/updated), and emits a
-grouped, sorted catalog. A domain's table holds only its active rows; its
+grouped, sorted catalog. A domain's table holds only its non-archived rows (columns Doc, Title,
+Type, Status, Updated — tags stay in the frontmatter, `make find TAG=` lists by tag); its
 `status: archived` rows are folded into one summary line (count + the `make find`
-command that lists them) so the catalog stays flat as a store accumulates history.
+command that lists them) so the catalog stays flat as a store accumulates history. A domain
+holding more than INDEX_REFERENCE_FOLD (12, env override of the same name) `status: reference`
+rows folds those the same way: one line, `<n> reference docs — make find DOMAIN=<domain> …`.
 INDEX.md is generated — never hand-edit it; the kit's
 PostToolUse hook (ctx_adapter.py post-tool-use-async) reruns this after every change
 under the content root, and `make -C $BATON/context-db index` runs it by hand.
@@ -723,7 +726,23 @@ Checks every content doc for:
   - `type` and `status` drawn from the allowed vocabularies,
   - an ISO `updated` date that parses,
   - INDEX.md being up to date (regenerate and diff),
-  - INDEX.md staying under its size budget (non-fatal — see INDEX_SIZE_WARN below).
+  - INDEX.md staying under its size budgets (non-fatal — see INDEX_SIZE_WARN / INDEX_TOTAL_SIZE_WARN below).
+
+Size budgets (all non-fatal, all in bytes, each overridable by an environment variable of the same name; a set
+but unusable value prints one `verify: ignoring NAME=value (…)` stderr line and keeps the default):
+  ACTIVE_SIZE_WARN       30 KB  one non-archived doc of any type but `reference`/`repo`
+  REFERENCE_SIZE_WARN    64 KB  one non-archived `type: reference` or `type: repo` doc (repo deep-dives, snapshots:
+                                read in slices, so expected to be large)
+  INDEX_SIZE_WARN        10 KB  the `status: active` and `status: closed` rows of INDEX.md. Closed rows count (they
+                                are finished work, and `archive` moves them out); reference rows do not (never
+                                finished — gen_index.py folds a domain's reference rows past INDEX_REFERENCE_FOLD
+                                (12) into one line instead)
+  INDEX_TOTAL_SIZE_WARN  2 x INDEX_SIZE_WARN  the whole INDEX.md file, with the bytes per status, so a file
+                                bloated by reference rows still warns when its active rows fit
+Oversized docs are reported as one line per domain (`<domain>: n docs over budget, largest <slug> (n KB)`)
+followed by the remedy for that largest doc, named by what dominates it: its `## Session log` (archive the
+entries), else — for a `reference`/`repo` doc — its own budget, else its largest sections. The INDEX findings
+print the row count per status.
 
 Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & gotchas*
 (`docs/carousel.md` § After the answer) — a line that is ledger-shaped (starts with a bare date,

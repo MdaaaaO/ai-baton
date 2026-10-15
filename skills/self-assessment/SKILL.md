@@ -4,7 +4,7 @@ description: "Composes the user's weekly self-assessment for a past ISO week or 
 metadata:
   version: "19"
   updated: "2026-10-15"
-  reviewed: "2026-10-02"
+  reviewed: "2026-10-15"
   facts: "self_assessment.ledger,self_assessment.ledger_url,self_assessment.sections"
 user-invocable: true
 ---
@@ -83,7 +83,7 @@ it); `report_url` is the form the ledger links to (optional). A store without th
      AND updated >= <Mon> AND updated <= <Sun>` — use created/resolved/transition dates, not just current
      status, to place each item in the right week.
    - **`.context/` history — always; sweep BOTH live docs AND `.context/archive/*-log.md`.** Since the 30KB
-     guardrail (`make -C $BATON/context-db verify` warns past 30KB), a live doc keeps only the newest tail;
+     guardrail (`make -C $BATON/context-db verify` warns past 30 KB; 64 KB for `type: reference`/`repo`), a live doc keeps only the newest tail;
      **recent-but-not-newest history — including a just-finished week after a trim — lives in
      `archive/<slug>-log.md`** (newest-first, while the live Session log reads oldest-first: date-grep,
      never rely on position). Archive↔live pairs share the slug

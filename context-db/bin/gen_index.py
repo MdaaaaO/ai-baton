@@ -3,9 +3,12 @@
 
 Walks every *.md doc under the content root (except the engine files), reads its
 YAML frontmatter "row" (title/type/domain/tags/status/updated), and emits a
-grouped, sorted catalog. A domain's table holds only its active rows; its
+grouped, sorted catalog. A domain's table holds only its non-archived rows (columns Doc, Title,
+Type, Status, Updated — tags stay in the frontmatter, `make find TAG=` lists by tag); its
 `status: archived` rows are folded into one summary line (count + the `make find`
-command that lists them) so the catalog stays flat as a store accumulates history.
+command that lists them) so the catalog stays flat as a store accumulates history. A domain
+holding more than INDEX_REFERENCE_FOLD (12, env override of the same name) `status: reference`
+rows folds those the same way: one line, `<n> reference docs — make find DOMAIN=<domain> …`.
 INDEX.md is generated — never hand-edit it; the kit's
 PostToolUse hook (ctx_adapter.py post-tool-use-async) reruns this after every change
 under the content root, and `make -C $BATON/context-db index` runs it by hand.
@@ -31,6 +34,29 @@ ROOT = str(kit_profile.context_root())
 # Files/dirs that are engine, not content:
 SKIP_DIRS = {"bin", "_templates", "sessions", "handoff", "memory", "state"}  # sessions/ = live session registry, on-call/handoff/ = handoff toolkit state (the toolkit itself lives outside the kit) + rendered page artifacts (operational, not knowledge)
 SKIP_FILES = {"INDEX.md", "README.md", "SESSION_INDEX.md"}
+def positive_int(raw: str | None, default: int, name: str | None = None) -> int:
+    """`raw` as a positive int, else `default` (an unset, empty, malformed or non-positive override). With `name`
+    (the environment variable it came from), a set-but-unusable value prints one stderr line, so a typo such as
+    `10KB` is not silently ignored."""
+    text = (raw or "").strip()
+    who = os.path.splitext(os.path.basename(sys.argv[0]))[0] or "gen_index"
+    try:
+        n = int(text)
+    except ValueError:
+        if name and text:
+            print(f"{who}: ignoring {name}={text} (not an integer)", file=sys.stderr)
+        return default
+    if n > 0:
+        return n
+    if name:
+        print(f"{who}: ignoring {name}={text} (not positive)", file=sys.stderr)
+    return default
+
+
+# More `status: reference` rows than this in one domain fold into a single line: reference rows are never
+# finished, so archiving cannot shrink them, and a long snapshot series would otherwise own the catalog.
+# 12, not higher: a mature store's largest domain holds ~18 and was listed whole at the old 20.
+INDEX_REFERENCE_FOLD = positive_int(os.environ.get("INDEX_REFERENCE_FOLD"), 12, "INDEX_REFERENCE_FOLD")
 REQUIRED = ("title", "type", "domain", "status", "updated")
 GENERATED_LINE = re.compile(r"^_\d+ docs · generated \d{4}-\d{2}-\d{2}_$")  # the one line verify ignores when diffing INDEX.md
 
@@ -79,6 +105,26 @@ def collect() -> tuple[list[dict], list[str]]:
     return rows, problems
 
 
+def row_line(r: dict) -> str:
+    """One table row of the catalog (no trailing newline)."""
+    title = r.get("title", "").replace("|", "\\|")
+    return (f"| [`{r['_path']}`]({r['_path']}) | {title} | {r.get('type','')} "
+            f"| {r.get('status','')} | {r.get('updated','')} |")
+
+
+def fold_plan(domain_rows: list[dict]) -> tuple[list[dict], list[dict], list[dict], list[dict], bool]:
+    """One domain's rows split for the catalog: (live, shown, reference, archived, fold_reference). `live` is every
+    non-archived row, newest first; `shown` is what the table lists (live minus the reference rows when they
+    fold); `closed` rows are never folded, they are finished work that `archive` can still move out."""
+    live = sorted([d for d in domain_rows if d.get("status") != "archived"],
+                  key=lambda r: r.get("updated", ""), reverse=True)
+    archived = [d for d in domain_rows if d.get("status") == "archived"]
+    reference = [d for d in live if d.get("status") == "reference"]
+    fold_reference = len(reference) > INDEX_REFERENCE_FOLD
+    shown = [d for d in live if not (fold_reference and d.get("status") == "reference")]
+    return live, shown, reference, archived, fold_reference
+
+
 def render(rows: list[dict]) -> str:
     domains: dict[str, list[dict]] = {}
     for r in rows:
@@ -98,22 +144,18 @@ def render(rows: list[dict]) -> str:
     out.append("")
 
     for domain in sorted(domains):
-        active = sorted([d for d in domains[domain] if d.get("status") != "archived"],
-                        key=lambda r: r.get("updated", ""), reverse=True)
-        archived = [d for d in domains[domain] if d.get("status") == "archived"]
+        live, shown, reference, archived, fold_reference = fold_plan(domains[domain])
 
         out.append(f"## {domain}")
         out.append("")
-        if active:
-            out.append("| Doc | Title | Type | Status | Tags | Updated |")
-            out.append("|---|---|---|---|---|---|")
-            for r in active:
-                tags = " ".join(f"`{t}`" for t in r["_tags"])
-                title = r.get("title", "").replace("|", "\\|")
-                out.append(
-                    f"| [`{r['_path']}`]({r['_path']}) | {title} | {r.get('type','')} "
-                    f"| {r.get('status','')} | {tags} | {r.get('updated','')} |"
-                )
+        if shown:
+            out.append("| Doc | Title | Type | Status | Updated |")
+            out.append("|---|---|---|---|---|")
+            out.extend(row_line(r) for r in shown)
+            out.append("")
+        if fold_reference:
+            # folded, not listed: a reference row stays queryable (`make find`), never read by default
+            out.append(f"_{len(reference)} reference docs — `make -C $BATON/context-db find DOMAIN={domain} STATUS=reference` lists them_")
             out.append("")
         if archived:
             # folded, not listed: an archived row stays queryable (`make find`), not re-read by default

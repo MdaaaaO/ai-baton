@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "32"
+  version: "33"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
 user-invocable: true
@@ -40,7 +40,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
      (`maintain.keep_log` in `ctx-store.json`) in the doc, oldest-first, and moves the rest verbatim into the
      archive doc `.context/archive/<slug>-log.md`, newest-first (the `log` type's order) — no manual
      move-and-reverse. A missing archive doc is created by `maintain` itself, valid for the `log` type.
-     `make -C $BATON/context-db verify` warns at the same **30KB** — an oversized doc thrashes any session
+     `make -C $BATON/context-db verify` warns at the same **30 KB** (64 KB for `type: reference`/`repo`) — an oversized doc thrashes any session
      that re-reads it after a compact, so run `maintain` (or split the doc) as soon as you see the warning.
    - Reference every ticket/PR as a clickable link (§ Rules).
 2. **Priorities** — where `.context/reference/priorities.md` exists, tick the matching checkbox(es)

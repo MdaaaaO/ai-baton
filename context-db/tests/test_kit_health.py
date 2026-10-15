@@ -869,7 +869,7 @@ class ReadOnlyRun(unittest.TestCase):
             env["CONTEXT_ROOT"] = str(root)
             subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env, check=True, capture_output=True)
             (root / "repos").mkdir()
-            (root / "repos" / "a.md").write_text("---\ntitle: A\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n", encoding="utf-8")
+            (root / "repos" / "a.md").write_text("---\ntitle: A\ntype: epic\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n", encoding="utf-8")
             (root / "INDEX.md").write_text("stale by hand\n", encoding="utf-8")
             report = self.engine_section(root)
             self.assertEqual((root / "INDEX.md").read_text(encoding="utf-8"), "stale by hand\n")  # untouched
@@ -892,7 +892,7 @@ class ReadOnlyRun(unittest.TestCase):
         env["CONTEXT_ROOT"] = str(root)
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env=env, check=True, capture_output=True)
         (root / "repos").mkdir()
-        (root / "repos" / "a.md").write_text("---\ntitle: A\ntype: repo\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n" + body + "\n", encoding="utf-8")
+        (root / "repos" / "a.md").write_text("---\ntitle: A\ntype: epic\ndomain: repos\nstatus: active\nupdated: 2026-09-26\n---\n" + body + "\n", encoding="utf-8")
         subprocess.run([sys.executable, str(BIN / "gen_index.py")], env=env, check=True, capture_output=True)
         return root
 
@@ -902,7 +902,7 @@ class ReadOnlyRun(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             report = self.engine_section(self.verified_store(tmp, "x" * 40_000))
             self.assertIn("- ✅ `make verify`", report)
-            self.assertRegex(report, r"(?m)^- ⚠️ 1 active doc\(s\) over .*trim to keep re-reads cheap.* repos/a\.md: \d+KB$")
+            self.assertRegex(report, r"(?m)^- ⚠️ 1 doc\(s\) over budget .*trim to keep re-reads cheap.* repos: 1 doc over budget, largest a \(\d+ KB\)")
 
     def test_a_passing_verify_without_warnings_adds_no_warn_row(self):
         with tempfile.TemporaryDirectory() as tmp:

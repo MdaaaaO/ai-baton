@@ -17,7 +17,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   `context-db/`.
 - **Context doc** — the private living doc for one initiative (`TYPE=epic`), one per tracker epic or tracking
   issue, with fixed sections and a dated Session log. It is the handoff document a cold session resumes from;
-  history goes to `archive/<slug>-log.md` and `verify` warns past 30 KB.
+  history goes to `archive/<slug>-log.md` and `verify` warns past 30 KB (64 KB for `type: reference`/`repo`).
 - **Discovery manifest** — `context-db/discovery/<system>.json`: for each fact the kit knows how to find, the tool
   that answers it, the verify clause, the `ttl_days` and the write target. `kb.py discover` prints a plan from it;
   `kit-verify` rejects a `metadata.facts` entry no manifest covers (`context-db/discovery/README.md`).
