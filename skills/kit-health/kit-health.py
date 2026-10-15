@@ -50,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 KIT = Path(__file__).resolve().parents[2]
@@ -1258,13 +1259,24 @@ def disk_wiring(r: Report, targets: list[tuple[str, Path]] | None = None) -> Non
 
 
 SESSION_ENDED = "ended"
+GRACE_SECONDS = 3600  # a dir touched more recently than this is never swept: its session may still be writing to it
+
+
+def archived_row(sess: Path, name: str) -> bool:
+    """True when `sessions/archive/` holds the row of `name`: `<name>.md`, or the date-suffixed form
+    (`<name>-YYYYMMDD[-n].md`, `<name>-undated[-n].md`) `gen_sessions.archive_path` writes when the name is taken."""
+    arch = sess / "archive"
+    if not arch.is_dir():
+        return False
+    pat = re.compile(re.escape(name) + r"(-(\d{8}|undated)(-\d+)?)?\.md")
+    return any(pat.fullmatch(f.name) for f in arch.iterdir())
 
 
 def session_scratch_status(ctx_root: Path, d: Path) -> tuple[str, str]:
     """(registry name, status) of the session whose scratch dir is `d`; status is "unregistered" when no row
-    can be found. The name comes from the dir's `session-name` file (written by `session-register`), else from a row
-    whose `session_id` is the dir's name; the status from `<ctx_root>/sessions/<name>.md`, and a row moved to
-    `sessions/archive/` counts as ended."""
+    can be found. The name comes from the dir's `session-name` file (written by `session-register`), else from a
+    row (live, or archived) whose `session_id` is the dir's name; the status from `<ctx_root>/sessions/<name>.md`,
+    and a row only in `sessions/archive/` counts as ended."""
     sess = ctx_root / "sessions"
     name = ""
     try:
@@ -1273,15 +1285,18 @@ def session_scratch_status(ctx_root: Path, d: Path) -> tuple[str, str]:
         pass
     if not re.fullmatch(r"[A-Za-z0-9][\w.-]{0,63}", name) or ".." in name:
         name = ""
-        if sess.is_dir():
-            for f in sorted(sess.glob("*.md")):
-                try:
-                    sid = frontmatter(f).get("session_id", "")
-                except OSError:
-                    continue
-                if sid and re.sub(r"[^\w.-]", "_", sid) == d.name:
-                    name = f.stem
-                    break
+        rows = sorted(sess.glob("*.md")) + sorted((sess / "archive").glob("*.md")) if sess.is_dir() else []
+        for f in rows:
+            try:
+                fm = frontmatter(f)
+            except OSError:
+                continue
+            sid = fm.get("session_id", "")
+            if sid and re.sub(r"[^\w.-]", "_", sid) == d.name:
+                if f.parent.name == "archive":
+                    return fm.get("session", "") or f.stem, SESSION_ENDED
+                name = f.stem
+                break
     if not name:
         return "", "unregistered"
     row = sess / f"{name}.md"
@@ -1290,21 +1305,60 @@ def session_scratch_status(ctx_root: Path, d: Path) -> tuple[str, str]:
             return name, frontmatter(row).get("status", "") or "unregistered"
         except OSError:
             return name, "unregistered"
-    if (sess / "archive" / f"{name}.md").is_file():
+    if archived_row(sess, name):
         return name, SESSION_ENDED
     return name, "unregistered"
 
 
-def session_scratch_dirs(root: Path | None, ctx_root: Path, keep: Path | None = None) -> list[tuple[Path, str, str, int]]:
+def newest_mtime(d: Path) -> float:
+    """The newest modification time of `d` and everything under it (symlinks not followed)."""
+    newest = 0.0
+    for dirpath, dirs, files in os.walk(d, followlinks=False):
+        for n in [*dirs, *files]:
+            try:
+                newest = max(newest, os.lstat(os.path.join(dirpath, n)).st_mtime)
+            except OSError:
+                continue
+    try:
+        newest = max(newest, os.lstat(d).st_mtime)
+    except OSError:
+        pass
+    return newest
+
+
+def pid_alive(pid: int) -> bool:
+    """True unless no process `pid` exists (`os.kill(pid, 0)` raising ProcessLookupError)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists, owned by someone else
+    return True
+
+
+def session_scratch_dirs(root: Path | None, ctx_root: Path, keep: Path | None = None,
+                         grace: float = GRACE_SECONDS, now: float | None = None) -> list[tuple[Path, str, str, int]]:
     """(dir, name, status, bytes) for every session scratch dir directly under `root` (symlinks skipped, `keep` —
-    this session's own dir — left out), biggest first. [] when there is no root."""
+    this session's own dir — left out), biggest first. [] when there is no root. Status is "ended" only for a dir that
+    is safe to sweep: its row is ended (or archived), nothing under it changed within `grace` seconds, and a
+    `pid-<n>` dir's process is gone; otherwise the row's own status, or "recent" / "pid alive" / "shared" (the
+    per-user `uid-<uid>` fallback dir, which several sessions use)."""
     if root is None or not root.is_dir() or root.is_symlink():
         return []
+    now = time.time() if now is None else now
     out = []
     for d in sorted(root.iterdir()):
         if d.is_symlink() or not d.is_dir() or (keep is not None and d.resolve() == keep.resolve()):
             continue
         name, status = session_scratch_status(ctx_root, d)
+        m = re.fullmatch(r"pid-(\d+)", d.name)
+        if d.name.startswith("uid-"):
+            status = "shared"
+        elif status == SESSION_ENDED and now - newest_mtime(d) < grace:
+            status = "recent"
+        elif status == SESSION_ENDED and m and pid_alive(int(m.group(1))):
+            status = "pid alive"
         out.append((d, name, status, kit_profile.tree_bytes(d)))
     return sorted(out, key=lambda t: -t[3])
 
@@ -1312,18 +1366,28 @@ def session_scratch_dirs(root: Path | None, ctx_root: Path, keep: Path | None = 
 SWEEP_FIX = "python3 $BATON/skills/kit-health/kit-health.py --sweep-scratch"
 
 
-def scratch_wiring(r: Report, root: Path | None = None, ctx_root: Path | None = None, keep: Path | None = None) -> None:
+def own_scratch() -> Path | None:
+    """This session's own scratch dir, so the listing and the sweep can leave it out; raises when it cannot be
+    resolved (the caller then stops: without it a live session's dir could be taken for an ended one)."""
+    if kit_profile.session_scratch_root() is None:
+        return None
+    return kit_profile.scratch()
+
+
+def scratch_wiring(r: Report, root: Path | None = None, ctx_root: Path | None = None, keep: Path | None = None,
+                   grace: float = GRACE_SECONDS) -> None:
     """Lists the scratch dirs of ended sessions with their sizes and names the sweep as the Fix (nothing here
-    removes anything); dirs of live or unregistered sessions are only counted. The defaults are this machine's
+    removes anything); dirs of live, recent or unregistered sessions are only counted. The defaults are this machine's
     scratch root, the content root and this session's own dir; a test passes throw-away ones."""
     if root is None:
         root = kit_profile.session_scratch_root()
     if keep is None:
         try:
-            keep = kit_profile.scratch()
-        except Exception:
-            keep = None
-    dirs = session_scratch_dirs(root, ctx() if ctx_root is None else ctx_root, keep)
+            keep = own_scratch()
+        except Exception as e:
+            r.add(WARN, "machine", f"scratch dirs not checked: this session's own scratch dir cannot be resolved ({e})")
+            return
+    dirs = session_scratch_dirs(root, ctx() if ctx_root is None else ctx_root, keep, grace)
     ended = [t for t in dirs if t[2] == SESSION_ENDED]
     other = len(dirs) - len(ended)
     if not ended:
@@ -1335,24 +1399,32 @@ def scratch_wiring(r: Report, root: Path | None = None, ctx_root: Path | None = 
         r.raw(f"  - `{name or d.name}`: {human_size(size)}")
 
 
-def sweep_scratch(root: Path | None = None, ctx_root: Path | None = None, keep: Path | None = None) -> list[tuple[str, int]]:
-    """Removes the scratch dirs of ended sessions (what `scratch_wiring` lists) and returns (dir name, bytes)
-    for each. Only a real directory directly under `root` is ever removed — never `root` itself, a symlink, this
-    session's own dir (`keep`) or a dir whose session is live or unregistered."""
+def sweep_scratch(root: Path | None = None, ctx_root: Path | None = None, keep: Path | None = None,
+                  grace: float = GRACE_SECONDS) -> tuple[list[tuple[str, int]], list[tuple[str, str]]]:
+    """Removes the scratch dirs of ended sessions (what `scratch_wiring` lists) and returns (removed, failed):
+    (dir name, bytes) for each dir that is gone afterwards, (dir name, first path that would not go) for each that
+    is not. Only what `session_scratch_dirs` calls ended is removed — never `root` itself, a symlink, this
+    session's own dir (`keep`), a recently touched dir, a `pid-<n>` dir whose process lives, the shared `uid-<uid>`
+    dir, or a live or unregistered session. Raises when this session's own dir cannot be resolved."""
     if root is None:
         root = kit_profile.session_scratch_root()
     if keep is None:
-        try:
-            keep = kit_profile.scratch()
-        except Exception:
-            keep = None
-    gone = []
-    for d, _name, status, size in session_scratch_dirs(root, ctx() if ctx_root is None else ctx_root, keep):
-        if status != SESSION_ENDED or d.parent.resolve() != root.resolve():
+        keep = own_scratch()
+    removed: list[tuple[str, int]] = []
+    failed: list[tuple[str, str]] = []
+    for d, _name, status, size in session_scratch_dirs(root, ctx() if ctx_root is None else ctx_root, keep, grace):
+        if status != SESSION_ENDED:
             continue
-        shutil.rmtree(d, ignore_errors=True)
-        gone.append((d.name, size))
-    return gone
+        errs: list[str] = []
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(d, onexc=lambda _f, path, _e: errs.append(str(path)))
+        else:
+            shutil.rmtree(d, onerror=lambda _f, path, _e: errs.append(str(path)))
+        if os.path.lexists(d):
+            failed.append((d.name, errs[0] if errs else str(d)))
+        else:
+            removed.append((d.name, size))
+    return removed, failed
 
 
 def pr_review_example_edited(example: Path | None = None) -> list[str]:
@@ -1952,14 +2024,22 @@ def main() -> int:
     ap.add_argument("--quiet", action="store_true", help="print only the summary line")
     ap.add_argument("--sweep-scratch", action="store_true",
                     help="remove the scratch dirs of ended sessions (what section 4 lists), print what went, and exit")
+    ap.add_argument("--grace-seconds", type=float, default=GRACE_SECONDS, metavar="S",
+                    help=f"with --sweep-scratch: leave a dir alone when anything in it changed within S seconds (default {GRACE_SECONDS})")
     ap.add_argument("--ci", action="store_true", help="CI mode: leak scan + env-store config only, against the checkout and the blank "
                                                        "store CI builds; nothing under .context/ is written; exit 2 on an error or a leak hit, else 0")
     a = ap.parse_args()
     if a.sweep_scratch:
-        gone = sweep_scratch()
+        try:
+            gone, failed = sweep_scratch(grace=a.grace_seconds)
+        except Exception as e:
+            print(f"kit-health: cannot resolve this session's own scratch dir ({e}) — not sweeping", file=sys.stderr)
+            return 2
         print(f"removed {len(gone)} ended session scratch dir(s), {human_size(sum(n for _d, n in gone))}" if gone
               else "no ended session scratch dirs to remove")
-        return 0
+        for name, path in failed:
+            print(f"could not remove `{name}` (stuck at {path})", file=sys.stderr)
+        return 1 if failed else 0
     r = Report()
     try:
         return run(a, r)

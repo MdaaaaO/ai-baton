@@ -1,6 +1,7 @@
 """#138: `kit_profile.py scratch` lands in a per-user 0700 root and refuses a symlinked or foreign one.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import io
 import os
 import stat
 import subprocess
@@ -67,9 +68,6 @@ class ScratchRoot(unittest.TestCase):
         self.assertEqual(self.scratch(), self.t / "mine")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SweepPrReview(unittest.TestCase):
     """`scratch --sweep-pr-review` removes the session's own pr-review/ subtree and nothing else."""
@@ -123,8 +121,27 @@ class SweepPrReview(unittest.TestCase):
         self.assertTrue((victim / "keep.txt").is_file())
         self.assertTrue((self.mine / "pr-review").is_symlink())
 
+    def test_the_shared_uid_fallback_key_is_refused(self):
+        env = {k: v for k, v in self.env.items() if k != "CLAUDE_CODE_SESSION_ID"}
+        uid_dir = self.t / f"ai-baton-kit-{os.getuid()}" / f"uid-{os.getuid()}"
+        uid_dir.mkdir(parents=True)
+        (uid_dir / "pr-review").mkdir()
+        (uid_dir / "pr-review" / "x").write_text("x")
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(kit_profile, "_owning_pid", return_value=None), \
+             mock.patch("sys.stderr", err):
+            rc = kit_profile.main(["kit_profile.py", "scratch", "--sweep-pr-review"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(len(err.getvalue().strip().splitlines()), 1)
+        self.assertIn("shared", err.getvalue())
+        self.assertTrue((uid_dir / "pr-review" / "x").is_file())
+
     def test_session_scratch_root_is_none_under_an_override(self):
         with mock.patch.dict(os.environ, dict(self.env, KIT_SCRATCH=str(self.t / "own")), clear=True):
             self.assertIsNone(kit_profile.session_scratch_root())
         with mock.patch.dict(os.environ, self.env, clear=True):
             self.assertEqual(kit_profile.session_scratch_root(), self.t / f"ai-baton-kit-{os.getuid()}")
+
+
+if __name__ == "__main__":
+    unittest.main()

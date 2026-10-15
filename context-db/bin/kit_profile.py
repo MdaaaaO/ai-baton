@@ -583,8 +583,12 @@ def sweep_pr_review() -> tuple[Path, int]:
     else — `next.md`, `session-name` and the other files in the session's scratch dir stay. Returns (the subtree,
     the bytes freed); 0 when there was none. Refuses (`ScratchError`) a `pr-review` that is a symlink or not a
     directory, or whose real path is not directly inside the session's scratch dir, so a planted link can never
-    point the removal elsewhere. Only ever looks at `scratch()` — another session's dir is never touched."""
+    point the removal elsewhere. Refuses when the session's scratch key is the shared `uid-<uid>` fallback. Only ever looks at `scratch()` — another
+    session's dir is never touched."""
     base = scratch()
+    if session_scratch_root() is not None and base.name == f"uid-{os.getuid()}":
+        raise ScratchError("this session's scratch key is the per-user fallback (no session id, no owning process), "
+                           "shared with other sessions of this user — not removing its pr-review scratch")
     target = base / "pr-review"
     if not os.path.lexists(target):
         return target, 0
