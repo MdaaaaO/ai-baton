@@ -7,7 +7,8 @@ an unknown download failure, a verify call that times out or gets no answer, a v
 "no answer" — against a stub `gh` on PATH, never the network or the real `gh`), a rejected tag staying rejected
 across an unattended run (.sync-rejected) instead of reading as merely `held` again, origin_owner_repo's host
 matching (ssh/https/ssh:// forms, an explicit port, a look-alike host rejected, an ssh host alias left
-unparsed), and which states sync-check warns about.
+unparsed), the fetch failure line carrying git's error tail and, for a tag moved on origin, the remedy, and which
+states sync-check warns about.
 Stdlib unittest, no network: a hung or unreachable origin is faked with `remote.origin.uploadpack`.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
@@ -534,6 +535,39 @@ class SyncSh(unittest.TestCase):
         self.sync()
         self.assertEqual(self.status()[1], "error")
         self.assertIn("fetch failed", self.check())
+
+    def test_moved_tag_fetch_failure_names_tag_and_remedy(self):
+        """A release tag moved on origin is rejected by the fetch; the log line and the status carry git's own
+        error tail and the one-line remedy, not just the exit code."""
+        self.seed_tag("v0.1.0")
+        self.sync()
+        self.assertEqual(self.status()[1], "ok")
+        self.origin_commit("moved")
+        self.git("tag", "-f", "v0.1.0", cwd=self.seed)
+        self.git("push", "-q", "-f", str(self.origin), "v0.1.0", cwd=self.seed)
+        self.sync()
+        st = self.status_file.read_text()
+        self.assertEqual(self.status()[1], "error")
+        for text in (self.log_file.read_text(), st, self.check()):
+            self.assertIn("would clobber existing tag", text)
+            self.assertIn("tag -d v0.1.0", text)
+        self.assertIn("ERROR fetch failed (exit 1): ", self.log_file.read_text())
+        self.assertEqual(st.count("\n"), 1, "the status stays one line")
+        # the remedy works: with the stale local tag gone the next run fetches origin's copy (the release
+        # channel then holds the newer tag for --accept) instead of failing at the fetch again
+        self.git("tag", "-d", "v0.1.0", cwd=self.kit)
+        self.sync()
+        self.assertEqual(self.status()[1], "held")
+
+    def test_clean_fetch_logs_no_per_ref_noise(self):
+        self.seed_tag("v0.1.0")
+        self.origin_commit("quiet")
+        self.sync()
+        self.assertEqual(self.status()[1], "ok")
+        log = self.log_file.read_text()
+        self.assertNotIn("From ", log)
+        self.assertNotIn("[new tag]", log)
+        self.assertNotIn("ERROR", log)
 
     # ── refusals still error ──
     def test_dirty_is_error(self):
