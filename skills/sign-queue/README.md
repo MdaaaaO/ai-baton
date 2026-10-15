@@ -3,8 +3,9 @@
 A shared queue for commits that must be GPG- or SSH-signed and pushed by the user on the host: a session
 enqueues a job (worktree, branch, message file, flags); the user drains the queue with one command.
 
-**Needs:** `systems.signed_commits` (the repos enforce a signed-commits ruleset and the editing machine cannot
-sign). No env fact rows; the queue itself is `<workspace>/.context/state/sign-queue/` — in the workspace, never
+**Needs:** `systems.signed_commits` (the repos enforce a signed-commits ruleset and the session's process has
+no signing identity). The discipline before a job (worktree, staging, message file, rebases) is
+`reference/discipline.md`. No env fact rows; the queue itself is `<workspace>/.context/state/sign-queue/` — in the workspace, never
 under the kit, so a plugin update or kit re-clone never deletes it. Nothing ships or seeds that directory: the
 first `enqueue.sh` call creates it.
 

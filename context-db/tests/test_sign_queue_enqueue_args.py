@@ -266,6 +266,113 @@ class ByIsRequired(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
+def _with_origin(root: Path, push: bool = True) -> tuple[Path, Path]:
+    """_seed_repo plus a bare `origin` under root; `push` publishes main there first. Returns (wt, origin)."""
+    wt = _seed_repo(root)
+    origin = root / "origin.git"
+    git_env = _env(root)
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True, env=git_env)
+    subprocess.run(["git", "-C", str(wt), "remote", "add", "origin", str(origin)], check=True, env=git_env)
+    if push:
+        subprocess.run(["git", "-C", str(wt), "push", "-q", "origin", "main"], check=True, env=git_env)
+    return wt, origin
+
+
+def _move_origin(root: Path, origin: Path) -> None:
+    """Someone else pushes to origin/main (a GitHub "Update branch" click): the new tip is not in the worktree."""
+    git_env = _env(root)
+    other = root / "other"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True, env=git_env)
+    (other / "theirs.txt").write_text("theirs\n")
+    subprocess.run(["git", "-C", str(other), "add", "theirs.txt"], check=True, env=git_env)
+    subprocess.run(["git", "-C", str(other), "commit", "-q", "-m", "chore: theirs"], check=True, env=git_env)
+    subprocess.run(["git", "-C", str(other), "push", "-q", "origin", "main"], check=True, env=git_env)
+
+
+def _job_lines(r) -> list[str]:
+    return Path(r.stdout.strip().splitlines()[-1]).read_text().splitlines()
+
+
+class RemoteDecidesFlags(unittest.TestCase):
+    """enqueue.sh reads the remote itself (#50): an absent `origin/<branch>` means --new-branch, a remote tip
+    that is not in HEAD's history means --rebase, and a worktree in the middle of a rebase is refused. The
+    explicit flags still force their behaviour on."""
+
+    def _setup(self, tmp: Path, push: bool = True):
+        ctx = tmp / "ws" / ".context"
+        ctx.mkdir(parents=True)
+        wt, origin = _with_origin(tmp / "ws", push=push)
+        (wt / "a.txt").write_text("a\n")
+        return ctx, wt, origin
+
+    def test_a_branch_missing_on_the_remote_gets_new_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, _ = self._setup(tmp, push=False)
+            r = _enqueue(tmp, wt, ctx, "auto-new", "--files", "a.txt", "--by", "t")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            lines = _job_lines(r)
+            self.assertIn('git -C "$WT" push -u origin "$BR"', lines)
+            self.assertNotIn('git -C "$WT" rebase -S -f FETCH_HEAD', lines)
+
+    def test_a_remote_tip_outside_head_gets_rebase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, origin = self._setup(tmp)
+            _move_origin(tmp / "ws", origin)
+            r = _enqueue(tmp, wt, ctx, "auto-rebase", "--files", "a.txt", "--by", "t")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            lines = _job_lines(r)
+            self.assertIn('git -C "$WT" rebase -S -f FETCH_HEAD', lines)
+            self.assertIn('git -C "$WT" push origin "$BR"', lines)
+
+    def test_a_remote_tip_already_in_head_needs_neither_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, _ = self._setup(tmp)
+            r = _enqueue(tmp, wt, ctx, "plain", "--files", "a.txt", "--by", "t")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            lines = _job_lines(r)
+            self.assertIn('git -C "$WT" push origin "$BR"', lines)
+            self.assertNotIn('git -C "$WT" rebase -S -f FETCH_HEAD', lines)
+
+    def test_explicit_rebase_still_forces_the_rebase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, _ = self._setup(tmp)
+            r = _enqueue(tmp, wt, ctx, "forced", "--files", "a.txt", "--by", "t", "--rebase")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn('git -C "$WT" rebase -S -f FETCH_HEAD', _job_lines(r))
+
+    def test_force_with_lease_is_never_turned_into_a_rebase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, origin = self._setup(tmp)
+            _move_origin(tmp / "ws", origin)
+            tip = subprocess.run(["git", "--git-dir", str(origin), "rev-parse", "main"], check=True,
+                                 env=_env(tmp), capture_output=True, text=True).stdout.strip()
+            r = _enqueue(tmp, wt, ctx, "lease", "--files", "a.txt", "--by", "t", "--force-with-lease", tip)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn('git -C "$WT" rebase -S -f FETCH_HEAD', _job_lines(r))
+
+    def test_a_rebase_in_progress_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            ctx, wt, _ = self._setup(tmp)
+            git_dir = subprocess.run(["git", "-C", str(wt), "rev-parse", "--absolute-git-dir"], check=True,
+                                     env=_env(tmp), capture_output=True, text=True).stdout.strip()
+            for d in ("rebase-merge", "rebase-apply"):
+                with self.subTest(state=d):
+                    (Path(git_dir) / d).mkdir()
+                    try:
+                        r = _enqueue(tmp, wt, ctx, "mid-rebase", "--files", "a.txt", "--by", "t")
+                    finally:
+                        (Path(git_dir) / d).rmdir()
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                    self.assertIn("rebase is in progress", r.stderr)
+                    self.assertEqual(list(ctx.rglob("*.sh")), [], "a refused enqueue must not queue a job")
+
+
 @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can write through directory permissions")
 class ReadOnlyQueueDir(unittest.TestCase):
     """A queue directory that cannot be written stops before the claim loop ever runs, naming the directory

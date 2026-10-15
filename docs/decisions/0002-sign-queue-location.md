@@ -39,4 +39,4 @@ creates it on first use. Job logs live alongside it, at
 - `skills/sign-queue/README.md` (**Needs** / queue location paragraph)
 - `skills/sign-queue/SKILL.md` § User side — drain (job-file location, `logs/`) and § Why (the owner
   decision behind the queue's existence, 2026-09-10)
-- `skills/signed-git-commits/SKILL.md` (defers the signing/push hand-off to `sign-queue`)
+- `skills/sign-queue/reference/discipline.md` (the discipline before a job; until #50 a separate `signed-git-commits` skill)

@@ -116,7 +116,7 @@ always-on rule** — those are § Rules above (and in `environment.md`). Trigger
 - any non-trivial `gh` loop or count → `gh-cli` first · a README/CONTRIBUTING → `repo-docs`
 - `NEEDS <fact>`/new machine → `env-init` · plugin install → `kit-setup` · sync/kit change → `kit-health`;
   memory over budget → `memory-prune`
-- signed-commits repos → `sign-queue` (why: `signed-git-commits`) · weekly → `self-assessment` · spend → `cost-report`
+- signed-commits repos → `sign-queue` · weekly → `self-assessment` · spend → `cost-report`
 - chat draft → `slack-draft` · docs-page comments → `notion-page-review` · `requires`-gated rest: `environment.md`
 
 ## Cost & context hygiene

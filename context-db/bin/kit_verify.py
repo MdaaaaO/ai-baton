@@ -629,14 +629,6 @@ BODY_LINES_ALLOW = {
     "pr-watch": "arm/re-arm, park, triage-and-act and merge are five distinct operational sequences a session "
                "runs at different points, each already condensed to a pointer-backed summary; full mechanism "
                "detail, tables and rationale already moved to five reference/*.md files",
-    "sign-queue": "the flag-by-flag enqueue spec (--rebase/--new-branch/--force-with-lease/--onto, the "
-               "no-op re-stack trap, --files staging, --supersede folding) and the drain side are one "
-               "command-line contract read top to bottom while enqueuing or draining, not reference "
-               "material to split out",
-    "signed-git-commits": "the worktree-first branching, staging and rebase-signing-quirk sequence is the "
-               "one discipline followed step by step when committing on a signing-less machine, not "
-               "reference material to split out; the hand-off incident log is already its own "
-               "reference/handoff-incidents.md",
     "pr-scan": "the numbered sweep steps and the exact five-section Answer template (incl. the "
                "self-executing MARK trailer) are the one procedure the fork reads top to bottom each run, "
                "not reference material to split out; column rules and the two owner-decision gates' full "

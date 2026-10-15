@@ -47,7 +47,7 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 
 ## Capability tier — needs a system
 
-- **sign-queue** · **signed-git-commits** — commits the host must sign and push. Needs `signed_commits`.
+- **sign-queue** — commits the host must sign and push: the discipline before a job and the queue that carries it. Needs `signed_commits`.
 - **slack-draft** — every Slack message is a draft you send yourself. Needs `slack`.
 - **alerts-sweep** — forked sweep of the Airflow alerts channel. Needs `airflow`, `slack`.
 - **aws-sso-login** — AWS access through the SSO device-code flow. Needs `aws_sso`.
