@@ -308,7 +308,7 @@ test loads. It covers `kb.py`
 schema, env-store checks, `--stale`, `--no-env`), `gen_index.py` / `verify.py` / `new.sh` on a throw-away
 `CONTEXT_ROOT`, `gen_sessions.py`, `mission.py`, `commit_style.py`, `eval_check.py` (on a throw-away kit), `session_stats.py` + `transcripts.py` on a synthetic
 transcript, `frontmatter.py` + `migrate_frontmatter.py`, and the pure functions of `pr-review/scripts/trivial-check.py`
-and `pr-open/diagram-plan.py`, the `pr-issue` parser (`.github/scripts/check-pr-issue.sh`, with a stub `gh`), the squash footer block
+`pr-open/diagram-plan.py` and `pr-open/codeowners.py`, the `pr-issue` parser (`.github/scripts/check-pr-issue.sh`, with a stub `gh`), the squash footer block
 (`squash-footers.jq`, `check-pr-footers.sh`, and auto-merge's merge step against a stub `gh`),
 and the `main-guard` retry loop (`.github/scripts/main-guard.sh`, with a stub `gh` and no pause).
 

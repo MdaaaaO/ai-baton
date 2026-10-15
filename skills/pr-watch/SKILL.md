@@ -137,7 +137,7 @@ to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot
 `python3 $BATON/skills/pr-open/diagram-plan.py --pr <o/r> <n> --check` yourself (one script call) —
 `OK` / `NO MARKER` → nothing; `DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD
 MOVED line only (the brief reruns the check itself), and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
-own sync emits no head move and gets no check. Also run `python3 $BATON/skills/pr-open/codeowners.py check <o/r> --pr <n>`:
+own sync emits no head move and gets no check. Also run `python3 $BATON/skills/pr-open/codeowners.py check <o/r> --pr <n> [--ignore <github.review_bot>]`:
 exit 0 → nothing; exit 3 `OWNERS CHANGED +…` → request the `+` owners; exit 2 is a failed read, never "OK" (`$BATON/skills/pr-open/reference/codeowners.md`). Skip the fork for
 `MERGED`/`CLOSED` (close out per `reference/events.md`), and `LOOKUP FAILED` / `ERROR … startup:` (never fork
 `pr-event-brief` for either — a failed read is not a PR event, there is nothing on the PR to triage). A brief slot
