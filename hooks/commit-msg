@@ -7,9 +7,14 @@
 set -u
 [ "${KIT_SKIP_COMMIT_STYLE:-0}" = "1" ] && exit 0
 here=$(cd "$(dirname "$0")" && pwd)
-checker="$here/../context-db/bin/commit_style.py"
-[ -f "$checker" ] || exit 0            # hook copied somewhere without the kit: nothing to check with
 top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+# The checker of the tree being committed first: core.hooksPath points at ONE checkout's hooks/, so in a
+# worktree whose branch changes the checker the hook-relative copy would judge by the old rule. The
+# hook-relative copy is the fallback (a plugin install, or another repo that opted in with core.hooksPath).
+checker="$top/context-db/bin/commit_style.py"
+[ -f "$checker" ] || checker="$here/../context-db/bin/commit_style.py"
+[ -f "$checker" ] || exit 0            # hook copied somewhere without the kit: nothing to check with
+# `check --quiet --dir <top> <file>` is a frozen CLI contract: this hook runs against checkers of every branch.
 python3 "$checker" check --quiet --dir "$top" "$1"
 rc=$?
 case $rc in
