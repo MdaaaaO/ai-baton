@@ -134,15 +134,14 @@ class ScanHarness:
         gh = self.bin / "gh"; gh.write_text(GH_STUB); gh.chmod(0o755)
         env_dir = self.tmp / "ws" / ".context" / "reference" / "env"; env_dir.mkdir(parents=True)
         env_dir.joinpath("config.json").write_text(json.dumps(
-            {"github": {"review_bot": "", "sandbox_token_prefix": ""}}))
+            {"github": {"org": OWNER, "bots": ["dependabot[bot]"], "review_bot": "", "sandbox_token_prefix": ""}}))
         self.state_dir = self.tmp / "ws" / ".context" / "state" / "pr-review"; self.state_dir.mkdir(parents=True)
         self.log = self.tmp / "gh.log"
         self.out = self.tmp / "out"
 
     def write_config(self, **auto_comment) -> None:
         cfg = {
-            "login": ME, "owner": OWNER, "sweep_repos": [], "days": 14, "max_rows": 8, "enrich_cap": 40,
-            "deep_lines": 600, "bots": ["dependabot[bot]"], "footer": "",
+            "sweep_repos": [], "days": 14, "max_rows": 8, "enrich_cap": 40, "deep_lines": 600, "footer": "",
             "auto_approve": {"mode": "off", "bot_authors": []},
             "auto_comment": {"mode": "shadow", "prios": [1], "max_per_tick": 3, **auto_comment},
         }
@@ -159,7 +158,7 @@ class ScanHarness:
         base = {k: v for k, v in os.environ.items() if k not in ("CONTEXT_ROOT", "PR_REVIEW_HOME", "PR_SCAN_OUT")}
         base.update(
             PATH=path, CONTEXT_ROOT=str(self.tmp / "ws" / ".context"), PR_SCAN_OUT=str(self.tmp / "scanout"),
-            STUB_LOG=str(self.log), STUB_GRAPHQL_DEFAULT=json.dumps(EMPTY_THREADS),
+            STUB_LOG=str(self.log), STUB_GRAPHQL_DEFAULT=json.dumps(EMPTY_THREADS), WORKSPACE_GITHUB_LOGIN=ME,
         )
         base.update(stub)
         return base

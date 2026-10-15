@@ -32,7 +32,7 @@
 #      blank when missing. With
 #      --personal the blank store is FILLED without a question (context-db/bin/personal.py): tracker =
 #      GitHub issues, tracked repos = the clones under the workspace root, identity from `gh api user`
-#      (also written into settings.local.json and the pr-review config where still empty), timezone from
+#      (also written into settings.local.json where still empty; the pr-review config gets its sweep_repos), timezone from
 #      the OS, every systems.* false; a configured value is never overwritten, so it is idempotent. Then
 #      seeds the environment prose .context/reference/environment.md (from
 #      environment-template/environment.md), the root CLAUDE.md (your preamble +
@@ -301,7 +301,7 @@ if [ "$SETTINGS_DIR" != "$HERE" ] && git -C "$PROJECTS" rev-parse --is-inside-wo
 fi
 if [ ! -f "$CONTEXT/state/pr-review/config.json" ]; then
   seed "$HERE/pr-review/config.example.json" "$CONTEXT/state/pr-review/config.json"
-  echo "  created .context/state/pr-review/config.json from the example — set \"login\" to your GitHub login"
+  echo "  created .context/state/pr-review/config.json from the example — tuning only (the GitHub login is WORKSPACE_GITHUB_LOGIN, the org github.org)"
 else
   echo "  .context/state/pr-review/config.json present"
 fi

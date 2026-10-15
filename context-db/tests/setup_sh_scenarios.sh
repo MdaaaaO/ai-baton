@@ -218,7 +218,7 @@ set -e
 check "exit 0" '[ "$RC" -eq 0 ]'
 check "tracker is GitHub issues, environment named after the login, every system off" 'python3 -c "
 import json,sys; c=json.load(open(sys.argv[1])); sys.exit(0 if c[\"tracker\"][\"kind\"]==\"github\" and c[\"environment\"]==\"octo-tester\" and not any(c[\"systems\"].values()) else 1)" "$WS/.context/reference/env/config.json"'
-check "identity written into settings.local.json and the pr-review config" 'grep -q "\"WORKSPACE_GITHUB_LOGIN\": \"octo-tester\"" "$WS/.claude/settings.local.json" && grep -q "\"login\": \"octo-tester\"" "$WS/.context/state/pr-review/config.json"'
+check "identity written into settings.local.json, never the pr-review config (#48)" 'grep -q "\"WORKSPACE_GITHUB_LOGIN\": \"octo-tester\"" "$WS/.claude/settings.local.json" && ! grep -q "\"login\"" "$WS/.context/state/pr-review/config.json" && grep -q "octo-tester/widgets" "$WS/.context/state/pr-review/config.json"'
 check "report says every identity key is set" 'printf "%s" "$OUT" | grep -q "WORKSPACE_GITHUB_LOGIN: set" && ! printf "%s" "$OUT" | grep -q "NOT SET"'
 check "kit-verify accepts the store it wrote" '(cd "$WS/.claude" && CONTEXT_ROOT="$WS/.context" python3 context-db/bin/kit_verify.py >/dev/null 2>&1)'
 check "idempotent: a second --personal run rewrites nothing" 'OUT="$(cd "$WS" && HOME="$HOME_DIR" PROJECTS="$WS" PATH="$WORK/fakegh:$PATH" sh "$WS/.claude/setup.sh" --personal 2>&1)" && printf "%s" "$OUT" | grep -q "environment already named"'

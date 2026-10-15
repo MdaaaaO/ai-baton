@@ -43,9 +43,8 @@ CFG=$ROOT/config.json; LEDGER=$ROOT/ledger.jsonl; touch "$LEDGER"
 # below only mean something in a directory shared across sweeps. PR_SCAN_OUT overrides.
 BASE_OUT=${PR_SCAN_OUT:-$(python3 "$(dirname "$0")/../../context-db/bin/kit_profile.py" scratch --stable pr-scan)} || { echo "pr-scan: cannot resolve the output dir (kit_profile.py scratch failed)" >&2; exit 2; }
 [ -n "$BASE_OUT" ] || { echo "pr-scan: empty output dir" >&2; exit 2; }; mkdir -p "$BASE_OUT"
-ME=$(jq -r .login "$CFG"); OWNER=$(jq -r .owner "$CFG")
 DAYS=$(jq -r .days "$CFG"); CAP=$(jq -r .enrich_cap "$CFG"); MAXROWS=$(jq -r .max_rows "$CFG")
-DEEP=$(jq -r .deep_lines "$CFG"); BOTS=$(jq -c .bots "$CFG")
+DEEP=$(jq -r .deep_lines "$CFG")
 AUTO_MODE=$(jq -r '.auto_approve.mode // "off"' "$CFG"); AUTO_BOTS=$(jq -c '.auto_approve.bot_authors // []' "$CFG")
 AUTO_MAXF=$(jq -r '.auto_approve.max_files // 10' "$CFG"); AUTO_MAXL=$(jq -r '.auto_approve.max_lines // 200' "$CFG")
 # unattended auto-COMMENT gate for direct review requests (opt-in, default off) — no gh calls, computed
@@ -105,6 +104,12 @@ if [ "$MARK_ONLY" = 1 ]; then
   fi
   exit $rc
 fi
+
+# login, owner and bots are facts, not tuning (#48): one reader (`kit_profile.py review-facts`), never config.json —
+# read after --mark-only, which needs none of them. A missing one stops the sweep with the line naming where it is set.
+FACTS=$(python3 "$KIT/context-db/bin/kit_profile.py" review-facts --need login,owner) \
+  || { echo "pr-scan: a GitHub fact is missing (the kit_profile line above names where to set it) — not sweeping" >&2; exit 2; }
+ME=$(jq -r .login <<<"$FACTS"); OWNER=$(jq -r .owner <<<"$FACTS"); BOTS=$(jq -c .bots <<<"$FACTS")
 
 # one scan at a time, taken before the retention sweep and the `latest` repoint: a second sweep would repeat the
 # gh calls and race the first for `latest` (the ledger is written only by --mark-only, under ledger-append.sh's
@@ -198,7 +203,7 @@ while IFS= read -r row; do
   [ "$src" = sweep ] && [[ "$upd" < "$since" ]] && { dropped_stale=$((dropped_stale+1)); continue; }
   # trivial-PR auto-approve gate (owner decision 2026-09-19): cheap pre-filter on size, then trivial-check.py (deterministic).
   # Bot authors listed in auto_approve.bot_authors (dependabot/renovate) are kept ONLY when eligible; other bots drop.
-  # Auto-approve is scoped to PRs the user was asked to review (direct or via owner_teams) — sweep rows never run the gate.
+  # Auto-approve is scoped to PRs the user was asked to review (direct or via github.owner_teams) — sweep rows never run the gate.
   auto='null'
   if [ "$AUTO_MODE" != off ] && [ "$src" != sweep ] && [ "$(jq -r .changed_files <<<"$pr")" -le "$AUTO_MAXF" ] && [ "$(jq -r '.additions+.deletions' <<<"$pr")" -le $((AUTO_MAXL*4)) ]; then
     auto_raw=$(python3 "$TRIVIAL" "$repo" "$num" 2>>"$ERR.raw" || true)   # exit 1 = gh/API failure, exit 3 = config/setup problem; both still print a JSON with reasons

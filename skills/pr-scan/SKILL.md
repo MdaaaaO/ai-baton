@@ -2,7 +2,7 @@
 name: pr-scan
 description: "Forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts, stale, already-reviewed heads. Returns a <=8-row brief or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
 metadata:
-  version: "22"
+  version: "23"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "github.display_names"
@@ -127,13 +127,9 @@ Rules: `Why now` is fact from the data, never an opinion on the PR's value. Auth
 in the column rules. Every PR is a clickable link. Do not read PR bodies or diffs — that is `pr-review`'s
 job. The `**Auto**` and `**AUTO-COMMENT**` lines repeat the gate's facts only — the decision belongs to the main session.
 
-## Trivial-PR auto-approve (owner's standing decision, 2026-09-19 — `shadow` until `auto_approve.shadow_review_due`)
+## Trivial-PR auto-approve
 
-Rows flagged `A` are eligible for approval on the user's behalf without a walk: a deterministic gate
-(`trivial-check.py`, outside this fork) filters on ownership, class/globs/excludes, size, CI + review-bot-green,
-and threads; eligible rows then get a Sonnet `auto-runner` pass that returns `AUTO: approve` or `AUTO: fallback`.
-Mode (`auto_approve.mode`: `off`/`shadow`/`live`) controls whether that posts. Kill switch: `mode: off`; the one
-sanctioned exception to `scope.md` "APPROVE is never inferred". Full gate rules and the two layers: `reference/auto-paths.md` § Trivial-PR auto-approve.
+Rows flagged `A` follow the one contract in `pr-review/reference/auto-approve.md` (gate, modes, ledger, fallback).
 
 ## Unattended auto-COMMENT (owner-decision scope, opt-in — off by default)
 

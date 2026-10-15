@@ -1489,7 +1489,26 @@ def pr_review_example_edited(example: Path | None = None) -> list[str]:
         cfg = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
-    return [k for k in ("login", "owner") if not str(cfg.get(k, "")).startswith("<")]
+    if not isinstance(cfg, dict):
+        return []
+    edited = [k for k in ("sweep_repos",) if any(not str(x).startswith("<") for x in (cfg.get(k) or []))]
+    # the facts it no longer carries (#48) — one put back by hand is an edit too
+    return edited + [k for k in PR_REVIEW_FACT_KEYS if pr_review_key(cfg, k) is not None]
+
+
+# keys a pr-review config.json no longer carries (#48): the scripts read them through `kit_profile.py review-facts`
+# (the login from identity, the rest from github.* in the store) — a value left in the file is ignored
+PR_REVIEW_FACT_KEYS = ("login", "owner", "bots", "auto_approve.owner_teams")
+
+
+def pr_review_key(cfg: dict, dotted: str):
+    """`cfg`'s value at a dotted key, None when absent."""
+    cur: object = cfg
+    for part in dotted.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return None
+        cur = cur[part]
+    return cur
 
 
 def sandbox_detected(markers: list) -> bool:
@@ -1687,23 +1706,27 @@ def sec_machine(r: Report) -> str:
     if prc.is_file():
         try:
             c = json.loads(prc.read_text(encoding="utf-8"))
-            if not c.get("login") or c["login"].startswith("<"):
-                r.add(WARN, "machine", "`.context/state/pr-review/config.json`: `login` not set")
-            if c.get("owner") != org:
-                r.add(WARN, "machine", f"`.context/state/pr-review/config.json`: `owner` is `{c.get('owner')}` but the configured `github.org` is `{org}`")
+            stale = [k for k in PR_REVIEW_FACT_KEYS if pr_review_key(c, k) is not None]
+            if stale:
+                r.add(WARN, "machine", f"`.context/state/pr-review/config.json` still carries {', '.join(f'`{k}`' for k in stale)} — "
+                      "ignored: the scripts read the login, `github.org`, `github.bots` and `github.owner_teams` through "
+                      "`kit_profile.py review-facts`; move a value the store lacks there, then delete the key")
+            missing = kit_profile.review_facts_missing(kit_profile.review_facts(), ["login", "owner"])
+            for line in missing:
+                r.add(WARN, "machine", f"pr-review: {line}")
             bad = [x for x in c.get("sweep_repos", []) if org and not x.startswith(org + "/")]
             if bad:
                 r.add(WARN, "machine", f"pr-review config `sweep_repos` outside `{org}/`: {', '.join(bad)}")
-            if c.get("owner") == org and not bad and c.get("login") and not c["login"].startswith("<"):
-                r.add(OK, "machine", f"pr-review config matches the configured org (`owner` = `{org}`)")
+            if not stale and not missing and not bad:
+                r.add(OK, "machine", f"pr-review config holds tuning only; its facts resolve (`owner` = `{org}`)")
         except json.JSONDecodeError:
             r.add(ERR, "machine", "`.context/state/pr-review/config.json` is not valid JSON")
     else:
         r.add(WARN, "machine", "`.context/state/pr-review/config.json` missing — `sh $BATON/setup.sh` seeds it")
     edited = pr_review_example_edited()
     if edited:
-        r.add(WARN, "machine", f"`pr-review/config.example.json` {', '.join(edited)} no longer look(s) like a "
-              "placeholder — editing the example changes nothing on this machine; edit "
+        r.add(WARN, "machine", f"`pr-review/config.example.json` {', '.join(edited)} no longer look(s) like the "
+              "kit's placeholder shape — editing the example changes nothing on this machine; edit "
               "`.context/state/pr-review/config.json` instead (`docs/conventions.md`)")
     for tool in ("git", "make", "python3", "gh", "jq"):
         if shutil.which(tool):

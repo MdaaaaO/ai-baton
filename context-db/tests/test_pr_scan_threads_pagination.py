@@ -100,11 +100,10 @@ class ReviewThreadsPagination(unittest.TestCase):
         gh = self.bin / "gh"; gh.write_text(GH_STUB); gh.chmod(0o755)
         env_dir = self.tmp / "ws" / ".context" / "reference" / "env"; env_dir.mkdir(parents=True)
         env_dir.joinpath("config.json").write_text(json.dumps(
-            {"github": {"review_bot": "", "sandbox_token_prefix": ""}}))
+            {"github": {"org": OWNER, "bots": [], "review_bot": "", "sandbox_token_prefix": ""}}))
         state_dir = self.tmp / "ws" / ".context" / "state" / "pr-review"; state_dir.mkdir(parents=True)
         state_dir.joinpath("config.json").write_text(json.dumps({
-            "login": ME, "owner": OWNER, "sweep_repos": [REPO], "days": 36500, "max_rows": 8,
-            "enrich_cap": 40, "deep_lines": 600, "bots": [], "footer": "",
+            "sweep_repos": [REPO], "days": 36500, "max_rows": 8, "enrich_cap": 40, "deep_lines": 600, "footer": "",
             "auto_approve": {"mode": "off", "bot_authors": []},
             "auto_comment": {"mode": "off", "prios": [1], "max_per_tick": 3},
         }))
@@ -116,6 +115,7 @@ class ReviewThreadsPagination(unittest.TestCase):
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
             "CONTEXT_ROOT": str(self.tmp / "ws" / ".context"),
             "PR_SCAN_OUT": str(self.scanout),
+            "WORKSPACE_GITHUB_LOGIN": ME,
             "STUB_LOG": str(self.log),
             "STUB_SWEEP_JSON": json.dumps(SWEEP_JSON),
             "STUB_PR_JSON": json.dumps(PR_JSON),

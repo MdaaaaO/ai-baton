@@ -32,11 +32,10 @@ class MarkOnlyRequiresRun(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         env_dir = self.tmp / "ws" / ".context" / "reference" / "env"; env_dir.mkdir(parents=True)
         env_dir.joinpath("config.json").write_text(json.dumps(
-            {"github": {"review_bot": "", "sandbox_token_prefix": ""}}))
+            {"github": {"org": OWNER, "bots": [], "review_bot": "", "sandbox_token_prefix": ""}}))
         self.state_dir = self.tmp / "ws" / ".context" / "state" / "pr-review"; self.state_dir.mkdir(parents=True)
         self.state_dir.joinpath("config.json").write_text(json.dumps({
-            "login": "tester", "owner": OWNER, "sweep_repos": [], "days": 14, "max_rows": 8,
-            "enrich_cap": 40, "deep_lines": 600, "bots": [],
+            "sweep_repos": [], "days": 14, "max_rows": 8, "enrich_cap": 40, "deep_lines": 600,
             "auto_approve": {"mode": "off", "bot_authors": []},
             "auto_comment": {"mode": "off", "prios": [1], "max_per_tick": 3},
         }))
@@ -51,7 +50,7 @@ class MarkOnlyRequiresRun(unittest.TestCase):
 
     def env(self) -> dict:
         base = {k: v for k, v in os.environ.items() if k not in ("CONTEXT_ROOT", "PR_REVIEW_HOME", "PR_SCAN_OUT")}
-        base.update(CONTEXT_ROOT=str(self.tmp / "ws" / ".context"), PR_SCAN_OUT=str(self.base_out))
+        base.update(CONTEXT_ROOT=str(self.tmp / "ws" / ".context"), PR_SCAN_OUT=str(self.base_out), WORKSPACE_GITHUB_LOGIN="tester")
         return base
 
     def mark(self, run_dir, *, quiet: bool = True) -> subprocess.CompletedProcess:

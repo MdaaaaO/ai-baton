@@ -41,8 +41,10 @@ class TrivialCheck(unittest.TestCase):
     def setUpClass(cls):
         # the script reads .context/state/pr-review/config.json at import — give it a minimal one
         cls.tmp = tempfile.TemporaryDirectory()
-        Path(cls.tmp.name, "config.json").write_text(json.dumps({"login": "someone", "auto_approve": {"mode": "off"}}), encoding="utf-8")
-        cls.tc = load_script(KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py", "trivial_check", {"PR_REVIEW_HOME": cls.tmp.name})
+        # (tuning only) and the login from the identity (#48)
+        Path(cls.tmp.name, "config.json").write_text(json.dumps({"auto_approve": {"mode": "off"}}), encoding="utf-8")
+        cls.tc = load_script(KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py", "trivial_check",
+                             {"PR_REVIEW_HOME": cls.tmp.name, "WORKSPACE_GITHUB_LOGIN": "someone"})
 
     @classmethod
     def tearDownClass(cls):
@@ -130,7 +132,7 @@ class TrivialCheck(unittest.TestCase):
         script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
         sha = "ab" * 20
         with tempfile.TemporaryDirectory() as ctx:
-            env = dict(os.environ, PR_REVIEW_HOME=self.tmp.name, CONTEXT_ROOT=ctx)
+            env = dict(os.environ, PR_REVIEW_HOME=self.tmp.name, CONTEXT_ROOT=ctx, WORKSPACE_GITHUB_LOGIN="someone")
             run = lambda *a: subprocess.run([sys.executable, str(script), "o/r", "1", *a], capture_output=True, text=True, env=env)
             for bad in (["--head", ""], ["--head"], ["--head", sha[:12]], ["--head", sha.upper()],
                         ["--head", sha, "--head", ""]):
@@ -162,7 +164,7 @@ class TrivialCheck(unittest.TestCase):
         script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
         sha = "cd" * 20
         with tempfile.TemporaryDirectory() as ctx:
-            env = dict(os.environ, PR_REVIEW_HOME=self.tmp.name, CONTEXT_ROOT=ctx)
+            env = dict(os.environ, PR_REVIEW_HOME=self.tmp.name, CONTEXT_ROOT=ctx, WORKSPACE_GITHUB_LOGIN="someone")
             run = lambda *a: subprocess.run([sys.executable, str(script), *a], capture_output=True, text=True, env=env)
             for bad in (["o/r", "1", "--head="], ["o/r", "1", "--head=" + sha[:12]], ["o/r", "1", f"--head={sha}", "--head", sha],
                         ["o/r", "1", "--dry-run"], ["--skip-ci", "o/r", "1"]):
@@ -255,9 +257,11 @@ class TrivialCheck(unittest.TestCase):
             out = json.loads(r.stdout)
             self.assertEqual((out["eligible"], out["error"]), (False, True))
 
-    def test_config_without_a_login_prints_the_error_shape_and_exits_3(self):
+    def test_an_unset_login_prints_the_error_shape_naming_the_key_and_exits_3(self):
+        # #48: the login is the identity (WORKSPACE_GITHUB_LOGIN), never config.json's — a leftover config
+        # `login` neither stands in for an unset identity nor is required
         script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
-        for body in ('{"auto_approve": {}}', '{"login": ""}', '[]'):
+        for body in ('{"auto_approve": {}}', '{"login": "someone"}'):
             with self.subTest(body=body), tempfile.TemporaryDirectory() as tmp:
                 home = str(Path(tmp, "home"))
                 os.makedirs(home)
@@ -269,7 +273,34 @@ class TrivialCheck(unittest.TestCase):
                 self.assertEqual(r.returncode, 3, (r.stdout, r.stderr))
                 out = json.loads(r.stdout)
                 self.assertEqual((out["eligible"], out["error"]), (False, True))
-                self.assertIn("no login", out["reasons"][0])
+                self.assertIn("login is not set", out["reasons"][0])
+                self.assertIn("WORKSPACE_GITHUB_LOGIN", out["reasons"][0])
+
+    def test_a_set_login_needs_no_config_key(self):
+        script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            home = str(Path(tmp, "home"))
+            os.makedirs(home)
+            Path(home, "config.json").write_text('{"auto_approve": {"mode": "off"}}', encoding="utf-8")
+            env = hermetic_env(tmp)
+            env.update(PR_REVIEW_HOME=home, WORKSPACE_GITHUB_LOGIN="someone")
+            r = subprocess.run([sys.executable, str(script), "acme/widgets", "1"], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, (r.stdout, r.stderr))
+            self.assertIn("auto_approve.mode=off", r.stdout)
+
+    def test_a_config_that_is_not_an_object_prints_the_error_shape_and_exits_3(self):
+        script = KIT / "skills" / "pr-review" / "scripts" / "trivial-check.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            home = str(Path(tmp, "home"))
+            os.makedirs(home)
+            Path(home, "config.json").write_text("[]", encoding="utf-8")
+            env = hermetic_env(tmp)
+            env.update(PR_REVIEW_HOME=home, WORKSPACE_GITHUB_LOGIN="someone")
+            r = subprocess.run([sys.executable, str(script), "acme/widgets", "1"], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 3, (r.stdout, r.stderr))
+            out = json.loads(r.stdout)
+            self.assertEqual((out["eligible"], out["error"]), (False, True))
+            self.assertIn("not a JSON object", out["reasons"][0])
 
     @staticmethod
     def _fake_run(responses):

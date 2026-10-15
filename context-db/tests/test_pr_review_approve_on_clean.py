@@ -116,7 +116,7 @@ class ApproveOnClean(unittest.TestCase):
         if approve_on_clean is not None:
             ac["approve_on_clean"] = approve_on_clean
         self.state_dir.joinpath("config.json").write_text(json.dumps({
-            "login": ME, "footer": "", "submitted_retention_days": 14,
+            "footer": "", "submitted_retention_days": 14,
             "auto_approve": {"mode": "off"}, "auto_comment": ac}))
 
     def env(self, author="alice", checks=None, status=None, reviews=None, pr=None, branch=None, protection=None,
@@ -124,7 +124,7 @@ class ApproveOnClean(unittest.TestCase):
         return {
             **{k: v for k, v in os.environ.items() if k not in ("CONTEXT_ROOT", "PR_REVIEW_HOME")},
             "PATH": f"{self.tmp / 'bin'}{os.pathsep}{os.environ['PATH']}",
-            "CONTEXT_ROOT": str(self.tmp / "ws" / ".context"),
+            "CONTEXT_ROOT": str(self.tmp / "ws" / ".context"), "WORKSPACE_GITHUB_LOGIN": ME,
             "STUB_LOG": str(self.log), "STUB_POST": str(self.post), "STUB_PR_CTR": str(self.tmp / "prctr"),
             "STUB_PR_JSON": pr if pr is not None else pr_json(author=author),
             "STUB_PR_MOVED_JSON": pr_json(head=MOVED, author=author),

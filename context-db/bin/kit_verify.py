@@ -613,9 +613,10 @@ BODY_LINES_ALLOW = {
                  "first-handoff fallback, the ≤12-line full-state cap and its fields) is quoted verbatim, "
                  "substring-for-substring, by tests/test_diff_shaped.py — extracting it to reference/ broke "
                  "that contract, so it stays inline rather than risk another drift",
-    "pr-review": "the per-finding walk (Post / Deep dive / Body only / Skip), the repo trap KB and the "
-                 "verification steps are the one walkthrough a reviewer follows top to bottom, not reference "
-                 "material to split out",
+    "review-runner": "pr-review's steps 1-4 (bundle, trap KB, review pass, verification, stakeholder impact) "
+                     "live only here since #48 (pr-review's SKILL.md and reference/runner.md point at its "
+                     "§ Contract) — the one sequence a spawned runner follows top to bottom, not reference "
+                     "material to split out",
     "self-assessment": "the week-file, report-block and ledger-card templates and the back-fill branch for "
                        "every systems-of-record source are the procedure itself, not reference material to "
                        "split out",

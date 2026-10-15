@@ -14,7 +14,7 @@ Proposed — the behaviour is implemented; the rationale waits on the owner's co
 `agents/review-runner.md`), not in the main session. `fetch-context.sh` first writes a bundle to a
 context directory (`$CTX`): `manifest.json`, `bundle.json`, `diff.patch` and per-file `diffs/<path>.patch`,
 `head/<path>` and `base/<path>` blobs, `kb-traps.md`, `threads.json`, `review_comments.json`,
-`issue_comments.json`. The runner is told to read only that bundle — `SKILL.md` § Contract lists exactly
+`issue_comments.json`. The runner is told to read only that bundle — `agents/review-runner.md` § Contract lists exactly
 four live reads allowed beyond it (a repo's own `CLAUDE.md`/`AGENTS.md` rules when the PR didn't touch
 that file, a base blob for a path the PR didn't touch, one named file in an external repo for a
 convention claim, and a repo-wide `ref()`/exposures search) — never `git show`, CI-log polling, or a `gh
@@ -55,8 +55,9 @@ returns a small fixed-shape summary; the diff, per-file patches and thread conte
 
 ## Sources
 
-- `skills/pr-review/SKILL.md` § "Contract: bundle vs. live reads" and § "Where each step runs (cost
-  model, 2026-09-19)"
+- `agents/review-runner.md` § "Contract: bundle vs. live reads" and
+  `skills/pr-review/reference/runner.md` § "Where each step runs (cost model, 2026-09-19)" (both moved
+  out of `skills/pr-review/SKILL.md` under #48)
 - `agents/review-runner.md` ("Do exactly this" steps 1–6, "Write only under `$CTX`", "Return exactly this
   and nothing else")
 - `agents/auto-runner.md` (the trivial-PR path: bundle-only reads, `$CTX`-only writes, `AUTO:`-only

@@ -56,6 +56,10 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
                         python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 otherwise
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
+                        python3 kit_profile.py review-facts [--need login,owner]  # the pr-review scripts' GitHub facts as JSON
+                                                               #   {login, owner, bots, owner_teams, review_bot}: the login
+                                                               #   from identity, the rest from github.* in the store; exit 1
+                                                               #   + one stderr line per --need fact that is empty
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
                         python3 kit_profile.py scratch --sweep-pr-review  # wind-down: remove this session's own pr-review/ scratch subtree only (next.md, session-name stay); exit 2 on a symlinked/escaping one
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
@@ -460,6 +464,38 @@ def identity_source(var: str, environ: dict | None = None) -> str:
     if var in IDENTITY_KEYS and str(env.get(option_var(var), "")).strip():
         return "option"
     return "env" if str(env.get(var, "")).strip() else ""
+
+
+# The pr-review family's GitHub facts (#48): one reader, so `pr-scan.sh`, `fetch-context.sh`, `submit-review.sh`,
+# `reply-threads.sh` and `trivial-check.py` never keep a copy in `.context/state/pr-review/config.json` (that file
+# holds tuning only). The login is identity (the plugin option, else `WORKSPACE_GITHUB_LOGIN`); the rest is the env
+# store. `REVIEW_FACT_SOURCES` names where each one is set — the text a missing fact's error line carries.
+REVIEW_FACT_SOURCES: dict[str, str] = {
+    "login": "WORKSPACE_GITHUB_LOGIN (`/plugin configure ai-baton` github_login, or settings.local.json env)",
+    "owner": "github.org in the env store (`kb.py config-set github.org <org>`)",
+    "bots": "github.bots in the env store",
+    "owner_teams": "github.owner_teams in the env store",
+    "review_bot": "github.review_bot in the env store",
+}
+
+
+def review_facts(environ: dict | None = None) -> dict:
+    """`{login, owner, bots, owner_teams, review_bot}` for the pr-review scripts. `bots` is `github.bots` plus the
+    review bot (a bot's review is never a human's), de-duplicated in order; an unset key is `""` / `[]`."""
+    def strs(v: object) -> list[str]:
+        return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
+    bot = str(get("github.review_bot") or "").strip()
+    bots: list[str] = []
+    for b in strs(get("github.bots")) + ([bot] if bot else []):
+        if b not in bots:
+            bots.append(b)
+    return {"login": identity("WORKSPACE_GITHUB_LOGIN", environ), "owner": str(get("github.org") or "").strip(),
+            "bots": bots, "owner_teams": strs(get("github.owner_teams")), "review_bot": bot}
+
+
+def review_facts_missing(facts: dict, need: list[str]) -> list[str]:
+    """One `<fact> is not set — <where it is set>` line per needed fact that is empty in `facts`."""
+    return [f"{k} is not set — {REVIEW_FACT_SOURCES[k]}" for k in need if is_empty(facts.get(k))]
 
 
 def tz() -> str:
@@ -1179,6 +1215,26 @@ def main(argv: list[str]) -> int:
         p = gh_token_prefix()
         if p and not os.environ.get(p[0]):
             print(f"export {p[0]}={shlex.quote(p[1])}")
+    elif cmd == "review-facts":
+        # the pr-review scripts' GitHub facts as one JSON line; `--need a,b` exits 1 (one stderr line per fact,
+        # naming where it is set) when a listed fact is empty — the JSON is still printed for the rest
+        rest = argv[2:]
+        need: list[str] = []
+        if rest[:1] == ["--need"] and len(rest) == 2:
+            need = [k for k in rest[1].split(",") if k]
+        elif rest:
+            need = ["?"]
+        unknown = [k for k in need if k not in REVIEW_FACT_SOURCES]
+        if unknown:
+            print(f"kit_profile: `review-facts` takes [--need {','.join(REVIEW_FACT_SOURCES)}] — not a fact: "
+                  f"{', '.join(unknown)}", file=sys.stderr)
+            return 2
+        facts = review_facts()
+        print(json.dumps(facts))
+        missing = review_facts_missing(facts, need)
+        for line in missing:
+            print(f"kit_profile: review-facts: {line}", file=sys.stderr)
+        return 1 if missing else 0
     elif cmd == "get":
         rest = argv[2:]
         nonempty = "--nonempty" in rest

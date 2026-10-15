@@ -47,6 +47,7 @@ env store (`docs/env-facts.md`); the file map is `docs/layout.md`.
   blank `.context/reference/env/`, `kb.py config-set` sets the switches, facts arrive as skills ask for
   them, `kit-health` proves the wiring (`docs/new-environment.md`). A shared prose layer for a team
   is a team plugin. `.context/state/pr-review/config.json` — `setup.sh` seeds it once from
-  `pr-review/config.example.json` and never overwrites it — is the one per-user file still edited by hand;
+  `pr-review/config.example.json` and never overwrites it — is the one per-user file still edited by hand (tuning only — its GitHub facts come from the identity and
+  the store through `kit_profile.py review-facts`);
   the example itself is a kit file, so editing it changes nothing on this machine (`kit-health` § 4 flags an
   edited example).

@@ -25,7 +25,8 @@ SCRIPTS = {  # script (relative to the kit) → argv after it
 
 def _env() -> dict:
     drop = ("CONTEXT_ROOT", "CLAUDE_PROJECT_DIR", "PR_REVIEW_HOME", "PR_SCAN_OUT")
-    return {k: v for k, v in os.environ.items() if k not in drop}
+    # a login (#48: identity, read through kit_profile.py review-facts) so each script gets as far as its config
+    return {**{k: v for k, v in os.environ.items() if k not in drop}, "WORKSPACE_GITHUB_LOGIN": "tester"}
 
 
 @unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
@@ -76,7 +77,7 @@ class PluginLayout(unittest.TestCase):
     def test_override_still_wins(self):
         home = self.tmp / "override"
         r = self.run_script("skills/pr-review/scripts/reply-threads.sh", self.tmp / "home", PR_REVIEW_HOME=str(home))
-        self.assertIn(str(home / "config.json"), r.stderr)
+        self.assertIn(str(home), r.stderr)  # reply-threads reads no config.json since #48: it names the state dir
 
 
 if __name__ == "__main__":

@@ -32,7 +32,10 @@ eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_
 CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
 [ -n "${PR_REVIEW_HOME:-}" ] || [ -d "$CTX" ] || { echo "submit-review.sh: no workspace .context/ found ($CTX) — run from the workspace, or set PR_REVIEW_HOME" >&2; exit 2; }
 export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_HOME
-ME=$(jq -r .login "$ROOT/config.json"); FOOTER=$(jq -r '.footer // ""' "$ROOT/config.json"); LEDGER=$ROOT/ledger.jsonl
+# the login is identity, not a config.json key (#48) — the one reader names where to set it when it is missing
+ME=$(python3 "$KIT/context-db/bin/kit_profile.py" review-facts --need login | jq -r .login) && [ -n "$ME" ] \
+  || { echo "submit-review.sh: no GitHub login (the kit_profile line above names where to set it)" >&2; exit 2; }
+FOOTER=$(jq -r '.footer // ""' "$ROOT/config.json"); LEDGER=$ROOT/ledger.jsonl
 AUTO_MODE=$(jq -r '.auto_approve.mode // "off"' "$ROOT/config.json"); RET=$(jq -r '.submitted_retention_days // 14' "$ROOT/config.json")
 AUTOC_MODE=$(jq -r '.auto_comment.mode // "off"' "$ROOT/config.json")
 APPROVE_CLEAN=$(jq -r '.auto_comment.approve_on_clean // "off"' "$ROOT/config.json")

@@ -15,7 +15,12 @@ eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_
 CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
 [ -n "${PR_REVIEW_HOME:-}" ] || [ -d "$CTX" ] || { echo "reply-threads.sh: no workspace .context/ found ($CTX) — run from the workspace, or set PR_REVIEW_HOME" >&2; exit 2; }
 export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_HOME
-ME=$(jq -r .login "$ROOT/config.json"); LEDGER=$ROOT/ledger.jsonl
+# no config.json read here (#48), but the `replied` row lands in $ROOT — refuse before posting rather than lose it
+[ -d "$ROOT" ] || { echo "reply-threads.sh: no pr-review state dir $ROOT — setup.sh creates it (or set PR_REVIEW_HOME)" >&2; exit 2; }
+# the login is identity, not a config.json key (#48) — the one reader names where to set it when it is missing
+ME=$(python3 "$KIT/context-db/bin/kit_profile.py" review-facts --need login | jq -r .login) && [ -n "$ME" ] \
+  || { echo "reply-threads.sh: no GitHub login (the kit_profile line above names where to set it)" >&2; exit 2; }
+LEDGER=$ROOT/ledger.jsonl
 usage(){ echo "usage: reply-threads.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST]" >&2; exit 2; }
 cmd=${1:-}; shift || usage; repo=""; pr=""; head=""; req=""; confirm=""
 while [ $# -gt 0 ]; do case $1 in

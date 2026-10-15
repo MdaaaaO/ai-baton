@@ -29,7 +29,9 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 - **pr-watch** — one low-noise Monitor per repo that surfaces only events you can act on.
 - **pr-event-brief** — forked triage of one watch event, returning a brief with one recommended action.
 - **pr-scan** — forked sweep that builds your review queue.
-- **pr-review** — reviews someone else's PR with you, then posts one approved review.
+- **pr-review** — reviews someone else's PR with you, then posts one approved review. The body keeps the trigger,
+  spawn, walk, post and KB write-back; the walk in full is `reference/walk.md`, the trivial-PR auto-approve
+  contract `reference/auto-approve.md`.
 - **gh-cli** — how to query GitHub with `gh` without hitting the known traps.
 
 ## Tracker
@@ -59,5 +61,6 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 The forked workers that skills run under. Where they fit is shown in `docs/architecture.md`.
 
 - **triage** — cheap read-only worker (Haiku) that summarises. It never posts.
-- **review-runner** — Opus worker that runs `pr-review` steps 1–4 for one PR.
+- **review-runner** — Opus worker that runs `pr-review` steps 1–4 for one PR — the only place those steps and
+  the bundle-vs-live-read contract are written.
 - **auto-runner** — Sonnet worker for the auto-approve path on trivial PRs.

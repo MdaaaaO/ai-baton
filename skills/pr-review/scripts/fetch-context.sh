@@ -3,7 +3,8 @@
 # Snapshots everything a review needs into one directory and decides the review mode. Read-only.
 # Fail-closed: a fetch that fails after a retry aborts (exit 1) — a swallowed error must never read as "no reviews".
 # A review-thread list that stops at a failed page is not fatal: threads_complete=false in the manifest, one line in errors.txt.
-# Exit 2: usage, no workspace, or a config.json that is missing, unparsable or without a login.
+# Exit 2: usage, no workspace, a config.json that is missing or unparsable, or no GitHub login
+# (`kit_profile.py review-facts` — the login and bot list are facts, never config.json keys).
 # Besides the snapshot it writes the BUNDLE the runner works from, so no model turn is spent on `gh api contents`
 # or `git show`: head/<path> and base/<path> for every touched file, diffs/<path>.patch, checks+statuses,
 # kb-traps.md (repo KB traps sections + sections matching touched paths), bundle.json (per-file stats, unresolved
@@ -17,9 +18,11 @@ CTX=$(python3 "$KIT/context-db/bin/kit_profile.py" context)
 export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_HOME
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 [ -r "$ROOT/config.json" ] || { echo "fetch-context.sh: no readable config.json at $ROOT" >&2; exit 2; }
-ME=$(jq -r '.login // empty' "$ROOT/config.json" 2>/dev/null) || { echo "fetch-context.sh: config.json at $ROOT cannot be parsed" >&2; exit 2; }
-[ -n "$ME" ] || { echo "fetch-context.sh: config.json at $ROOT has no login" >&2; exit 2; }
-BOTS=$(jq -c .bots "$ROOT/config.json")
+jq -e 'type == "object"' "$ROOT/config.json" >/dev/null 2>&1 || { echo "fetch-context.sh: config.json at $ROOT cannot be parsed" >&2; exit 2; }
+# the login and the bot list are facts (#48), read through the one reader — config.json holds tuning only
+FACTS=$(python3 "$KIT/context-db/bin/kit_profile.py" review-facts --need login) \
+  || { echo "fetch-context.sh: no GitHub login (the kit_profile line above names where to set it)" >&2; exit 2; }
+ME=$(jq -r .login <<<"$FACTS"); BOTS=$(jq -c .bots <<<"$FACTS")
 BMAXF=$(jq -r '.bundle_max_files // 60' "$ROOT/config.json"); BMAXKB=$(jq -r '.bundle_max_kb // 200' "$ROOT/config.json")
 repo=${1:?usage: fetch-context.sh <owner/repo> <pr> [--out DIR] [--no-bundle]}; pr=${2:?pr number}; shift 2; out=""; bundle=1
 while [ $# -gt 0 ]; do case $1 in --out) out=$2; shift 2;; --no-bundle) bundle=0; shift;; *) echo "unknown arg $1" >&2; exit 2;; esac; done

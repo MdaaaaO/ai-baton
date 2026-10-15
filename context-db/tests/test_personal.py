@@ -158,7 +158,9 @@ class Cli(unittest.TestCase):
         self.assertNotIn("<", s["WORKSPACE_TZ"])  # the OS zone, never the example's placeholder
         self.assertEqual(s["WORKSPACE_SLACK_SELF_DM"], "")
         p = json.loads(prr.read_text(encoding="utf-8"))
-        self.assertEqual((p["login"], p["owner"], len(p["sweep_repos"])), (LOGIN, LOGIN, 2))
+        self.assertEqual(len(p["sweep_repos"]), 2)
+        self.assertNotIn("login", p)  # #48: the login / owner are facts (settings, github.org), never pr-review config keys
+        self.assertNotIn("owner", p)
         self.assertEqual(self.verify_store(), [])  # env store complete for kit-verify, with zero questions asked
         # idempotent: a second run writes nothing and says so — the store, the person row, both files
         github_before = (self.store / "github.md").read_text(encoding="utf-8")
