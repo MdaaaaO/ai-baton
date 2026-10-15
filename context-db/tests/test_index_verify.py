@@ -2,6 +2,7 @@
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -67,7 +68,9 @@ class IndexAndVerify(ContextRoot):
         self.assertIn("reference/conventions.md", index)
         self.assertIn("repos/kit.md", index)
         self.assertIn("reference/env/slack.md", index)
-        self.assertIn("`alpha` `beta`", index)  # tags normalised (quotes stripped)
+        self.assertNotIn("Tags", index)  # the table carries no Tags column: tags stay in frontmatter
+        self.assertNotIn("`alpha`", index)
+        self.assertIn("| Doc | Title | Type | Status | Updated |", index)
         v = run(self.root, "verify.py")
         self.assertEqual(v.returncode, 0, v.stderr)
         self.assertIn("OK — ", v.stdout)
@@ -223,38 +226,321 @@ class IndexAndVerify(ContextRoot):
         self.assertEqual(v.returncode, 0, v.stderr)
 
 
+def active_row_bytes(index_text: str) -> int:
+    """Bytes of the `status: active` and `status: closed` table rows of a generated INDEX.md (the figure verify
+    budgets against INDEX_SIZE_WARN), counted straight from the file so the test does not lean on the generator's
+    own helpers."""
+    return sum(len(line.encode("utf-8")) + 1 for line in index_text.splitlines()
+               if line.startswith("| [`") and line.split("|")[4].strip() in ("active", "closed"))
+
+
 class IndexSizeBudget(ContextRoot):
-    """verify.py's INDEX_SIZE_WARN budget (10KB, the same figure as SESSION_INDEX_WARN). A row's
-    `title` is unescaped ASCII (besides `|`), so padding it by N bytes grows INDEX.md by exactly
-    N bytes — the 10240/10241-byte boundary is reachable precisely, without patching the constant."""
+    """verify.py's INDEX_SIZE_WARN budget (10KB, the same figure as SESSION_INDEX_WARN) counts the bytes of the
+    `status: active` and `status: closed` rows; INDEX_TOTAL_SIZE_WARN (2x) bounds the whole file. A row's `title` is unescaped ASCII (besides `|`), so padding it by N bytes grows
+    that figure by exactly N bytes — the 10240/10241-byte boundary is reachable precisely, without patching the
+    constant."""
 
     BUDGET = 10 * 1024
 
+    def active_bytes(self) -> int:
+        return active_row_bytes((self.root / "INDEX.md").read_text(encoding="utf-8"))
+
     def test_no_warning_at_the_budget_and_a_warning_one_byte_over(self):
-        index_path = self.root / "INDEX.md"
         run(self.root, "gen_index.py")
         self.doc("repos/pad.md", title="X", type="repo", domain="repos", status="active")
         run(self.root, "gen_index.py")
-        with_one_char_title = index_path.stat().st_size
-        # every other byte in INDEX.md is fixed by setUp's docs; growing this title by one byte
-        # grows the file by exactly one byte, so the target length is reachable by arithmetic
-        length_at_budget = 1 + (self.BUDGET - with_one_char_title)
+        # every other byte of the active rows is fixed by setUp's docs; growing this title by one byte
+        # grows the figure by exactly one byte, so the target length is reachable by arithmetic
+        length_at_budget = 1 + (self.BUDGET - self.active_bytes())
         self.assertGreater(length_at_budget, 0)
 
         self.doc("repos/pad.md", title="X" * length_at_budget, type="repo", domain="repos", status="active")
         run(self.root, "gen_index.py")
-        self.assertEqual(index_path.stat().st_size, self.BUDGET)
+        self.assertEqual(self.active_bytes(), self.BUDGET)
         v = run(self.root, "verify.py")
         self.assertEqual(v.returncode, 0, v.stderr)
-        self.assertNotIn("INDEX.md is", v.stderr)  # exactly at budget: no warning
+        self.assertNotIn("INDEX.md:", v.stderr)  # exactly at budget: no warning
 
         self.doc("repos/pad.md", title="X" * (length_at_budget + 1), type="repo", domain="repos", status="active")
         run(self.root, "gen_index.py")
-        self.assertEqual(index_path.stat().st_size, self.BUDGET + 1)
+        self.assertEqual(self.active_bytes(), self.BUDGET + 1)
         v = run(self.root, "verify.py")
         self.assertEqual(v.returncode, 0, v.stderr)  # non-fatal — a warning, not a FAIL
-        self.assertIn(f"INDEX.md is {self.BUDGET + 1} bytes (> {self.BUDGET // 1024}KB)", v.stderr)
+        self.assertIn(f"take {self.BUDGET + 1} bytes (> {self.BUDGET // 1024} KB", v.stderr)
         self.assertIn("archive finished docs", v.stderr)
+
+    def test_ninety_rows_across_statuses_budget_counts_active_and_closed_and_prints_counts(self):
+        # 20 active, 4 closed and 66 reference rows (plus setUp's own) over several domains, titles padded so the
+        # active and closed rows alone pass the budget while the whole file is far larger
+        for d in ("repos", "alpha", "beta", "gamma"):
+            (self.root / d).mkdir(exist_ok=True)
+        pad = "T" * 600
+        for i in range(20):
+            self.doc(f"repos/live{i:02d}.md", title=f"Live {i} {pad}", type="epic", domain="repos", status="active")
+        for i in range(4):
+            self.doc(f"repos/done{i:02d}.md", title=f"Done {i} {pad}", type="epic", domain="repos", status="closed")
+        for d in ("alpha", "beta", "gamma"):
+            for i in range(22):
+                self.doc(f"{d}/ref{i:02d}.md", title=f"Ref {d} {i} {pad}", type="reference", domain=d, status="reference")
+        run(self.root, "kb.py", "config-set", "domains", '["alpha", "beta", "gamma"]')
+        # each of the three has 22 > 12 reference rows, which the default fold would collapse: raise it so all stay listed
+        r = run(self.root, "gen_index.py", INDEX_REFERENCE_FOLD="100")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        index = (self.root / "INDEX.md").read_text(encoding="utf-8")
+        self.assertGreater(len(index.encode("utf-8")), 3 * self.BUDGET)  # reference rows dominate the file
+        active_bytes = active_row_bytes(index)
+        self.assertGreater(active_bytes, self.BUDGET)
+        v = run(self.root, "verify.py", INDEX_REFERENCE_FOLD="100")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        # setUp's repos/kit.md is the 21st active row (+ 4 closed); its env-store docs add to the reference count
+        self.assertIn(f"its 25 active/closed rows take {active_bytes} bytes", v.stderr)
+        self.assertIn("INDEX.md is ", v.stderr)  # the whole file (far past 20 KB) trips the total budget too
+        self.assertRegex(v.stderr, r"active 21, closed 4, reference (\d+), archived 0")
+        self.assertGreaterEqual(int(re.search(r"reference (\d+),", v.stderr).group(1)), 66)
+
+    def test_reference_rows_alone_never_trip_the_active_budget(self):
+        for d in ("alpha", "beta"):
+            (self.root / d).mkdir(exist_ok=True)
+        run(self.root, "kb.py", "config-set", "domains", '["alpha", "beta"]')
+        pad = "T" * 400
+        for d in ("alpha", "beta"):
+            for i in range(12):  # at the fold threshold: all listed
+                self.doc(f"{d}/ref{i:02d}.md", title=f"Ref {i} {pad}", type="reference", domain=d, status="reference")
+        run(self.root, "gen_index.py")
+        size = (self.root / "INDEX.md").stat().st_size
+        self.assertTrue(self.BUDGET < size < 2 * self.BUDGET, size)  # over the active budget, under the total one
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.assertNotIn("INDEX.md", v.stderr)
+
+    def test_total_budget_warns_when_the_active_rows_fit(self):
+        for d in ("alpha", "beta", "gamma"):
+            (self.root / d).mkdir(exist_ok=True)
+        run(self.root, "kb.py", "config-set", "domains", '["alpha", "beta", "gamma"]')
+        pad = "T" * 600
+        for d in ("alpha", "beta", "gamma"):
+            for i in range(12):  # no domain past the fold, so every row is listed
+                self.doc(f"{d}/ref{i:02d}.md", title=f"Ref {i} {pad}", type="reference", domain=d, status="reference")
+        run(self.root, "gen_index.py")
+        index = (self.root / "INDEX.md").read_text(encoding="utf-8")
+        self.assertLess(active_row_bytes(index), self.BUDGET)
+        self.assertGreater(len(index.encode("utf-8")), 2 * self.BUDGET)
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)  # non-fatal
+        self.assertNotIn("INDEX.md:", v.stderr)  # the active/closed budget is not what tripped
+        self.assertRegex(v.stderr, rf"INDEX\.md is {len(index.encode('utf-8'))} bytes \(> 20 KB for the whole file\)")
+        self.assertRegex(v.stderr, r"listed: reference \d+ rows, \d+ KB, active 1 row, \d+ KB")
+        self.assertIn("lower INDEX_REFERENCE_FOLD / archive closed docs", v.stderr)
+        # the remedy works: folding the reference rows brings the file back under the total budget
+        run(self.root, "gen_index.py", INDEX_REFERENCE_FOLD="5")
+        self.assertNotIn("INDEX.md", run(self.root, "verify.py", INDEX_REFERENCE_FOLD="5").stderr)
+        # and the total budget is overridable
+        run(self.root, "gen_index.py")
+        self.assertNotIn("INDEX.md is", run(self.root, "verify.py", INDEX_TOTAL_SIZE_WARN="100000").stderr)
+
+    def test_total_budget_defaults_to_twice_the_active_budget(self):
+        self.doc("repos/pad.md", title="X" * 400, type="repo", domain="repos", status="active")
+        run(self.root, "gen_index.py")
+        size = (self.root / "INDEX.md").stat().st_size
+        self.assertNotIn("INDEX.md is", run(self.root, "verify.py", INDEX_SIZE_WARN=str(size)).stderr)  # 2x size: fits
+        self.assertIn("INDEX.md is", run(self.root, "verify.py", INDEX_SIZE_WARN=str(size // 2 - 1)).stderr)
+
+    def test_closed_rows_count_toward_the_budget_and_are_never_folded(self):
+        (self.root / "alpha").mkdir()
+        run(self.root, "kb.py", "config-set", "domains", '["alpha"]')
+        pad = "T" * 600
+        for i in range(15):  # past the reference fold of 12: closed rows still stay listed
+            self.doc(f"alpha/done{i:02d}.md", title=f"Done {i} {pad}", type="epic", domain="alpha", status="closed")
+        run(self.root, "gen_index.py")
+        index = (self.root / "INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("alpha/done14.md", index)
+        self.assertNotIn("reference docs —", index.split("## alpha")[1])
+        self.assertGreater(active_row_bytes(index), self.BUDGET)
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.assertIn("its 16 active/closed rows take", v.stderr)
+        self.assertRegex(v.stderr, r"closed 15")
+
+    def test_warning_rounds_the_budget_like_the_doc_warnings(self):
+        self.doc("repos/pad.md", title="X" * 400, type="repo", domain="repos", status="active")
+        run(self.root, "gen_index.py")
+        v = run(self.root, "verify.py", INDEX_SIZE_WARN="500")
+        self.assertIn("(> 1 KB;", v.stderr)  # kb() rounds up; never "> 0KB"
+        self.assertNotIn("> 0", v.stderr)
+
+    def test_malformed_override_is_named_on_stderr_and_keeps_the_default(self):
+        self.doc("repos/pad.md", title="X" * 400, type="repo", domain="repos", status="active")
+        run(self.root, "gen_index.py")
+        v = run(self.root, "verify.py", INDEX_SIZE_WARN="10KB")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.assertIn("verify: ignoring INDEX_SIZE_WARN=10KB (not an integer)", v.stderr)
+        self.assertEqual(v.stderr.count("ignoring INDEX_SIZE_WARN"), 1)
+        self.assertNotIn("INDEX.md:", v.stderr)  # the 10 KB default still applies
+        self.assertIn("(not positive)", run(self.root, "verify.py", ACTIVE_SIZE_WARN="0").stderr)
+        quiet = run(self.root, "verify.py", INDEX_SIZE_WARN="", ACTIVE_SIZE_WARN="20480")
+        self.assertNotIn("ignoring", quiet.stderr)  # unset, empty and valid values never print
+
+    def test_budget_is_overridable_from_the_environment(self):
+        self.doc("repos/pad.md", title="X" * 400, type="repo", domain="repos", status="active")
+        run(self.root, "gen_index.py")
+        self.assertNotIn("INDEX.md:", run(self.root, "verify.py").stderr)
+        v = run(self.root, "verify.py", INDEX_SIZE_WARN="300")
+        self.assertIn("INDEX.md:", v.stderr)
+
+
+class IndexReferenceFold(ContextRoot):
+    """gen_index.py folds a domain's `status: reference` rows into one line once it holds more than
+    INDEX_REFERENCE_FOLD (12) of them, the way an archived row is folded."""
+
+    def make_series(self, n: int, domain: str = "snapshots") -> None:
+        (self.root / domain).mkdir(exist_ok=True)
+        run(self.root, "kb.py", "config-set", "domains", f'["{domain}"]')
+        for i in range(n):
+            self.doc(f"{domain}/snap{i:02d}.md", title=f"Snapshot {i}", type="reference", domain=domain, status="reference")
+        self.doc(f"{domain}/entry.md", title="Series entry", type="epic", domain=domain, status="active")
+
+    def section(self, domain: str) -> str:
+        index = (self.root / "INDEX.md").read_text(encoding="utf-8")
+        rest = index[index.index(f"## {domain}\n"):]
+        nxt = rest.find("\n## ", 1)
+        return rest[:nxt] if nxt != -1 else rest
+
+    def test_twenty_five_reference_rows_fold_into_one_line(self):
+        self.make_series(25)
+        r = run(self.root, "gen_index.py")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        section = self.section("snapshots")
+        self.assertIn("_25 reference docs — `make -C $BATON/context-db find DOMAIN=snapshots STATUS=reference` lists them_", section)
+        self.assertNotIn("snapshots/snap00.md", section)  # the rows themselves are gone
+        self.assertIn("snapshots/entry.md", section)  # the active entry doc stays listed
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.assertNotIn("INDEX.md:", v.stderr)
+        # still discoverable
+        f = subprocess.run([sys.executable, str(BIN / "find_frontmatter.py"), str(self.root), "DOMAIN", "snapshots",
+                            "STATUS", "reference"], capture_output=True, text=True, env=env_for(self.root))
+        self.assertEqual(len(f.stdout.split()), 25, f.stderr)
+
+    def test_twelve_reference_rows_stay_listed(self):
+        self.make_series(12)
+        run(self.root, "gen_index.py")
+        section = self.section("snapshots")
+        self.assertIn("snapshots/snap11.md", section)
+        self.assertNotIn("reference docs —", section)
+
+    def test_an_all_reference_domain_folds_without_an_empty_table(self):
+        (self.root / "snapshots").mkdir()
+        run(self.root, "kb.py", "config-set", "domains", '["snapshots"]')
+        for i in range(13):
+            self.doc(f"snapshots/snap{i:02d}.md", title=f"Snapshot {i}", type="reference", domain="snapshots", status="reference")
+        run(self.root, "gen_index.py")
+        section = self.section("snapshots")
+        self.assertNotIn("| Doc |", section)
+        self.assertIn("_13 reference docs — ", section)
+
+    def test_fold_threshold_is_overridable(self):
+        self.make_series(5)
+        run(self.root, "gen_index.py", INDEX_REFERENCE_FOLD="3")
+        self.assertIn("_5 reference docs — ", self.section("snapshots"))
+
+
+class SizeBudgets(ContextRoot):
+    """verify.py's per-doc budgets: ACTIVE_SIZE_WARN (30 KB) for any type but reference/repo, REFERENCE_SIZE_WARN
+    (64 KB) for `type: reference` and `type: repo`; one folded line per domain, remedy named by what dominates the largest doc."""
+
+    def big_doc(self, rel: str, *, type: str, status: str = "active", log_kb: int = 0, total_kb: int = 31,
+                sections: tuple[str, ...] = ("Goal", "Notes")) -> Path:
+        domain = rel.split("/")[0]
+        (self.root / domain).mkdir(exist_ok=True)
+        head = f"---\ntitle: Big\ntype: {type}\ndomain: {domain}\nstatus: {status}\nupdated: 2026-09-30\n---\n\n# Big\n\n"
+        body = ""
+        if log_kb:
+            body += "## Session log\n\n" + ("- 2026-09-01 · one log line of filler text to take some room\n" * 1000)[:log_kb * 1024] + "\n\n"
+        body_so_far = len((head + body).encode())
+        rest = total_kb * 1024 - body_so_far
+        per = rest // len(sections)
+        for i, name in enumerate(sections):
+            fill = per - len(f"## {name}\n\n") - 2  # the heading, and the newline pair closing the section
+            body += f"## {name}\n\n" + "x" * fill + "\n\n"
+        p = self.root / rel
+        p.write_text(head + body, encoding="utf-8")
+        return p
+
+    def verify(self, **env: str) -> subprocess.CompletedProcess:
+        run(self.root, "gen_index.py")
+        v = run(self.root, "verify.py", **env)
+        self.assertEqual(v.returncode, 0, v.stderr)  # a size finding is never a FAIL
+        return v
+
+    def test_session_log_dominating_names_the_session_log_remedy(self):
+        p = self.big_doc("repos/logheavy.md", type="epic", log_kb=20)
+        self.assertGreater(p.stat().st_size, 30 * 1024)
+        v = self.verify()
+        self.assertIn("repos: 1 doc over budget, largest logheavy (31 KB)", v.stderr)
+        self.assertRegex(v.stderr, r"the session log is 2[01] KB of it: move its entries to archive/logheavy-log\.md")
+        self.assertNotIn("largest sections", v.stderr)
+
+    def test_no_session_log_names_the_largest_sections(self):
+        p = self.big_doc("repos/nolog.md", type="epic", sections=("Goal", "Key decisions", "Notes"))
+        self.assertGreater(p.stat().st_size, 30 * 1024)
+        self.assertNotIn("## Session log", p.read_text(encoding="utf-8"))
+        v = self.verify()
+        self.assertIn("repos: 1 doc over budget, largest nolog (31 KB)", v.stderr)
+        self.assertRegex(v.stderr, r"largest sections: \w[\w ]* \(1\d KB\), \w[\w ]* \(1\d KB\)")
+        self.assertNotIn("move its entries", v.stderr)
+
+    def test_small_session_log_does_not_get_the_log_remedy(self):
+        self.big_doc("repos/smalllog.md", type="epic", log_kb=2, sections=("Goal", "Notes"))
+        v = self.verify()
+        self.assertIn("largest sections: ", v.stderr)
+        self.assertNotIn("move its entries", v.stderr)
+
+    def test_reference_doc_is_held_to_its_own_budget(self):
+        p = self.big_doc("reference/deepdive.md", type="reference", status="reference", total_kb=31)
+        self.assertGreater(p.stat().st_size, 30 * 1024)
+        v = self.verify()
+        self.assertNotIn("over budget", v.stderr)  # 31 KB reference: no finding
+        self.assertNotIn("deepdive", v.stderr)
+
+        p = self.big_doc("reference/deepdive.md", type="reference", status="reference", total_kb=65)
+        v = self.verify()
+        self.assertIn("reference: 1 doc over budget, largest deepdive (65 KB)", v.stderr)
+        self.assertIn("a `type: reference` doc has its own 64 KB budget", v.stderr)
+        self.assertIn("64 KB for `type: reference`/`repo`)", v.stderr)
+
+    def test_repo_deep_dive_is_held_to_the_large_budget(self):
+        p = self.big_doc("repos/deepdive.md", type="repo", total_kb=31)
+        self.assertGreater(p.stat().st_size, 30 * 1024)
+        v = self.verify()
+        self.assertNotIn("over budget", v.stderr)  # 31 KB repo doc: no finding
+        self.assertNotIn("deepdive", v.stderr)
+
+        self.big_doc("repos/deepdive.md", type="repo", total_kb=65)
+        v = self.verify()
+        self.assertIn("repos: 1 doc over budget, largest deepdive (65 KB)", v.stderr)
+        self.assertIn("a `type: repo` doc has its own 64 KB budget", v.stderr)
+        self.assertIn("64 KB for `type: reference`/`repo`)", v.stderr)
+
+    def test_findings_fold_to_one_line_per_domain(self):
+        for i in range(5):
+            self.big_doc(f"reference/snap{i}.md", type="reference", status="reference", total_kb=65 + i)
+        self.big_doc("repos/a.md", type="epic", total_kb=31)
+        self.big_doc("repos/b.md", type="epic", total_kb=40)
+        v = self.verify()
+        lines = [l for l in v.stderr.splitlines() if l.startswith("  - ")]
+        self.assertEqual(len(lines), 2, v.stderr)  # one per domain, not one per doc
+        self.assertTrue(any(l.startswith("  - reference: 5 docs over budget, largest snap4 (69 KB)") for l in lines), lines)
+        self.assertTrue(any(l.startswith("  - repos: 2 docs over budget, largest b (40 KB)") for l in lines), lines)
+        self.assertIn("7 doc(s) over budget", v.stderr)
+
+    def test_archived_docs_are_exempt_and_budgets_are_overridable(self):
+        self.big_doc("repos/old.md", type="epic", status="archived", total_kb=40)
+        self.assertNotIn("over budget", self.verify().stderr)
+        self.big_doc("repos/live.md", type="epic", total_kb=2)
+        self.assertNotIn("over budget", self.verify().stderr)
+        self.assertIn("repos: 1 doc over budget, largest live", self.verify(ACTIVE_SIZE_WARN="1024").stderr)
+        self.big_doc("reference/ref.md", type="reference", status="reference", total_kb=2)
+        self.assertIn("reference: 1 doc over budget, largest ref", self.verify(REFERENCE_SIZE_WARN="1024").stderr)
 
 
 class LedgerWarnings(ContextRoot):
@@ -427,6 +713,20 @@ class NewSh(ContextRoot):
         r = self.new(TYPE="repo", SLUG="over", TITLE="Over")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("OVERRIDE over", Path(r.stdout.strip()).read_text(encoding="utf-8"))
+
+
+class ReadmeTemplateBudgets(unittest.TestCase):
+    """The store README template states the real fold and index budgets, so the prose cannot drift from the code."""
+
+    def test_template_names_the_default_fold_and_budgets(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("INDEX_")}
+        code = "import gen_index, verify; print(gen_index.INDEX_REFERENCE_FOLD, verify.INDEX_SIZE_WARN // 1024)"
+        out = subprocess.run([sys.executable, "-c", code], env=env, cwd=BIN, capture_output=True, text=True, check=True)
+        fold, size_kb = out.stdout.split()
+        text = " ".join((BIN.parent / "context-README.template.md").read_text(encoding="utf-8").split())
+        self.assertIn(f"more than {fold} (`INDEX_REFERENCE_FOLD`)", text)
+        self.assertIn(f"`active` and `closed` rows pass {size_kb} KB (`INDEX_SIZE_WARN`;", text)
+        self.assertIn(f"whole file passes {2 * int(size_kb)} KB (`INDEX_TOTAL_SIZE_WARN`", text)
 
 
 if __name__ == "__main__":

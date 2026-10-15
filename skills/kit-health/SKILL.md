@@ -2,7 +2,7 @@
 name: kit-health
 description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Walks each finding, reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
 metadata:
-  version: "80"
+  version: "81"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "aws.profile kit-health"
@@ -41,7 +41,7 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    § 4's "auto-memory over budget": Fix is `/memory-prune` (its own carousel, archive first). A Fix that touches a skill bumps `metadata.version` + `metadata.updated`. **Every edit to a kit
    file** (an Accept, a Fix) is made in a worktree of a kit **checkout** off `origin/main`, never under `$BATON`
    on a plugin install: that is Claude Code's plugin cache, and `claude plugin update` overwrites it (§ 1 warns
-   about a file changed there). No checkout yet: `gh repo clone <kit repo>` (§ 1 names it) into the workspace.
+   about a file changed there). No checkout yet: `gh repo clone <kit repo>` (§ 1 names it) into the workspace. A § 5 size finding on a doc a live session owns goes to that session (Ticket), never trimmed by the health run.
 5. **Report.** One log per day and environment: `make -C $BATON/context-db new TYPE=log DOMAIN=kit-health
    SLUG=<YYYY-MM-DD>-<env> TITLE="kit-health <date> · <env>"` (the date of the report header), then add the report
    and each finding's outcome with `ctx_insert` (doc key `kit-health/<YYYY-MM-DD>-<env>`, after the title line) —

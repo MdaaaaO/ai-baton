@@ -7,7 +7,23 @@ Checks every content doc for:
   - `type` and `status` drawn from the allowed vocabularies,
   - an ISO `updated` date that parses,
   - INDEX.md being up to date (regenerate and diff),
-  - INDEX.md staying under its size budget (non-fatal — see INDEX_SIZE_WARN below).
+  - INDEX.md staying under its size budgets (non-fatal — see INDEX_SIZE_WARN / INDEX_TOTAL_SIZE_WARN below).
+
+Size budgets (all non-fatal, all in bytes, each overridable by an environment variable of the same name; a set
+but unusable value prints one `verify: ignoring NAME=value (…)` stderr line and keeps the default):
+  ACTIVE_SIZE_WARN       30 KB  one non-archived doc of any type but `reference`/`repo`
+  REFERENCE_SIZE_WARN    64 KB  one non-archived `type: reference` or `type: repo` doc (repo deep-dives, snapshots:
+                                read in slices, so expected to be large)
+  INDEX_SIZE_WARN        10 KB  the `status: active` and `status: closed` rows of INDEX.md. Closed rows count (they
+                                are finished work, and `archive` moves them out); reference rows do not (never
+                                finished — gen_index.py folds a domain's reference rows past INDEX_REFERENCE_FOLD
+                                (12) into one line instead)
+  INDEX_TOTAL_SIZE_WARN  2 x INDEX_SIZE_WARN  the whole INDEX.md file, with the bytes per status, so a file
+                                bloated by reference rows still warns when its active rows fit
+Oversized docs are reported as one line per domain (`<domain>: n docs over budget, largest <slug> (n KB)`)
+followed by the remedy for that largest doc, named by what dominates it: its `## Session log` (archive the
+entries), else — for a `reference`/`repo` doc — its own budget, else its largest sections. The INDEX findings
+print the row count per status.
 
 Also warns (non-fatal) on a malformed decision-ledger line in *Key decisions & gotchas*
 (`docs/carousel.md` § After the answer) — a line that is ledger-shaped (starts with a bare date,
@@ -21,6 +37,7 @@ Operates on the content root gen_index takes from kit_profile.context_root() (do
 "Content root" paragraph). Run via `make -C $BATON/context-db verify`. Stdlib only.
 """
 from __future__ import annotations
+import math
 import os
 import re
 import sys
@@ -43,14 +60,24 @@ DOMAINS = CORE_DOMAINS | set(profile.domains())
 # thrash. Long history belongs in archive/<slug>-log.md, so archive/ and
 # status: archived docs are exempt (they exist to hold the bulk). Non-fatal —
 # a warning at flush time, not a blocker (never stand between a session and its flush).
-ACTIVE_SIZE_WARN = 30 * 1024  # ~8k tokens
+# Each budget reads the environment variable of its own name (bytes); an unset, malformed or
+# non-positive value keeps the default.
+ACTIVE_SIZE_WARN = gi.positive_int(os.environ.get("ACTIVE_SIZE_WARN"), 30 * 1024, "ACTIVE_SIZE_WARN")  # ~8k tokens
+# A `type: reference` doc (a snapshot) or a `type: repo` doc (a repo deep-dive) is read in slices and is expected
+# to be large: it has its own, higher budget instead of the active one.
+LARGE_DOC_TYPES = ("reference", "repo")
+REFERENCE_SIZE_WARN = gi.positive_int(os.environ.get("REFERENCE_SIZE_WARN"), 64 * 1024, "REFERENCE_SIZE_WARN")
 # SESSION_INDEX.md is read at every session start (WORKSPACE.md § Sessions); gen_sessions.py keeps
 # ended rows short and capped (MAX_ENDED), so passing this means active rows have bloated. Non-fatal.
 SESSION_INDEX_WARN = 10 * 1024
-# INDEX.md is read whole at every "find first" step (WORKSPACE.md § The .context/ DB); gen_index.py's
-# fold rule keeps archived rows out of it, so passing this means the active roster itself has grown —
-# the one number SESSION_INDEX_WARN already uses. Non-fatal.
-INDEX_SIZE_WARN = 10 * 1024
+# INDEX.md is read whole at every "find first" step (WORKSPACE.md § The .context/ DB). Two budgets, both non-fatal:
+# the `active` + `closed` rows (live and finished work: the part `archive` can shrink) against INDEX_SIZE_WARN, and
+# the whole file against INDEX_TOTAL_SIZE_WARN, so reference rows (never finished; gen_index.py folds a domain's
+# surplus past INDEX_REFERENCE_FOLD) can still not bloat the file unnoticed.
+INDEX_SIZE_WARN = gi.positive_int(os.environ.get("INDEX_SIZE_WARN"), 10 * 1024, "INDEX_SIZE_WARN")
+INDEX_TOTAL_SIZE_WARN = gi.positive_int(os.environ.get("INDEX_TOTAL_SIZE_WARN"), 2 * INDEX_SIZE_WARN,
+                                        "INDEX_TOTAL_SIZE_WARN")
+LIVE_ROW_STATUSES = ("active", "closed")  # the statuses that count toward INDEX_SIZE_WARN
 
 # Decision-ledger shape (docs/carousel.md § After the answer): "YYYY-MM-DD · <question> → <chosen>;
 # not <rejected options> — <one clause why>". A line only counts as ledger-shaped (and so only then
@@ -115,6 +142,123 @@ def owner_claim_warnings(root: str, rows: list[dict]) -> list[tuple[str, str]]:
         found += [(r["_path"], l.strip()) for l in lines if OWNER_CLAIM_RE.search(l)]
     return found
 
+SESSION_LOG_RE = re.compile(r"^##\s+Session log\s*$", re.IGNORECASE)
+SECTION_RE = re.compile(r"^##\s+(.*?)\s*$")
+
+
+def kb(n: int) -> int:
+    """Whole KB, rounded up (so a doc just over a budget never reads as 0 KB or as under it)."""
+    return math.ceil(n / 1024)
+
+
+def section_sizes(text: str) -> list[tuple[str, int]]:
+    """(heading, bytes) of every `## ` section of a doc, heading line included; text before the first one is left out."""
+    sections: list[tuple[str, int]] = []
+    for line in text.splitlines(keepends=True):
+        m = SECTION_RE.match(line) if line.startswith("## ") else None
+        if m:
+            sections.append((m.group(1), 0))
+        if sections:
+            name, size = sections[-1]
+            sections[-1] = (name, size + len(line.encode("utf-8")))
+    return sections
+
+
+def size_remedy(path: str, doc_type: str, size: int, text: str) -> str:
+    """What to do about one oversized doc, named by what dominates it."""
+    slug = os.path.splitext(os.path.basename(path))[0]
+    sections = section_sizes(text)
+    log = sum(n for name, n in sections if SESSION_LOG_RE.match("## " + name))
+    if log and log * 2 >= size:
+        return f"the session log is {kb(log)} KB of it: move its entries to archive/{slug}-log.md"
+    if doc_type in LARGE_DOC_TYPES:
+        return (f"a `type: {doc_type}` doc has its own {kb(REFERENCE_SIZE_WARN)} KB budget: split it, "
+                f"or `make -C $BATON/context-db archive SLUG={slug}` once it is finished")
+    biggest = sorted(sections, key=lambda s: s[1], reverse=True)[:2]
+    if not biggest:
+        return "no `## ` sections to split it by"
+    return "largest sections: " + ", ".join(f"{name} ({kb(n)} KB)" for name, n in biggest)
+
+
+def oversized_findings(root: str, rows: list[dict]) -> tuple[int, list[str]]:
+    """(count of oversized docs, one folded line per domain). A `type` in LARGE_DOC_TYPES is held to
+    REFERENCE_SIZE_WARN, any other to ACTIVE_SIZE_WARN; archive/ and `status: archived` docs are exempt."""
+    by_domain: dict[str, list[tuple[int, dict]]] = {}
+    total = 0
+    for r in rows:
+        if r.get("domain") == "archive" or r.get("status") == "archived":
+            continue
+        budget = REFERENCE_SIZE_WARN if r.get("type") in LARGE_DOC_TYPES else ACTIVE_SIZE_WARN
+        try:
+            sz = os.path.getsize(os.path.join(root, r["_path"]))
+        except OSError:
+            continue
+        if sz > budget:
+            by_domain.setdefault(r.get("domain", "?"), []).append((sz, r))
+            total += 1
+    lines = []
+    for domain in sorted(by_domain):
+        docs = sorted(by_domain[domain], key=lambda d: (-d[0], d[1]["_path"]))
+        sz, big = docs[0]
+        slug = os.path.splitext(os.path.basename(big["_path"]))[0]
+        try:
+            with open(os.path.join(root, big["_path"]), encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            text = ""
+        n = len(docs)
+        lines.append(f"{domain}: {n} doc{'s' if n != 1 else ''} over budget, largest {slug} ({kb(sz)} KB) — "
+                     + size_remedy(big["_path"], big.get("type", ""), sz, text))
+    return total, lines
+
+
+def status_counts(rows: list[dict]) -> str:
+    """`active 36, closed 2, reference 51, archived 5` — the row count per status, the vocabulary's order first."""
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r.get("status", "?")] = counts.get(r.get("status", "?"), 0) + 1
+    order = ["active", "closed", "reference", "archived"]
+    order += sorted(k for k in counts if k not in order)
+    return ", ".join(f"{k} {counts.get(k, 0)}" for k in order if k in counts or k in STATUSES)
+
+
+def listed_bytes(rows: list[dict]) -> dict[str, tuple[int, int]]:
+    """`{status: (rows listed in INDEX.md, bytes they take)}` — the rows gen_index.py lists after folding, one
+    byte per row for its newline. Folded reference rows and archived rows take no row bytes."""
+    domains: dict[str, list[dict]] = {}
+    for r in rows:
+        domains.setdefault(r.get("domain", "?"), []).append(r)
+    out: dict[str, tuple[int, int]] = {}
+    for domain_rows in domains.values():
+        for r in gi.fold_plan(domain_rows)[1]:
+            n, size = out.get(r.get("status", "?"), (0, 0))
+            out[r.get("status", "?")] = (n + 1, size + len(gi.row_line(r).encode("utf-8")) + 1)
+    return out
+
+
+def index_warnings(rows: list[dict], rendered: str) -> None:
+    """The two INDEX.md size findings (stderr, non-fatal): the live rows against INDEX_SIZE_WARN, the whole file
+    against INDEX_TOTAL_SIZE_WARN."""
+    listed = listed_bytes(rows)
+    live_n = sum(listed.get(s, (0, 0))[0] for s in LIVE_ROW_STATUSES)
+    live_bytes = sum(listed.get(s, (0, 0))[1] for s in LIVE_ROW_STATUSES)
+    total = len(rendered.encode("utf-8"))
+    if live_bytes > INDEX_SIZE_WARN:
+        print(f"⚠ INDEX.md: its {live_n} active/closed rows take {live_bytes} bytes "
+              f"(> {kb(INDEX_SIZE_WARN)} KB; the file is {total} bytes) — it is read whole at every "
+              f"\"find first\" step; rows by status: {status_counts(rows)}; "
+              f"archive finished docs (`make -C $BATON/context-db archive SLUG=<slug>`) to bring it back under budget "
+              f"(reference rows are not counted: they fold per domain past {gi.INDEX_REFERENCE_FOLD})",
+              file=sys.stderr)
+    if total > INDEX_TOTAL_SIZE_WARN:
+        parts = [f"{s} {listed[s][0]} row{'' if listed[s][0] == 1 else 's'}, {kb(listed[s][1])} KB" for s in sorted(listed, key=lambda k: -listed[k][1])]
+        other = total - sum(b for _, b in listed.values())
+        print(f"⚠ INDEX.md is {total} bytes (> {kb(INDEX_TOTAL_SIZE_WARN)} KB for the whole file) — it is read whole "
+              f"at every \"find first\" step; listed: {', '.join(parts)}, headings and fold lines {kb(other)} KB; "
+              f"lower INDEX_REFERENCE_FOLD / archive closed docs "
+              f"(`make -C $BATON/context-db archive SLUG=<slug>`)",
+              file=sys.stderr)
+
 
 def main() -> int:
     rows, problems = gi.collect()
@@ -151,25 +295,15 @@ def main() -> int:
     if strip_date(fresh) != strip_date(current):
         errors.append("INDEX.md is stale — run `make index`")
 
-    # Size guardrail (non-fatal) — surface active docs that have grown past the
-    # lean-handoff threshold, whatever the schema verdict is.
-    oversized = []
-    for r in rows:
-        if r.get("domain") == "archive" or r.get("status") == "archived":
-            continue
-        try:
-            sz = os.path.getsize(os.path.join(gi.ROOT, r["_path"]))
-        except OSError:
-            continue
-        if sz > ACTIVE_SIZE_WARN:
-            oversized.append((sz, r["_path"]))
-    if oversized:
-        print(f"⚠ {len(oversized)} active doc(s) over "
-              f"{ACTIVE_SIZE_WARN // 1024}KB — trim to keep re-reads cheap "
-              f"(move old Session-log entries to archive/<slug>-log.md):",
+    # Size guardrail (non-fatal) — surface docs that have grown past their type's budget, whatever the
+    # schema verdict is: one folded line per domain, not one per doc.
+    n_over, over_lines = oversized_findings(gi.ROOT, rows)
+    if n_over:
+        print(f"⚠ {n_over} doc(s) over budget ({kb(ACTIVE_SIZE_WARN)} KB; "
+              f"{kb(REFERENCE_SIZE_WARN)} KB for `type: reference`/`repo`) — trim to keep re-reads cheap:",
               file=sys.stderr)
-        for sz, p in sorted(oversized, reverse=True):
-            print(f"  - {p}: {sz // 1024}KB", file=sys.stderr)
+        for line in over_lines:
+            print(f"  - {line}", file=sys.stderr)
     try:
         si = os.path.getsize(os.path.join(gi.ROOT, "SESSION_INDEX.md"))
     except OSError:
@@ -178,14 +312,7 @@ def main() -> int:
         print(f"⚠ SESSION_INDEX.md is {si // 1024}KB (> {SESSION_INDEX_WARN // 1024}KB) — it is read at every "
               f"session start; trim the active rows' working_on/responsibilities or lower MAX_ENDED",
               file=sys.stderr)
-    try:
-        ix = os.path.getsize(index_path)
-    except OSError:
-        ix = 0
-    if ix > INDEX_SIZE_WARN:
-        print(f"⚠ INDEX.md is {ix} bytes (> {INDEX_SIZE_WARN // 1024}KB) — it is read whole at every "
-              f"\"find first\" step; archive finished docs (`make -C $BATON/context-db archive SLUG=<slug>`) to bring it back under budget",
-              file=sys.stderr)
+    index_warnings(rows, fresh)
 
     # Decision-ledger shape (non-fatal) — a line that already starts with a date and has the
     # `→` arrow (so it looks like a ledger entry) but is missing its `; not <rejected>` clause

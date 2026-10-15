@@ -16,12 +16,14 @@ of reading everything into context every session.
 - **Each `*.md` doc is a row.** Its YAML frontmatter (`title/type/domain/tags/status/updated`)
   is the row's columns.
 - **[`INDEX.md`](INDEX.md) is the materialized catalog** — generated from all frontmatter,
-  grouped by domain. Each domain's table holds only its active rows; `status: archived` rows
-  fold into one line per domain (count + the `make find DOMAIN=` command that lists them), so
-  the catalog stays flat as a domain accumulates history. **Read it first** (it's cheap), then
+  grouped by domain. Each domain's table holds its live rows (Doc, Title, Type, Status, Updated; tags
+  stay in the frontmatter, `make find TAG=` lists by tag); `status: archived` rows, and a domain's
+  `status: reference` rows once it holds more than 12 (`INDEX_REFERENCE_FOLD`), fold into one line per domain (count + the
+  `make find DOMAIN=` command that lists them), so the catalog stays flat as a domain accumulates history. **Read it first** (it's cheap), then
   open only the leaf docs your task needs. Never hand-edit it: the kit's hook regenerates it
-  after every change (`make index` by hand); `make verify` warns past 10 KB (archive finished
-  docs to bring it back under budget).
+  after every change (`make index` by hand); `make verify` warns when its `active` and `closed` rows pass 10 KB
+  (`INDEX_SIZE_WARN`; archive finished docs to bring it back under budget, reference rows do not count) or the whole
+  file passes 20 KB (`INDEX_TOTAL_SIZE_WARN`, twice that).
 - **The `Makefile` is the CLI** (see below). Claude creates, indexes, verifies, finds, and
   archives docs through it, then "manages however it wants" within these conventions. The
   engine (`Makefile` + `bin/` + `_templates/`) lives **outside** this dir, at
@@ -88,7 +90,7 @@ rules do **not** live here — they live in `.claude/WORKSPACE.md` § Rules (imp
 (`.context/memory/`, the harness auto-memory) hold situational recall and point here; they don't duplicate.
 
 **Keep active docs lean — the 30KB guardrail.** `make verify` warns (non-fatal) when any
-active (non-`archive/`, non-`status: archived`) doc exceeds **30KB** (~8k tokens). A context doc
+active (non-`archive/`, non-`status: archived`) doc exceeds **30 KB** (~8k tokens; 64 KB for `type: reference`/`repo`). A context doc
 is a *handoff* — a cold session re-reads it whole to re-ground, so an oversized one pulled in
 after a compact is what makes autocompact **thrash** (context refills to the limit within a few
 turns of every compact). When verify flags a doc, create `archive/<slug>-log.md` first if it does not exist

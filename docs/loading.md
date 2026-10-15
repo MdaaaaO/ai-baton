@@ -42,7 +42,7 @@ does: a procedure, an example exchange, a rationale, an environment value.
 
 `README.md`, `CONTRIBUTING.md`, `docs/`, the engine sources, and every `.context/` leaf doc: the context DB is
 "find first" — `INDEX.md` (then `SESSION_INDEX.md` for shared work), then only the leaf docs the task needs.
-`make -C $BATON/context-db verify` warns when an active doc passes 30 KB, because a context doc is re-read whole
+`make -C $BATON/context-db verify` warns when an active doc passes 30 KB (a `type: reference` or `type: repo` doc, 64 KB), because a context doc is re-read whole
 after a compaction. These files are carried by the plugin and the clone alike but cost nothing until opened.
 
 ## How to measure
