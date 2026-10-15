@@ -7,8 +7,8 @@ Owner decision, 2026-09-25: "by default we want to follow conventional commits i
 `commits.default` → `conventional`. Never decide the style by reading the repo's recent log: a repo that drifted
 is not a repo that overrode.
 
-- **Conventional**: `<type>(<scope>)!: <description>` — types `feat fix docs chore refactor test ci build perf
-  style revert`, lowercase scope (the component: `dbt`, `dag`, `<service>`, `kit`), `!` for a breaking change,
+- **Conventional**: `<type>(<scope>)!: <description>` — type from the list in `$BATON/docs/commit-style.md`
+  (the one home; the checker and the release toml follow it), lowercase scope (the component: `dbt`, `dag`, `<service>`, `kit`), `!` for a breaking change,
   lowercase imperative description, ≤ 72 chars, no trailing period. **The tracker key goes inside the
   description** (`feat(dbt): KEY-123 add the fact table`), never as the prefix — the key is text in the title
   (§ Links) and a link in the body. An upper-case start is refused unless it is this environment's own key

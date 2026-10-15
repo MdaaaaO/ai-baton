@@ -1,7 +1,52 @@
 # conventional-release (https://github.com/MdaaaaO/conventional-release) — kit releases, docs/contributing.md § Releases.
 # The kit is no package: a release is a CHANGELOG.md section, the VERSION bump, a vX.Y.Z tag and a GitHub
-# Release. Types are the tool's default Angular set, the same list as docs/commit-style.md.
+# Release. Types are declared below, the same list as docs/commit-style.md and commit_style.py TYPES
+# (a test holds the three together); the order and sections are the engine's Angular default.
 version-files = ["VERSION", ".claude-plugin/plugin.json"]  # kit-verify checks the two agree
 changelog = "CHANGELOG.md"
 base-branch = "main"
 tag-prefix = "v"
+
+[[types]]
+type = "feat"
+section = "Features"
+
+[[types]]
+type = "fix"
+section = "Bug Fixes"
+
+[[types]]
+type = "docs"
+section = "Documentation"
+
+[[types]]
+type = "style"
+section = "Styling"
+
+[[types]]
+type = "refactor"
+section = "Refactors"
+
+[[types]]
+type = "perf"
+section = "Performance"
+
+[[types]]
+type = "test"
+section = "Tests"
+
+[[types]]
+type = "build"
+section = "Build System"
+
+[[types]]
+type = "ci"
+section = "CI"
+
+[[types]]
+type = "chore"
+section = "Chore"
+
+[[types]]
+type = "revert"
+section = "Reverts"

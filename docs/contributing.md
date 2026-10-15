@@ -43,8 +43,8 @@ Exempt from step 1/3's issue link: dependabot PRs and release PRs (title `chore(
 ## Commits and PR titles
 
 Conventional Commits. The one prose home for the rule is [`docs/commit-style.md`](commit-style.md) (types, scope,
-description, length); the one checker is `context-db/bin/commit_style.py`, which the `commit-msg` hook, `pr-open` and
-`sign-queue` all run, with its types equal to `.conventional-release.toml`'s (a test holds them together). The review
+description, length); the one checker is `context-db/bin/commit_style.py`, which the `commit-msg` hook, `pr-open`, `sign-queue` and
+the `pr-title` workflow all run, with its types equal to `.conventional-release.toml`'s (a test holds them together). The review
 rules have one home too, [`docs/REVIEW.md`](REVIEW.md). The scope is the unit or area (`pr-open`, `kb`, `sync`, `kit`).
 Commits on a branch can be anything — they are squashed away.
 

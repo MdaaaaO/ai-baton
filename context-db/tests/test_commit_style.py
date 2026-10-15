@@ -266,16 +266,17 @@ class Resolve(BlankStore):
 
 
 class OneTypeList(unittest.TestCase):
-    """The release engine's type list is the truth; the checker and the prose table follow it."""
+    """The release engine's `[[types]]` table is the truth; the checker and every prose copy follow it."""
     KIT = Path(__file__).resolve().parents[2]
-    # conventional-release's documented default when the toml declares no `[[types]]` table: all of these, listed.
-    ENGINE_DEFAULT = {"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"}
 
     def toml_types(self) -> set:
         text = (self.KIT / ".conventional-release.toml").read_text(encoding="utf-8")
-        # a regex, not tomllib (3.11+; the kit's floor is 3.9): the `type = "x"` line of each `[[types]]` entry
-        declared = set(re.findall(r'^\[\[types\]\]\s*\n(?:[^\[\n]*\n)*?type\s*=\s*"([a-z]+)"', text, re.M))
-        return declared or self.ENGINE_DEFAULT
+        # a regex, not tomllib (3.11+; the kit's floor is 3.9): the `type = "x"` line of each `[[types]]` entry.
+        # No fallback: the table is declared in the toml, so an entry the regex cannot read is a failure here.
+        declared = re.findall(r'^\[\[types\]\]\s*\n(?:[^\[\n]*\n)*?type\s*=\s*"([a-z]+)"', text, re.M)
+        self.assertEqual(len(declared), text.count("[[types]]"), "a [[types]] entry this test cannot parse")
+        self.assertTrue(declared, ".conventional-release.toml declares no [[types]]")
+        return set(declared)
 
     def test_checker_types_equal_the_release_toml(self):
         self.assertEqual(set(cs.TYPES), self.toml_types())
@@ -286,6 +287,20 @@ class OneTypeList(unittest.TestCase):
         m = re.search(r"types `([a-z ]+)`", text)
         self.assertIsNotNone(m, "docs/commit-style.md no longer names the types")
         self.assertEqual(set(m.group(1).split()), set(cs.TYPES))
+
+    def test_no_other_file_restates_the_type_list(self):
+        # the pr-open reference and the PR template used to list the types; they point at docs/commit-style.md now
+        for rel in ("skills/pr-open/reference/commit-style.md", ".github/pull_request_template.md"):
+            text = (self.KIT / rel).read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"\bfeat\b[ ,]+\bfix\b[ ,]+\bdocs\b", f"{rel} lists the types again")
+            self.assertIn("docs/commit-style.md", text, f"{rel} does not point at the one home")
+
+
+class ReviewRulesHeadings(unittest.TestCase):
+    def test_review_md_has_the_six_numbered_sections_the_workflow_cites(self):
+        text = (Path(__file__).resolve().parents[2] / "docs" / "REVIEW.md").read_text(encoding="utf-8")
+        nums = [int(n) for n in re.findall(r"^## (\d+)\. ", text, re.M)]
+        self.assertEqual(nums[:6], [1, 2, 3, 4, 5, 6], "claude-review.yml cites docs/REVIEW.md §§ 1-6")
 
 
 if __name__ == "__main__":

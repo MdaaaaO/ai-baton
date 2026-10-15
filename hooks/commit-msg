@@ -14,6 +14,7 @@ top=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 checker="$top/context-db/bin/commit_style.py"
 [ -f "$checker" ] || checker="$here/../context-db/bin/commit_style.py"
 [ -f "$checker" ] || exit 0            # hook copied somewhere without the kit: nothing to check with
+# `check --quiet --dir <top> <file>` is a frozen CLI contract: this hook runs against checkers of every branch.
 python3 "$checker" check --quiet --dir "$top" "$1"
 rc=$?
 case $rc in

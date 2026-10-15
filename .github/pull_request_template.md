@@ -7,7 +7,7 @@ no trailing period, ≤ 72 characters:
   docs(kit): new-environment migration steps
   ci(kit): add the pr-issue check
 
-Types: feat fix docs chore refactor test ci build perf style revert
+Types: the list in docs/commit-style.md
 -->
 
 Closes #
