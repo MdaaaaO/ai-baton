@@ -733,6 +733,20 @@ class LoadingTable(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             self.assertIn("~ warn: descriptions total", err)
             self.assertIn("largest:", err)
+            self.assertIn(f"1 B left of {kit_verify.DESC_TOTAL_BYTES} B", err)
+        finally:
+            kit_verify.DESC_TOTAL_BYTES = saved_bytes
+
+    def test_description_budget_ok_line_says_bytes_left(self):
+        total = kit_verify.loading_numbers()["desc_bytes"]
+        saved_bytes = kit_verify.DESC_TOTAL_BYTES
+        kit_verify.DESC_TOTAL_BYTES = total + 5000
+        try:
+            out_buf, err_buf = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+                rc = kit_verify.main(["--no-env"])
+            self.assertEqual(rc, 0, err_buf.getvalue())
+            self.assertIn(f"descriptions {total} B (5000 B left of {total + 5000} B)", out_buf.getvalue())
         finally:
             kit_verify.DESC_TOTAL_BYTES = saved_bytes
 

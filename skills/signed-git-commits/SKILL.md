@@ -1,6 +1,6 @@
 ---
 name: signed-git-commits
-description: "Discipline behind signed/SSH commits where the editing machine cannot sign or push: worktree-first branching, exact staging, message-to-file, rebase quirks, gh-token prefix. Hand-off: `sign-queue`, never pasted git commands. Read when committing/pushing in a repo with a signed-commits ruleset (`systems.signed_commits`)."
+description: "Discipline behind signed/SSH commits where the editing machine cannot sign or push: worktree-first branching, exact staging, message-to-file, rebase quirks. Hand-off: `sign-queue`, never pasted git commands. Read when committing/pushing in a repo with a signed-commits ruleset (`systems.signed_commits`)."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
   version: "12"

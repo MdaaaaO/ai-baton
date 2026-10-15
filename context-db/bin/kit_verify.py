@@ -1105,8 +1105,8 @@ def main(argv: list[str] | None = None) -> int:
             errors.append(f"descriptions total {desc_total} bytes > {DESC_TOTAL_BYTES} always-on budget across {len(units)} units")
         elif not partial and desc_total > DESC_TOTAL_BYTES * DESC_TOTAL_WARN_RATIO:
             largest = ", ".join(f"{r} ({s} B)" for s, r in sorted(desc_sizes, reverse=True)[:3])
-            warn.append(f"descriptions total {desc_total} B — past {int(DESC_TOTAL_WARN_RATIO * 100)}% of the {DESC_TOTAL_BYTES} B "
-                        f"budget; largest: {largest}")
+            warn.append(f"descriptions total {desc_total} B — {DESC_TOTAL_BYTES - desc_total} B left of {DESC_TOTAL_BYTES} B, "
+                        f"past {int(DESC_TOTAL_WARN_RATIO * 100)}% of the budget; largest: {largest}")
         for s_ in stale:
             print(f"  ~ stale: {s_}", file=sys.stderr)
         for s_ in warn:
@@ -1120,7 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         store = f"env store `{envname}` complete" if not a.no_env else "env store not checked (--no-env)"
         print(f"OK — {len(units)} skills/agents verified, {len(kb.fact_entries())} discoverable facts, {store}, "
-              f"descriptions {desc_total} B" + (f", {len(stale)} stale" if stale else "") + (f", {len(warn)} warn" if warn else ""))
+              f"descriptions {desc_total} B ({DESC_TOTAL_BYTES - desc_total} B left of {DESC_TOTAL_BYTES} B)" + (f", {len(stale)} stale" if stale else "") + (f", {len(warn)} warn" if warn else ""))
         return 0
     finally:
         kb.ENV = saved_kb_env
