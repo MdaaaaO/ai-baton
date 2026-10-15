@@ -63,7 +63,7 @@ it at session start (`docs/context-sync.md`, the `context.sync` config key).
 | `agents/` | Subagent definitions, one file per agent — the forked workers skills run under; where they sit between skills, engine and context DB: `docs/architecture.md`. |
 | `output-styles/` | Output styles, one Markdown file each. A style is opt-in: pick it with `/output-style <name>` or set `outputStyle` in `settings.json`. `simplified-technical-english.md` sets the wording to ASD-STE100. Nothing here loads by default, so it adds nothing to the `WORKSPACE.md` always-on budget. |
 | `context-db/` | The engine (Makefile, `bin/`, `_templates/`) behind the `.context/` document DB, plus `context-README.template.md` (the DB spec, seeded into `../.context/README.md`) and `ctx-store/` (the store settings and type schemas `ctx_adapter.py adopt` writes into `../.context/` once). `make -C $BATON/context-db help` lists every target. Content lives in `../.context/`. CLI reference: `docs/engine-cli.md`. |
-| `pr-review/` | Tooling README + `config.example.json` for `pr-scan` / `pr-review`; the live state is in `../.context/state/pr-review/`. |
+| `pr-review/` | Tooling README + `config.example.json` for `pr-scan` / `pr-review` — tuning only; the GitHub facts (login, `github.org`, `github.bots`, `github.owner_teams`) come from the env store via `kit_profile.py review-facts`. The live state is in `../.context/state/pr-review/`. |
 | `docs/` | Kit-level docs, one file per topic — details below. |
 
 ## Notes
