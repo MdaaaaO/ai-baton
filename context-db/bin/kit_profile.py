@@ -57,6 +57,7 @@ Usage from shell:       python3 kit_profile.py                # environment name
                         python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 otherwise
                         python3 kit_profile.py gh-env         # `export NAME=value` for github.sandbox_token_prefix, or nothing
                         python3 kit_profile.py scratch [--stable] [sub]  # scratch dir, created: per session (0700, $XDG_RUNTIME_DIR/ai-baton-kit/ or <tmp>/ai-baton-kit-<uid>/; KIT_SCRATCH overrides; exit 2 on a symlinked/foreign root), or --stable per user (survives logout)
+                        python3 kit_profile.py scratch --sweep-pr-review  # wind-down: remove this session's own pr-review/ scratch subtree only (next.md, session-name stay); exit 2 on a symlinked/escaping one
                         python3 kit_profile.py dir            # deprecated: always "" (kept for old callers)
 Exit: 0 ok · 1 the thing asked about is absent (`get` of an unset key — or, with `--nonempty`, one set to
 `""` / `[]` / `{}` — `plugin` on a clone) · 2 usage or I/O error.
@@ -69,6 +70,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import stat
 import sys
 
@@ -540,9 +542,7 @@ def scratch(sub: str | None = None, stable: bool = False) -> Path:
     elif os.environ.get("KIT_SCRATCH"):
         base = Path(os.environ["KIT_SCRATCH"])
     else:
-        xdg = os.environ.get("XDG_RUNTIME_DIR")  # per user and 0700 already
-        root = Path(xdg) / "ai-baton-kit" if xdg else \
-            Path(os.environ.get("TMPDIR") or "/tmp") / f"ai-baton-kit-{os.getuid()}"  # shared temp root: one dir per uid
+        root = session_scratch_root()
         private_dir(root)
         owner = None if os.environ.get("CLAUDE_CODE_SESSION_ID") else _owning_pid()
         key = os.environ.get("CLAUDE_CODE_SESSION_ID") or (f"pid-{owner}" if owner else f"uid-{os.getuid()}")
@@ -552,6 +552,54 @@ def scratch(sub: str | None = None, stable: bool = False) -> Path:
         base = base / sub
     base.mkdir(mode=0o700, parents=True, exist_ok=True)
     return base
+
+
+def session_scratch_root() -> Path | None:
+    """The per-user directory that holds one scratch dir per session (`<runtime dir>/ai-baton-kit` or
+    `<temp>/ai-baton-kit-<uid>`); not created. None when `CLAUDE_JOB_DIR` or `KIT_SCRATCH` fixes the scratch dir
+    outright — there is no shared root then, so nothing to list or sweep."""
+    if os.environ.get("CLAUDE_JOB_DIR") or os.environ.get("KIT_SCRATCH"):
+        return None
+    xdg = os.environ.get("XDG_RUNTIME_DIR")  # per user and 0700 already
+    if xdg:
+        return Path(xdg) / "ai-baton-kit"
+    return Path(os.environ.get("TMPDIR") or "/tmp") / f"ai-baton-kit-{os.getuid()}"  # shared temp root: one dir per uid
+
+
+def tree_bytes(path: Path) -> int:
+    """Total bytes of the files under `path` (symlinks not followed)."""
+    total = 0
+    for dirpath, _dirs, files in os.walk(path, followlinks=False):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(dirpath, f)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def sweep_pr_review() -> tuple[Path, int]:
+    """Remove this session's own `pr-review/` scratch subtree (the per-PR snapshots `pr-review` writes) and nothing
+    else — `next.md`, `session-name` and the other files in the session's scratch dir stay. Returns (the subtree,
+    the bytes freed); 0 when there was none. Refuses (`ScratchError`) a `pr-review` that is a symlink or not a
+    directory, or whose real path is not directly inside the session's scratch dir, so a planted link can never
+    point the removal elsewhere. Refuses when the session's scratch key is the shared `uid-<uid>` fallback. Only ever looks at `scratch()` — another
+    session's dir is never touched."""
+    base = scratch()
+    if session_scratch_root() is not None and base.name == f"uid-{os.getuid()}":
+        raise ScratchError("this session's scratch key is the per-user fallback (no session id, no owning process), "
+                           "shared with other sessions of this user — not removing its pr-review scratch")
+    target = base / "pr-review"
+    if not os.path.lexists(target):
+        return target, 0
+    st = os.lstat(target)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise ScratchError(f"{target} is a symlink or not a directory — not removing it")
+    if target.resolve().parent != base.resolve():
+        raise ScratchError(f"{target} resolves outside the session's scratch dir — not removing it")
+    freed = tree_bytes(target)
+    shutil.rmtree(target)
+    return target, freed
 
 
 class ScratchError(RuntimeError):
@@ -1011,6 +1059,13 @@ def main(argv: list[str]) -> int:
     elif cmd == "template":
         t = template(argv[2])
         print(t or "")
+    elif cmd == "scratch" and "--sweep-pr-review" in argv[2:]:
+        try:
+            gone, freed = sweep_pr_review()
+        except (ScratchError, OSError) as e:
+            print(f"kit_profile: {e}", file=sys.stderr)
+            return 2
+        print(f"removed {gone} ({freed} bytes)" if freed else "no pr-review scratch to remove")
     elif cmd == "scratch":
         rest = [a for a in argv[2:] if a != "--stable"]
         try:

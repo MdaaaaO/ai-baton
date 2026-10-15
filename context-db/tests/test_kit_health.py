@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -620,7 +621,7 @@ class DiskCheck(unittest.TestCase):
             (home / ".npm").mkdir()  # present but empty — no size, no line
             with mock.patch.object(kh.shutil, "disk_usage", return_value=Usage(total=100, used=96, free=4)), \
                  mock.patch.object(kh.Path, "home", return_value=home):
-                kh.disk_wiring(r, targets=[("/", Path("/a")), ("$HOME", Path("/b"))])
+                kh.disk_wiring(r, targets=[("/", home), ("$HOME", home / ".cache")])
         text = "\n".join(r.lines)
         self.assertEqual(r.counts[kh.WARN], 2)  # both targets over DISK_WARN_PCT
         self.assertIn("96% full on `/`", text)
@@ -629,6 +630,174 @@ class DiskCheck(unittest.TestCase):
         self.assertIn("rm -rf ~/.cache/go-build", text)
         self.assertEqual(text.count("safe to remove"), 1)  # listed once, not once per over-threshold target
         self.assertNotIn("~/.npm`", text)  # empty cache dir: no size to report, no line at all
+
+    def test_caches_on_another_filesystem_are_not_pointed_at(self):
+        kh = load_kit_health()
+        r = kh.Report()
+        Usage = type(kh.shutil.disk_usage(Path.cwd()))
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td)
+            (home / ".cache" / "go-build").mkdir(parents=True)
+            (home / ".cache" / "go-build" / "b.o").write_bytes(b"x" * 4096)
+            full = home / "full"
+            full.mkdir()
+            real_stat = os.stat
+
+            def fake_stat(p, *a, **k):  # `full` is its own filesystem
+                st = real_stat(p, *a, **k)
+                if str(p).startswith(str(full)):
+                    return os.stat_result((st.st_mode, st.st_ino, st.st_dev + 1) + tuple(st)[3:])
+                return st
+            with mock.patch.object(kh.shutil, "disk_usage", return_value=Usage(total=100, used=96, free=4)), \
+                 mock.patch.object(kh.Path, "home", return_value=home), mock.patch.object(kh.os, "stat", fake_stat):
+                kh.disk_wiring(r, targets=[("scratch", full)])
+                text_other = "\n".join(r.lines)
+                r2 = kh.Report()
+                kh.disk_wiring(r2, targets=[("$HOME", home)])
+        self.assertEqual(r.counts[kh.WARN], 1)
+        self.assertNotIn("go-build", text_other)
+        self.assertIn("go-build", "\n".join(r2.lines))
+
+
+class EndedSessionScratch(unittest.TestCase):
+    """Section 4 lists ended sessions' scratch dirs with sizes and `--sweep-scratch` removes exactly those —
+    on throw-away scratch and content roots, never the live ones."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        t = Path(self.tmp.name)
+        self.root = t / "scratch"
+        self.ctx = t / "ctx"
+        (self.ctx / "sessions" / "archive").mkdir(parents=True)
+        self.old = time.time() - 7200  # well past the default grace
+
+        def session(dirname, name, status, size, id_only=False, archived=None, age=None):
+            d = self.root / dirname
+            d.mkdir(parents=True)
+            (d / "blob.bin").write_bytes(b"x" * size)
+            (d / "next.md").write_text("p\n")
+            if not id_only:
+                (d / "session-name").write_text(name + "\n")
+            if name:
+                row = f"---\nsession: {name}\nsession_id: {dirname}\nstatus: {status}\n---\n"
+                if archived:
+                    (self.ctx / "sessions" / "archive" / archived).write_text(row)
+                else:
+                    (self.ctx / "sessions" / f"{name}.md").write_text(row)
+            t_ = self.old if age is None else age
+            for p in [*d.iterdir(), d]:
+                os.utime(p, (t_, t_))
+        self.session = session
+        session("sid-ended", "alpha-ended", "ended", 3000)
+        session("sid-byid", "beta-byid", "ended", 2000, id_only=True)   # no session-name file: matched by session_id
+        session("sid-archived", "gamma-arch", "ended", 1000, archived="gamma-arch.md")
+        session("sid-dated", "eta-dated", "ended", 900, archived="eta-dated-20261001.md")      # gen_sessions' suffixed shape
+        session("sid-dated2", "eta-dated", "ended", 800, archived="eta-dated-20261001-2.md")
+        session("sid-arch-byid", "theta-id", "ended", 700, id_only=True, archived="theta-id-20261002.md")  # id found in archive/
+        session("sid-live", "delta-live", "active", 5000)
+        session("sid-anon", "", "", 4000)                                # never registered
+        session("sid-self", "eps-self", "ended", 6000)                   # this session's own dir
+        session("sid-recent", "iota-recent", "ended", 600, age=time.time())  # ended row, but still being written
+        session("pid-4242", "kappa-pid", "ended", 500)
+        session(f"uid-{os.getuid()}", "lambda-shared", "ended", 400)
+        (self.root / "stray-link").symlink_to(t)
+        self.keep = self.root / "sid-self"
+        self.kh = load_kit_health()
+        self.swept = ["sid-archived", "sid-arch-byid", "sid-byid", "sid-dated", "sid-dated2", "sid-ended"]
+        self.kept = ["pid-4242", "sid-anon", "sid-live", "sid-recent", "sid-self", "stray-link", f"uid-{os.getuid()}"]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def gone(self):
+        """Patch os.kill so every pid looks dead, except in a test that says otherwise."""
+        return mock.patch.object(self.kh.os, "kill", side_effect=ProcessLookupError)
+
+    def test_lists_ended_dirs_with_sizes_and_the_fix(self):
+        r = self.kh.Report()
+        with self.gone():
+            self.kh.scratch_wiring(r, self.root, self.ctx, self.keep)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[self.kh.WARN], 1)
+        self.assertIn("7 ended session(s)", text)  # the six above plus the pid dir, whose process is gone
+        for n in ("alpha-ended", "beta-byid", "gamma-arch", "eta-dated", "theta-id", "kappa-pid"):
+            self.assertIn(f"`{n}`", text)
+        for n in ("delta-live", "sid-anon", "eps-self", "iota-recent", "lambda-shared"):
+            self.assertNotIn(n, text)
+        self.assertIn("--sweep-scratch", text)
+        self.assertIn("4 other dir(s) kept", text)  # live, unregistered, recent and shared; own dir and the symlink are not counted
+
+    def test_all_clear_when_nothing_ended(self):
+        r = self.kh.Report()
+        self.kh.scratch_wiring(r, self.root / "absent", self.ctx, self.keep)
+        self.assertEqual(r.counts[self.kh.WARN], 0)
+        self.assertIn("no ended session", "\n".join(r.lines))
+
+    def test_sweep_removes_only_ended_dirs(self):
+        with self.gone():
+            removed, failed = self.kh.sweep_scratch(self.root, self.ctx, self.keep)
+        self.assertEqual(failed, [])
+        self.assertEqual(sorted(n for n, _ in removed), sorted(self.swept + ["pid-4242"]))
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), sorted(x for x in self.kept if x != "pid-4242"))
+        self.assertTrue((self.root.parent / "ctx" / "sessions").is_dir())
+        with self.gone():
+            self.assertEqual(self.kh.sweep_scratch(self.root, self.ctx, self.keep), ([], []))
+
+    def test_grace_period_keeps_a_recently_touched_dir_and_is_overridable(self):
+        with self.gone():
+            removed, _ = self.kh.sweep_scratch(self.root, self.ctx, self.keep)
+        self.assertNotIn("sid-recent", [n for n, _ in removed])
+        self.assertTrue((self.root / "sid-recent").is_dir())
+        with self.gone():
+            removed, _ = self.kh.sweep_scratch(self.root, self.ctx, self.keep, grace=0)
+        self.assertEqual([n for n, _ in removed], ["sid-recent"])
+
+    def test_a_file_deep_in_the_tree_counts_as_recent(self):
+        deep = self.root / "sid-ended" / "pr-review" / "x" / "1"
+        deep.mkdir(parents=True)
+        (deep / "late.txt").write_text("fresh")  # new file, old dirs above it
+        os.utime(deep.parent.parent, (self.old, self.old))
+        with self.gone():
+            removed, _ = self.kh.sweep_scratch(self.root, self.ctx, self.keep)
+        self.assertNotIn("sid-ended", [n for n, _ in removed])
+
+    def test_a_pid_dir_is_kept_while_its_process_lives(self):
+        with mock.patch.object(self.kh.os, "kill", return_value=None) as k:
+            removed, _ = self.kh.sweep_scratch(self.root, self.ctx, self.keep)
+        k.assert_called_once_with(4242, 0)
+        self.assertNotIn("pid-4242", [n for n, _ in removed])
+        with mock.patch.object(self.kh.os, "kill", side_effect=PermissionError):  # exists, another user's
+            removed, _ = self.kh.sweep_scratch(self.root, self.ctx, self.keep)
+        self.assertTrue((self.root / "pid-4242").is_dir())
+
+    def test_the_shared_uid_dir_is_never_swept_even_with_no_grace(self):
+        with self.gone():
+            removed, _ = self.kh.sweep_scratch(self.root, self.ctx, self.keep, grace=0)
+        self.assertNotIn(f"uid-{os.getuid()}", [n for n, _ in removed])
+        self.assertTrue((self.root / f"uid-{os.getuid()}").is_dir())
+
+    def test_a_dir_that_will_not_go_is_reported_failed_not_removed(self):
+        with self.gone(), mock.patch.object(self.kh.shutil, "rmtree"):  # removes nothing
+            removed, failed = self.kh.sweep_scratch(self.root, self.ctx, self.keep)
+        self.assertEqual(removed, [])
+        self.assertEqual(sorted(n for n, _ in failed), sorted(self.swept + ["pid-4242"]))
+
+    def test_a_live_row_beats_an_archived_one(self):
+        # a resumed session re-registered: the live row says active although an old archived copy says ended
+        (self.ctx / "sessions" / "archive" / "delta-live-20261001.md").write_text("---\nsession: delta-live\nstatus: ended\n---\n")
+        with self.gone():
+            removed, _ = self.kh.sweep_scratch(self.root, self.ctx, self.keep)
+        self.assertNotIn("sid-live", [n for n, _ in removed])
+
+    def test_an_unresolvable_own_dir_stops_the_sweep(self):
+        with mock.patch.object(self.kh.kit_profile, "scratch", side_effect=self.kh.kit_profile.ScratchError("nope")), \
+             mock.patch.object(self.kh.kit_profile, "session_scratch_root", return_value=self.root):
+            with self.assertRaises(self.kh.kit_profile.ScratchError):
+                self.kh.sweep_scratch(self.root, self.ctx)
+            r = self.kh.Report()
+            self.kh.scratch_wiring(r, self.root, self.ctx)
+        self.assertEqual(len(list(self.root.iterdir())), 13)  # nothing was touched
+        self.assertIn("cannot be resolved", "\n".join(r.lines))
 
 
 class ReadOnlyRun(unittest.TestCase):

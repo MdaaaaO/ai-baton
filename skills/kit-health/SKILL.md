@@ -2,8 +2,8 @@
 name: kit-health
 description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Walks each finding, reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
 metadata:
-  version: "72"
-  updated: "2026-10-08"
+  version: "73"
+  updated: "2026-10-15"
   reviewed: "2026-10-08"
   facts: "aws.profile kit-health"
 user-invocable: true
@@ -17,7 +17,7 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
 1. **Run.** `SCRATCH=$(python3 $BATON/context-db/bin/kit_profile.py scratch); echo "report: $SCRATCH/kit-health.md"`
    then `python3 $BATON/skills/kit-health/kit-health.py --stale 90 --quiet --report "$SCRATCH/kit-health.md"`
    and Read the echoed path (shell variables do not survive between tool calls). Exit 0 GREEN · 1 AMBER ·
-   2 RED. Read-only: only `--stamp` writes. Sections 1–6 (kit, leaks, config, machine, engine, stamp); § 1 names
+   2 RED. Read-only: only `--stamp` writes (and the separate `--sweep-scratch` Fix below). Sections 1–6 (kit, leaks, config, machine, engine, stamp); § 1 names
    the install mode (warns when it differs from the one setup.sh recorded) and
    warns when a newer kit release is out and names the update command; on a clone, § 1 also names the release
    channel, the installed tag and a held preview, and warns when the last sync applied an update it could not
@@ -36,7 +36,8 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
 4. **Walk the findings** — one `AskUserQuestion` per finding (batch trivial ones; shape: `docs/carousel.md`): **Fix** (do it, re-run), **Ticket** (`ticket-open`, title `[KIT] …`, unassigned), **Accept** (leaks only: add the
    anchored `path:value` regex to `skills/kit-health/allow.txt` with a `# reason`; a stale unit is accepted
    by bumping `metadata.reviewed` after re-reading it). A leak's Fix: `kb.py set …`, then the skill
-   reads it back. A Fix that touches a skill bumps `metadata.version` + `metadata.updated`. **Every edit to a kit
+   reads it back. § 4's "ended session(s) left … of scratch" warning: Fix is
+   `python3 $BATON/skills/kit-health/kit-health.py --sweep-scratch` (removes only the listed ended sessions' scratch dirs). A Fix that touches a skill bumps `metadata.version` + `metadata.updated`. **Every edit to a kit
    file** (an Accept, a Fix) is made in a worktree of a kit **checkout** off `origin/main`, never under `$BATON`
    on a plugin install: that is Claude Code's plugin cache, and `claude plugin update` overwrites it (§ 1 warns
    about a file changed there). No checkout yet: `gh repo clone <kit repo>` (§ 1 names it) into the workspace.
