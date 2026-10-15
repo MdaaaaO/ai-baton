@@ -51,7 +51,7 @@ main session directly (`context: fork` means only this fork ever reads anything 
    threshold (`deep_lines` in `config.json`, 600 by default) — a `pr-review --deep` candidate. `A` = passed the trivial-PR auto-approve gate
    (`.auto.eligible` in `queue.json`; the summary line carries `auto=<n> auto_mode=<mode>`). `C` = eligible
    for the unattended auto-COMMENT path (`.auto_comment.eligible` in `queue.json`; the summary line carries
-   `auto_comment=<n> auto_comment_mode=<mode>`; § Unattended auto-COMMENT below — off by default). `HUMANS` = last state per human reviewer
+   `auto_comment=<n> auto_comment_mode=<mode>`; § Unattended auto-COMMENT below — off by default; heads already decided under `auto_comment.approve_on_clean` — ledger `shadow_approve_clean` / `auto_approved_clean` — leave the queue and count in `done=`). `HUMANS` = last state per human reviewer
    (`APP`, `CHA`, `COM`). `THREADS/BOT` = unresolved threads / review-bot (`github.review_bot`) Assessment on
    this head (`🟢`/`🟡`/`🔴`, `-` if none or no bot configured). `STATE` = `.state_label` from `queue.json`
    (`row-state.py`, no `gh` call) — the row's state from its kind, the user's own review on this head and the

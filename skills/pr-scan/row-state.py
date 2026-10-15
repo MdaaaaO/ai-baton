@@ -63,7 +63,7 @@ def load_ledger(path):
     return rows
 
 
-POSTED = ("reviewed", "auto_commented")
+POSTED = ("reviewed", "auto_commented", "auto_approved_clean")
 VERDICTS = {"APPROVED": "approve", "APPROVE": "approve",
             "CHANGES_REQUESTED": "request_changes", "REQUEST_CHANGES": "request_changes"}
 

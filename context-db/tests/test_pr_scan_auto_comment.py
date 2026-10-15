@@ -375,6 +375,32 @@ class AutoCommentGate(ScanHarness, unittest.TestCase):
         row302 = self.row(302)
         self.assertTrue(row302["auto_comment"]["eligible"], row302["auto_comment"])  # cap slot not stolen
 
+    # `shadow_approve_clean` / `auto_approved_clean` (approve_on_clean) are terminal for the head the same way
+    def test_clean_approve_row_is_dropped_and_counted_in_done(self):
+        self.write_config(prios=[1], max_per_tick=1)
+        shadow_head = "2" * 40
+        status = "shadow_approve_clean"
+        fresh_head = "3" * 40
+        self.write_ledger([{"repo": REPO, "pr": 301, "head": shadow_head, "status": status,
+                             "ts": "2026-01-01T00:00:00Z"}])
+        env = self.env(
+            STUB_DIRECT_JSON=json.dumps([
+                direct_entry(301, "alice", "2026-01-03T00:00:00Z"),   # newer — processed first, already shadow-decided
+                direct_entry(302, "bob", "2026-01-02T00:00:00Z"),
+            ]),
+            STUB_PR_301_JSON=json.dumps(pr_json(301, "alice", shadow_head)),
+            STUB_REVIEWS_301_JSON="[]",
+            STUB_PR_302_JSON=json.dumps(pr_json(302, "bob", fresh_head)),
+            STUB_REVIEWS_302_JSON="[]",
+        )
+        r = self.run_scan(env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        nums = [row["pr"] for row in self.queue()]
+        self.assertNotIn(301, nums, self.queue())        # dropped like shadow_comment — done for this head
+        row302 = self.row(302)
+        self.assertTrue(row302["auto_comment"]["eligible"], row302["auto_comment"])  # cap slot not stolen
+        self.assertRegex(r.stdout, r"done=1\b")  # counted in the summary line
+
     # --- a head already `held` (an `on_stop: hold` STOP decision) must stay an ordinary queue row for the
     # next interactive `pr-review` walk, but must never be re-flagged `C` or counted toward `max_per_tick`
     # again until the head changes (PR#373 review) ---

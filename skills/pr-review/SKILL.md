@@ -230,9 +230,7 @@ criteria, modes and the ledger write: `reference/runner.md` § `--auto`.
 
 Chains `pr-scan` straight into a posted review with no hand-off, for the PRs `pr-scan` flags `C`
 (config block `auto_comment` in `config.json`). Not a shortcut on the review — steps 1–4 run exactly as
-in the interactive path (`--deep` included); only steps 5–6 (the walk, the Submit prompt) are skipped,
-and only for a `COMMENT` with no STOP finding. Spawn, `on_stop`, modes, logging, kill switch:
-`reference/runner.md` § `--unattended`.
+in the interactive path (`--deep` included); only steps 5–6 (the walk, the Submit prompt) are skipped, and only for a `COMMENT` with no STOP finding — or an `APPROVE` when the sheet is clean: zero findings (a NIT counts), CI green on the exact head, no standing CHANGES_REQUESTED, author ≠ login (`auto_comment.approve_on_clean`: `off` default · `shadow` logs "would approve (clean)" · `live` posts; `submit-review.sh --auto-comment --triage` re-reads the gate and refuses with a named reason). Spawn, `on_stop`, modes, logging, kill switch: `reference/runner.md` § `--unattended`.
 
 ## Not in scope
 Our own PRs (`pr-open`, `pr-watch`, `pr-event-brief`); merging (`pr-merge.sh` in `pr-watch`);

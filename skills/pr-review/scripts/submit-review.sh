@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# submit-review.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST] [--auto] [--auto-comment]
+# submit-review.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST] [--auto] [--auto-comment [--triage FILE]]
 # request FILE: {"event":"COMMENT|APPROVE|REQUEST_CHANGES","body":"…","comments":[{"path":"…","line":N,"side":"RIGHT","body":"…"}]}
 # preview: validates, injects the snapshot marker (no footer — owner decision 2026-09-19: attribution text only costs the reader), prints the exact payload and its digest.
 # submit:  refuses unless --confirm matches the digest, the live head still equals --head, and this
@@ -8,9 +8,16 @@
 # --auto:  the trivial-PR auto-approve path (or PR_REVIEW_AUTO=1). Refuses unless auto_approve.mode == "live" AND
 #          trivial-check.py --head <sha> says eligible on the exact head being approved. Ledger status auto_approved.
 # --auto-comment: the unattended auto-COMMENT path for direct review requests (or PR_REVIEW_AUTO_COMMENT=1).
-#          Refuses unless the request event is exactly "COMMENT" (never APPROVE/REQUEST_CHANGES on this path),
-#          auto_comment.mode == "live", and the live PR author is not the user (never the user's own PR).
-#          Ledger status auto_commented. Mutually exclusive with --auto.
+#          Refuses unless the request event is "COMMENT" (or "APPROVE" on a clean sheet, below; never
+#          REQUEST_CHANGES on this path), auto_comment.mode == "live", and the live PR author is not the user
+#          (never the user's own PR). Ledger status auto_commented. Mutually exclusive with --auto.
+#          APPROVE under --auto-comment (needs --triage FILE = the runner's triage.json) is allowed only when
+#          auto_comment.approve_on_clean is "live" (or "shadow": the gate runs, "would approve (clean)" is
+#          printed and ledgered as shadow_approve_clean, nothing is posted) AND the gate holds on the exact
+#          --head: triage.json has zero findings, the request carries no inline comments, every check-run is
+#          green and the combined status is not red, no reviewer's latest review is CHANGES_REQUESTED, and the
+#          live PR author is not the user. Any miss refuses (exit 8) naming the reason. Ledger status
+#          auto_approved_clean.
 # lint:    body + inline comments are refused when they leak local paths (.context/, scratchpad, /tmp, ai-baton-kit/ (formerly claude-kit/), /run/user/, home dirs) or a
 #          bare Jira key that is not a link — the workspace rules for every external surface.
 set -uo pipefail
@@ -26,12 +33,13 @@ export PR_REVIEW_HOME=${PR_REVIEW_HOME:-$CTX/state/pr-review}; ROOT=$PR_REVIEW_H
 ME=$(jq -r .login "$ROOT/config.json"); FOOTER=$(jq -r '.footer // ""' "$ROOT/config.json"); LEDGER=$ROOT/ledger.jsonl
 AUTO_MODE=$(jq -r '.auto_approve.mode // "off"' "$ROOT/config.json"); RET=$(jq -r '.submitted_retention_days // 14' "$ROOT/config.json")
 AUTOC_MODE=$(jq -r '.auto_comment.mode // "off"' "$ROOT/config.json")
+APPROVE_CLEAN=$(jq -r '.auto_comment.approve_on_clean // "off"' "$ROOT/config.json")
 TRIVIAL=$(dirname "$0")/trivial-check.py
 mkdir -p "$ROOT/.submitted"; find "$ROOT/.submitted" -mindepth 1 -maxdepth 1 -type d -mtime +"$RET" -exec rm -rf {} + 2>/dev/null
-usage(){ echo "usage: submit-review.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST] [--auto] [--auto-comment]" >&2; exit 2; }
-cmd=${1:-}; shift || usage; repo=""; pr=""; head=""; req=""; confirm=""; auto=${PR_REVIEW_AUTO:-0}; autoc=${PR_REVIEW_AUTO_COMMENT:-0}
+usage(){ echo "usage: submit-review.sh preview|submit --repo O/R --pr N --head SHA --request FILE [--confirm DIGEST] [--auto] [--auto-comment [--triage FILE]]" >&2; exit 2; }
+cmd=${1:-}; shift || usage; repo=""; pr=""; head=""; req=""; triage=""; confirm=""; auto=${PR_REVIEW_AUTO:-0}; autoc=${PR_REVIEW_AUTO_COMMENT:-0}
 while [ $# -gt 0 ]; do case $1 in
-  --repo) repo=$2; shift 2;; --pr) pr=$2; shift 2;; --head) head=$2; shift 2;; --request) req=$2; shift 2;; --confirm) confirm=$2; shift 2;; --auto) auto=1; shift;; --auto-comment) autoc=1; shift;; *) usage;; esac; done
+  --repo) repo=$2; shift 2;; --pr) pr=$2; shift 2;; --head) head=$2; shift 2;; --request) req=$2; shift 2;; --confirm) confirm=$2; shift 2;; --auto) auto=1; shift;; --auto-comment) autoc=1; shift;; --triage) triage=$2; shift 2;; *) usage;; esac; done
 [ "$auto" = 1 ] && [ "$autoc" = 1 ] && { echo "error: --auto and --auto-comment are mutually exclusive" >&2; exit 2; }
 [ "$cmd" = preview ] || [ "$cmd" = submit ] || usage
 [ -n "$repo" ] && [ -n "$pr" ] && [ -n "$head" ] && [ -f "$req" ] || usage
@@ -82,12 +90,23 @@ if [ "$auto" = 1 ]; then
   [ "$(jq -r .event "$req")" = "APPROVE" ] || { echo "error: --auto is only for APPROVE" >&2; exit 2; }
   [ "$AUTO_MODE" = live ] || { echo "error: auto_approve.mode is '$AUTO_MODE', not 'live' — refusing to auto-approve (shadow mode reports only)" >&2; exit 8; }
 fi
+approve_clean=0
 if [ "$autoc" = 1 ]; then
-  # unattended auto-COMMENT path (owner-decision scope, issue-tracked): opt-in config, COMMENT only —
-  # never APPROVE/REQUEST_CHANGES here, whatever the request says.
-  [ "$(jq -r .event "$req")" = "COMMENT" ] || { echo "error: --auto-comment is only for COMMENT (never APPROVE/REQUEST_CHANGES on this path)" >&2; exit 2; }
+  # unattended auto-COMMENT path (owner-decision scope, issue-tracked): opt-in config. COMMENT, or APPROVE
+  # on a clean runner sheet under auto_comment.approve_on_clean — never REQUEST_CHANGES here, whatever the
+  # request says.
+  case "$(jq -r .event "$req")" in
+    COMMENT) ;;
+    APPROVE) approve_clean=1 ;;
+    *) echo "error: --auto-comment is only for COMMENT (or APPROVE on a clean sheet under auto_comment.approve_on_clean); never REQUEST_CHANGES on this path" >&2; exit 2 ;;
+  esac
   [ "$AUTOC_MODE" = live ] || { echo "error: auto_comment.mode is '$AUTOC_MODE', not 'live' — refusing to auto-comment (shadow mode reports only)" >&2; exit 8; }
+  if [ "$approve_clean" = 1 ]; then
+    case "$APPROVE_CLEAN" in live|shadow) ;; *) echo "error: auto_comment.approve_on_clean is '$APPROVE_CLEAN', not 'live' or 'shadow' — refusing to auto-approve a clean sheet" >&2; exit 8 ;; esac
+    [ -n "$triage" ] && [ -f "$triage" ] || { echo "error: an APPROVE under --auto-comment needs --triage FILE (the runner's triage.json) to prove the sheet is clean" >&2; exit 2; }
+  fi
 fi
+[ "$approve_clean" = 1 ] || [ -z "$triage" ] || { echo "error: --triage only applies to an APPROVE under --auto-comment" >&2; exit 2; }
 
 # 2. live PR state
 live=$(gh api "repos/$repo/pulls/$pr" 2>/dev/null) || { echo "error: cannot read repos/$repo/pulls/$pr" >&2; exit 3; }
@@ -107,6 +126,35 @@ if [ "$auto" = 1 ]; then
   gate=$(python3 "$TRIVIAL" "$repo" "$pr" --head "$head" 2>&1) || { echo "error: trivial-check failed: $(jq -r '.reasons|join("; ")' <<<"$gate" 2>/dev/null || echo "$gate" | tail -c 300)" >&2; exit 8; }
   [ "$(jq -r '.eligible // false' <<<"$gate")" = true ] || { echo "error: trivial-check says NOT eligible on $head: $(jq -r '.reasons|join("; ")' <<<"$gate")" >&2; exit 8; }
   echo "note: --auto gate passed (class $(jq -r .class <<<"$gate"))" >&2
+fi
+if [ "$approve_clean" = 1 ]; then
+  # clean-sheet gate, re-read at call time on the exact head — the main session's decision is never trusted alone
+  why=()
+  if ! jq -e 'type=="array"' "$triage" >/dev/null 2>&1; then why+=("triage file is not a findings array")
+  else nfind=$(jq 'length' "$triage"); [ "$nfind" = 0 ] || why+=("triage has $nfind finding(s)"); fi
+  [ "$(jq -r '.comments|length' "$req")" = 0 ] || why+=("request carries inline comments")
+  cr_raw=$(gh api --paginate "repos/$repo/commits/$head/check-runs?per_page=100" 2>/dev/null) || why+=("cannot read check-runs on head")
+  st_raw=$(gh api "repos/$repo/commits/$head/status" 2>/dev/null) || why+=("cannot read combined status on head")
+  if [ -n "${cr_raw:-}" ]; then
+    ncr=$(jq -s '[.[].check_runs[]?] | length' <<<"$cr_raw" 2>/dev/null) || ncr=-1
+    badcr=$(jq -rs '[.[].check_runs[]? | select(.status != "completed" or ((.conclusion // "") | IN("success","skipped","neutral") | not)) | .name] | join(", ")' <<<"$cr_raw" 2>/dev/null) || badcr="unparseable"
+    [ "$ncr" -gt 0 ] 2>/dev/null || why+=("no check-runs on head")
+    [ -z "$badcr" ] || why+=("checks not green: $badcr")
+  fi
+  if [ -n "${st_raw:-}" ]; then
+    stbad=$(jq -r 'if (.total_count // 0) > 0 and .state != "success" then .state else "" end' <<<"$st_raw" 2>/dev/null) || stbad="unparseable"
+    [ -z "$stbad" ] || why+=("combined status $stbad")
+  fi
+  rev_raw=$(gh api --paginate "repos/$repo/pulls/$pr/reviews?per_page=100" 2>/dev/null) || why+=("cannot read the PR reviews")
+  if [ -n "${rev_raw:-}" ]; then
+    crq=$(jq -rs '[.[][]? | select(.state | IN("APPROVED","CHANGES_REQUESTED","DISMISSED"))] | group_by(.user.login) | map(last | select(.state=="CHANGES_REQUESTED") | .user.login) | join(", ")' <<<"$rev_raw" 2>/dev/null) || crq="unparseable"
+    [ -z "$crq" ] || why+=("CHANGES_REQUESTED standing from: $crq")
+  fi
+  if [ ${#why[@]} -gt 0 ]; then
+    reasons=$(printf '%s; ' "${why[@]}")
+    echo "error: approve_on_clean gate refused on ${head:0:9}: ${reasons%; }" >&2; exit 8
+  fi
+  echo "note: approve_on_clean gate passed on ${head:0:9} (0 findings, checks green, no CHANGES_REQUESTED, author is not the user)" >&2
 fi
 # comment paths must be in the PR's file list
 files_raw=$(gh api --paginate "repos/$repo/pulls/$pr/files?per_page=100" 2>&1) || { echo "error: cannot read the PR file list: $(printf '%s' "$files_raw" | tail -c 200)" >&2; exit 3; }
@@ -128,12 +176,20 @@ if [ "$cmd" = preview ]; then
   jq -r '.comments[] | "  - \(.path):\(.line) [\(.side)] \(.body|split("\n")[0][:110])"' <<<"$payload"
   echo "-- body --"; jq -r .body <<<"$payload"; echo "-- end body --"
   echo "digest: $digest"
+  [ "$approve_clean" = 1 ] && [ "$APPROVE_CLEAN" = shadow ] && echo "note: approve_on_clean is shadow — submit logs 'would approve (clean)' and posts nothing"
   echo "submit with: submit-review.sh submit --repo $repo --pr $pr --head $head --request $req --confirm $digest"
   exit 0
 fi
 
 # 4. submit
 [ "$confirm" = "$digest" ] || { echo "error: --confirm does not match current digest $digest (request or head changed since preview)" >&2; exit 4; }
+if [ "$approve_clean" = 1 ] && [ "$APPROVE_CLEAN" = shadow ]; then
+  # shadow: the gate passed above; record the decision and post nothing (no digest lock — a later live submit stays possible)
+  echo "status: shadow · would approve (clean) $repo#$pr @ ${head:0:9} — nothing posted"
+  ( flock 9; jq -nc --arg repo "$repo" --argjson pr "$pr" --arg head "$head" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{repo:$repo, pr:$pr, head:$head, status:"shadow_approve_clean", ts:$ts, event:"APPROVE", comments:0}' >> "$LEDGER" ) 9>"$ROOT/.ledger.lock"
+  exit 0
+fi
 lock="$ROOT/.submitted/$digest"; mkdir -p "$ROOT/.submitted"
 # two gates, both must hold. `mkdir "$lock"` refuses a digest dir that already exists — an earlier
 # submit of this review, whether or not it left a `claimed` file. It is not a safe exclusivity check on
@@ -156,6 +212,6 @@ want=$(jq '.comments|length' <<<"$payload")
 if [ "$ver" = "null" ] || [ -z "$ver" ]; then echo "status: uncertain — POST returned id $rid but the review is not listed yet; re-check before any retry"; exit 7; fi
 echo "status: submitted · review $rid · state $(jq -r .state <<<"$ver") · url $(jq -r .html_url <<<"$ver") · inline comments $nposted/$want"
 [ "$nposted" = "$want" ] || echo "warning: inline comment count differs from request"
-lstatus=reviewed; [ "$auto" = 1 ] && lstatus=auto_approved; [ "$autoc" = 1 ] && lstatus=auto_commented
+lstatus=reviewed; [ "$auto" = 1 ] && lstatus=auto_approved; [ "$autoc" = 1 ] && lstatus=auto_commented; [ "$approve_clean" = 1 ] && lstatus=auto_approved_clean
 ( flock 9; jq -nc --arg repo "$repo" --argjson pr "$pr" --arg head "$head" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson id "$rid" --arg ev "$(jq -r .event <<<"$payload")" --argjson n "$nposted" --arg st "$lstatus" \
   '{repo:$repo, pr:$pr, head:$head, status:$st, ts:$ts, review_id:$id, event:$ev, comments:$n}' >> "$LEDGER" ) 9>"$ROOT/.ledger.lock"
