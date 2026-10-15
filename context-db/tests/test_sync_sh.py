@@ -550,7 +550,8 @@ class SyncSh(unittest.TestCase):
         self.assertEqual(self.status()[1], "error")
         for text in (self.log_file.read_text(), st, self.check()):
             self.assertIn("would clobber existing tag", text)
-            self.assertIn("tag -d v0.1.0", text)
+            self.assertIn("tag -d 'v0.1.0'", text)
+            self.assertRegex(text, r"git -C '[^']+' tag -d")
         self.assertIn("ERROR fetch failed (exit 1): ", self.log_file.read_text())
         self.assertEqual(st.count("\n"), 1, "the status stays one line")
         # the remedy works: with the stale local tag gone the next run fetches origin's copy (the release

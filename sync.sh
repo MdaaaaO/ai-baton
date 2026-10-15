@@ -144,17 +144,25 @@ fetch_tail() {
     END { s = (n > 3 ? n - 2 : 1); for (i = s; i <= n; i++) printf "%s%s", (i > s ? " | " : ""), a[i] }' | cut -c1-300
 }
 
+# sq <string> — the string in single quotes (an embedded ' becomes '\''), so a printed command pastes safely.
+sq() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 # fetch_remedy <stderr-file> — one line naming the fix when git rejected a ref update; empty otherwise.
 # A release tag that moved on origin is rejected (`would clobber existing tag`) and stays rejected on
 # every later run: the fetch never forces tags, since a moved release tag is what the manifest check
 # is there to catch. Deleting the local tag lets the next run fetch origin's copy.
 fetch_remedy() {
-  local tags
+  local tags qtags="" t here
   tags="$(grep 'would clobber existing tag' "$1" | sed -n 's/^[[:space:]]*!\{0,1\}[[:space:]]*\[rejected\][[:space:]]*\([^[:space:]]*\).*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
+  here="$(sq "$HERE")"
   if [ -n "$tags" ]; then
-    printf 'tag %s moved on origin and git will not overwrite it; check it is a legitimate retag, then git -C %s tag -d %s (the next sync fetches origin'"'"'s copy)' "$tags" "$HERE" "$tags"
+    # shellcheck disable=SC2086  # word-split on purpose: tag names hold no whitespace (the sed stops at it)
+    for t in $tags; do qtags="${qtags:+$qtags }$(sq "$t")"; done
+    printf 'tag %s moved on origin and git will not overwrite it; check it is a legitimate retag, then git -C %s tag -d %s (the next sync fetches origin'"'"'s copy)' "$tags" "$here" "$qtags"
   elif grep -q '\[rejected\]' "$1"; then
-    printf 'git rejected a ref update; run git -C %s fetch --tags origin by hand to see which' "$HERE"
+    printf 'git rejected a ref update; run git -C %s fetch --tags origin by hand to see which' "$here"
   fi
 }
 
