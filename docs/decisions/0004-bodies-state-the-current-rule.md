@@ -39,8 +39,9 @@ bodies were past the 130-line target with no reference material to show for it.
   inline — one hop more, paid only by the reader who asks.
 - Reference files may keep dated history; only bodies are checked. A rule that needs its rationale to be
   followed correctly keeps the rationale as part of the rule, stated without a date.
-- The warning is a warn, not an error: a legitimate date in prose (rare) is visible in review rather than
-  blocked.
+- `kit-verify` reports a hit as a warning, and `test_kit_verify_dated_history` fails `make ci` on any hit in a
+  unit body, so the kit's own bodies are held to the rule; a legitimate date in prose goes into inline code or a
+  reference file.
 
 ## Sources
 
