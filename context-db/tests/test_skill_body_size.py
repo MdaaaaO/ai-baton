@@ -23,7 +23,9 @@ import frontmatter as fmt  # noqa: E402
 # not trip the test, tight enough that reverting the restructuring trips it immediately.
 LIMITS = {
     "self-assessment": (220, 1),
-    "pr-review": (230, 1),
+    # #48: runner steps moved to agents/review-runner.md, the walk to reference/walk.md, the
+    # auto-approve contract to reference/auto-approve.md — the body is ~80 lines / under 6 KB now
+    "pr-review": (100, 9),
     "pr-open": (180, 1),
     "pr-watch": (180, 1),
     "cost-report": (140, 1),

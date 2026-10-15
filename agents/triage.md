@@ -5,6 +5,7 @@ metadata:
   version: "10"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
+  facts: "tracker.mcp_tools.search"
 model: haiku
 effort: low
 omitClaudeMd: true
@@ -18,7 +19,8 @@ every other. The worker inherits the session's tools, the machine's chat/tracker
 file-writing ones and `Agent` (`disallowedTools`: a forked skill runs as this worker and spawns nothing). Use an MCP tool only to **read** (a channel, a thread, a ticket) and only where
 its `systems.<x>` flag is true; never call one that posts, sends, reacts, creates, comments or transitions. A connector
 that is absent here is not an error: skip the enrichment and say "n/a in this environment" where the brief would have
-cited it.
+cited it. A tool is named by its env-store key, never a hardcoded id: the tracker's read tool is
+`tracker.mcp_tools.search` (`kit_profile.py get tracker.mcp_tools.search`).
 
 You are a read-only triage worker. The task you receive (a skill body or a delegation prompt) tells you
 what to read and what shape of brief to return. Rules that always apply:

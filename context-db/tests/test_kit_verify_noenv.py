@@ -331,7 +331,7 @@ class BodyChecks(unittest.TestCase):
 
     def test_body_lines_allow_skips_the_warning_but_never_the_cap(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for name, over in (("pr-review", True), ("self-assessment", True), ("some-other-skill", False)):
+            for name, over in (("session-handoff", True), ("self-assessment", True), ("some-other-skill", False)):
                 unit_dir = Path(tmp) / name
                 unit_dir.mkdir()
                 p = unit_dir / "SKILL.md"

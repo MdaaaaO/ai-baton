@@ -6,8 +6,21 @@ reads is re-billed on every later tick. A PR snapshot is 20–100K tokens; three
 the verification round-trips live in a child that dies after the review, and the main session keeps
 only the sheet, the walk with the user, the post, and the KB write-back.
 
-The per-step routing table (which step runs in which child, what enters the main session's prefix) is
-`pr-review/SKILL.md` § Where each step runs — read it there, never repeat it here.
+## Where each step runs (cost model, 2026-09-19)
+
+| Steps | Runs in | What enters the main prefix |
+|---|---|---|
+| 1–4 snapshot · KB · review pass · verification (+ 4b) | **`review-runner` child** — Opus `effort: medium`, ≤ 60 turns, no CLAUDE.md. The steps live only in `$BATON/agents/review-runner.md`; it works from the **bundle** `fetch-context.sh` writes plus the named exceptions in its § Contract | its return only: the 5a overview + `CTX:` / `NEEDS` / `NOTE:` lines (≤ 3K tokens) |
+| `--auto` trivial-PR pass | **`auto-runner` child** — Sonnet, ≤ 15 turns (`reference/auto-approve.md`) | `AUTO:` / `CTX:` / `NEEDS` lines |
+| `--unattended` auto-COMMENT pass (opt-in) | same `review-runner` child — no shortcut on the review itself | its return only, same as 1–4 |
+| 5 walk · 6 post · 7 replies | **main session** — AskUserQuestion needs the user; the post carries their login | `$CTX/triage.json`, `request.json` / `replies.json`, the script previews |
+| 5b deep dives | one-question `opus` `Agent` spawned from the main session | its ≤ 10-line answer |
+| 8 KB write-back | main session, sourced from `triage.json` `evidence` + the walk decisions | the KB's traps slice (any `##`/`###` heading containing "traps") |
+
+The main session never opens `$CTX/diff.patch`, `files.json`, `reviews.json` or `threads.json` itself; if a walk
+question needs them, that is a deep dive (a child reads them). `--deep` spawns its lenses **inside** the runner (it
+has `Agent`), so the main session sees one return either way. `--local` runs the runner's steps in-session — only
+for a session that exists for this one review and ends after it, never in the `pr-scan` monitor session.
 
 ## Spawn (main session, after step 0 Coordinate)
 
@@ -19,6 +32,10 @@ Agent(
 )
 ```
 Run it in the background; relay nothing until it returns. Never spawn two runners for one PR.
+
+**`--deep`** goes into the prompt's `Flags:` **only** when the user passed it or the queue row is over `deep_lines`
+(the `!` marker); a write-audit-publish / layer-placement / grant change is a reason to *suggest* `--deep` to the
+user, not to set it.
 
 **Before spawning for a modelling PR** (`dbt/models/**`, BI-consumed tables, data-reshaping SQL): the
 main session runs one cheap `select 1` through the datalake SQL MCP. An auth
@@ -88,7 +105,7 @@ bundle shows it`:
   controlled input reach a shell/`eval` unsanitized.
 
 The bundle-vs-live-read contract (what the runner may read outside the bundle, and under which named
-exception) is stated once, in `pr-review/SKILL.md` § Contract — read it there, never repeat it here.
+exception) is stated once, in `$BATON/agents/review-runner.md` § Contract — read it there, never repeat it here.
 
 ## Deep dives during the walk (5b)
 
