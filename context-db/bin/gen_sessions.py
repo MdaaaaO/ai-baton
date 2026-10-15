@@ -23,9 +23,10 @@ MAX_ENDED sessions get a block; older ones (still in the fold) get the path with
 session that ended with no real prompt — nothing written, blank, or a "no successor" note
 (session-handoff's wording for a lane that intentionally left nothing to hand over) — does
 not appear in the Ended table at all; `has_next_prompt()` is the one place that decides "real".
-Ended sessions with no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago, are swept to
-sessions/archive/<name>.md (listed in sessions/archive/INDEX.md) so the live registry stays short
-under a fold. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
+Ended sessions are swept to sessions/archive/<name>.md (listed in sessions/archive/INDEX.md) so the live registry
+stays short under a fold, for one of three reasons (`archive_reason()`): the hand-off was consumed (its § Next session
+names a successor, `Register as <name>`, and a session of that name is registered, live or already archived — age
+aside), no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
 § Session stats) and `sessions/_ledger.md`. `make verify` warns when the file passes
 SESSION_INDEX_WARN bytes.
 
@@ -94,8 +95,9 @@ def rel_from_index(path: str, index_path: str) -> str:
     return os.path.relpath(path, os.path.dirname(os.path.abspath(index_path))).replace(os.sep, "/")
 
 
-# Ended sessions leave the live registry for sessions/archive/ when nothing waits on them: no next-session
-# prompt (nothing for a successor to pick up), or ended more than ARCHIVE_DAYS ago. Makefile:
+# Ended sessions leave the live registry for sessions/archive/ when nothing waits on them: the hand-off was consumed
+# (its named successor registered), no next-session prompt (nothing for a successor to pick up), or ended more than
+# ARCHIVE_DAYS ago. Makefile:
 # `make … ARCHIVE_DAYS=<n>` (exported as SESSION_ARCHIVE_DAYS); 0 sweeps every ended session; --no-archive skips.
 ARCHIVE_DIR = os.path.join(SESS_DIR, "archive")
 ARCHIVE_OUT = os.path.join(ARCHIVE_DIR, "INDEX.md")
@@ -170,8 +172,38 @@ def by_heartbeat(items: list[dict]) -> list[dict]:
     return sorted(items, key=lambda r: r.get("heartbeat", ""), reverse=True)
 
 
-def archive_reason(m: dict) -> str | None:
-    """Why an ended session leaves the live registry — None while a successor may still need it."""
+# The handoff skill's closing form: the prompt starts "Register as <name>" (the name may be wrapped in backticks or
+# quotes). A session name is a file stem: letters, digits, `-`, `_`, `.`.
+SUCCESSOR_RE = re.compile(r"\bRegister as\s+[`'\"]?([A-Za-z0-9][A-Za-z0-9_.-]*)", re.IGNORECASE)
+_DATED_SUFFIX_RE = re.compile(r"-\d{8}(?:-\d+)?$")  # archive_path()'s collision suffix
+
+
+def named_successors(m: dict) -> list[str]:
+    """The session names `m`'s § Next session asks a successor to register as (trailing `.` of a sentence dropped)."""
+    return [n.rstrip(".") for n in SUCCESSOR_RE.findall(m.get("_next", "") or "") if n.rstrip(".")]
+
+
+def archived_names() -> set[str]:
+    """Names of the sessions already swept to sessions/archive/ (a collision-suffixed file counts for its base name)."""
+    names: set[str] = set()
+    for p in glob.glob(os.path.join(ARCHIVE_DIR, "*.md")):
+        stem = os.path.splitext(os.path.basename(p))[0]
+        if stem.startswith("_") or stem == "INDEX":
+            continue
+        names.add(stem)
+        names.add(_DATED_SUFFIX_RE.sub("", stem))
+    return names
+
+
+def archive_reason(m: dict, registered: frozenset[str] | set[str] = frozenset()) -> str | None:
+    """Why an ended session leaves the live registry — None while a successor may still need it. `registered` is
+    every session name that exists, live (any status) or already archived: a hand-off whose named successor is in
+    it was consumed, so the row goes regardless of age."""
+    me = m.get("session", "")
+    if has_next_prompt(m):
+        for succ in named_successors(m):
+            if succ != me and succ in registered:
+                return f"successor {succ} registered"
     a = age_hours(m.get("heartbeat", ""))
     if a is None:
         return None  # unparsable ended-at: never drop a row on a bad value (same stance as MAX_ENDED)
@@ -198,11 +230,13 @@ def archive_path(name: str, m: dict) -> str:
         n += 1
 
 
-def sweep(ended: list[dict], dry_run: bool) -> tuple[list[dict], int]:
-    """Move the ended sessions nothing waits on to sessions/archive/; returns (still live, moved count)."""
+def sweep(ended: list[dict], dry_run: bool, registered: frozenset[str] | set[str] = frozenset()
+          ) -> tuple[list[dict], int]:
+    """Move the ended sessions nothing waits on to sessions/archive/; returns (still live, moved count).
+    `registered` is every session name known before the sweep, so a chain A → B → C archives A and B in one run."""
     keep, moved = [], 0
     for m in ended:
-        why = archive_reason(m)
+        why = archive_reason(m, registered)
         if why is None:
             keep.append(m)
             continue
@@ -236,7 +270,7 @@ def write_archive_index(now: datetime) -> int:
         "# `.context/sessions/archive/` — SESSION INDEX ARCHIVE",
         "",
         "> **Generated — do not hand-edit.** Ended sessions that left the live registry (`SESSION_INDEX.md`): "
-        f"no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago. Each row's full file is "
+        f"their named successor registered, no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago. Each row's full file is "
         "`sessions/archive/<file>` (its § Next session, § Session stats); the cross-session ledger stays "
         "`sessions/_ledger.md`. Nothing here is read at session start.",
         "",
@@ -281,7 +315,8 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(timezone.utc)
     moved = 0
     if not a.no_archive:
-        ended, moved = sweep(ended, a.dry_run)
+        registered = {m["session"] for m in rows} | archived_names()
+        ended, moved = sweep(ended, a.dry_run, registered)
     if a.dry_run:
         print(f"dry run — {len(active)} active, {len(ended)} ended stay in the live registry")
         return 0
@@ -304,7 +339,7 @@ def main(argv: list[str] | None = None) -> int:
         "the table points at it (`sessions/<name>.md` § Next session); a session that ended with nothing "
         "to hand over is not listed here (its file and stats stay in `sessions/<name>.md` § Session stats "
         "and `sessions/_ledger.md`, and it is swept on the usual schedule). "
-        f"Ended sessions with no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago, are swept "
+        f"Ended sessions whose named successor has registered, with no next-session prompt for {NOPROMPT_HOURS} h, or ended more than {ARCHIVE_DAYS} days ago, are swept "
         "to `sessions/archive/` (see `sessions/archive/INDEX.md`).",
         "",
         f"_generated {now.astimezone(LOCAL_TZ).strftime(profile.LOCAL_TIME_FMT)} · {len(active)} active · "

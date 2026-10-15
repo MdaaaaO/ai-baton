@@ -225,6 +225,80 @@ class ArchiveSweep(unittest.TestCase):
         self.assertNotIn("would archive fresh-with-prompt", out)
 
 
+class ConsumedHandoff(unittest.TestCase):
+    """An ended session whose § Next session names a successor that is registered leaves at the next sweep, age aside."""
+
+    def setUp(self):
+        self.tmp, self.root = blank_root()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def live(self):
+        return sorted(p.stem for p in (self.root / "sessions").glob("*.md") if not p.name.startswith("_"))
+
+    def test_chain_archives_consumed_links_and_keeps_the_head(self):
+        session_file(self.root, "sess-a", "ended", 1, "Register as sess-b, pick up the parser work.")
+        session_file(self.root, "sess-b", "ended", 0.5, "Register as `sess-c`, then re-arm the watch.")
+        session_file(self.root, "sess-c", "active", 0, "")
+        out = run(self.root, "--dry-run")
+        self.assertIn("would archive sess-a", out)
+        self.assertIn("would archive sess-b", out)
+        self.assertIn("(successor sess-b registered)", out)
+        self.assertIn("(successor sess-c registered)", out)
+        self.assertNotIn("would archive sess-c", out)
+        self.assertEqual(self.live(), ["sess-a", "sess-b", "sess-c"])  # dry run moves nothing
+        run(self.root)
+        self.assertEqual(self.live(), ["sess-c"])
+        self.assertEqual(sorted(p.stem for p in (self.root / "sessions" / "archive").glob("sess-*.md")),
+                         ["sess-a", "sess-b"])
+
+    def test_unregistered_successor_stays(self):
+        session_file(self.root, "sess-d", "ended", 1, "Register as sess-e, pick up the parser work.")
+        out = run(self.root, "--dry-run")
+        self.assertNotIn("would archive", out)
+        run(self.root)
+        self.assertEqual(self.live(), ["sess-d"])
+        self.assertIn("`sess-d`", (self.root / "SESSION_INDEX.md").read_text())
+
+    def test_successor_already_archived_counts_as_registered(self):
+        session_file(self.root, "sess-f", "ended", 30, "Register as sess-g.")  # aged out, swept in the first run
+        session_file(self.root, "sess-g", "ended", 30, "")
+        run(self.root)
+        self.assertEqual(self.live(), [])
+        session_file(self.root, "sess-h", "ended", 1, "Register as sess-f, continue.")
+        self.assertIn("would archive sess-h", run(self.root, "--dry-run"))
+        # a collision-suffixed archive file still names its base session
+        (self.root / "sessions" / "archive" / "sess-f.md").rename(self.root / "sessions" / "archive" / "sess-f-20260901.md")
+        self.assertIn("(successor sess-f registered)", run(self.root, "--dry-run"))
+
+    def test_successor_in_any_live_status_counts(self):
+        session_file(self.root, "sess-i", "ended", 1, "Register as sess-j.")
+        session_file(self.root, "sess-j", "idle", 0, "")
+        self.assertIn("would archive sess-i", run(self.root, "--dry-run"))
+
+    def test_self_reference_and_no_successor_note_do_not_count(self):
+        session_file(self.root, "sess-k", "ended", 1, "Register as sess-k again later.")
+        session_file(self.root, "sess-l", "ended", 1, "No successor. Register as sess-k if you disagree.")
+        out = run(self.root, "--dry-run")
+        self.assertNotIn("would archive", out)
+
+    def test_windows_still_apply_without_a_named_successor(self):
+        session_file(self.root, "sess-m", "ended", 1, "Read the context doc and carry on.")  # real prompt, no successor
+        session_file(self.root, "sess-n", "ended", 30, "Read the context doc and carry on.")
+        out = run(self.root, "--dry-run")
+        self.assertNotIn("would archive sess-m", out)
+        self.assertIn("would archive sess-n", out)
+        self.assertIn("> 7d", out)
+
+    def test_archive_index_note_names_the_reason(self):
+        session_file(self.root, "sess-a", "ended", 1, "Register as sess-b.")
+        session_file(self.root, "sess-b", "active", 0, "")
+        run(self.root)
+        self.assertIn("named successor registered", (self.root / "sessions" / "archive" / "INDEX.md").read_text())
+        self.assertIn("named successor has registered", (self.root / "SESSION_INDEX.md").read_text())
+
+
 class EndedTablePromptPointer(unittest.TestCase):
     """#266: the Ended table points at a real next-session prompt instead of quoting its own words, and
     lists a session at all only when it left one — an empty prompt, a whitespace-only one, and a "no

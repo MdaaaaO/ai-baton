@@ -38,7 +38,7 @@ Live session registry (who is working on what, right now — see SESSION_INDEX.m
   make -C $BATON/context-db session-stats             # print this session's stats block (turns, ctx, tokens, ~$, PRs…)
   make -C $BATON/context-db session-activity          # what this session did, grouped (files/commits/PRs/tickets/drafts/compactions), from the transcript
   make -C $BATON/context-db session-index             # regenerate SESSION_INDEX.md (MAX_ENDED=5 rows of ended sessions)
-  make -C $BATON/context-db session-archive           # sweep ended sessions (> ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only
+  make -C $BATON/context-db session-archive           # sweep ended sessions (successor registered, > ARCHIVE_DAYS=7 old, or no next prompt for NOPROMPT_HOURS=48) to sessions/archive/; DRY=1 lists only, naming each reason
   Every session-* target refreshes the row's `stats:` line from the transcript named by
   $CLAUDE_CODE_SESSION_ID (or SESSION_ID=<uuid>); NOSTATS=1 skips it. Zero model turns.
 
