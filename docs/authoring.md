@@ -37,6 +37,9 @@ Also failed: a bare value with a ` #` in it (YAML cuts it there — quote it), a
   (`kit-verify` warns past `BODY_WARN_LINES`), 300 the hard cap (`BODY_MAX_LINES`) — a unit that genuinely needs
   more is named in `BODY_LINES_ALLOW` (kit_verify.py) with a reason, not left to grow past the warning silently.
   Rationale, history and worked scripts go to `reference.md` / `references/` (loaded on demand).
+- **The current rule only**: no owner-decision provenance, no dated "since"/"added"/"retired" notes — the when
+  and why live in git and `docs/decisions/` (`kit-verify` warns on a date in body prose; code is exempt;
+  `docs/decisions/0004-bodies-state-the-current-rule.md`).
 - **No environment value**: no id, host, org / team / channel name, person, ticket key, timezone literal — the
   body names the fact (`metadata.facts`) and reads it (`kb.py get`); a missing one is resolved as `docs/env-facts.md`
   § How a skill resolves a fact says, and a forked worker returns exactly `NEEDS <system>.<kind> <name>`.

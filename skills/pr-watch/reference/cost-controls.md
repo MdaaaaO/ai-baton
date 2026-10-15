@@ -65,3 +65,12 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
   original head, reused on the re-arm, so the state is kept (re-arming used to report the same move twice). The dir is shared by every session
   on the same machine: a successor taking over a PR inherits the silence and reads the current verdict from the
   predecessor's `## Open PRs` list instead.
+
+## Why park
+
+The shell polling is free; an idle Monitor is not: each 30-min expiry is a wake-up at full prefix. 3 PRs × one
+Monitor each ≈ 6 expiry wake-ups/h idle; one multi-PR Monitor ≈ 2/h; a parked session = 0. One idle session with
+three 30-min watchers once ran 30–40 turns/h all night before the park rule existed. A PR waiting on an
+`update-branch` only the user's machine can run, a human review or a third party is not something a live session
+makes happen faster — hence `SKILL.md` § Park when the gates are not yours.
+

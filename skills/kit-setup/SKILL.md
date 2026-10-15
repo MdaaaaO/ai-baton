@@ -2,9 +2,9 @@
 name: kit-setup
 description: "Scaffold this workspace for the kit from inside a session: runs the kit's setup.sh --personal here, reports the result, hands over to /kit-health. Use once, when setting up this workspace right after plugin install."
 metadata:
-  version: "2"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "3"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
 user-invocable: true
 ---
 
@@ -12,7 +12,7 @@ user-invocable: true
 
 The plugin's install path moves on every update, so a shell cannot name `setup.sh` without looking it up. A session
 can: the SessionStart hook exports the kit root as `$BATON` (and `.claude` on a clone), so this skill runs the
-setup script in place (#97). `setup.sh` never overwrites a file and is safe to re-run.
+setup script in place. `setup.sh` never overwrites a file and is safe to re-run.
 
 ## 1. Check
 

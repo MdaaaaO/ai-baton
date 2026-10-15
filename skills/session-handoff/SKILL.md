@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "34"
+  version: "35"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
 user-invocable: true
@@ -69,14 +69,14 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    the registry step, so no event fires into a session that is ending (and the successor re-arms from a
    clean list, one watcher per PR across sessions). A session whose PRs all wait on host/human gates
    should *arrive* here after two idle Monitor windows rather than re-arming a third — an idle watcher
-   costs a full-prefix wake-up per expiry, a parked session costs nothing (owner decision, 2026-09-22; `pr-watch`
+   costs a full-prefix wake-up per expiry, a parked session costs nothing (`pr-watch`
    § Park when the gates are not yours).
 8. **What the session did, then its stats.** First run `make -C $BATON/context-db session-activity` (zero
    model turns; the transcript's files edited, commits, PRs, tickets, drafts and compactions, identifiers only)
    and treat the list as a checklist: every item is reflected in the context doc above or named here as
    deliberately left out; no transcript → one line saying so, then flush from memory as before. The same
-   block lands under `## What this session did` at `session-end`. Then the stats (owner decision,
-   2026-09-19: "stats for geeks"). Run `make -C $BATON/context-db session-stats` — it prints **the
+   block lands under `## What this session did` at `session-end`. Then the stats:
+   run `make -C $BATON/context-db session-stats` — it prints **the
    block** (window, prompts, token split, spend basis, top tools, delegation, PR + ticket lists,
    hand-offs; zero model turns, derived from the transcript via `$CLAUDE_CODE_SESSION_ID`), which lands
    for you under `## Session stats` in `.context/sessions/<name>.md`, together with one row in
@@ -88,7 +88,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    - one line of *judgment* next to the numbers in the context doc (what drove the cost: fat
      prefix × watcher events, a CI-log read at full prefix, etc.) — the numbers alone don't teach the
      next session anything.
-   Turns are deduped API requests; spend is a per-model list-price estimate and, since 2026-09-22, the
+   Turns are deduped API requests; spend is a per-model list-price estimate and the
    TOTAL of main session + every subagent transcript (`<session-id>/subagents/*.jsonl`) — quote the total,
    the block shows the main/subagent split — and say "estimate" when you quote it. If the transcript isn't discoverable (no
    `CLAUDE_CODE_SESSION_ID`, e.g. a subagent), say so and skip; never invent the figures.
@@ -105,7 +105,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    row: a local file, zero model turns, never a publish.
    Then free the review snapshots: `python3 $BATON/context-db/bin/kit_profile.py scratch --sweep-pr-review` removes only this
    session's own `pr-review/` scratch (`next.md` and `session-name` stay).
-10. **Next-session prompt — only when there is one to write (owner decision, 2026-09-19; a closing session
+10. **Next-session prompt — only when there is one to write (a closing session
     with nothing to hand over does not force one).** Decide first: does *this* session own follow-on work
     — an open PR, a ticket still in progress, or an agreed next step on its own epic? Work that belongs to
     another session, or that simply finished clean, does not count.

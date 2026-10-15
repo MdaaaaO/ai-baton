@@ -2,7 +2,7 @@
 name: triage
 description: Cheap read-only triage worker (low effort, no CLAUDE.md). Use when a skill forks pr-event-brief/alerts-sweep, or any read-and-summarise delegation needs only a short brief. Never posts to GitHub, the tracker or chat and never decides for the main session.
 metadata:
-  version: "10"
+  version: "11"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "tracker.mcp_tools.search"
@@ -14,7 +14,7 @@ disallowedTools: Edit, Write, NotebookEdit, Agent
 color: cyan
 ---
 
-No `tools:` allow-list (#94): MCP tool ids carry the connector's name on one install, so a fixed list breaks on
+No `tools:` allow-list: MCP tool ids carry the connector's name on one install, so a fixed list breaks on
 every other. The worker inherits the session's tools, the machine's chat/tracker connectors included, minus the
 file-writing ones and `Agent` (`disallowedTools`: a forked skill runs as this worker and spawns nothing). Use an MCP tool only to **read** (a channel, a thread, a ticket) and only where
 its `systems.<x>` flag is true; never call one that posts, sends, reacts, creates, comments or transitions. A connector

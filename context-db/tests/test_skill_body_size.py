@@ -22,13 +22,15 @@ import frontmatter as fmt  # noqa: E402
 # up to 263) and its restructured length — loose enough that a later, legitimate small edit will
 # not trip the test, tight enough that reverting the restructuring trips it immediately.
 LIMITS = {
-    "self-assessment": (220, 1),
+    # #49: dated history stripped, lookup detail moved to reference/ — each body lost >=30% of its bytes
+    "self-assessment": (110, 5),
     # #48: runner steps moved to agents/review-runner.md, the walk to reference/walk.md, the
     # auto-approve contract to reference/auto-approve.md — the body is ~80 lines / under 6 KB now
     "pr-review": (100, 9),
-    "pr-open": (180, 1),
-    "pr-watch": (180, 1),
-    "cost-report": (140, 1),
+    "pr-open": (130, 7),
+    "pr-watch": (125, 6),
+    "cost-report": (70, 4),
+    "session-register": (155, 1),
     "dbt-sqlfluff-fixes": (110, 1),
     "gh-cli": (105, 1),
 }

@@ -51,3 +51,5 @@
 - A transcript estimate is high for cache-heavy sessions relative to a negotiated rate and low when
   the account is billed for retries; treat private-mode $ as ±20%, and lean on in/out and cheap%,
   which need no prices at all.
+- GitHub's `closed:`/`merged:` search qualifiers select by UTC date while rows are bucketed by local day, so a
+  unit near a window edge can land a day outside `[since, until]`.

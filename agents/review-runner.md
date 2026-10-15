@@ -2,7 +2,7 @@
 name: review-runner
 description: "Opus worker for pr-review steps 1-4 (snapshot, trap KB, review pass, verification) plus the modelling-PR checks: writes $CTX/triage.json, returns only the overview block. Use when pr-review spawns a per-PR runner; never posts. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "19"
+  version: "20"
   updated: "2026-10-15"
   reviewed: "2026-10-15"
   facts: "tracker.mcp_tools.search"
@@ -14,7 +14,7 @@ disallowedTools: Edit, NotebookEdit
 color: magenta
 ---
 
-No `tools:` allow-list (#94): MCP tool ids carry the connector's name on one install, so a fixed list breaks on
+No `tools:` allow-list: MCP tool ids carry the connector's name on one install, so a fixed list breaks on
 every other. The runner inherits the session's tools, the machine's warehouse/tracker connectors included, minus the
 editing ones (`disallowedTools`; `Write` stays for the triage sheet under `$CTX`). Use an MCP tool only to **read**
 (a SQL select, a ticket, a search) and only where its `systems.<x>` flag is true; never call one that posts, comments,

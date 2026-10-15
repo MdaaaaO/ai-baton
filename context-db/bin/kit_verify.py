@@ -37,8 +37,11 @@ under a renamed kind (`kb.py migrate` moves them).
     `references/…` / `$BATON/skills/<name>/…` path it cites exists, and no generic environment-fact shape
     (Slack id, custom-field id, account id, ticket key, org host, tz literal — `leak_shapes.py`, shared with
     kit-health) in the file.
+  - the body states the current rule only: an owner-decision provenance line, a `YYYY-MM-DD` date or
+    "added/retired <year>" in body prose warns (frontmatter, fenced blocks and inline code are exempt) —
+    history lives in git and `docs/decisions/`.
   - docs/loading.md's `<!-- kit-verify:<key> -->` numbers must match what this run just computed (`--loading-table`
-    prints them without running the rest of the checks).
+    prints them, then every unit's body lines and bytes largest first, without running the rest of the checks).
 With --stale N also lists units whose `reviewed` is older than N days (warning, not an error). Two more
 non-blocking notes, always on: a description that names no trigger ("Use when …", or plain "when …") or reads
 in the first person, and a `reviewed:` date older than the file's last committed edit (`--no-git` skips the
@@ -426,6 +429,21 @@ def loading_numbers() -> dict[str, int]:
     return {"units": len(units), "desc_bytes": desc_bytes, "bodies": bodies, "body_bytes": body_bytes}
 
 
+def body_sizes() -> list[tuple[str, int, int]]:
+    """(unit path relative to the kit, body lines, body bytes) for every skill and agent, largest body first — the
+    per-unit view behind `body-bytes`, printed by `--loading-table` so a growing body shows by name."""
+    out = []
+    for p in fmt.units(KIT):
+        parts = fmt.split(p.read_text(encoding="utf-8", errors="replace"))
+        body = parts[1] if parts else ""
+        out.append((str(p.relative_to(KIT)), _line_count(body), len(body.encode())))
+    return sorted(out, key=lambda r: (-r[2], r[0]))
+
+
+def _line_count(body: str) -> int:
+    return body.count("\n") + (1 if body and not body.endswith("\n") else 0)
+
+
 def loading_table_values(n: dict[str, int] | None = None) -> dict[str, str]:
     """The exact text each `<!-- kit-verify:<key> -->` marker in docs/loading.md must hold."""
     n = n or loading_numbers()
@@ -617,19 +635,9 @@ BODY_LINES_ALLOW = {
                      "live only here since #48 (pr-review's SKILL.md and reference/runner.md point at its "
                      "§ Contract) — the one sequence a spawned runner follows top to bottom, not reference "
                      "material to split out",
-    "self-assessment": "the week-file, report-block and ledger-card templates and the back-fill branch for "
-                       "every systems-of-record source are the procedure itself, not reference material to "
-                       "split out",
-    "pr-open": "the numbered 0-7 checklist (sizing gate, create with Verified/public-text-check/length_check, "
-               "reviewers, labels, watch, tracker, Slack draft, tell the user) is the one ordered sequence a "
-               "session follows top to bottom to open a PR, not reference material to split out; rationale and "
-               "detail already moved to reference/diagrams.md and reference/labels.md",
     "session-register": "the numbered startup sequence (orient, narrate-back/carousel, register, re-arm "
                "PR-watch), the heartbeat and the on-end steps are the one ordered procedure every session runs, "
                "not reference material to split out",
-    "pr-watch": "arm/re-arm, park, triage-and-act and merge are five distinct operational sequences a session "
-               "runs at different points, each already condensed to a pointer-backed summary; full mechanism "
-               "detail, tables and rationale already moved to five reference/*.md files",
     "pr-scan": "the numbered sweep steps and the exact five-section Answer template (incl. the "
                "self-executing MARK trailer) are the one procedure the fork reads top to bottom each run, "
                "not reference material to split out; column rules and the two owner-decision gates' full "
@@ -837,6 +845,28 @@ def duplicated_steps(body: str) -> list[str]:
     return out
 
 
+# Dated history in a body: the body states the current rule; when and why it changed lives in git and in
+# docs/decisions/. Frontmatter is never passed in; fenced blocks and inline code spans are exempt (a template's
+# example date, a fixture command's --since).
+DATED_HISTORY = re.compile(r"owner[- ]decision|\b20\d\d-\d\d-\d\d\b|\b(?:added|retired)\s+(?:in\s+)?20\d\d\b", re.I)
+INLINE_CODE = re.compile(r"`[^`\n]*`")
+
+
+def dated_history_hits(body: str) -> list[tuple[int, str]]:
+    """(body line, matched text) for every dated-history phrase outside fenced blocks and inline code."""
+    hits: list[tuple[int, str]] = []
+    fenced = False
+    for n, line in enumerate(body.split("\n"), 1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        for m in DATED_HISTORY.finditer(INLINE_CODE.sub("", line)):
+            hits.append((n, m.group(0)))
+    return hits
+
+
 def check_body(p: Path, rel, body: str, errors: list[str], is_agent: bool = False, warn: list[str] | None = None) -> None:
     """Environment-free checks on a unit's body: length, cited own paths exist, no fact-shaped literal."""
     warn = warn if warn is not None else []
@@ -846,15 +876,22 @@ def check_body(p: Path, rel, body: str, errors: list[str], is_agent: bool = Fals
                 errors.append(f"{rel}: body line {n} spells a `NEEDS:` report line with a colon — the fork "
                               "hand-back form is `NEEDS <system>.<kind> <name>`, never a colon (one spelling, "
                               "docs/env-facts.md § Environment facts)")
-    n_lines = body.count("\n") + (1 if body and not body.endswith("\n") else 0)
+    n_lines = _line_count(body)
+    n_bytes = len(body.encode())
     allow_reason = BODY_LINES_ALLOW.get(fmt.unit_name(p))
     if n_lines > BODY_MAX_LINES:
         errors.append(f"{rel}: body is {n_lines} lines > {BODY_MAX_LINES} — move detail into references/ (loaded on "
                       f"demand); BODY_LINES_ALLOW only silences the {BODY_WARN_LINES}-line warning, not this cap")
     elif allow_reason is None and n_lines > BODY_WARN_LINES:
-        warn.append(f"{rel}: body is {n_lines} lines > {BODY_WARN_LINES} (docs/authoring.md's target) — move detail "
+        warn.append(f"{rel}: body is {n_lines} lines > {BODY_WARN_LINES} (docs/authoring.md's target; {n_bytes:,} B) — move detail "
                     "into references/ (loaded on demand), or name the unit in BODY_LINES_ALLOW (kit_verify.py) "
                     "with a reason")
+    by_line: dict[int, list[str]] = {}
+    for n, hit in dated_history_hits(body):
+        by_line.setdefault(n, []).append(hit)
+    for n, hits in by_line.items():
+        warn.append(f"{rel}: body line {n} carries dated history ({', '.join(f'`{h}`' for h in hits)}) — state the "
+                    "current rule only; the when and why live in git and docs/decisions/")
     unit_dir = p.parent
     for n, target in cited_make_targets(body):
         if target not in make_targets():
@@ -1042,6 +1079,9 @@ def main(argv: list[str] | None = None) -> int:
         for key, val in values.items():
             note = notes.get(key)
             print(f"{key}: {val}" + (f" {note}" if note else ""))
+        print("per unit (body lines, body bytes):")
+        for rel, lines, size in body_sizes():
+            print(f"  {rel}: {lines} lines, {size:,} B")
         return 0
     saved_kb_env = kb.ENV
     if a.no_env:

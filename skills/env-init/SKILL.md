@@ -2,9 +2,9 @@
 name: env-init
 description: "Fill or refresh this machine's env fact store: run the named tool per missing/stale fact, verify, write back with provenance, ask once for the rest. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact."
 metadata:
-  version: "10"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "11"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
 user-invocable: true
 ---
 
@@ -101,7 +101,7 @@ secret, and asks the user only for what no tool can settle — once, batched.
 - **The forked-worker contract**: a `triage` / `review-runner` / `auto-runner` fork that hits a missing
   fact does not run this skill — it returns exactly `NEEDS <system>.<kind> <name>` and the main session
   runs `/env-init <system>.<kind> <name>` (the user round happens in the main session, where the user is).
-- **Migration of a store from the free-text era** (`learned-from` cells like `slack_search_channels 2026-09-24`):
+- **Migration of a store from the free-text era** (`learned-from` cells like `slack_search_channels <YYYY-MM-DD>`):
   nothing to do — `stale` reads the last date in the cell; an undated cell shows up under `--refresh` and
   is re-verified and re-dated like any other stale row.
 

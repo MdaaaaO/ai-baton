@@ -23,3 +23,21 @@
   that is still one **process** for several PRs (the multi-PR form), not one Monitor each.
 
 Source of truth for the scripts: this directory — whichever session improves them copies the change back here (no master session since 2026-09-12).
+
+## pr-merge.sh phases
+
+1. Wait for the review bot's **Assessment on the current head**, read from the review *object* (a green "PR
+   Review" check is not a review).
+2. If BEHIND, `update-branch`, then force a full bot review on the merge head with a DELETE + POST re-request of
+   the bot as a requested reviewer — a plain `POST` alone is a no-op on a merge-commit head, and the draft-toggle
+   fallback (`gh pr ready --undo && gh pr ready`) is visible to every other reviewer and cancels a
+   `ready_for_review`-triggered run, so the script uses neither — then wait again.
+3. Squash-merge when `CLEAN` + `reviewDecision APPROVED` + zero unresolved threads, **confirmed by re-reading the
+   PR's `merged_at`** — a `gh pr merge` call that reports success but leaves `merged_at` unset is not read as
+   merged.
+
+Exit 0 = confirmed merged; exit 1 = a gate failed, the merge call failed, or `merged_at` came back unset (one-line
+reason: head moved, open threads, not green, approval missing — read it and rerun after acting); exit 3 = gave up
+(CLEAN + APPROVED never held within the deadline). The script squashes with the repository's default message; a
+body ending in a `BREAKING CHANGE:` footer needs the hand merge in the squash-footers rule above.
+

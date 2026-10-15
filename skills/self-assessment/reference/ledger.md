@@ -1,6 +1,9 @@
 # Ledger update — the four sub-steps behind step 10
 
-Loaded from `SKILL.md` step 10 (`self_assessment.ledger` on). Continues after
+Loaded from `SKILL.md` step 10 (`self_assessment.ledger` on). The ledger is one private Artifact page
+holding every composed week as a copy-ready card (the copy button writes `text/html` + `text/plain` so links
+survive the paste; the tick list lives in the viewer's browser); skipping the card is the failure step 10
+exists to prevent. Continues after
 `python3 $BATON/context-db/bin/kit_profile.py get self_assessment.ledger_url`:
 
 1. **URL set** → `Artifact read` with that `url` and `path: index.html` (saves the live page locally), then

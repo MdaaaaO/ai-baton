@@ -3,16 +3,15 @@ name: slack-draft
 description: "Every Slack draft a session makes for the user: create it (never paste text), record it, and read the channel/thread before any follow-up or status claim, since the user may edit drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
-  version: "9"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "10"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   requires: "slack"
 ---
 
 # slack-draft — a draft is a hand-off, not a send
 
-Owner decision (2026-09-18): "drafts sometimes go out and you should confirm if they went out and in what
-form." A session that assumes a draft is still pending — or gone — without reading the target
+Drafts sometimes go out: confirm whether each one went out and in what form. A session that assumes a draft is still pending — or gone — without reading the target
 channel gets the state wrong in both directions: it re-drafts a message that is already live (a
 duplicate in the composer the user must discard) or reports "unsent" for something the team already
 answered.
