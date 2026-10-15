@@ -373,6 +373,18 @@ class MemoryWiring(unittest.TestCase):
         self.assertEqual(r.counts[kh.WARN], 1, text)
         self.assertIn("/memory-prune", text)
 
+    def test_a_secret_within_budget_warns_and_names_the_skill(self):
+        with tempfile.TemporaryDirectory() as td:
+            mem = self.fixture(td, "short")
+            (mem / "a.md").write_text('---\nname: a\ndescription: "d"\nmetadata:\n  type: user\n---\ntoken '
+                                      + "gh" + "p_" + "A1b2C3d4" * 4 + "\n", encoding="utf-8")
+            kh, r = self.run_check(mem, MEMORY_LINE_WARN="150")
+        text = "\n".join(r.lines)
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.OK]), (1, 0), text)
+        self.assertIn("secret-shaped", text)
+        self.assertIn("/memory-prune", text)
+        self.assertNotIn("within budget", text)
+
     def test_within_budget_is_ok(self):
         with tempfile.TemporaryDirectory() as td:
             kh, r = self.run_check(self.fixture(td, "short"), MEMORY_LINE_WARN="150")

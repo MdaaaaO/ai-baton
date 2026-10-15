@@ -103,6 +103,15 @@ class ExitCodes(Fixture):
         self.assertEqual(rc, 0, out)
         self.assertIn(f"/ {mc.INDEX_WARN} B", out)
 
+    def test_a_secret_exits_1_inside_the_budget_and_the_summary_names_it(self):
+        token = "gh" + "p_" + "A1b2C3d4" * 4
+        self.write("a.md", note("a", f"fixture: {token}"))
+        rc, out = self.run_check()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("1 SECRET — /memory-prune", out.splitlines()[0])
+        self.assertNotIn("within budget", out)
+        self.assertNotIn(token, out)
+
     def test_findings_inside_the_budget_do_not_change_the_exit(self):
         self.write("c.md", note("c"))  # unindexed
         rc, out = self.run_check()
@@ -198,6 +207,29 @@ class Dump(Fixture):
         self.assertIn("key <redacted: AWS access key id>", out)
         self.assertIn("````markdown\n" + note("a").rstrip("\n") + "\n````", out)
         self.assertEqual(before, {p.name: p.read_bytes() for p in self.mem.iterdir()}, "--dump must not write")
+
+    def test_dump_redacts_a_multi_line_private_key_from_begin_to_end(self):
+        kind = "OPENSSH " + "PRIVATE KEY"
+        body = ["b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABBGYWtl",
+                "S2V5Rm9yVGVzdHNPbmx5Tm90QVJlYWxLZXlKdXN0QmFzZTY0Qm9keUxpbmVzRm9yVGhl",
+                "UmVkYWN0aW9uVGVzdA=="]
+        key = "\n".join(["-----BEGIN " + kind + "-----", *body, "-----END " + kind + "-----"])
+        self.write("a.md", note("a", f"deploy key:\n\n```\n{key}\n```\n\nafter the key"))
+        p = subprocess.run([sys.executable, str(SCRIPT), "--dir", str(self.mem), "--dump"], capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        out = p.stdout
+        for line in body:
+            self.assertNotIn(line, out)
+        self.assertNotIn("-----END", out)
+        self.assertNotIn("-----BEGIN", out)
+        self.assertIn("```\n<redacted: private key>\n```\n\nafter the key", out)
+        _, check = self.run_check()
+        self.assertIn("SECRET a.md:", check)
+
+    def test_an_unterminated_private_key_is_redacted_to_the_end_of_the_note(self):
+        text = "x\n-----BEGIN " + "RSA PRIVATE KEY-----\nTUlJRW9nSUJBQUtDQVFFQXRydW5jYXRlZA\n"
+        self.assertEqual(mc.redact(text), "x\n<redacted: private key>")
 
     def test_fence_outgrows_the_longest_backtick_run(self):
         self.write("a.md", note("a", "`````five`````"))

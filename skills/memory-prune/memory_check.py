@@ -20,10 +20,12 @@ Prints one summary line, then one line per finding, `<KIND> <file>[:<line>] <det
   LARGE          a note over 10 KB (the classifier judges it per section)
 
 `--dump` prints the archive text instead: a `## Run <date time>` heading, then every note and `MEMORY.md` verbatim,
-each under `### <file>` in its own fence, secret-shaped values replaced by `<redacted: <kind>>` — the input
+each under `### <file>` in its own fence, secret-shaped values replaced by `<redacted: <kind>>` (a private-key block
+whole, BEGIN to END) — the input
 `memory-prune` parks in `archive/` before it changes anything. Exit 0, or 2 on a missing dir.
 
-Exit 0 within budget · 1 past the budget (INDEX_BUDGET or LONG_LINE) · 2 when the memory dir is missing. Never writes.
+Exit 0 within budget · 1 past the budget (INDEX_BUDGET or LONG_LINE) or on any SECRET (the summary names which) · 2 when
+the memory dir is missing. Never writes.
 Stdlib only.
 """
 from __future__ import annotations
@@ -52,6 +54,11 @@ LINK_RE = re.compile(r"\]\(([^)\s]+?\.md)(?:#[^)]*)?\)")
 WIKI_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
 WORD_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
 SECRETS = [(re.compile(rx), what) for rx, what in leak_shapes.SECRET_SHAPES]
+# The multi-line secrets the shapes above only see by their first line: a PEM/OpenSSH/PGP private-key block, from its
+# BEGIN line through the matching END line (or the end of the text when the END line is missing), so `--dump` keeps
+# neither the key body nor the END line. Applied before the one-line shapes.
+SECRET_BLOCKS = [(re.compile(r"-----BEGIN ([A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?)-----.*?(?:-----END \1-----|\Z)", re.S),
+                  "private key")]
 
 
 def env_int(raw: str, default: int) -> int:
@@ -151,8 +158,9 @@ def secret_hits(name: str, text: str) -> list[str]:
 
 
 def redact(text: str) -> str:
-    """`text` with every secret-shaped value replaced by `<redacted: <kind>>` — the ctx store refuses the original."""
-    for rx, what in SECRETS:
+    """`text` with every secret-shaped value replaced by `<redacted: <kind>>` — the ctx store refuses the original. A
+    multi-line block (`SECRET_BLOCKS`) goes whole, BEGIN to END, before the one-line shapes run."""
+    for rx, what in SECRET_BLOCKS + SECRETS:
         text = rx.sub(f"<redacted: {what}>", text)
     return text
 
@@ -173,7 +181,7 @@ def dump(mem: Path, now: str) -> str:
 
 
 def check(mem: Path, workspace: Path, index_warn: int = INDEX_WARN, line_warn: int = LINE_WARN) -> tuple[str, list[str], bool]:
-    """(summary line, findings, over budget) for an existing memory dir."""
+    """(summary line, findings, act now) for an existing memory dir: act now is past the budget or any SECRET."""
     findings: list[str] = []
     idx = mem / INDEX
     index_text = idx.read_text(encoding="utf-8", errors="replace") if idx.is_file() else ""
@@ -241,11 +249,13 @@ def check(mem: Path, workspace: Path, index_warn: int = INDEX_WARN, line_warn: i
         if size > LARGE_NOTE:
             findings.append(f"LARGE {p.name} {size // 1024} KB — judge it per section")
 
+    secrets = sum(1 for f in findings if f.startswith("SECRET "))
+    flags = (["OVER BUDGET"] if over else []) + ([f"{secrets} SECRET"] if secrets else [])
     summary = (f"memory-check: index {index_bytes} B / {index_warn} B · {len(index_lines)} lines "
                f"({histogram([len(x) for x in index_lines])}) · {long_lines} over {line_warn} chars · "
                f"{len(notes)} notes {body_bytes // 1024} KB · {len(findings)} findings · "
-               + ("OVER BUDGET — /memory-prune" if over else "within budget"))
-    return summary, findings, over
+               + (" + ".join(flags) + " — /memory-prune" if flags else "within budget"))
+    return summary, findings, bool(flags)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -263,11 +273,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     index_warn = env_int(os.environ.get("MEMORY_INDEX_WARN", ""), INDEX_WARN)
     line_warn = env_int(os.environ.get("MEMORY_LINE_WARN", ""), LINE_WARN)
-    summary, findings, over = check(mem, Path(a.workspace), index_warn, line_warn)
+    summary, findings, act = check(mem, Path(a.workspace), index_warn, line_warn)
     print(summary)
     for f in findings:
         print(f)
-    return 1 if over else 0
+    return 1 if act else 0
 
 
 if __name__ == "__main__":

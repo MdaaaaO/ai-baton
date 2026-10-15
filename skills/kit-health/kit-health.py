@@ -27,8 +27,8 @@ Sections:
                   same filesystem) named above DISK_WARN_PCT; the scratch dirs of ended sessions with their
                   sizes (`--sweep-scratch` removes them); a stale `$CLAUDE_ENV_FILE` (a `BATON`/`CLAUDE_PROJECT_DIR` path that no longer
                   exists, or an `export BATON=` line outside the session-env block); the auto-memory budget
-                  (`memory-prune`'s `memory_check.py`: a WARN past it); one legacy line: a leftover
-                  `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
+                  (`memory-prune`'s `memory_check.py`: a WARN past it or on a secret-shaped value); one legacy
+                  line: a leftover `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
                   scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
                   and the pinned `ctx --version` answers the API the adapter expects; an environment's
@@ -1593,12 +1593,17 @@ def sync_wiring(r: Report) -> None:
 
 
 def memory_wiring(r: Report) -> None:
-    """§ 4's auto-memory row: `memory-prune`'s read-only check. Past its budget (exit 1) one WARN naming `/memory-prune`;
-    within it an OK line with the summary; no memory dir (exit 2) is the symlink row's business, so a plain line."""
+    """§ 4's auto-memory row: `memory-prune`'s read-only check. Past its budget or holding a secret-shaped value
+    (exit 1) one WARN naming `/memory-prune` and which of the two; within it an OK line with the summary; no memory
+    dir (exit 2) is the symlink row's business, so a plain line."""
     rc, out, err = sh([sys.executable, str(KIT / "skills" / "memory-prune" / "memory_check.py")], timeout=60)
     line = (out or err).splitlines()[0] if (out or err) else ""
     if rc == 1:
-        r.add(WARN, "machine", f"auto-memory over budget — run `/memory-prune` ({line.removeprefix('memory-check: ')})")
+        secrets = sum(1 for x in (out or "").splitlines() if x.startswith("SECRET "))
+        why = ((["over budget"] if "OVER BUDGET" in line else [])
+               + ([f"holds {secrets} secret-shaped value(s)"] if secrets else []))
+        r.add(WARN, "machine", f"auto-memory {' and '.join(why) or 'needs a prune'} — run `/memory-prune` "
+                               f"({line.removeprefix('memory-check: ')})")
     elif rc == 0:
         r.add(OK, "machine", f"auto-memory within budget ({line.removeprefix('memory-check: ')})")
     elif rc == 2:

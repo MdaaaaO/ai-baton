@@ -24,8 +24,8 @@ Run `python3 $BATON/skills/memory-prune/memory_check.py` (read-only; `--dir <pat
 - `$ARGUMENTS` is `--check` → show the output and stop.
 - Exit 0 with no finding and the user asked for no prune → show the summary line and stop.
 - Otherwise go on. Findings: `INDEX_BUDGET`/`LONG_LINE` (exit 1, past `MEMORY_INDEX_WARN`/`MEMORY_LINE_WARN`),
-  `NO_FILE`, `NO_INDEX`, `DANGLING`, `FRONTMATTER`, `RULES_QUOTE`, `SECRET` (kind and line, never the value),
-  `LARGE` (> 10 KB: judged per section).
+  `NO_FILE`, `NO_INDEX`, `DANGLING`, `FRONTMATTER`, `RULES_QUOTE`, `SECRET` (exit 1 as well; kind and line, never
+  the value), `LARGE` (> 10 KB: judged per section).
 
 ## 2. Classify — one Sonnet worker
 
@@ -48,7 +48,8 @@ Spawn ONE `Agent` (`subagent_type: general-purpose`, `model: sonnet`, foreground
 
 1. `SCRATCH=$(python3 $BATON/context-db/bin/kit_profile.py scratch)`, then
    `python3 $BATON/skills/memory-prune/memory_check.py --dump > "$SCRATCH/memory-pruned.md"`: every note and the
-   index verbatim, each fenced under `### <file>`, secret-shaped values already replaced by `<redacted: <kind>>`.
+   index verbatim, each fenced under `### <file>`, secret-shaped values already replaced by `<redacted: <kind>>` (a
+   private-key block whole, BEGIN to END).
 2. `make -C $BATON/context-db new TYPE=log DOMAIN=archive SLUG=memory-pruned-<YYYY-MM-DD> TITLE="Memory pruned
    <YYYY-MM-DD>"`. An earlier run today: `new` refuses, keep the existing doc.
 3. `ctx_insert` the dump after the title line (Bash: `python3 $BATON/context-db/bin/ctx_adapter.py ctx insert
@@ -87,6 +88,6 @@ lines: index bytes before → after, notes before → after, the archive key.
 
 ## Related
 
-- `kit-health` — its § 4 runs `memory_check.py` and warns past the budget, naming this skill.
+- `kit-health` — its § 4 runs `memory_check.py` and warns past the budget or on a `SECRET`, naming this skill.
 - `session-retro` — suggests this skill after a session that added notes.
 - `session-handoff` — writes notes and index lines; this skill trims them later.
