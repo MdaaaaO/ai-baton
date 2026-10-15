@@ -54,14 +54,9 @@ only where the environment has Slack (`systems.slack`); everything else holds in
    Also run `python3 $BATON/context-db/bin/length_check.py <file> --surface pr --repo <o>/<r>` on the same
    file — a warning (step 7), never a blocker; a long template overrides the budget via
    `length.repos.<o>/<r>.pr_words`.
-2. **Reviewers**: `python3 $BATON/skills/pr-open/codeowners.py resolve <o>/<r> --pr <n>` (reads CODEOWNERS on
-   the PR's base branch). Exit **0** → request exactly its `team:`/`user:` lines plus a non-empty
-   `github.review_bot` via `gh api -X POST repos/<o>/<r>/pulls/<n>/requested_reviewers` (`reviewers[]=`,
-   `team_reviewers[]=`). Exit **3** → the repo is readable but no CODEOWNERS line owns a changed path (or
-   there is no file): nothing to request, say so (the bot is still requested). Exit **2** → the read failed
-   (stderr `FAIL …` says why) — never "nothing to request": retry once, then request by hand from the
-   CODEOWNERS file you can see, or say the reviewer step is blocked. `github.owner_teams` only names the
-   approval you cannot give yourself.
+2. **Reviewers**: `python3 $BATON/skills/pr-open/codeowners.py resolve <o>/<r> --pr <n>`: exit **0** → request exactly
+   its `team:`/`user:` lines plus a non-empty `github.review_bot` (`gh api -X POST repos/<o>/<r>/pulls/<n>/requested_reviewers`);
+   exit **3** → nothing to request; exit **2** is a failed read, never "nothing to request" — `reference/codeowners.md`.
 3. **Labels — always, in every repo, whether or not the repo asks for them** (owner decision, 2026-09-11 and
    2026-09-18: "applying tags should not be repo specific, we always want to apply tags and follow best
    practices, even if the repo itself doesn't require it"). A PR without labels is not open. Procedure:

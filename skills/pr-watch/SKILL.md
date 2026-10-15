@@ -136,14 +136,9 @@ low effort, no CLAUDE.md — and blocks until it returns). You get a ≤10-line 
 to GitHub and stay on the main model. On a real `HEAD MOVED`, re-request the bot and run
 `python3 $BATON/skills/pr-open/diagram-plan.py --pr <o/r> <n> --check` yourself (one script call) —
 `OK` / `NO MARKER` → nothing; `DRIFT` (incl. a malformed marker) → fork `pr-event-brief` with the HEAD
-MOVED line only (the brief reruns the check itself), and act on its `REDRAW` per `docs/diagrams.md`. Also run
-`python3 $BATON/skills/pr-open/codeowners.py check <o/r> --pr <n> [--ignore <github.review_bot>]` (base-branch
-CODEOWNERS; a team counts as reviewed once a member reviewed): exit 0 `OWNERS OK` → nothing; exit 3 `OWNERS
-CHANGED +…` → report that one line and request the `+` owners per `pr-open` step 2 (the check never asks to
-remove anyone — a hand-requested extra reviewer is a stderr `note:` only); exit 2 → the read failed (stderr
-`FAIL …` says why), never "OK": retry once, then check the CODEOWNERS file by hand or say the step is
-blocked. The watcher's
-own sync emits no head move and gets no check. Skip the fork for
+MOVED line only (the brief reruns the check itself), and act on its `REDRAW` per `docs/diagrams.md`; the watcher's
+own sync emits no head move and gets no check. Also run `python3 $BATON/skills/pr-open/codeowners.py check <o/r> --pr <n>`:
+exit 0 → nothing; exit 3 `OWNERS CHANGED +…` → request the `+` owners; exit 2 is a failed read, never "OK" (`$BATON/skills/pr-open/reference/codeowners.md`). Skip the fork for
 `MERGED`/`CLOSED` (close out per `reference/events.md`), and `LOOKUP FAILED` / `ERROR … startup:` (never fork
 `pr-event-brief` for either — a failed read is not a PR event, there is nothing on the PR to triage). A brief slot
 marked `unverified` means fetch it yourself.
