@@ -433,8 +433,9 @@ no ctx executable at all, so it can never take long or time out; "is this an ado
 The same version record
 also guards a plain `adopt`: one whose own kit is older than what the store last recorded refuses outright (exit
 2, naming both versions, `--replace` overrides) rather than hand the store an older release's types — ctx-store's
-own `init --upgrade` does not check a type's `version` against what is already installed (it diffs bytes and the
-last-init digest only, `ctxstore/bootstrap.py`'s `init`), so nothing else would catch a silent downgrade.
+own `init --upgrade` (0.8.0 on) never writes a type schema at a lower version than the installed one either: it keeps
+it and reports it `kept: <file> (version N installed, M offered)` (`downgraded` in --json), handled like any kept file
+below; this guard is the kit-version one, and refuses before `init` runs at all.
 
 Hooks — `hook <name>` is what `hooks/hooks.json` (plugin) and `settings.json` (clone) run, with Claude Code's hook
 JSON on stdin. Every hook is a silent no-op (exit 0, no output) when ctx is not installed, when no store is named
