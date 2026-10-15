@@ -10,8 +10,10 @@ Slack drafts/sends, pr-watch monitors armed). Ticket writes are counted from bot
 tracker MCP tools named in `tracker.mcp_tools` (create / comment / transition), and Bash commands for
 GitHub issues — created: `gh issue create`, `gh api …/issues -X POST`; comments: `gh issue comment`,
 `gh api …/issues/<n>/comments` (POST); transitions: `gh issue close|reopen`, `gh issue edit` with
-`--add-label|--remove-label|--milestone`, `gh api …/issues/<n> -X PATCH`. A `gh api` body flag
-(`-f`/`-F`/`--field`/`--raw-field`/`--input`) implies POST. The JSON key is `tracker`.
+`--add-label|--remove-label|--milestone|--remove-milestone`, `gh api …/issues/<n> -X PATCH`,
+`gh api …/issues/<n>/labels` (POST/PUT/DELETE). A `gh api` body flag (`-f`/`-F`/`--field`/`--raw-field`/
+`--input`) implies POST. Only a command at the start of a shell segment counts, not a `gh issue …` quoted
+inside another command's text; a PR number through the issues endpoint counts too. The JSON key is `tracker`.
 
 Used by session.py (registry `stats:` field on every register/touch/end, `## Session stats`
 block + ledger row on `end`) and by heartbeat.sh (so a LIVE session's row carries current
@@ -238,57 +240,79 @@ PR_CREATE_RE = re.compile(r"(?<![\w-])gh\s+pr\s+create\b")
 PR_CREATE_API_RE = re.compile(r"(?<![\w-])gh\s+api\b(?:[^;|&\n]|\\\n)*?/pulls(?:[/?\s]|$)(?:[^;|&\n]|\\\n)*?-X\s+POST\b")
 PR_MERGE_RE = re.compile(r"pr-merge\.sh\s+\S+\s+(\d+)")
 PR_COMMENT_RE = re.compile(r"(?<![\w-])gh\s+pr\s+comment\s+(\d+)")
-ISSUE_CREATE_RE = re.compile(r"(?<![\w-])gh\s+issue\s+create\b")
-ISSUE_COMMENT_RE = re.compile(r"(?<![\w-])gh\s+issue\s+comment\s+(\d+)")
-ISSUE_CLOSE_RE = re.compile(r"(?<![\w-])gh\s+issue\s+close\s+(\d+)")
-# Ticket-counter shapes beyond the activity listing: a state change is a `close` / `reopen`, or an `edit` that moves
-# a label or the milestone (the GitHub adapter's transitions); a `\`-newline continuation stays inside one command.
+# Ticket-write shapes, ONE table feeding both the counters (`ticket_writes`) and the activity listing
+# (`collect_activity`) so they cannot drift. `_GH` anchors on the start of a shell segment (`^`, `;`, `&`, `|`, `(`
+# or a newline, optionally followed by `VAR=x` env prefixes), so a `gh issue ...` quoted inside another command's text
+# (a commit message, a PR body) is not a write. `_REF` lets `-R o/r` / `--repo o/r` precede the issue number. A
+# state change is a `close` / `reopen`, or an `edit` that moves a label or the milestone (the GitHub adapter's
+# transitions); a backslash-newline continuation stays inside one command.
+_GH = r"(?:^\s*|[;&|(\n]\s*)(?:\w+=\S*\s+)*gh\s+"
+_REF = r"(?:\s+(?:-R|--repo)[\s=]+\S+)*"
 _ARGS = r"(?:[^;|&\n]|\\\n)*?"
-ISSUE_REOPEN_RE = re.compile(r"(?<![\w-])gh\s+issue\s+reopen\s+(\d+)")
-ISSUE_EDIT_STATE_RE = re.compile(
-    r"(?<![\w-])gh\s+issue\s+edit\s+\d+" + _ARGS + r"--(?:add-label|remove-label|milestone)\b")
+# (counter kind, activity label, regex with an optional `n` group for the issue number)
+TICKET_SHAPES = tuple((kind, label, re.compile(rx)) for kind, label, rx in (
+    ("created", "created", _GH + r"issue\s+create\b"),
+    ("comment", "commented", _GH + r"issue\s+comment" + _REF + r"\s+(?P<n>\d+)"),
+    ("transition", "closed", _GH + r"issue\s+close" + _REF + r"\s+(?P<n>\d+)"),
+    ("transition", "reopened", _GH + r"issue\s+reopen" + _REF + r"\s+(?P<n>\d+)"),
+    ("transition", "edited", _GH + r"issue\s+edit" + _REF + r"(?:\s+(?P<n>\d+))?" + _ARGS
+     + r"--(?:add-label|remove-label|milestone|remove-milestone)\b"),
+))
+_API_LABEL = {"created": "created", "comment": "commented", "transition": "updated"}
 # `gh api` command segments, analysed in `_api_ticket_write` — the method is explicit (`-X`/`--method`) or implied
 # POST by a body flag, and the endpoint decides which counter the call feeds.
-API_CMD_RE = re.compile(r"(?<![\w-])gh\s+api\b((?:[^;|&\n]|\\\n)*)")
+API_CMD_RE = re.compile(_GH + r"api\b(?P<args>(?:[^;|&\n]|\\\n)*)")
 _API_METHOD_RE = re.compile(r"(?:-X|--method)[\s=]+['\"]?([A-Za-z]+)")
 _API_BODY_RE = re.compile(r"\s(?:-f|-F|--field|--raw-field|--input)\b")
-_API_ISSUES_RE = re.compile(r"/issues(?:/(\d+))?(/comments)?['\"]?(?=\s|$|\?)")
+_API_ISSUES_RE = re.compile(r"/issues(?:/(\d+))?(/comments|/labels\b[^\s'\"?]*)?['\"]?(?=\s|$|\?)")
 
 
-def _api_ticket_write(segment: str) -> str | None:
-    """`created` / `comment` / `transition` for one `gh api` argument string, else None. Issue-collection POST =
-    created; `/issues/<n>/comments` POST = comment; `/issues/<n>` PATCH = transition (state / labels / milestone)."""
+def _api_ticket_write(segment: str) -> tuple[str, str | None] | None:
+    """(`created` / `comment` / `transition`, issue number or None) for one `gh api` argument string, else None.
+    Issue-collection POST = created; `/issues/<n>/comments` POST = comment; `/issues/<n>` PATCH = transition (state /
+    labels / milestone); `/issues/<n>/labels` POST/PUT/DELETE = transition (labels moved)."""
     m = _API_METHOD_RE.search(segment)
     method = m.group(1).upper() if m else ("POST" if _API_BODY_RE.search(segment) else "GET")
     em = _API_ISSUES_RE.search(segment)
     if not em:
         return None
-    num, comments = em.group(1), em.group(2)
-    if method == "POST" and not num and not comments:
-        return "created"
-    if method == "POST" and num and comments:
-        return "comment"
-    if method == "PATCH" and num and not comments:
-        return "transition"
+    num, sub = em.group(1), em.group(2)
+    if method == "POST" and not num and not sub:
+        return "created", None
+    if method == "POST" and num and sub == "/comments":
+        return "comment", num
+    if method == "PATCH" and num and not sub:
+        return "transition", num
+    if method in ("POST", "PUT", "DELETE") and num and sub and sub.startswith("/labels"):
+        return "transition", num
     return None
+
+
+def ticket_events(cmd: str) -> list[tuple[str, str]]:
+    """(counter kind, activity line) for each ticket-write shape one Bash command contains — the single source
+    `ticket_writes` (counters) and `collect_activity` (listing) both read, so they agree on every shape."""
+    events: list[tuple[str, str]] = []
+    for kind, label, rx in TICKET_SHAPES:
+        m = rx.search(cmd)
+        if m:
+            n = m.groupdict().get("n")
+            events.append((kind, f"{label} #{n}" if n else label))
+    for am in API_CMD_RE.finditer(cmd):
+        hit = _api_ticket_write(am.group("args"))
+        if hit:
+            kind, n = hit
+            events.append((kind, f"{_API_LABEL[kind]} #{n}" if n else _API_LABEL[kind]))
+    return events
 
 
 def ticket_writes(cmd: str) -> set[str]:
     """Which ticket-counter kinds (`created`, `comment`, `transition`) one Bash command feeds — the GitHub-tracker
-    shapes: `gh issue create|comment|close|reopen|edit --add-label|--milestone` and the `gh api …/issues…` forms.
-    A kind counts once per command however often it repeats, like every other per-call counter here."""
-    kinds: set[str] = set()
-    if ISSUE_CREATE_RE.search(cmd):
-        kinds.add("created")
-    if ISSUE_COMMENT_RE.search(cmd):
-        kinds.add("comment")
-    if ISSUE_CLOSE_RE.search(cmd) or ISSUE_REOPEN_RE.search(cmd) or ISSUE_EDIT_STATE_RE.search(cmd):
-        kinds.add("transition")
-    for am in API_CMD_RE.finditer(cmd):
-        kind = _api_ticket_write(am.group(1))
-        if kind:
-            kinds.add(kind)
-    return kinds
+    shapes: `gh issue create|comment|close|reopen|edit --add-label|--remove-label|--milestone|--remove-milestone`
+    and the `gh api …/issues…` forms. Only a command at the start of a shell segment counts, never a `gh issue …`
+    quoted inside another command's text. A PR number through the issues endpoint counts too; the kit cannot tell
+    them apart without a network call. A kind counts once per command however often it repeats, like every other
+    per-call counter here."""
+    return {kind for kind, _ in ticket_events(cmd)}
 
 
 def _nearest_repo(path: str) -> tuple[str, str]:
@@ -357,14 +381,7 @@ def collect_activity(path: str) -> list[dict]:
                 m = PR_COMMENT_RE.search(cmd)
                 if m:
                     prs.append(f"commented #{m.group(1)}")
-                if ISSUE_CREATE_RE.search(cmd):
-                    tickets.append("created")
-                m = ISSUE_COMMENT_RE.search(cmd)
-                if m:
-                    tickets.append(f"commented #{m.group(1)}")
-                m = ISSUE_CLOSE_RE.search(cmd)
-                if m:
-                    tickets.append(f"closed #{m.group(1)}")
+                tickets.extend(line for _, line in ticket_events(cmd))
             elif name.endswith("slack_send_message_draft"):
                 drafts += 1
 

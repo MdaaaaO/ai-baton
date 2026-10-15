@@ -398,6 +398,63 @@ class TicketCounters(unittest.TestCase):
     def test_gh_issue_edit_without_a_state_flag_is_not_a_transition(self):
         self.assertEqual(self.bash("gh issue edit 12 --title y"), (0, 0, 0))
 
+    def test_remove_label_and_remove_milestone_are_transitions(self):
+        self.assertEqual(self.bash("gh issue edit 12 --remove-label blocked"), (0, 0, 1))
+        self.assertEqual(self.bash("gh issue edit 12 --remove-milestone"), (0, 0, 1))
+
+    def test_repo_flag_before_the_number(self):
+        self.assertEqual(self.bash("gh issue comment -R example/repo 12 --body x"), (0, 1, 0))
+        self.assertEqual(self.bash("gh issue close --repo example/repo 12"), (0, 0, 1))
+        self.assertEqual(self.bash("gh issue reopen -R example/repo 12"), (0, 0, 1))
+        self.assertEqual(self.bash("gh issue edit -R example/repo 12 --add-label x"), (0, 0, 1))
+
+    def test_gh_api_labels_with_method_equals_is_a_transition(self):
+        self.assertEqual(self.bash("gh api --method=POST repos/example/repo/issues/12/labels -f 'labels[]=x'"), (0, 0, 1))
+        self.assertEqual(self.bash("gh api repos/example/repo/issues/12/labels"), (0, 0, 0))  # a read
+
+    def test_a_quoted_mention_is_not_a_write(self):
+        for cmd in ("git commit -m 'fix: gh issue close 12'",
+                    "gh pr create --title x --body 'see gh issue comment 9 for context'",
+                    "echo gh issue create",
+                    "git commit -m 'gh api repos/o/r/issues -X POST'"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(ss.ticket_writes(cmd), set())
+                self.assertEqual(self.bash(cmd), (0, 0, 0))
+
+    def test_a_command_start_after_a_separator_or_env_prefix_counts(self):
+        for cmd in ("cd x && gh issue close 3", "echo hi; gh issue close 3", "(gh issue close 3)",
+                    "echo $(gh issue close 3)", "true\ngh issue close 3", "GH_TOKEN=x gh issue close 3",
+                    "  gh issue close 3"):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.bash(cmd), (0, 0, 1))
+
+    def test_counters_and_activity_agree_for_every_shape(self):
+        shapes = {
+            "gh issue create --title x": "created",
+            "gh issue comment 12 --body x": "comment",
+            "gh issue comment -R o/r 12 --body x": "comment",
+            "gh issue close 12": "transition",
+            "gh issue reopen 12": "transition",
+            "gh issue edit 12 --add-label x": "transition",
+            "gh issue edit 12 --remove-label x": "transition",
+            "gh issue edit 12 --milestone v1": "transition",
+            "gh issue edit 12 --remove-milestone": "transition",
+            "gh api repos/o/r/issues -X POST -f title=x": "created",
+            "gh api repos/o/r/issues/12/comments -f body=x": "comment",
+            "gh api repos/o/r/issues/12 -X PATCH -f state=closed": "transition",
+            "gh api --method=POST repos/o/r/issues/12/labels -f 'labels[]=x'": "transition",
+        }
+        counter = {"created": 0, "comment": 1, "transition": 2}
+        for cmd, kind in shapes.items():
+            with self.subTest(cmd=cmd):
+                want = [0, 0, 0]
+                want[counter[kind]] = 1
+                self.assertEqual(self.bash(cmd), tuple(want))
+                path = write_transcript(self.dir, "sess-ev", [assistant("t3", "2026-09-28T09:00:01Z", [tool("Bash", command=cmd)])])
+                groups = ss.collect_activity(str(path))
+                self.assertEqual([g["header"] for g in groups], ["Tickets"])
+                self.assertEqual(groups[0]["count"], 1)
+
     def test_gh_api_issue_create(self):
         self.assertEqual(self.bash("gh api repos/example/repo/issues -X POST -f title=x"), (1, 0, 0))
         self.assertEqual(self.bash("gh api repos/example/repo/issues -f title=x"), (1, 0, 0))  # a body flag implies POST
