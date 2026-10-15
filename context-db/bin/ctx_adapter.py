@@ -228,8 +228,10 @@ MESSAGE_MAX = 1000      # characters of validate findings returned as the system
 SYNC_NET_TIMEOUT = 20   # seconds one fetch or push of the context-sync pass may take inside the async hook (120 s entry:
                         # fetch + rebase + validate + push, with the two non-fast-forward retries, fit with room)
 SYNC_LOCK_WAIT = 8      # seconds that pass waits for another session's pass on the same store before leaving it to it
-WRITE_VERBS = ("log", "str_replace", "insert", "create", "fm", "new", "move", "rename", "delete", "maintain", "migrate")
-                        # the `ctx <verb>` calls that change the store: each gets a sync pass (`_sync_after_write`)
+WRITE_VERBS = ("log", "str_replace", "insert", "create", "fm", "new", "move", "rename", "delete", "maintain", "migrate",
+               "memory")  # the `ctx <verb>` calls that change the store (`memory` writes it from stdin): each gets a
+                          # catalog refresh and a sync pass (`_sync_after_write`)
+CTX_VALUE_OPTIONS = ("--store", "--now")  # ctx's global options that take the next argument as their value
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
 BIN = Path(__file__).resolve().parent
 KIT_ROOT = BIN.parent.parent  # context-db/bin -> context-db -> the kit root, where .claude-plugin/plugin.json lives
@@ -845,12 +847,21 @@ def run_ctx(args: list[str], mcp: bool = False) -> int:
     rc = subprocess.run([str(ctx), *store, *args], env=env, check=False).returncode  # noqa: S603 — the resolved ctx
     if rc == 0:
         _sync_after_write(root)
-    return rc
+    return 128 - rc if rc < 0 else rc  # a signal death is -N: exit 128+N like a shell, not 256-N
 
 
 def _verb(args: list[str]) -> str:
-    """The ctx verb of a command line: its first argument that is not an option."""
-    return next((a for a in args if not a.startswith("-")), "")
+    """The ctx verb of a command line: its first argument that is not an option or an option's value (`--store <path>`
+    and `--now <ts>` take the next argument; `--store=<path>` carries its own). A bare `--` ends the options: no verb."""
+    it = iter(args)
+    for a in it:
+        if a == "--":
+            return ""
+        if a in CTX_VALUE_OPTIONS:
+            next(it, None)
+        elif not a.startswith("-"):
+            return a
+    return ""
 
 
 def _syncs_after(args: list[str], env: dict) -> bool:
@@ -860,13 +871,15 @@ def _syncs_after(args: list[str], env: dict) -> bool:
 
 
 def _sync_after_write(root: Path) -> None:
-    """The ctx-store PostToolUse hook's sync pass (`_sync`, i.e. ctx_sync.run) for the Bash route, which that hook
-    never sees: a store with `context.sync` on and its own git repository with a remote is committed and pushed, and
-    the pass's one line (`pushed …` / `push pending …` / `conflict: …`) goes to stderr; a pass with nothing to say
+    """The ctx-store PostToolUse hook's pass (`refresh_catalogs`, then ctx_sync.run, in that order) for the Bash route,
+    which that hook never sees — a stale INDEX.md must not be what gets committed. A store with `context.sync` on
+    and its own git repository with a remote is committed and pushed, and the pass's one line (`pushed …` / `push pending …` / `conflict: …`) goes to stderr; a pass with nothing to say
     (`clean`/`off`) is silent. A failed pass never changes the exit status of the write that already landed."""
     try:
         import ctx_sync  # same dir
-        _, line = ctx_sync.run(root)
+        refresh_catalogs(root)
+        # the hook's bounds, so the worst case fits the Bash tool's 2-minute window (the defaults are 25 s / 15 s)
+        _, line = ctx_sync.run(root, timeout=SYNC_NET_TIMEOUT, lock_wait=SYNC_LOCK_WAIT)
         if not line.startswith(("clean", "off")):
             print(f"context sync: {line}", file=sys.stderr)
     except Exception as e:  # noqa: BLE001 — the write succeeded; report, never fail

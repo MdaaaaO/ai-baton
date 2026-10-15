@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests import hermetic_env
 
@@ -20,10 +21,22 @@ FAKE_CTX = f"""#!{sys.executable}
 import sys
 args = sys.argv[1:]
 store = args[1]  # --store <root>
-verb = args[2]
+rest, i = [], 0
+while i < len(args):  # ctx's globals: --store/--now take a value (the last --store wins), the verb comes next
+    if args[i] in ("--store", "--now"):
+        if args[i] == "--store":
+            store = args[i + 1]
+        i += 2
+    else:
+        rest.append(args[i])
+        i += 1
+verb = rest[0]
+if "signal" in rest:
+    import os, signal
+    os.kill(os.getpid(), signal.SIGTERM)
 if verb in ("log", "fail"):
     with open(store + "/alpha/alpha.md", "a", encoding="utf-8") as f:
-        f.write("- " + " ".join(args[3:]) + "\\n")
+        f.write("- " + " ".join(rest[1:]) + "\\n")
 sys.exit(1 if verb == "fail" else 0)
 """
 
@@ -46,7 +59,9 @@ class AdapterSync(unittest.TestCase):
         git(self.t, "init", "-q", "--bare", "-b", "main", str(self.remote), env=self.env)
         self.root = self.t / "ws" / ".context"
         (self.root / "alpha").mkdir(parents=True)
-        (self.root / "alpha" / "alpha.md").write_text("# Alpha\n\n## Session log\n\n", encoding="utf-8")
+        (self.root / "alpha" / "alpha.md").write_text(
+            "---\ntitle: Alpha\ntype: project\ndomain: alpha\nstatus: active\nupdated: 2026-01-01\n---\n"
+            "# Alpha\n\n## Session log\n\n", encoding="utf-8")
         (self.root / "reference" / "env").mkdir(parents=True)
         (self.root / "reference" / "env" / "config.json").write_text(
             json.dumps({"environment": "t", "context": {"sync": "auto"}}), encoding="utf-8")
@@ -124,6 +139,55 @@ class AdapterSync(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("context sync:", r.stderr)
         self.assertEqual(self.status(), "")  # committed locally, push pending
+
+    def test_the_catalogs_are_fresh_in_the_committed_tree(self):
+        self.assertNotIn("INDEX.md", git(self.root, "ls-files", env=self.env))
+        r = self.adapter("log", "alpha/alpha", "hello")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.status(), "")
+        committed = git(self.root, "show", "HEAD:INDEX.md", env=self.env)  # regenerated before the commit
+        self.assertIn("alpha/alpha.md", committed)
+
+    def test_a_value_taking_option_does_not_hide_the_verb(self):
+        before = self.heads()[1]
+        r = self.adapter("--store", str(self.root), "--now", "2026-01-01T00:00:00Z", "log", "alpha/alpha", "hello")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("context sync: pushed", r.stderr)
+        self.assertEqual(self.status(), "")
+        self.assertNotEqual(self.heads()[1], before)
+
+    def test_a_signal_death_exits_128_plus_n(self):
+        r = self.adapter("log", "alpha/alpha", "signal")  # the fake ctx kills itself with SIGTERM
+        self.assertEqual(r.returncode, 128 + 15)
+
+
+class AdapterSyncUnits(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(BIN))
+        self.addCleanup(sys.path.remove, str(BIN))
+        import ctx_adapter
+        self.adapter = ctx_adapter
+
+    def test_verb_skips_option_values(self):
+        v = self.adapter._verb
+        self.assertEqual(v(["log", "d", "x"]), "log")
+        self.assertEqual(v(["--store", "/p", "log"]), "log")
+        self.assertEqual(v(["--now", "t", "--store", "/p", "--json", "fm"]), "fm")
+        self.assertEqual(v(["--store=/p", "log"]), "log")
+        self.assertEqual(v(["--json", "memory"]), "memory")
+        self.assertEqual(v(["--store"]), "")
+        self.assertEqual(v(["--", "log"]), "")
+        self.assertIn("memory", self.adapter.WRITE_VERBS)
+
+    def test_the_pass_refreshes_catalogs_first_and_carries_the_hook_timeouts(self):
+        import ctx_sync
+        calls = []
+        with mock.patch.object(self.adapter, "refresh_catalogs", lambda root: calls.append(("refresh", root))), \
+                mock.patch.object(ctx_sync, "run", lambda root, **kw: calls.append(("run", root, kw)) or (0, "clean")):
+            self.adapter._sync_after_write(Path("/x"))
+        self.assertEqual(calls, [("refresh", Path("/x")),
+                                 ("run", Path("/x"), {"timeout": self.adapter.SYNC_NET_TIMEOUT,
+                                                      "lock_wait": self.adapter.SYNC_LOCK_WAIT})])
 
 
 if __name__ == "__main__":

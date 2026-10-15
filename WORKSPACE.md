@@ -13,16 +13,16 @@ Kit reference: `$BATON/README.md`.
   prose question; no tool → a numbered `Decisions` block (`docs/carousel.md`).
 - No AI attribution anywhere; own PRs/comments end with `kit_profile.py footer` only.
 - Asks/status pings default to 1–3 plain sentences — link + one clause + who must act, no bold
-  templates; point to existing detail, don't restate it. Save headers/bullets/tables for messages
+  templates; point to existing detail, never restate it. Save headers/bullets/tables for messages
   that bundle several items.
 - Refer to work by its tracker key (`ABC-123`, `#123`), never a bare nickname; every tracker key and
   PR reference is a **clickable link on every surface** (`[KEY](url)`); only PR titles stay bare.
-- Right-size to the reader: experts get the TLDR only; hold detail until asked.
-- Don't pester: one ask in the right channel, no nudge DMs, batch per person, prefer removing the
-  dependency over chasing it.
+- Right-size to the reader: experts get the TLDR; detail on request.
+- Don't pester: one ask in the right channel, no nudge DMs, batch per person; remove the
+  dependency rather than chase it.
 - Never cite local `.context/` or workspace paths on any external surface — link the ticket/PR or
   inline the evidence.
-- Never print secret values (parameter-store, tokens, `settings.local.json`) into the transcript —
+- Never print secret values (parameter-store, tokens, `settings.local.json`) —
   compare in-shell, print only match/no-match.
 
 **Workflow & scope**
@@ -42,7 +42,7 @@ Kit reference: `$BATON/README.md`.
 **Verification**
 - Never assert infra/data-location/deploy/run state from a proxy signal — verify against the system
   of record, or label it unverified.
-- Copying precedent code is not verification — check it against the documented spec or real data first.
+- Copying precedent code is not verification: check the documented spec or real data first.
 - Never let a swallowed error read as a negative result — check exit status separately; never
   `2>/dev/null` a query whose emptiness is meaningful.
 
@@ -61,8 +61,8 @@ Each `*.md` under `.context/` is a row; its frontmatter is the columns; don't lo
    TITLE="…"` (types: `.context/README.md`). **Writes to `.context/` docs go through ctx tools** —
    `ctx_str_replace`, `ctx_insert`, `ctx_log`, `ctx_fm`, `ctx_create` (Bash: `$BATON/context-db/bin/ctx_adapter.py
    ctx <verb>`); `Write`/`Edit` is denied outside `sessions/`. Hooks validate, re-index and sync a
-   git-versioned `.context/` (`$BATON/docs/context-sync.md`). The Bash adapter is the fallback when
-   the ctx MCP tools are absent or fail; it syncs after each write itself.
+   git-versioned `.context/` (`$BATON/docs/context-sync.md`). The Bash adapter is the fallback for absent or
+   failing ctx MCP tools; it syncs each write itself.
 3. **Domains are folders:** core `reference/`, `repos/`, `pr-reviews/`, `meetings/`, `1on1/`,
    `self-assessment/`, `on-call/`, `archive/`; the environment adds its own (`domains` in the env
    config). Repo deep-dives are `.context/repos/<repo>.md` (links + TLDRs; the repo's own `CLAUDE.md`
@@ -121,7 +121,7 @@ always-on rule** — those are § Rules above (and in `environment.md`). Trigger
 ## Cost & context hygiene
 
 Caching: a stable prefix re-reads each turn at ~0.1× input; editing `CLAUDE.md`, an import, skill
-description or tool list invalidates it, re-billing every open session next turn —
+description or tool list invalidates it, re-billing open sessions next turn —
 **batch always-on edits into one PR**. Auto-compact backstop: a clone gets it from the kit's
 `settings.json`; a plugin install ships none — set `/autocompact 200k` (cloud:
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000`).
@@ -136,10 +136,10 @@ description or tool list invalidates it, re-billing every open session next turn
   overview, not the diff, and owns every post, merge and flush. Brief: `docs/delegation.md`. Heartbeats:
   shell, no `/loop`.
 - **Flush at every step.** When a ticket/PR/epic step lands: context doc (Session log + section), tick
-  `.context/reference/priorities.md` where it exists; the `MEMORY.md` index if a memory note changed.
+  `.context/reference/priorities.md` if present; the `MEMORY.md` index if a note changed.
 - **One scope per session.** Feedback+ticketing, a build/review round, or a release — flush and end
-  at its boundary (a next-session prompt, no carried prefix). Coordinate through the registry
-  and context doc, not wake-ups.
+  at its boundary (a next-session prompt, no carried prefix). Wake other sessions only when needed;
+  coordinate through the registry and context doc.
 
 ## Repos
 
