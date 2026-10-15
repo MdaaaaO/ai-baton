@@ -506,6 +506,12 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        that call, never a single value reused across more than one — skipped or timed out, one
                        line `context doc: skipped (hook deadline)` stands in for that tail
 
+The Bash route `ctx <verb> …` (the fallback when the ctx MCP tools are absent or fail) never reaches that hook, so
+after a successful write verb (log, str_replace, insert, create, fm, new, move, rename, delete, maintain, migrate)
+it runs the same sync pass itself: commit + push, the pass's one line (`pushed …`, `push pending …`, `conflict: …`)
+on stderr, silent when sync is off or the store is not its own git repository. A sync failure never changes the
+exit status; reads are untouched; `CTX_ADAPTER_NO_SYNC=1` skips the pass.
+
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 

@@ -10,6 +10,7 @@ with the remote on its own: every context write commits and pushes; every sessio
 | When | Pass | Where you see it |
 |---|---|---|
 | after every write under `.context/` (a ctx tool or a `Write`/`Edit` under `sessions/`) | `commit → fetch → rebase → push` from the asynchronous `PostToolUse` hook, after the catalogs were regenerated | nothing when it worked; the scratch dir's `hooks.log` holds the line; a conflict is shown by the next synchronous hook as a system message |
+| a write through the Bash adapter (`ctx_adapter.py ctx <verb>`: `log`, `str_replace`, `insert`, `create`, `fm`, `new`, `move`, `rename`, `delete`, `maintain`, `migrate`) | the same pass, synchronously, after the verb succeeded — the fallback when the ctx MCP tools are absent or fail (a 502 from the hosted connector) never reaches the hook, so it syncs on its own; `CTX_ADAPTER_NO_SYNC=1` skips it | on stderr: `context sync: pushed …`, `push pending …` or `conflict: …`; silent when sync is off or the pass was a no-op; never changes the exit status |
 | `session-register`, `session-touch`, `session-end`, `session-rename` (and `heartbeat.sh`'s touches) | the same pass, synchronously | the command prints `context sync: pushed …`, `push pending …` or `conflict: …` |
 | session start (`startup`, `resume`, `clear`) | `commit → fetch → rebase`, no push (`run --no-push --quiet`) | `context sync: pulled …` in the hook output when something came in, nothing when the store was already current; a pending conflict leads the registry brief (with or without ctx installed) |
 | by hand | `make -C $BATON/context-db context-sync` / `context-sync-status` | the one line; exit 3 on a conflict |
@@ -104,7 +105,7 @@ duplicated section is yours to tidy in the next flush; `session-handoff` step 5 
 | Path | Role |
 |---|---|
 | `context-db/bin/ctx_sync.py` | the engine: `run`, `status`, the three merge drivers; stdlib only |
-| `context-db/bin/ctx_adapter.py` | wires the pass into `post-tool-use-async` and the conflict line into `post-tool-use` / `brief-registry` |
+| `context-db/bin/ctx_adapter.py` | wires the pass into `post-tool-use-async` and (after a write verb) the Bash route `ctx <verb>`, and the conflict line into `post-tool-use` / `brief-registry` |
 | `context-db/bin/session.py` | runs the pass after every registry change and prints its line |
 | `hooks/hooks.json`, `settings.json` | the SessionStart pull (`run --no-push --quiet`) and the ctx-tool `post-tool-use` entry |
 | `<store>/.gitattributes` | the managed merge-driver block (tracked, so every clone merges alike) |
