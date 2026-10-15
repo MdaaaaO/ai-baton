@@ -6,7 +6,7 @@
 # Exit 2: usage, no workspace, or a config.json that is missing, unparsable or without a login.
 # Besides the snapshot it writes the BUNDLE the runner works from, so no model turn is spent on `gh api contents`
 # or `git show`: head/<path> and base/<path> for every touched file, diffs/<path>.patch, checks+statuses,
-# kb-traps.md (repo KB § Known traps + sections matching touched paths), bundle.json (per-file stats, unresolved
+# kb-traps.md (repo KB traps sections + sections matching touched paths), bundle.json (per-file stats, unresolved
 # threads with their last comment). Prints the manifest summary; the SKILL tells the model what to do with it.
 set -uo pipefail
 KIT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -151,23 +151,44 @@ if [ "$bundle" = 1 ]; then
     done
   fi
   rm -rf "$BLOBERR"
-  # KB traps pre-grepped: § Known traps + every section whose heading shares a word with a touched path.
-  # Matched as a plain substring (index(), never a regex): a word taken from a filename may carry parentheses,
+  # KB traps pre-grepped: every `## ` or `### ` section whose heading contains the word "traps" (case-insensitive, word-bounded so "Trapsheet" is not kept: "Known
+  # traps", "Repo-specific traps", "Traps", "Traps & machinery facts"), plus every `## ` section whose heading shares
+  # a word with a touched path. A `### ` heading under a kept `## ` section stays inside it; a kept `### ` section
+  # ends at the next `##`/`###` heading. When the KB has no traps heading at all the whole doc is passed, with a
+  # one-line note first, so a KB that names its section differently never reaches the runner empty.
+  # The traps heading is a fixed word-bounded regex ("Trapsheet" is not kept); filename words are matched as a plain
+  # substring (index(), never a regex): a word taken from a filename may carry parentheses,
   # brackets or other regex metacharacters, and building a live pattern from it used to break the match (or the
   # whole awk program) silently — a fixed-string search cannot mis-parse.
-  kb="$CTX/pr-reviews/$r.md"; : > "$out/kb-traps.md"
+  kb="$CTX/pr-reviews/$r.md"; : > "$out/kb-traps.md"; traps_note=""
   if [ -f "$kb" ]; then
     words=$(jq -r '[.[] | .filename | split("/")[] | split(".")[0] | select(length>3)] | unique | .[]' "$out/files.json" | tr '\n' '|' | sed 's/|$//')
-    awk -v words="$words" 'BEGIN{n = split(words, arr, "|")}
-      /^## /{
-        keep = ($0 ~ /[Kk]nown traps/)
-        if (!keep && n > 0) {
-          line = tolower($0)
-          for (i = 1; i <= n; i++) { if (arr[i] != "" && index(line, tolower(arr[i])) > 0) { keep = 1; break } }
+    awk -v words="$words" 'BEGIN{n = split(words, arr, "|"); keep = 0; lvl = 0; found = 0}
+      /^###? /{
+        l = ($0 ~ /^### /) ? 3 : 2
+        istrap = (tolower($0) ~ /(^|[^a-z])traps([^a-z]|$)/)
+        if (istrap) found = 1
+        if (!(keep && l > lvl)) {
+          keep = istrap
+          if (!keep && l == 2 && n > 0) {
+            line = tolower($0)
+            for (i = 1; i <= n; i++) { if (arr[i] != "" && index(line, tolower(arr[i])) > 0) { keep = 1; break } }
+          }
+          lvl = l
         }
       }
-      keep{print}' "$kb" > "$out/kb-traps.md"
-    echo "" >> "$out/kb-traps.md"; echo "<!-- source: .context/pr-reviews/$r.md — sections: Known traps + headings matching touched paths -->" >> "$out/kb-traps.md"
+      keep{print}
+      END{exit (found ? 0 : 3)}' "$kb" > "$out/kb-traps.md"; awk_rc=$?
+    if [ "$awk_rc" -ne 0 ] && [ "$awk_rc" -ne 3 ]; then
+      echo "kb-traps awk rc=$awk_rc" >> "$ERR"
+    fi
+    if [ "$awk_rc" -eq 3 ]; then
+      traps_note="TRAPS: no traps section, whole KB passed"
+      { echo "$traps_note"; echo ""; cat "$kb"; } > "$out/kb-traps.md"
+      echo "<!-- source: .context/pr-reviews/$r.md — no traps heading found, whole KB -->" >> "$out/kb-traps.md"
+    else
+      echo "" >> "$out/kb-traps.md"; echo "<!-- source: .context/pr-reviews/$r.md — sections: traps headings + headings matching touched paths -->" >> "$out/kb-traps.md"
+    fi
   fi
   jq -n --slurpfile m "$out/manifest.json" --slurpfile f "$out/files.json" --slurpfile t "$out/threads.json" --slurpfile c "$out/checks.json" --slurpfile s "$out/status.json" \
      --argjson bh "$bundled_head" --argjson bb "$bundled_base" --argjson sk "$skipped" --arg kb "$out/kb-traps.md" --arg skd "$out/skipped.tsv" \
@@ -187,6 +208,7 @@ if [ "$bundle" = 1 ]; then
     skip_summary="$skipped skipped ($br)"
   fi
   echo "bundle: $bundled_head files at head · $bundled_base at base · $skip_summary · diffs/ kb-traps.md bundle.json skipped.tsv"
+  [ -n "${traps_note:-}" ] && echo "$traps_note"
 fi
 [ -s "$ERR" ] && echo "errors: $(wc -l < "$ERR") lines in $ERR"
 exit 0

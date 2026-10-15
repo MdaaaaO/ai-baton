@@ -150,6 +150,58 @@ class FetchContextStub(unittest.TestCase):
         self.assertIn("foo(bar edge cases", traps)
         self.assertIn("legacy parser", traps)
 
+    # --- kb-traps.md keeps every documented trap heading form, and passes the whole KB when none matches ---
+
+    NO_TOUCH = [{"filename": "a.txt", "status": "added", "changes": 1, "additions": 1, "deletions": 0}]
+    NOTE = "TRAPS: no traps section, whole KB passed"
+
+    def traps_for(self, kb):
+        r, out = self.run_fetch(self.NO_TOUCH, kb_content=kb)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return (out / "kb-traps.md").read_text(), r.stdout
+
+    def test_kb_traps_keeps_each_documented_heading_form(self):
+        forms = ["## Known traps", "## Known traps — extras", "## Repo-specific traps", "## Traps",
+                 "## traps & machinery facts", "## KNOWN TRAPS", "### Known traps", "### Repo-specific traps",
+                 "### TRAPS"]
+        for head in forms:
+            with self.subTest(heading=head):
+                kb = f"# Title\n\n## Machinery facts\nunrelated fact\n\n{head}\n- the trap bullet\n\n## Other\nlater prose\n"
+                traps, stdout = self.traps_for(kb)
+                self.assertIn("the trap bullet", traps)
+                self.assertNotIn("unrelated fact", traps)
+                self.assertNotIn("later prose", traps)
+                self.assertNotIn(self.NOTE, traps)
+                self.assertNotIn(self.NOTE, stdout)
+
+    def test_kb_traps_h3_section_ends_at_next_heading_and_h2_keeps_its_subsections(self):
+        kb = ("## Notes\nnote prose\n\n### Repo-specific traps\n- h3 trap\n\n### Other\nh3 other prose\n\n"
+              "## Known traps\n- h2 trap\n\n### Detail\nnested detail\n\n## Tail\ntail prose\n")
+        traps, _ = self.traps_for(kb)
+        for want in ("h3 trap", "h2 trap", "nested detail"):
+            self.assertIn(want, traps)
+        for unwanted in ("note prose", "h3 other prose", "tail prose"):
+            self.assertNotIn(unwanted, traps)
+
+    def test_kb_traps_does_not_keep_a_heading_that_only_contains_traps_inside_a_word(self):
+        kb = "# Title\n\n## Known traps\n- real trap\n\n## Trapsheet\nsheet prose\n"
+        traps, _ = self.traps_for(kb)
+        self.assertIn("real trap", traps)
+        self.assertNotIn("sheet prose", traps)
+
+    def test_kb_traps_falls_back_to_the_whole_kb_with_a_note_when_no_traps_heading(self):
+        kb = "# Title\n\n## Machinery facts\nfact one\n\n## Conventions\nconvention two\n"
+        traps, stdout = self.traps_for(kb)
+        self.assertTrue(traps.startswith(self.NOTE), traps)
+        self.assertIn("fact one", traps)
+        self.assertIn("convention two", traps)
+        self.assertIn(self.NOTE, stdout)
+
+    def test_kb_traps_without_a_kb_file_is_empty_and_has_no_note(self):
+        traps, stdout = self.traps_for(None)
+        self.assertEqual(traps, "")
+        self.assertNotIn(self.NOTE, stdout)
+
     # --- #159: a permanently failing blob fetch must be retried, then recorded — never just absent ---
 
     def test_flaky_blob_recovers_after_retries_and_gone_blob_is_recorded_skipped(self):

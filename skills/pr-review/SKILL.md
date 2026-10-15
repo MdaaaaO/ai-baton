@@ -2,9 +2,9 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, trap KB, Opus pass, walks findings, posts one review, replies in threads; a trivial PR auto-approves via Sonnet, an opt-in auto-COMMENT path skips the walk. Use when reviewing a PR pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "40"
-  updated: "2026-10-08"
-  reviewed: "2026-10-02"
+  version: "41"
+  updated: "2026-10-15"
+  reviewed: "2026-10-15"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
 ---
@@ -37,7 +37,7 @@ enter its prefix — everything read there is re-billed on every later tick. The
 | `--unattended` auto-COMMENT pass (opt-in) | same `review-runner` child as 1–4 — no shortcut on the review itself | its return only, same as 1–4 |
 | 5 walk · 6 post · 7 replies | **main session** — AskUserQuestion needs the user; the post carries their login | `$CTX/triage.json`, `request.json` / `replies.json`, the script previews |
 | 5b deep dives | one-question `opus` `Agent` spawned from the main session | its ≤ 10-line answer |
-| 8 KB write-back | main session, sourced from `triage.json` `evidence` + the walk decisions | the KB's `## Known traps` slice |
+| 8 KB write-back | main session, sourced from `triage.json` `evidence` + the walk decisions | the KB's traps slice (any `##`/`###` heading containing "traps") |
 
 The main session never opens `$CTX/diff.patch`, `files.json`, `reviews.json` or `threads.json`
 itself; if a walk question needs them, that is a deep dive (a child reads them). `--deep` spawns its
@@ -78,9 +78,9 @@ green checks gets a lighter touch (nits → body, or skip; ask the user).
 ## 2. Load what the generic pass cannot know *(runner)*
 
 Read, in this order, only the slices you need (`grep -n '^## ' file` first):
-1. `.context/pr-reviews/<repo>.md` § "Known traps to check on every PR" and any section whose
-   title matches a touched path (e.g. a model or table name). **This is the
-   compounding KB** — every past review paid to verify these; check each applicable trap explicitly
+1. `.context/pr-reviews/<repo>.md`: any `##`/`###` section whose heading contains "traps" (`Known traps`,
+   `Repo-specific traps`, …) and any section whose title matches a touched path (e.g. a model or table
+   name). **This is the compounding KB** — every past review paid to verify these; check each applicable trap explicitly
    and record the result (hit / not applicable) for the triage sheet.
 2. `.context/pr-reviews/README.md` § "Review workflow" and, for `dbt/models/**`, § "Architecture pass".
 3. The repo's own review rules: its `CLAUDE.md` / `AGENTS.md` review and "PR requirements" sections —
