@@ -35,6 +35,7 @@ Stdlib only.
 """
 from __future__ import annotations
 import argparse
+import contextlib
 import csv
 import glob
 import json
@@ -1049,14 +1050,19 @@ def cmd_run(a) -> int:
 def _run_in(a, since: str, work: Path) -> int:
     work.mkdir(parents=True, exist_ok=True)
     daily, prs, tickets = work / "daily.json", work / "prs.tsv", work / "tickets.tsv"
-    if (rc := cmd_collect_private(argparse.Namespace(since=since, until=a.until, csv=a.csv, out=str(daily)))):
+    # the collectors print "N rows → file" progress lines; stdout is the report alone (`make cost-report > report.md`)
+    with contextlib.redirect_stdout(sys.stderr):
+        rc = cmd_collect_private(argparse.Namespace(since=since, until=a.until, csv=a.csv, out=str(daily)))
+    if rc:
         return rc
     sources: dict[str, str | None] = {}
     for name, fn, path in (("PRs", cmd_work_prs, prs), ("tickets", cmd_work_tickets, tickets)):
         try:
-            rc = fn(argparse.Namespace(since=since, until=a.until, out=str(path)))
+            with contextlib.redirect_stdout(sys.stderr):
+                rc = fn(argparse.Namespace(since=since, until=a.until, out=str(path)))
         except SystemExit as e:
-            print(f"{name} skipped: {e}", file=sys.stderr)
+            # a bare SystemExit(2) (gh timeout) already printed its reason; its code is not a count
+            print(f"{name} skipped: {e.code if isinstance(e.code, str) else 'see above'}", file=sys.stderr)
             rc = 1
         sources[name] = str(path) if rc == 0 else None
     return cmd_report(argparse.Namespace(daily=str(daily), control=None, prs=sources["PRs"], tickets=sources["tickets"],

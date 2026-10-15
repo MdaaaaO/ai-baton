@@ -605,6 +605,45 @@ class RunDefaultReport(unittest.TestCase):
             self.assertEqual(calls[-1][1:], (str(Path(d) / "prs.tsv"), None, str(Path(d) / "daily.json")))
             self.assertIn("tickets skipped: tracker.repos is empty", err.getvalue())
 
+    def test_progress_lines_go_to_stderr_and_stdout_is_the_report_alone(self):
+        def collect(a):
+            print(f"3 daily×model rows → {a.out}"); Path(a.out).write_text("{}"); return 0
+
+        def prs(a):
+            print(f"2 PRs → {a.out}"); Path(a.out).write_text("x"); return 0
+
+        def tickets(a):
+            print(f"1 closed issues → {a.out}"); Path(a.out).write_text("x"); return 0
+
+        def report(a):
+            print("# Cost report"); return 0
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private"}), \
+                unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                unittest.mock.patch.object(cost_report, "cmd_work_prs", prs), \
+                unittest.mock.patch.object(cost_report, "cmd_work_tickets", tickets), \
+                unittest.mock.patch.object(cost_report, "cmd_report", report), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cost_report.cmd_run(self.args())
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.getvalue(), "# Cost report\n")
+        for line in ("daily×model rows →", "2 PRs →", "1 closed issues →"):
+            self.assertIn(line, err.getvalue())
+
+    def test_a_gh_timeout_skip_line_does_not_look_like_a_count(self):
+        err = io.StringIO()
+
+        def collect(a):
+            Path(a.out).write_text("{}"); return 0
+        with unittest.mock.patch.object(cost_report, "resolve_mode", return_value={"mode": "private"}), \
+                unittest.mock.patch.object(cost_report, "cmd_collect_private", collect), \
+                unittest.mock.patch.object(cost_report, "cmd_work_prs", side_effect=SystemExit(2)), \
+                unittest.mock.patch.object(cost_report, "cmd_work_tickets", side_effect=SystemExit("no repos")), \
+                unittest.mock.patch.object(cost_report, "cmd_report", return_value=0), contextlib.redirect_stderr(err):
+            cost_report.cmd_run(self.args())
+        self.assertIn("PRs skipped: see above", err.getvalue())
+        self.assertIn("tickets skipped: no repos", err.getvalue())
+
     def test_gh_not_on_path_skips_prs_and_tickets_and_still_reports(self):
         err, seen = io.StringIO(), {}
 
