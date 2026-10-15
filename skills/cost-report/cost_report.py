@@ -708,7 +708,7 @@ def cmd_work_tickets(a) -> int:
     kind = profile.get("tracker.kind", "none")
     if kind != "github":
         print(f"tracker.kind is {kind}: run the tracker query through its tool and save a TSV "
-              "(key, created, resolved, type, parent) — SKILL.md § Tracker query has the shape", file=sys.stderr)
+              "(key, created, resolved, type, parent) — reference/config.md § Tracker query has the shape", file=sys.stderr)
         return 2
     login = profile.identity("WORKSPACE_GITHUB_LOGIN")
     repos = profile.get("tracker.repos", []) or []
