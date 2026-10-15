@@ -10,8 +10,9 @@ sh $BATON/skills/sign-queue/enqueue.sh <topic> <abs-worktree> <branch> <abs-msg-
 
 It reads `refs/heads/<branch>` on `origin` once (`git ls-remote`, exact ref: `refs/heads/x/<branch>` does not
 count). A lookup that fails — an SSH remote this process has no identity for, or no network — is never read as
-"no branch" and never refuses a dirty worktree: it prints `note: remote not reachable here: no
---new-branch/--rebase decided; the sign job decides` and adds neither (explicit flags still hold). Only a clean
+"no branch" and never refuses a dirty worktree: it prints `note: remote not reachable here: --new-branch/--rebase
+not decided; pass them yourself if needed (a moved remote parks the job)` and adds neither (explicit flags still
+hold) — the job then runs a plain `push origin <branch>`, which a moved remote rejects into `.failed`. Only a clean
 worktree's push-only retry stops on it with git's own error, since it cannot tell whether anything is left to push.
 
 | remote state | added | unless |

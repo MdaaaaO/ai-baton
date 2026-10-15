@@ -404,7 +404,7 @@ class RemoteDecisionGuards(unittest.TestCase):
             (wt / "a.txt").write_text("a\n")
             r = _enqueue(tmp, wt, ctx, "ssh", "--files", "a.txt", "--by", "t", env_extra=_NO_SSH_IDENTITY)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("note: remote not reachable here: no --new-branch/--rebase decided; the sign job decides",
+            self.assertIn("note: remote not reachable here: --new-branch/--rebase not decided; pass them yourself if needed (a moved remote parks the job)",
                           r.stderr)
             self.assertEqual(r.stderr.count("remote not reachable here"), 1)
             lines = _job_lines(r)

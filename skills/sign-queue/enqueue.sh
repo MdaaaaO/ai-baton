@@ -169,7 +169,7 @@ if [ $clean = 1 ] || git -C "$wt" remote get-url origin >/dev/null 2>&1; then
     exit 2
   else
     rm -f "$ls_remote_err"
-    echo "note: remote not reachable here: no --new-branch/--rebase decided; the sign job decides" >&2
+    echo "note: remote not reachable here: --new-branch/--rebase not decided; pass them yourself if needed (a moved remote parks the job)" >&2
   fi
 fi
 if [ $clean = 1 ]; then
@@ -239,8 +239,10 @@ if [ $remote_read = 1 ]; then
     # refused: rewriting a pushed branch is a lease decision. Checked on the remote-only commits
     # (`rev-list <tip> --not HEAD`), so a rewrite is caught even when someone pushed on top of it since;
     # A tip not fetched here yet cannot be walked: only a rewrite buried under someone else's newer push
-    # slips through then (a `git fetch` before enqueuing closes that gap).
-    branch_log=$(git -C "$wt" reflog show --format=%H "refs/heads/$br" 2>/dev/null | sort -u) || branch_log=""
+    # slips through then (a `git fetch` before enqueuing closes that gap). A missing or disabled reflog
+    # (`core.logAllRefUpdates=false`, a fresh clone of the branch) leaves branch_log empty too: the reflog is the
+    # only record of what this branch once pointed at, so the guard is off then and the rebase goes ahead.
+    branch_log=$(git -C "$wt" reflog show --format=%H "refs/heads/$br" 2>/dev/null | sort -u)
     if [ -n "$branch_log" ] && git -C "$wt" cat-file -e "$remote_tip^{commit}" 2>/dev/null \
        && git -C "$wt" rev-list "$remote_tip" --not HEAD 2>/dev/null | grep -qxF -e "$branch_log"; then
       echo "enqueue.sh: origin/$br (at $(printf '%.12s' "$remote_tip")) still has commits this branch rewrote away (amend/fixup/reset after a push) — a plain push would be rejected and an auto --rebase would undo the rewrite. Pass --force-with-lease $remote_tip yourself if the rewrite is meant, or rebase onto the remote tip" >&2
