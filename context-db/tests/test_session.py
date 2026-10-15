@@ -387,6 +387,83 @@ class NoSilentLoss(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("## Open PRs\n\nnone", doc_path.read_text(encoding="utf-8"))
 
+    def _headings(self, doc: str, heading: str) -> int:
+        return sum(1 for ln in doc.splitlines() if ln.strip() == heading)
+
+    def test_a_second_open_prs_heading_is_merged_over_the_stub_through_a_full_cycle(self):
+        # A session that writes its own `## Open PRs` list after the scaffolded `none` stub leaves two headings
+        # (the store's validator flags a duplicate); every touch/end merges them, the filled-in list winning.
+        name = "t-dup-prs"
+        doc_path = self.root / "sessions" / f"{name}.md"
+        run("session.py", "register", "--name", name, "--no-stats", root=self.root)
+        r = run("session.py", "touch", "--name", name, "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._headings(doc_path.read_text(encoding="utf-8"), "## Open PRs"), 1)  # the stub
+        doc_path.write_text(doc_path.read_text(encoding="utf-8") + "\n## Open PRs\n- o/r#1 abc — waits\n", encoding="utf-8")
+        self.assertEqual(self._headings(doc_path.read_text(encoding="utf-8"), "## Open PRs"), 2)
+        for cmd in ("touch", "end"):
+            r = run("session.py", cmd, "--name", name, "--no-stats", root=self.root)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            doc = doc_path.read_text(encoding="utf-8")
+            self.assertEqual(self._headings(doc, "## Open PRs"), 1, doc)
+            self.assertIn("- o/r#1 abc — waits", doc)
+            self.assertNotIn("\nnone\n", doc)  # the stub lost
+        self.assertEqual(self._headings(doc, "## Open PRs"), 1)
+
+    def test_register_heals_a_duplicated_section_and_keeps_distinct_content(self):
+        name = "t-dup-heal"
+        doc_path = self.root / "sessions" / f"{name}.md"
+        run("session.py", "register", "--name", name, "--no-stats", root=self.root)
+        doc_path.write_text(doc_path.read_text(encoding="utf-8")
+                            + "\n## Owns\n- a\n\n## Open decisions\nnone\n\n## Owns\n- b\n\n## Open decisions\nnone\n",
+                            encoding="utf-8")
+        r = run("session.py", "register", "--name", name, "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = doc_path.read_text(encoding="utf-8")
+        self.assertEqual(self._headings(doc, "## Owns"), 1)
+        self.assertIn("- a\n\n- b", doc)  # two real lists are joined, nothing dropped
+        self.assertEqual(doc.count("## Open decisions\n\nnone"), 1)
+
+    def test_a_fenced_duplicate_heading_is_left_alone_by_the_merge(self):
+        sess = _load_session_module(self.root)
+        body = "# S\n\n## Next session\n\n```\n## Open PRs\nquoted\n```\n\n## Open PRs\n- x\n"
+        self.assertEqual(sess._merge_duplicate_sections(body), body)
+
+    def test_latest_state_open_prs_none_beats_an_earlier_stale_list(self):
+        sess = _load_session_module(self.root)
+        body = "# S\n\n## Open PRs\n- o/r#1 abc — waits\n\n## Owns\n- a\n\n## Open PRs\nnone\n"
+        out = sess._merge_duplicate_sections(body)
+        self.assertEqual(self._headings(out, "## Open PRs"), 1)
+        self.assertIn("## Open PRs\n\nnone", out)
+        self.assertNotIn("o/r#1", out)
+
+    def test_latest_state_next_session_last_prompt_wins_verbatim(self):
+        sess = _load_session_module(self.root)
+        body = "# S\n\n## Next session\n\nold prompt\n\n## Next session\n\nnew prompt\nsecond line\n"
+        out = sess._merge_duplicate_sections(body)
+        self.assertEqual(self._headings(out, "## Next session"), 1)
+        self.assertIn("new prompt\nsecond line", out)
+        self.assertNotIn("old prompt", out)
+
+    def test_latest_state_blank_last_duplicate_falls_back_to_the_previous(self):
+        sess = _load_session_module(self.root)
+        out = sess._merge_duplicate_sections("## Next session\n\nkeep me\n\n## Next session\n\n")
+        self.assertEqual(self._headings(out, "## Next session"), 1)
+        self.assertIn("keep me", out)
+
+    def test_an_indented_open_prs_duplicate_is_merged(self):
+        sess = _load_session_module(self.root)
+        body = "# S\n\n## Open PRs\n- o/r#1 abc — waits\n\n ## Open PRs\nnone\n"
+        out = sess._merge_duplicate_sections(body)
+        self.assertEqual(self._headings(out, "## Open PRs"), 1)
+        self.assertIn("## Open PRs\n\nnone", out)
+
+    def test_a_non_latest_state_heading_still_unions(self):
+        sess = _load_session_module(self.root)
+        out = sess._merge_duplicate_sections("# S\n\n## Owns\n- a\n\n## Owns\n- b\n")
+        self.assertEqual(self._headings(out, "## Owns"), 1)
+        self.assertIn("- a\n\n- b", out)
+
     def test_a_non_string_tracker_regex_does_not_break_the_registry(self):
         import json as _json
         subprocess.run([sys.executable, str(BIN / "kb.py"), "init", "--blank"], env={**os.environ, "CONTEXT_ROOT": str(self.root)},
