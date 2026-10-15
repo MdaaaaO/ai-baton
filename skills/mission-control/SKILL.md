@@ -2,8 +2,8 @@
 name: mission-control
 description: "Builds and opens the private mission-control page (sessions, spend, docs, priorities, queues) as one local HTML file. Use when asked to open, show or rebuild the mission page, where it is, or for an overview of sessions, spend and the store. Not for session-register, cost-report, kit-health, session-handoff or self-assessment."
 metadata:
-  version: "1"
-  updated: "2026-10-12"
+  version: "2"
+  updated: "2026-10-15"
   reviewed: "2026-10-12"
 user-invocable: true
 ---
@@ -23,6 +23,9 @@ leaves the machine. This skill checks that the page is current, rebuilds it when
    - `content root not found` (make shows `Error 2`): there is no store to read. Print
      `mission-control: no store at the content root — nothing to build` and stop. This skill never creates one.
 2. A store that exists but holds little still builds: every section shows an empty-state line instead of failing.
+   A source that is there but cannot be read (permissions, bytes that are not UTF-8) is not "empty": its section lists
+   `<section> · <path> · <error class>` and shows `not available — cannot read <path>` with no totals. The build still
+   succeeds; tell the user which file to fix.
 
 ## 2. Do
 

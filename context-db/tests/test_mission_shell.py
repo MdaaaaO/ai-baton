@@ -248,6 +248,18 @@ class Files(unittest.TestCase):
             for pattern, what in later:
                 self.assertIsNone(re.search(pattern, body, re.M), f"{what} in {name}")
 
+    def test_every_section_that_can_report_a_problem_draws_its_list_and_names_the_file(self):
+        """The generator's `problems` keys, one per reader (docs/engine-cli.md): each is drawn in its own section, and an
+        unreadable source gets an empty state that names the file instead of a bare 'none'."""
+        sections = self.parts["sections.js"]
+        for key in ("s.problems", "c.problems", "p.problems", "pr.problems", "sq.problems", "kh.problems"):
+            self.assertIn(f"problemList({key})", sections, key)
+        self.assertEqual(len(re.findall(r"problemList\(\w+\.problems\)", sections)), 9)  # sessions twice, then catalog, cost, priorities, three queues, pointers
+        self.assertIn("'not available — cannot read '", sections)
+        for call in ("cannotRead(ledgerPath)", "cannotRead(p.path)", "cannotRead(pr.path)", "cannotRead(sq.path)",
+                     "cannotRead(memoryPath)"):
+            self.assertIn(call, sections, call)
+
     def test_the_stale_rule_and_the_stamp_shape_mirror_the_generator(self):
         util = self.parts["util.js"]
         self.assertEqual(mission.STAMP_FMT, "%Y-%m-%dT%H:%M:%SZ")
@@ -309,6 +321,35 @@ class RealTemplate(unittest.TestCase):
         r = run_tool(CHECK, BLANK, BUILT_BLANK / "index.html")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(r.stderr, "")
+
+
+class UnreadableSourcePage(unittest.TestCase):
+    """A store with an unreadable ledger builds a page that carries the problem and null totals, and check.py accepts it."""
+
+    def test_the_page_carries_the_problem_and_the_gate_accepts_it(self):
+        tmp = tempfile.TemporaryDirectory(prefix="kit-shell-u-")
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / ".context"
+        shutil.copytree(BASE, root)
+        ledger = root / "sessions" / "_ledger.md"
+        os.chmod(ledger, 0o000)
+        self.addCleanup(os.chmod, ledger, 0o644)
+        try:
+            ledger.read_bytes()
+        except OSError:
+            pass
+        else:
+            self.skipTest("this platform or user can read a mode 000 file")
+        out = Path(tmp.name) / "out"
+        r = run_mission(root, "build", "--out", out)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        page = text(out, "index.html")
+        data = json.loads(script_json(page, "data"))
+        self.assertEqual(data["cost"]["problems"], ["cost · sessions/_ledger.md · PermissionError"])
+        self.assertIsNone(data["cost"]["totals"]["usd"])
+        self.assertIn("sessions/_ledger.md", [s["path"] for s in data["pointers"]["sources"]])  # the name the page shows
+        verdict = run_tool(CHECK, root, out / "index.html")
+        self.assertEqual(verdict.returncode, 0, verdict.stdout + verdict.stderr)
 
 
 # ── check.py: the shapes it names ────────────────────────────────────────────────────────────────────────────

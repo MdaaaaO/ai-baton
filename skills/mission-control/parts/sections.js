@@ -40,6 +40,16 @@ function problemList(problems) {
   return items.length ? el('ul', { class: 'problems' }, items.map((p) => el('li', null, String(p)))) : null;
 }
 
+// A source the build could not read is listed in its section's problems as "<section> · <path> · <error class>".
+const unreadable = (problems, path) => list(problems).some((p) => String(p).indexOf(' · ' + path + ' · ') !== -1);
+const cannotRead = (path) => empty('not available — cannot read ' + path);
+
+// The relative path the build read a source from, by the name pointers.sources gives it.
+function sourcePath(data, name) {
+  const found = list((data.pointers || {}).sources).find((s) => s.name === name);
+  return found && present(found.path) ? found.path : name;
+}
+
 const tile = (value, label, hint) => el('div', { class: 'tile', title: hint }, el('b', null, value), el('span', null, label));
 
 // ── sessions ───────────────────────────────────────────────────────────────────────────────────────────
@@ -131,6 +141,9 @@ function drawLedger(host, rows, all) {
   }
 }
 
+const liveTable = (live) => table([{ label: 'Session' }, { label: 'Usage' }, { label: 'Spend', num: true }],
+  live.map((s) => [s.name || '—', s.stats || '—', usd(s.cost_usd)]));
+
 function renderCost(body, data) {
   const c = data.cost || {};
   const t = c.totals || {};
@@ -138,9 +151,18 @@ function renderCost(body, data) {
   const w30 = t.last_30d || {};
   const ledger = list(c.ledger);
   const live = list(c.live);
+  const ledgerPath = sourcePath(data, 'ledger');
+  const lost = unreadable(c.problems, ledgerPath) || t.rows === null;
   put(body, present(c.basis) ? el('p', { class: 'muted' }, 'Basis: ' + c.basis) : null);
-  if (!ledger.length && !live.length) {
+  put(body, problemList(c.problems));
+  if (!ledger.length && !live.length && !lost) {
     put(body, empty('none — no ledger rows and no live sessions'));
+    return;
+  }
+  if (lost) {
+    put(body, cannotRead(ledgerPath));
+    put(body, heading('Live sessions', live.length));
+    put(body, live.length ? liveTable(live) : empty('none'));
     return;
   }
   put(body, el('div', { class: 'tiles' }, [
@@ -163,10 +185,7 @@ function renderCost(body, data) {
   if (ledger.length) drawLedger(host, newestFirst(ledger), false);
   else put(host, empty('none'));
   put(body, heading('Live sessions', live.length));
-  put(body, live.length
-    ? table([{ label: 'Session' }, { label: 'Usage' }, { label: 'Spend', num: true }],
-      live.map((s) => [s.name || '—', s.stats || '—', usd(s.cost_usd)]))
-    : empty('none'));
+  put(body, live.length ? liveTable(live) : empty('none'));
 }
 
 // ── catalog ────────────────────────────────────────────────────────────────────────────────────────────
@@ -226,6 +245,11 @@ function checkRow(item) {
 
 function renderPriorities(body, data) {
   const p = data.priorities || {};
+  put(body, problemList(p.problems));
+  if (unreadable(p.problems, p.path)) {
+    put(body, cannotRead(p.path));
+    return;
+  }
   if (!p.present) {
     put(body, empty('no priorities file'));
     return;
@@ -258,7 +282,10 @@ function renderQueues(body, data) {
   const pr = q.pr_review || {};
   const last = list(pr.last);
   put(body, heading('pr-review ledger', fmt(pr.rows, 0) + ' rows'));
-  if (!last.length) {
+  put(body, problemList(pr.problems));
+  if (unreadable(pr.problems, pr.path)) {
+    put(body, cannotRead(pr.path));
+  } else if (!last.length) {
     put(body, empty('none — no pr-review rows'));
   } else {
     const by = pr.by_status || {};
@@ -266,15 +293,18 @@ function renderQueues(body, data) {
     put(body, table([{ label: 'When' }, { label: 'PR' }, { label: 'Head' }, { label: 'Status' }],
       last.map((r) => [stampText(r.ts), isNum(r.pr) ? link(r.url, (r.repo || '') + '#' + r.pr) : '—', r.head || '—', r.status || '—'])));
   }
-  const jobs = list((q.sign_queue || {}).jobs);
+  const sq = q.sign_queue || {};
+  const jobs = list(sq.jobs);
   put(body, heading('sign-queue', jobs.length + ' jobs'));
-  put(body, jobs.length
+  put(body, problemList(sq.problems));
+  put(body, unreadable(sq.problems, sq.path) ? cannotRead(sq.path) : jobs.length
     ? table([{ label: 'Job' }, { label: 'Queued' }], jobs.map((j) => [j.name, stampText(j.mtime_utc)]))
     : empty('none — no queued jobs'));
   const kh = q.kit_health || {};
   put(body, heading('kit-health'));
+  put(body, problemList(kh.problems));
   if (!kh.latest && !kh.stamp) {
-    put(body, empty('none — no walk logged'));
+    put(body, list(kh.problems).length ? cannotRead(sourcePath(data, 'kit_health')) : empty('none — no walk logged'));
     return;
   }
   put(body, facts([
@@ -284,25 +314,29 @@ function renderQueues(body, data) {
     ['stamp doc', kh.stamp ? cmd(VIEW + kh.stamp.path) : null],
   ]));
   put(body, kh.latest && present(kh.latest.outcome) ? el('div', { class: 'outcome' }, kh.latest.outcome) : null);
+  put(body, kh.latest && kh.latest.outcome === null ? cannotRead(kh.latest.path) : null);
 }
 
 // ── pointers ───────────────────────────────────────────────────────────────────────────────────────────
 function renderPointers(body, data) {
   const p = data.pointers || {};
   const memory = list(p.memory);
+  const memoryPath = sourcePath(data, 'memory');
+  put(body, problemList(p.problems));
   put(body, heading('Memory pointers', memory.length));
   put(body, memory.length
     ? el('ul', { class: 'plain' }, memory.map((m) => el('li', null, el('b', null, m.title || m.file),
       present(m.hook) ? ' — ' + m.hook : null, ' ', el('code', { class: 'muted' }, m.file))))
-    : empty('none — no memory index'));
+    : (unreadable(p.problems, memoryPath) ? cannotRead(memoryPath) : empty('none — no memory index')));
   const idx = p.index;
   const sidx = p.session_index;
   put(body, heading('Generated indexes'));
+  const missing = (name) => muted(unreadable(p.problems, sourcePath(data, name)) ? 'cannot be read' : 'not found');
   put(body, facts([
-    ['INDEX.md', idx ? fmt(idx.docs, 0) + ' docs · generated ' + idx.generated : muted('not found')],
+    ['INDEX.md', idx ? fmt(idx.docs, 0) + ' docs · generated ' + idx.generated : missing('index')],
     ['SESSION_INDEX.md', sidx
       ? [fmt(sidx.active, 0) + ' active', fmt(sidx.ended_listed, 0) + ' ended listed', fmt(sidx.ended_no_prompt, 0) + ' without a prompt'].join(' · ') + ' · generated ' + sidx.generated
-      : muted('not found')],
+      : missing('session_index')],
   ]));
   const sources = list(p.sources);
   put(body, heading('Sources read', sources.length));
