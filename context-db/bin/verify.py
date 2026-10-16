@@ -11,7 +11,7 @@ Checks every content doc for:
 
 Size budgets (all non-fatal, all in bytes, each overridable by an environment variable of the same name; a set
 but unusable value prints one `verify: ignoring NAME=value (…)` stderr line and keeps the default):
-  ACTIVE_SIZE_WARN       30 KB  one non-archived doc of any type but `reference`/`repo`
+  ACTIVE_SIZE_WARN    30,000 B  one non-archived doc of any type but `reference`/`repo` (ctx-store's SIZE_GUARD)
   REFERENCE_SIZE_WARN    64 KB  one non-archived `type: reference` or `type: repo` doc (repo deep-dives, snapshots:
                                 read in slices, so expected to be large)
   INDEX_SIZE_WARN        10 KB  the `status: active` and `status: closed` rows of INDEX.md. Closed rows count (they
@@ -58,11 +58,14 @@ DOMAINS = CORE_DOMAINS | set(profile.domains())
 # session can re-read it to re-ground without meaningfully denting its context
 # window — an oversized doc pulled in after a compact is what makes autocompact
 # thrash. Long history belongs in archive/<slug>-log.md, so archive/ and
-# status: archived docs are exempt (they exist to hold the bulk). Non-fatal —
-# a warning at flush time, not a blocker (never stand between a session and its flush).
+# status: archived docs are exempt (they exist to hold the bulk). The folder decides, not the
+# frontmatter: `ctx maintain` gives a new archive doc its source doc's domain and `status: active`.
+# Non-fatal — a warning at flush time, not a blocker (never stand between a session and its flush).
 # Each budget reads the environment variable of its own name (bytes); an unset, malformed or
 # non-positive value keeps the default.
-ACTIVE_SIZE_WARN = gi.positive_int(os.environ.get("ACTIVE_SIZE_WARN"), 30 * 1024, "ACTIVE_SIZE_WARN")  # ~8k tokens
+# The active default is ctx-store's SIZE_GUARD (`ctx validate` warns and `ctx maintain` rotates past it), so both
+# tools warn at the same size. The kit reads no store file: a store that sets `maintain.size_guard` sets this to match.
+ACTIVE_SIZE_WARN = gi.positive_int(os.environ.get("ACTIVE_SIZE_WARN"), 30000, "ACTIVE_SIZE_WARN")  # ~8k tokens
 # A `type: reference` doc (a snapshot) or a `type: repo` doc (a repo deep-dive) is read in slices and is expected
 # to be large: it has its own, higher budget instead of the active one.
 LARGE_DOC_TYPES = ("reference", "repo")
@@ -182,11 +185,13 @@ def size_remedy(path: str, doc_type: str, size: int, text: str) -> str:
 
 def oversized_findings(root: str, rows: list[dict]) -> tuple[int, list[str]]:
     """(count of oversized docs, one folded line per domain). A `type` in LARGE_DOC_TYPES is held to
-    REFERENCE_SIZE_WARN, any other to ACTIVE_SIZE_WARN; archive/ and `status: archived` docs are exempt."""
+    REFERENCE_SIZE_WARN, any other to ACTIVE_SIZE_WARN; docs under archive/ (whatever their frontmatter says),
+    `domain: archive` and `status: archived` docs are exempt."""
     by_domain: dict[str, list[tuple[int, dict]]] = {}
     total = 0
     for r in rows:
-        if r.get("domain") == "archive" or r.get("status") == "archived":
+        in_archive = r["_path"].replace(os.sep, "/").split("/", 1)[0] == "archive"
+        if in_archive or r.get("domain") == "archive" or r.get("status") == "archived":
             continue
         budget = REFERENCE_SIZE_WARN if r.get("type") in LARGE_DOC_TYPES else ACTIVE_SIZE_WARN
         try:
