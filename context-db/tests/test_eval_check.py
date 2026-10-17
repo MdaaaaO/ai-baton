@@ -13,6 +13,7 @@ from pathlib import Path
 
 KIT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
+import ctx_adapter  # noqa: E402
 import eval_check  # noqa: E402
 
 PROMPT = "---\nmax_turns: 6\nallowed_tools: [Read, Skill]\ntags: [trigger, {kind}]\n{extra}---\n\n{body}\n"
@@ -224,13 +225,16 @@ class Mocks(unittest.TestCase):
         (manifest / "plugin.json").write_text(json.dumps({"mcpServers": {"ctx": {"command": "x"}}}), encoding="utf-8")
         self.mocks = self.kit.root / "evals" / "mocks"
 
-    def mock(self, server="ctx", tools=("ctx_get",), saved=None):
+    def mock(self, server="ctx", tools=("ctx_get",), saved=None, version=ctx_adapter.CTX_VERSION):
         d = self.mocks / server
         d.mkdir(parents=True, exist_ok=True)
         for t in tools:
             (d / f"{t}.md").write_text("ok\n", encoding="utf-8")
         if saved is not None:
-            (d / "_tools.json").write_text(json.dumps({"tools": [{"name": n} for n in saved]}), encoding="utf-8")
+            answer = {"tools": [{"name": n} for n in saved]}
+            if version is not None:
+                answer["ctx_version"] = version
+            (d / "_tools.json").write_text(json.dumps(answer), encoding="utf-8")
         return d
 
     def errors(self):
@@ -271,6 +275,31 @@ class Mocks(unittest.TestCase):
         errors = self.errors()
         self.assertTrue(any("`ctx_log` but there is no ctx_log.md" in e for e in errors), errors)
         self.assertTrue(any("ctx_extra.md answers a tool" in e for e in errors), errors)
+
+    def test_a_saved_ctx_list_without_a_version_stamp_fails(self):
+        self.mock(saved=["ctx_get"], version=None)
+        errors = self.errors()
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("_tools.json", errors[0])
+        self.assertIn("`ctx_version` is None", errors[0])
+
+    def test_a_saved_ctx_list_stamped_with_another_version_fails(self):
+        self.mock(saved=["ctx_get"], version="0.0.1-not-the-pin")
+        errors = self.errors()
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("'0.0.1-not-the-pin'", errors[0])
+        self.assertIn(repr(ctx_adapter.CTX_VERSION), errors[0])
+
+    def test_a_saved_ctx_list_stamped_with_the_pin_passes(self):
+        self.mock(saved=["ctx_get"], version=ctx_adapter.CTX_VERSION)
+        self.assertEqual(self.errors(), [])
+
+    def test_only_the_ctx_mock_is_compared_with_the_pin(self):
+        (self.kit.root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"mcpServers": {"ctx": {"command": "x"}, "other": {"command": "y"}}}), encoding="utf-8")
+        self.mock(saved=["ctx_get"])
+        self.mock(server="other", tools=("o_get",), saved=["o_get"], version=None)
+        self.assertEqual(self.errors(), [])
 
     def test_a_saved_tool_list_that_is_not_a_tools_list_fails(self):
         d = self.mock()

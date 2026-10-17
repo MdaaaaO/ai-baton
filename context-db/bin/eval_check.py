@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ctx_adapter  # noqa: E402
 import frontmatter  # noqa: E402
 
 KIT = Path(__file__).resolve().parents[2]
@@ -214,7 +215,8 @@ def mcp_servers(kit: Path) -> list[str]:
 def check_mocks(kit: Path, root: Path) -> list[str]:
     """Errors for the MCP mocks under `<root>/mocks/`. `claude plugin eval` starts no plugin server that has no mock
     (its tools are absent from the run), so every manifest server needs a `mocks/<server>/` with a `<tool>.md` per
-    tool, or a `_server.md`. A saved `_tools.json` (the server's `tools/list` answer) must name the same tools."""
+    tool, or a `_server.md`. A saved `_tools.json` (the server's `tools/list` answer) must name the same tools; the
+    `ctx` one also carries a `ctx_version` equal to the ctx-store release the kit pins (`ctx_adapter.CTX_VERSION`)."""
     errors: list[str] = []
     mocks = root / "mocks"
     rel = mocks.relative_to(kit)
@@ -245,6 +247,10 @@ def check_mocks(kit: Path, root: Path) -> list[str]:
         except (OSError, ValueError, KeyError, TypeError):
             errors.append(f"{where}/_tools.json: not a `tools/list` answer — expected {{\"tools\": [{{\"name\": …}}, …]}}")
             continue
+        if d.name == "ctx" and listed.get("ctx_version") != ctx_adapter.CTX_VERSION:
+            errors.append(f"{where}/_tools.json: `ctx_version` is {listed.get('ctx_version')!r} but the kit pins ctx-store "
+                          f"{ctx_adapter.CTX_VERSION!r} (CTX_VERSION in ctx_adapter.py) — regenerate the saved `tools/list` "
+                          f"answer and set `ctx_version` to the pin")
         if has_agent:
             continue  # an agent mock answers the saved tools itself; no per-tool file is required
         for t in sorted(set(names) - set(tools)):
