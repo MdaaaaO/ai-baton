@@ -2,8 +2,8 @@
 name: ticket-pickup
 description: "Verifies a ticket's Sizing line against the default branch, decides main session vs a sub-agent + model, sizes a missing line, and claims the ticket. Use when picking up, starting or resuming a ticket. Not for creating (`ticket-open`) or updating (`ticket-update`)."
 metadata:
-  version: "5"
-  updated: "2026-10-02"
+  version: "6"
+  updated: "2026-10-17"
   reviewed: "2026-10-02"
   facts: "tracker.kind"
 user-invocable: true
@@ -46,7 +46,9 @@ refs/remotes/origin/HEAD` in `--repo-dir`). Run
 `python3 $BATON/skills/ticket-open/sketch.py check <ticket text> --repo-dir <repo> --base
 origin/<default branch>` and put its line in the pickup report: `SKETCH OK` — say so; `MOVED <path>` —
 say the sketch must be redrawn before the build starts; `STALE SKETCH <old>→<new>` or
-`MALFORMED SKETCH <line>` — say so too, same as a `MOVED` result; `NO SKETCH` — nothing in the report.
+`MALFORMED SKETCH <line>` — say so too, same as a `MOVED` result — a `STALE SKETCH` on a drawing nobody
+changed (a Sketch stamped before the hash's canonical markdown form, `docs/diagrams.md` § The sketch marker)
+needs a restamp, not a redraw; `NO SKETCH` — nothing in the report.
 Exit 1 (a `git` read failed) → report the `FAIL` line from stderr; never read the empty stdout as
 `NO SKETCH`.
 

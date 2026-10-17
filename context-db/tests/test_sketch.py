@@ -482,6 +482,114 @@ class TicketOpenJiraSketchShape(unittest.TestCase):
             self.assertIn(needle, self.diagrams)
 
 
+
+class ConnectorRewrites(unittest.TestCase):
+    """A tracker connector that rewrites markdown on store (Jira, #589: `|---|` → `| --- |`, `| |` → `|  |`,
+    `-` → `*`, nested indent 2 → 4, whitespace-only lines between nested items, `[` → `\\[`) must leave the
+    hash alone, so `check` on the stored text is `SKETCH OK` without a restamp. A real edit still moves it,
+    and a fenced block (the ASCII WHERE box) is hashed verbatim."""
+
+    POSTED = (
+        "**Sketch**\n"
+        "```\n"
+        "+--------+     +--------+\n"
+        "| intake | --> | report |\n"
+        "+--------+     +--------+\n"
+        "```\n"
+        "\n"
+        "| Unit | Change |\n"
+        "|---|---|\n"
+        "| `a/mod.py` | reads the [config] |\n"
+        "| `keep.py` | |\n"
+        "\n"
+        "- WHY: one hash function\n"
+        "  - not a read-back [a]\n"
+    )
+    STORED = (
+        "**Sketch**\n"
+        "```\n"
+        "+--------+     +--------+\n"
+        "| intake | --> | report |\n"
+        "+--------+     +--------+\n"
+        "```\n"
+        "\n"
+        "| Unit | Change |\n"
+        "| --- | --- |\n"
+        "| `a/mod.py` | reads the \\[config\\] |\n"
+        "| `keep.py` |  |\n"
+        "\n"
+        "* WHY: one hash function\n"
+        "  \n"
+        "    * not a read-back \\[a\\]\n"
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        base = Path(cls.tmp.name)
+        origin = base / "origin"
+        origin.mkdir()
+        git(origin, "init", "-q", "-b", "main")
+        (origin / "keep.py").write_text("y = 2\n", encoding="utf-8")
+        git(origin, "add", "-A")
+        git(origin, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "-m", "init")
+        cls.clone = base / "clone"
+        subprocess.run(["git", "clone", "-q", str(origin), str(cls.clone)], check=True, capture_output=True,
+                        env=hermetic_env(base))
+        git(cls.clone, "remote", "set-url", "origin", f"https://example.test/{REPO_SLUG}.git")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def _write(self, text: str) -> str:
+        p = Path(tempfile.mkstemp(dir=self.tmp.name, suffix=".txt")[1])
+        p.write_text(text, encoding="utf-8")
+        return str(p)
+
+    def _marker_run(self, stamped: str) -> str:
+        """The fenced marker run `stamp --tracker jira` appended — the part the connector leaves alone."""
+        idx = stamped.index("\n```\n<!-- sketch:")
+        return stamped[idx:]
+
+    @staticmethod
+    def _hash(text: str) -> str:
+        return sketch.content_hash(sketch.normalize_lines(text.split("\n")))
+
+    def test_the_connectors_rewrite_hashes_the_same_as_the_posted_text(self):
+        self.assertEqual(self._hash(self.POSTED), self._hash(self.STORED))
+
+    def test_check_on_the_stored_text_is_sketch_ok_without_a_restamp(self):
+        rc, stamped = run(["stamp", self._write(self.POSTED), "--repo-slug", REPO_SLUG, "--paths", "keep.py",
+                           "--tracker", "jira"])
+        self.assertEqual(rc, 0)
+        stored = self.STORED.rstrip("\n") + self._marker_run(stamped)
+        rc, out = run(["check", self._write(stored), "--repo-dir", str(self.clone), "--base", "main"])
+        self.assertEqual((rc, out.strip()), (0, "SKETCH OK"), out)
+
+    def test_a_changed_table_cell_is_still_stale(self):
+        edited = self.STORED.replace("reads the \\[config\\]", "writes the \\[config\\]")
+        self.assertNotEqual(self._hash(self.POSTED), self._hash(edited))
+
+    def test_an_added_bullet_is_still_stale(self):
+        self.assertNotEqual(self._hash(self.POSTED), self._hash(self.STORED + "* a third reason\n"))
+
+    def test_a_fenced_line_is_hashed_verbatim(self):
+        # inside the ASCII box `|` and `-` are drawing: the canonical table form must not touch them
+        spaced = self.POSTED.replace("| intake | --> | report |", "|  intake  | --> |  report  |")
+        self.assertNotEqual(self._hash(self.POSTED), self._hash(spaced))
+        aligned = self.POSTED.replace("+--------+     +--------+\n| intake", "+--------+     +--------+\n\n| intake")
+        self.assertNotEqual(self._hash(self.POSTED), self._hash(aligned))
+
+    def test_a_separator_row_keeps_its_alignment_colons(self):
+        self.assertEqual(sketch.canonical_line("| :--- | ---: | :-: |"), "|:---|---:|:---:|")
+        self.assertEqual(sketch.canonical_line("|:--|--:|"), "|:---|---:|")
+
+    def test_docs_name_the_canonical_form_and_the_one_time_restamp(self):
+        doc = (KIT / "docs" / "diagrams.md").read_text(encoding="utf-8")
+        self.assertIn("canonical markdown", doc)
+        self.assertIn("reads `STALE SKETCH` once", doc)
+
+
 if __name__ == "__main__":
     unittest.main()
-
