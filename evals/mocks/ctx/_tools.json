@@ -1,0 +1,458 @@
+{
+  "tools": [
+    {
+      "description": "ctx brief <doc> [--links] [--near] | --registry | --session <id> [--budget <bytes>] [--full]\n          [--fields <k>[,<k>\u2026] | --no-frontmatter] [--sections <h>[,<h>\u2026]]\n\nThe cold-start read, within a byte budget (default 4096; above 8192 needs\n`--full`). What does not fit is replaced by one line that says how much is\nmissing.\n\n- `<doc>`: its frontmatter, its sections with their sizes, the 5 newest\n  entries of its log.\n  With `--links`, also the docs it links to and the docs that link to it\n  (relative markdown links and wikilinks). That reads every doc of the store.\n  With `--near`, one line for each of those docs: `\u2192` for a doc it links\n  to, `\u2190` for a doc that links to it, then `key \u00b7 title \u00b7 updated \u00b7\n  summary`. The doc and what is around it, inside the one budget. It\n  reads every doc of the store too, with or without `--links`.\n- `--registry`: one line per session that has not ended: name, status, epic,\n  what it is working on, heartbeat.\n- `--session <id>`: that session's doc, as for `<doc>`, then its body.\n- `--fields <k>[,<k>\u2026]`: only those frontmatter keys, in that order, instead\n  of every field. `--no-frontmatter`: none of them. Not with `--registry`\n  (there is no one doc's frontmatter to choose from); together with each\n  other, `USAGE --fields`.\n- `--sections <h>[,<h>\u2026]`: those `##` headings first, in that order, then\n  the rest as they fall in the doc \u2014 in the sections summary, and in the\n  body a session's brief prints. Not with `--registry`. Unknown or\n  ambiguous (repeated) headings are skipped silently: the doc may lack them.\n- In both lists a name given twice counts once, at its first place.\n\nExit 0; 2 `NO_SUCH_DOC`; 3 `AMBIGUOUS_SELECTOR`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "type": "integer"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "string"
+          },
+          "full": {
+            "type": "boolean"
+          },
+          "links": {
+            "type": "boolean"
+          },
+          "near": {
+            "type": "boolean"
+          },
+          "no-frontmatter": {
+            "type": "boolean"
+          },
+          "registry": {
+            "type": "boolean"
+          },
+          "sections": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ctx_brief"
+    },
+    {
+      "description": "ctx create <doc> [<text>] [--from <file>] [--type <type>] [--title <title>]\n\nWrite a doc: the text given, or without one the scaffold of `--type`. An\nexisting doc is replaced (the audit row keeps the hash of what it was); use\n`new` to refuse that.\n\nExit codes as for `log`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc, text. Not offered over MCP: --from (files of the server's machine). The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_create"
+    },
+    {
+      "description": "ctx delete <doc>\n\nRemove a doc. The audit row records it (`after` is `null`). Docs that link\nto it are named in the result and left as they are.\n\nExit codes as for `log`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_delete"
+    },
+    {
+      "description": "ctx doctor [--json] [--store <locator>]\n\nReport what this machine and store give the tool: ctx version and api, Python\nversion, lock timeout, git switch, scratch and cache directory, how the store\nwas found (`flag`, `env` or `walk`), and per store its backend, its locator\nand what the backend reports. A Markdown store reports the schema version,\nfilesystem type, read-only state and lock mode.\n\nLock mode is `flock` where a probe proves it (two descriptors on the marker\nfile, the second must be refused), `mkdir` on a writable store without flock,\n`none` on a read-only store without flock. doctor writes nothing.\n\nExit 0 with the report; 2 `NO_STORE`; 3 `SCHEMA_VIOLATION ctx-store.json`.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "ctx_doctor"
+    },
+    {
+      "description": "ctx find [<query>] [--type <type>] [--tag <tag>] [--where <conditions>] [--budget <bytes>] [--full] [--out -|auto]\n\nOne row per hit, best first: `key \u00b7 title \u00b7 updated \u00b7 summary` (\u2264 80\ncharacters), then `\u00b7 \u00a7 <section>` when one `##` section holds the terms.\n\nThe query is terms: words, and phrases in double quotes; punctuation around\na word is dropped. A doc is a hit when every term occurs in its key or its\ntext. A query of four terms or more is read as a task, not a lookup: a doc\nthat holds at least 35 % of the query's weight is a hit too, listed behind the\ndocs that hold every term, its row ending in `\u00b7 <n> of <m> terms`. A term's\nweight is how few docs hold it; a word that no doc holds, or every doc, weighs\nnothing. Matching folds case, ignores a\nplural `s` on a word and the `-` and `_` inside words: `orders` finds `Order\nmodel`, `rollout` finds `roll-out`. It does not know synonyms.\n\n`--where` keeps the docs whose frontmatter meets every condition, separated\nby commas: `field=value`, `field!=value`, `field>=value`, `field<=value`\n(`status=active,updated>=2026-01-01`). A list field meets `=` when it holds\nthe value. `>=` and `<=` compare as text, which orders dates and timestamps.\nA doc without the field meets only `!=`. A value cannot hold a comma or start with `=`. A query\nis not needed with `--where`,\n`--type` or `--tag`.\n\nHits are ranked by where each term occurs (key and title, then tags and\nheadings, then the rest), by how few docs hold the term, and higher when the\nterms occur as one phrase or in one section. Ties go by key. The 300 best\ncandidates are ranked this way; hits past them follow in key order.\n\nHits that do not fit the budget (default 4096) are folded into a count.\n`--json` adds `rows`: `doc` `title` `updated` `summary` `section` `score`\n`terms` `of` for every hit shown. `--out auto` writes the whole result to a file in\n`$CTX_SCRATCH` and prints its path.\n\nfind is a scan: there is no index to build or to lose. Its cost grows with\nthe store and with the number of terms.\n\nExit 0 (no hit is `0 hits`); 1 `USAGE`.\n\nOver MCP. Parameters named in angle brackets above are, in order: query. Not offered over MCP: --out (files of the server's machine).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "type": "integer"
+          },
+          "full": {
+            "type": "boolean"
+          },
+          "query": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "where": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ctx_find"
+    },
+    {
+      "description": "ctx fm <doc> <field> <value> [--from <file>]\n\nSet one frontmatter field, checked against the schema of the doc's type. A\nlist field takes `a, b` or `[a, b]`. Only that line of the doc changes, and\n`updated` is set to today when the type has that field.\n\nExit codes as for `log`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc, field, value. Not offered over MCP: --from (files of the server's machine). The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "field",
+          "value"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_fm"
+    },
+    {
+      "description": "ctx get <doc>[,<doc>\u2026] [--section <heading>] [--tail <n>] [--budget <bytes>] [--full] [--out -|auto]\n\nOne section of a doc, or its body; `--tail` keeps the last `n` entries\n(lines that are neither blank nor comments). Inside the byte budget\n(default 8192); `--out auto` as for `find`.\n\nSeveral docs, separated by commas, are answered in one call, each under a\nline `== <doc> ==`. A key that holds a comma itself and names a doc that\nexists is read as that one doc; it is looked up first. The budget is the call's and is shared evenly, so one long doc cannot\ncrowd the others out. A doc that lacks the section says so in its part. A doc\nthat does not exist, or that has the heading twice, fails the call.\n\nExit 0; 2 `NO_SUCH_DOC`, `NO_SUCH_SECTION`; 3 `AMBIGUOUS_SELECTOR`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc. Not offered over MCP: --out (files of the server's machine).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "type": "integer"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "full": {
+            "type": "boolean"
+          },
+          "section": {
+            "type": "string"
+          },
+          "tail": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "doc"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_get"
+    },
+    {
+      "description": "ctx insert <doc> <text> --line <n> [--from <file>]\n\nInsert text after line `n` (0: before the first line).\n\nExit codes as for `log`; 1 `USAGE --line` for a line the doc does not have.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc, text. Not offered over MCP: --from (files of the server's machine). The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "text",
+          "line"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_insert"
+    },
+    {
+      "description": "ctx log <doc> <text> [--section <heading>] [--date <YYYY-MM-DD>] [--from <file>]\n\nAdd one entry to a doc's log, under the store lock. The entry is\n`- <date> \u2014 <text>`. A text that already starts with `<YYYY-MM-DD> \u2014 ` keeps\nthat date and gets no second one; `--date` with such a text is `USAGE --date`.\nIt goes after the section's last line, so a log reads\noldest first, unless the doc's type says `\"order\": \"newest-first\"`: then it\ngoes before the first entry. The section is `--section`, else the\n`log.section` of the doc's type.\nFor a ledger type the text is appended as it is, at the end of the doc.\n\nThe text is one line. `log` does not change the `updated` field: the time of\na doc's last write is the `ts` of its last audit row.\n\nExit 0; 2 `NO_SUCH_DOC`, `NO_SUCH_SECTION`; 3 `AMBIGUOUS_SELECTOR`,\n`SCHEMA_VIOLATION`, `SECRET_DETECTED`, `PATH_ESCAPE`, `GENERATED`,\n`NOT_OWNER`; 4 `LOCK_TIMEOUT`; 5 `STORE_READONLY`, `STORE_NOT_NAMED`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc, text. Not offered over MCP: --from (files of the server's machine). The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "section": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_log"
+    },
+    {
+      "description": "ctx maintain\n\nThe periodic pass, for an asynchronous hook, cron or the end of a session.\nA second run changes nothing.\n\n1. Log tails: a doc over `size_guard` bytes (default 30000) keeps the\n   `keep_log` newest entries of its log (default 20); the older ones move to\n   the doc `archive` names (default `archive/{slug}-log`), which is created\n   if it does not exist yet. The archive doc's own type (default `log`)\n   decides the shape: with `log.section` the moved entries go into that\n   section; with `log` rules but no `section`, into its body-level dated\n   list; with no `log` rules, into a `## Log` section; `log.order`\n   `newest-first` puts the moved block at the top, newest first,\n   `oldest-first` (default) at the end, oldest first, as they are kept. A\n   freshly created archive doc carries `title`, `type`, `updated` plus a\n   reasonable default for every other field its type requires: `domain`\n   copied from the source doc, a field's `const`, an enum field's first\n   value, today's date for a `date` field \u2014 the first of these the field's\n   rule accepts, so a source `domain` outside the rule's enum falls back to\n   the enum. A required field with no derivable default is reported as\n   `archive: <target> \u2014 cannot create, <field> required` and that tail is\n   left alone: nothing is written to either doc.\n2. Sessions: a session doc with `status: ended` and a heartbeat older than\n   `session_days` (default 7) moves to `session_archive` (default\n   `sessions/archive/{name}`), links to it rewritten; its audit rows are put\n   aside and still count.\n3. Catalog: when `catalog` names a generated doc, it is rewritten as a table\n   of every doc (key, title, type, status, updated), only if it changed.\n4. With `CTX_GIT=1` on a store inside a git work tree: one commit of the\n   store's changes, author and committer the actor, unless ctx committed\n   less than `git_debounce` seconds ago (default 300).\n\nExit codes as for `log`.\n\nOver MCP. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ctx_maintain"
+    },
+    {
+      "description": "ctx migrate --check | --dry-run | --apply\n\nTake every doc that is behind its type's schema version to that version.\n\nA type's `migrations` are numbered steps. A step may hold `rename_fields`\nand `rename_sections` (old \u2192 new), `set_fields` (field \u2192 value),\n`remove_fields`, `log_order` (`oldest-first` or `newest-first`: a log whose\ndated entries read the other way round is reversed; one already in order, or\nin no order, is left alone; with no `log.section` this reorders the doc's\nbody-level dated list instead), `log_order_from` (beside `log_order`, the other\norder: the one the logs were written in, so entries whose dates all tie, one\nbusy day, are reversed too; a log whose dates read in the target order is\nstill left alone) and `replace_comments` (`old`, `new`: replaced inside HTML\ncomments only). Steps touch frontmatter, section names and the order of log\nentries; prose is never rewritten. A doc takes each step once, so a second\nrun changes nothing.\n\n- `--check`: exit 3 `MIGRATION_PENDING`, one line per doc, when steps are\n  pending.\n- `--dry-run`: what `--apply` would do, per doc: versions, steps, lines\n  added or removed. Writes nothing.\n- `--apply`: one audited write per doc, validated at the new version. Every\n  doc is checked before any is written: when one would not be valid, the run\n  writes nothing and names each such doc, one line per finding, as `validate`\n  does (`SCHEMA_VIOLATION <doc> <detail>`; `--json` findings carry `doc`).\n\nExit 0; 3 `MIGRATION_PENDING` (`--check`), `SCHEMA_VIOLATION` when a doc is\nnot valid after its steps; otherwise as for `log`.\n\nOver MCP. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "apply": {
+            "type": "boolean"
+          },
+          "check": {
+            "type": "boolean"
+          },
+          "dry-run": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ctx_migrate"
+    },
+    {
+      "description": "ctx move <doc> <to>\n\n`rename` under the name of the structured write; the audit rows say `move`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc, to. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_move"
+    },
+    {
+      "description": "ctx new <type> <doc> [--title <title>]\n\nScaffold a doc from the type's template, `.ctx/templates/<type>.md`; a type\nwithout one gets frontmatter and a title.\n\nExit codes as for `log`; 3 `DOC_EXISTS`.\n\nOver MCP. Parameters named in angle brackets above are, in order: type, doc. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "doc"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_new"
+    },
+    {
+      "description": "ctx rename <doc> <to>\n\nRename a doc and rewrite the links to it: relative markdown links\n(`[x](../a/b.md#part)`) and wikilinks of its key or name (`[[b]]`). The\ndoc's own relative links are rewritten for its new place. One lock, one\naudit row per doc touched.\n\nExit codes as for `log`; 3 `DOC_EXISTS`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc, to. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_rename"
+    },
+    {
+      "description": "ctx resolve <key>\n\nThe one doc a tracker key belongs to, as a `find` row. The key's shape is the\nstore's `resolve.key_regex`, never a built-in pattern. A doc matches when one\nof its `resolve.fields` is the key, else when its `resolve.section` names\nthe key; field matches win.\n\nExit 0; 1 `USAGE resolve.key_regex` when no store sets one; 2 `NO_SUCH_DOC`\n(also for a key of another shape); 3 `AMBIGUOUS_SELECTOR`, listing the docs.\n\nOver MCP. Parameters named in angle brackets above are, in order: key.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_resolve"
+    },
+    {
+      "description": "ctx str_replace <doc> --old <text> [--new <text>]\n\nReplace one exact string. It must occur once: no match is `NO_MATCH`, more\nthan one `AMBIGUOUS_SELECTOR`.\n\nExit codes as for `log`; 2 `NO_MATCH`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "new": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "old"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_str_replace"
+    },
+    {
+      "description": "ctx touch --session <id> [--working <text>]\n\nSet `heartbeat` to now in the session doc whose `session_id` or `session` is\n`<id>`, and `working_on` when `--working` is given. The write is recorded for\nthe session itself, whatever `CTX_ACTOR` says.\n\nExit 0; 2 `NO_SUCH_DOC`; 3 `AMBIGUOUS_SELECTOR`; otherwise as for `log`.\n\nOver MCP. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "session": {
+            "type": "string"
+          },
+          "working": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "name": "ctx_touch"
+    },
+    {
+      "description": "ctx validate [--changed] [--adopt]\n\nCheck every doc against the general rules and the schema of its type.\n\n`--changed` looks only at docs that differ from what their last audit row\nrecorded, and reports each as `UNAUDITED_WRITE`: it changed outside ctx.\n`--changed --adopt` records the current state of every such doc that is\nvalid instead (an audit row with the verb `adopt`), and reports only the\ninvalid ones. A doc deleted outside ctx is adopted as deleted (`after`\n`null`). `--adopt` is a write.\n\nA doc larger than the store's `maintain.size_guard` (default 30000 bytes) is\na warning, never a failure: `warning: SIZE_GUARD <doc>: <n> bytes` after the\nresult, `warnings` in the envelope.\n\nExit 0 with the number of docs checked; 3 with one line per finding.\n\nOver MCP. The optional `actor` writes as that actor instead of the server's; the store's settings must allow the name (`mcp.actors`).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "adopt": {
+            "type": "boolean"
+          },
+          "changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ctx_validate"
+    },
+    {
+      "description": "ctx view [<doc> | <directory>] [--range <first>:<last>] [--budget <bytes>] [--full]\n\nA doc with its lines numbered, or the docs below a directory with their\nsizes (no argument: the whole store). Inside the byte budget (default 8192).\n\nExit 0; 2 `NO_SUCH_DOC`; 3 `PATH_ESCAPE`.\n\nOver MCP. Parameters named in angle brackets above are, in order: doc.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "budget": {
+            "type": "integer"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "full": {
+            "type": "boolean"
+          },
+          "range": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "ctx_view"
+    }
+  ]
+}

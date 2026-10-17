@@ -89,6 +89,25 @@ class ThisKit(unittest.TestCase):
         self.assertEqual(manifest["experimental"]["evals"], "evals")
         self.assertEqual(eval_check.eval_dir(KIT), KIT / "evals")
 
+    def test_every_plugin_mcp_server_has_a_committed_mock(self):
+        # `claude plugin eval` starts no plugin MCP server that has no mock, so every case ran without the ctx tools
+        # (the runner warned `has no mock and is NOT started` once per case). The mock lives under evals/mocks/<server>/.
+        servers = eval_check.mcp_servers(KIT)
+        self.assertIn("ctx", servers)
+        for server in servers:
+            d = eval_check.eval_dir(KIT) / "mocks" / server
+            self.assertTrue(list(d.glob("*.md")), f"{server}: no mocks/{server}/<tool>.md")
+        self.assertEqual(eval_check.check_mocks(KIT, eval_check.eval_dir(KIT)), [])
+
+    def test_the_ctx_mock_answers_every_tool_it_lists(self):
+        d = eval_check.eval_dir(KIT) / "mocks" / "ctx"
+        listed = {t["name"] for t in json.loads((d / "_tools.json").read_text(encoding="utf-8"))["tools"]}
+        answered = {p.stem for p in d.glob("*.md") if not p.name.startswith("_")}
+        self.assertEqual(listed, answered)
+        self.assertIn("ctx_log", answered)
+        for tool in sorted(answered):  # the runner refuses a stub, and an empty answer tells the agent nothing
+            self.assertTrue((d / f"{tool}.md").read_text(encoding="utf-8").strip(), tool)
+
     def test_results_stay_ignored(self):
         self.assertIn("evals/results/", (KIT / ".gitignore").read_text(encoding="utf-8").splitlines())
 
@@ -192,6 +211,77 @@ class Suites(unittest.TestCase):
         self.kit.case("foo-both", kind="positive, near-miss")
         errors, _, _ = self.kit.run()
         self.assertTrue(any("tagged exactly one of" in e for e in errors), errors)
+
+
+class Mocks(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.kit = Kit(Path(self.tmp.name))
+        self.kit.suite()
+        manifest = self.kit.root / ".claude-plugin"
+        manifest.mkdir()
+        (manifest / "plugin.json").write_text(json.dumps({"mcpServers": {"ctx": {"command": "x"}}}), encoding="utf-8")
+        self.mocks = self.kit.root / "evals" / "mocks"
+
+    def mock(self, server="ctx", tools=("ctx_get",), saved=None):
+        d = self.mocks / server
+        d.mkdir(parents=True, exist_ok=True)
+        for t in tools:
+            (d / f"{t}.md").write_text("ok\n", encoding="utf-8")
+        if saved is not None:
+            (d / "_tools.json").write_text(json.dumps({"tools": [{"name": n} for n in saved]}), encoding="utf-8")
+        return d
+
+    def errors(self):
+        return self.kit.run()[0]
+
+    def test_a_plugin_mcp_server_without_a_mock_fails(self):
+        errors = self.errors()
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("evals/mocks/ctx/", errors[0])
+        self.assertIn("no mock", errors[0])
+
+    def test_a_mock_for_the_server_passes(self):
+        self.mock()
+        self.assertEqual(self.errors(), [])
+
+    def test_a_kit_without_mcp_servers_needs_no_mock(self):
+        (self.kit.root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(self.errors(), [])
+
+    def test_an_empty_mock_directory_answers_nothing(self):
+        self.mock(tools=())
+        self.assertTrue(any("no `<tool>.md`" in e for e in self.errors()), self.errors())
+
+    def test_an_agent_mock_stands_without_tool_files(self):
+        d = self.mock(tools=())
+        (d / "_server.md").write_text("---\ntype: agent\ntools: [ctx_get]\n---\nA small world.\n", encoding="utf-8")
+        self.assertEqual(self.errors(), [])
+
+    def test_a_double_underscore_in_a_name_is_refused(self):
+        self.mock(tools=("ctx_get", "ctx__log"))
+        self.mock(server="bad__name", tools=("ctx_get",))
+        errors = self.errors()
+        self.assertTrue(any("ctx__log.md" in e for e in errors), errors)
+        self.assertTrue(any("bad__name" in e for e in errors), errors)
+
+    def test_a_saved_tool_list_must_match_the_tool_files(self):
+        self.mock(tools=("ctx_get", "ctx_extra"), saved=["ctx_get", "ctx_log"])
+        errors = self.errors()
+        self.assertTrue(any("`ctx_log` but there is no ctx_log.md" in e for e in errors), errors)
+        self.assertTrue(any("ctx_extra.md answers a tool" in e for e in errors), errors)
+
+    def test_a_saved_tool_list_that_is_not_a_tools_list_fails(self):
+        d = self.mock()
+        (d / "_tools.json").write_text(json.dumps({"nope": []}), encoding="utf-8")
+        self.assertTrue(any("not a `tools/list` answer" in e for e in self.errors()), self.errors())
+
+    def test_the_cli_fails_on_a_missing_mock(self):
+        r = subprocess.run([sys.executable, str(KIT / "context-db" / "bin" / "eval_check.py"), "--kit", str(self.kit.root)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("no mock", r.stdout)
 
 
 class CaseFormat(unittest.TestCase):
