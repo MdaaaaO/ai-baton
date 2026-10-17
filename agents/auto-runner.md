@@ -4,7 +4,7 @@ description: "Sonnet worker for the trivial-PR auto-approve path (docs-only/depe
 metadata:
   version: "7"
   updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  reviewed: "2026-10-17"
 model: sonnet
 effort: medium
 omitClaudeMd: true
