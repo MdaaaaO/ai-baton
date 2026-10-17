@@ -10,7 +10,11 @@ reads the eval dir the plugin manifest names (`experimental.evals`, else `evals/
   - a trigger case (tag `trigger`) whose directory names no skill (`evals/<skill>-<case>/`), that is not tagged
     exactly one of `positive` / `near-miss`, or whose `tool_used: Skill` grader does not name the skill, is not scored
     under ablation (`arm: both`), or points the wrong way (a positive needs `min` >= 1, a near miss `min: 0` + `max: 0`);
-  - a skill that HAS a trigger suite with fewer than MIN_CASES cases or fewer than MIN_EACH positives or near misses.
+  - a skill that HAS a trigger suite with fewer than MIN_CASES cases or fewer than MIN_EACH positives or near misses;
+  - an MCP server the plugin manifest ships (`mcpServers`) with no mock under `<eval dir>/mocks/<server>/` — the
+    runner then withholds the server and its tools are absent from every case — or a mock the runner would refuse
+    to load (a name with `__` or characters outside letters, digits, `_` and `-`), or a saved `_tools.json` that
+    disagrees with the `<tool>.md` files beside it.
 
 Skills without a suite yet, and descriptions without a recognized trigger phrase, are printed as notes — not
 failures — until every skill has one (`--require-all` turns both into failures; the eventual gate). Stdlib only;
@@ -62,6 +66,7 @@ TRIGGER_OTHER = re.compile(
     re.IGNORECASE,
 )
 SKIP_DIRS = frozenset({"results", "mocks"})
+MOCK_NAME = re.compile(r"^[A-Za-z0-9_-]+$")  # a server directory / tool file name; "__" is the tool-name separator
 
 
 def has_trigger_phrase(description: str) -> bool:
@@ -197,6 +202,58 @@ def check_case(case_dir: Path, skills: list[str]) -> tuple[list[str], dict | Non
     return errors, {"skill": skill, "kind": kind}
 
 
+def mcp_servers(kit: Path) -> list[str]:
+    """The keys of the plugin manifest's `mcpServers` (the MCP servers the plugin starts in every session)."""
+    try:
+        servers = json.loads((kit / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")).get("mcpServers")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return sorted(servers) if isinstance(servers, dict) else []
+
+
+def check_mocks(kit: Path, root: Path) -> list[str]:
+    """Errors for the MCP mocks under `<root>/mocks/`. `claude plugin eval` starts no plugin server that has no mock
+    (its tools are absent from the run), so every manifest server needs a `mocks/<server>/` with a `<tool>.md` per
+    tool, or a `_server.md`. A saved `_tools.json` (the server's `tools/list` answer) must name the same tools."""
+    errors: list[str] = []
+    mocks = root / "mocks"
+    rel = mocks.relative_to(kit)
+    for server in mcp_servers(kit):
+        d = mocks / server
+        if not d.is_dir():
+            errors.append(f"{rel}/{server}/: the plugin ships the MCP server `{server}` but no mock — the runner would "
+                          f"withhold it and every case would lose its tools")
+    if not mocks.is_dir():
+        return errors
+    for d in sorted(p for p in mocks.iterdir() if p.is_dir()):
+        where = f"{rel}/{d.name}"
+        if "__" in d.name or not MOCK_NAME.match(d.name):
+            errors.append(f"{where}/: a server directory is named with letters, digits, `_` and `-`, never `__`")
+        tools = sorted(p.stem for p in d.glob("*.md") if not p.name.startswith("_"))
+        has_agent = (d / "_server.md").is_file()
+        for t in tools:
+            if "__" in t or not MOCK_NAME.match(t):
+                errors.append(f"{where}/{t}.md: name a responder file after its tool (letters, digits, `_` and `-`, never `__`)")
+        if not tools and not has_agent:
+            errors.append(f"{where}/: no `<tool>.md` and no `_server.md` — the mock answers nothing")
+        saved = d / "_tools.json"
+        if not saved.is_file():
+            continue
+        try:
+            listed = json.loads(saved.read_text(encoding="utf-8"))
+            names = sorted(t["name"] for t in listed["tools"])
+        except (OSError, ValueError, KeyError, TypeError):
+            errors.append(f"{where}/_tools.json: not a `tools/list` answer — expected {{\"tools\": [{{\"name\": …}}, …]}}")
+            continue
+        if has_agent:
+            continue  # an agent mock answers the saved tools itself; no per-tool file is required
+        for t in sorted(set(names) - set(tools)):
+            errors.append(f"{where}/_tools.json lists `{t}` but there is no {t}.md to answer it")
+        for t in sorted(set(tools) - set(names)):
+            errors.append(f"{where}/{t}.md answers a tool `_tools.json` does not list")
+    return errors
+
+
 def check(kit: Path, require_all: bool = False) -> tuple[list[str], list[str], dict[str, dict[str, int]]]:
     """(errors, notes, per-skill counts {skill: {positive: n, near-miss: n}})."""
     skills = skill_names(kit)
@@ -208,6 +265,7 @@ def check(kit: Path, require_all: bool = False) -> tuple[list[str], list[str], d
     if not root.is_dir():
         errors.append(f"{root.relative_to(kit)}/: the eval dir does not exist")
         return errors, notes, suites
+    errors += check_mocks(kit, root)
     for case_dir in sorted(p for p in root.iterdir() if p.is_dir() and p.name not in SKIP_DIRS and not p.name.startswith(".")):
         errs, trig = check_case(case_dir, skills)
         errors += errs

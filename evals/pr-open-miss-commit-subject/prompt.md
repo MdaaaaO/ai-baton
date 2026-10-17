@@ -5,4 +5,4 @@ allowed_tools: [Read, Glob, Grep, Skill]
 tags: [trigger, near-miss, pr-open]
 ---
 
-Suggest a Conventional Commit subject line for my staged change that renames the config loader. Just the subject, I'll commit myself.
+Suggest a Conventional Commit subject line for my staged change, which renames the `ConfigLoader` class to `SettingsLoader` in `config.py` and changes nothing else. The diff is not in this directory; work from that description. Just the subject, I'll commit myself.
