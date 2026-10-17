@@ -53,7 +53,9 @@ without one the server's tools are absent from every case and the runner warns `
 `_tools.json`, the server's saved `tools/list` answer, so the model sees the real tool schemas. A mocked tool is
 allowed automatically — never add it to a case's `allowed_tools`. When the pinned ctx-store version changes its
 tool set, regenerate `_tools.json` and add or drop the matching `<tool>.md`; `eval_check.py` fails a manifest server
-with no mock and a `_tools.json` that disagrees with the files beside it.
+with no mock and a `_tools.json` that disagrees with the files beside it. The file carries the ctx-store version it was
+saved from (`ctx_version`), and `eval_check.py` fails when that differs from `CTX_VERSION` in `ctx_adapter.py` — regenerate
+the file whenever `CTX_VERSION` is bumped.
 
 | run | what | tokens |
 |---|---|---|

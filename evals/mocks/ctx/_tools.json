@@ -454,5 +454,6 @@
       },
       "name": "ctx_view"
     }
-  ]
+  ],
+  "ctx_version": "0.8.0"
 }
