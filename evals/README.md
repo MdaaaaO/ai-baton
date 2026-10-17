@@ -47,6 +47,14 @@ follow-up; (5) `pr-event-brief`'s `DIAGRAMS:` line — a
 drifted plan on a real `HEAD MOVED` event reads `DRIFT` and picks `REDRAW`, and a stale-review event
 (marked `(on older head <sha>)`, never a `HEAD MOVED` line) carries no `DIAGRAMS:` line at all.
 
+**MCP mocks.** `claude plugin eval` starts no MCP server the plugin ships unless `evals/mocks/<server>/` stands in for it;
+without one the server's tools are absent from every case and the runner warns `has no mock and is NOT started`.
+`mocks/ctx/` answers the `ctx` server: one `<tool>.md` per tool (an empty-store read or an acknowledged write) and
+`_tools.json`, the server's saved `tools/list` answer, so the model sees the real tool schemas. A mocked tool is
+allowed automatically — never add it to a case's `allowed_tools`. When the pinned ctx-store version changes its
+tool set, regenerate `_tools.json` and add or drop the matching `<tool>.md`; `eval_check.py` fails a manifest server
+with no mock and a `_tools.json` that disagrees with the files beside it.
+
 | run | what | tokens |
 |---|---|---|
 | `make -C $BATON/context-db eval-check` | every case loads (prompt keys, grader types), every trigger suite has ≥ 10 cases with both kinds; skills without a suite and descriptions with no recognized trigger phrase (`TRIGGER_WHEN` / `TRIGGER_OTHER`) are notes on a bare run, but `ci.yml` runs `REQUIRE_ALL=1`, so both are a failure there. Part of `make ci` and `ci.yml` | none |
