@@ -2,8 +2,8 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "35"
-  updated: "2026-10-15"
+  version: "36"
+  updated: "2026-10-17"
   reviewed: "2026-10-15"
 user-invocable: true
 ---
@@ -52,7 +52,11 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    tools as in step 1. New docs are created with `make -C $BATON/context-db new TYPE=… DOMAIN=… SLUG=…`.
 4. **Memory** — only if a *situational* fact worth recalling emerged (not an always-on rule — those
    go to `WORKSPACE.md` § Rules). Write or update the note **and** add or fix its one-line entry in
-   `MEMORY.md`. Prefer updating an existing note over adding a duplicate; delete notes proven wrong.
+   `MEMORY.md`: `- [Title](<note>.md) — <hook>`, the whole line ≤ 150 characters (`MEMORY_LINE_WARN`) —
+   the hook says when the note applies, never what it says. Prefer updating an existing note over adding
+   a duplicate; delete notes proven wrong. Then `python3 $BATON/skills/memory-prune/memory_check.py` must
+   exit 0 (no `LONG_LINE`, `INDEX_BUDGET` or `SECRET`); a `LONG_LINE` or `INDEX_BUDGET` is fixed now, by
+   shortening the line or running `memory-prune` — never left for the next kit-health run.
 5. **Index integrity and context sync** — nothing to run: after every `.context/` write the kit's hooks validate
    the doc, regenerate `INDEX.md` and `SESSION_INDEX.md`, touch your registry row and — when `.context/` is its
    own git repository with a remote (`context.sync`, `docs/context-sync.md`) — commit and push it. A
