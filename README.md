@@ -1,16 +1,31 @@
 # bAIton
 
-**`ai-baton` — a workspace kit for Claude Code: every session gets the same skills, rules and memory,
-hands off to the next, and every machine checks and updates its own copy.**
+**`ai-baton` — a workspace kit for Claude Code: a context database that grows with every session, a live
+registry of who works on what, and handoffs that let an initiative outlive any one session. Every machine checks
+and updates its own copy.**
 
 [![CI](https://github.com/MdaaaaO/ai-baton/actions/workflows/ci.yml/badge.svg)](https://github.com/MdaaaaO/ai-baton/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/MdaaaaO/ai-baton)](https://github.com/MdaaaaO/ai-baton/releases)
 [![Conventional Commits](https://img.shields.io/badge/Conventional_Commits-1.0.0-FE5196)](https://www.conventionalcommits.org)
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](docs/packaging.md)
 
-Install it as a plugin or clone it. You get skills for PRs, tickets, sessions and docs, a markdown database for
-what sessions learn, and one store for per-machine values. No names, ids or org settings: every machine and
-teammate uses it unchanged.
+What you get, from the top:
+
+- **Context that accumulates.** `.context/` is an indexed markdown database beside your repos, optionally its own
+  git repo that every machine pulls at session start. Each session adds what it learned; the next does not start cold.
+- **Sessions choose their context.** The index names every doc and a brief per initiative; a session reads what it
+  works on, not everything, so the loaded prefix and the cost stay small.
+- **Initiatives outlive sessions.** One context doc per initiative. A session ends with a handoff prompt; its
+  successor reads it back, checks each claim against the tracker and the PRs, and only then edits. A stale prompt is
+  caught before it is acted on ([a real one](#a-handoff)).
+- **A live registry.** Who works on what right now: heartbeats, the PRs each session watches, what each session
+  cost. A second session coordinates instead of colliding.
+- **Tooling, not prose.** Index, registry, session stats, health check and sync are scripts and hooks with zero
+  model turns; the skills are the thin layer on top.
+- **Lightweight.** One install command, one setup run, no names or ids in the kit. If you already start Claude Code
+  from the directory that holds your repos, the first session benefits.
+
+Plus skills for PRs, tickets, sessions and docs, and one store for per-machine values.
 
 **Plugin**: Claude Code installs and updates it.
 
@@ -33,8 +48,14 @@ git clone https://github.com/MdaaaaO/ai-baton.git .claude && sh .claude/setup.sh
 > **Never use your home directory as the workspace root.** `~/.claude` is Claude Code's own config directory;
 > `setup.sh` refuses `$HOME` as the workspace root.
 
-Both paths set `$BATON`, the kit root that this repo's docs write as `$BATON/…`: a clone's `settings.json` sets it
-to `.claude`, a plugin's SessionStart hook exports it from the plugin cache. You never set it (`docs/glossary.md`).
+**What it leaves on disk.** `setup.sh` creates a `.context/` tree beside your repos (memory, the env store, the
+context DB), seeds a root `CLAUDE.md` and a root `Makefile` include only where none exists, and points Claude Code's
+auto-memory directory at `.context/memory` through one symlink. It never writes into your repos. To remove it:
+[`docs/troubleshooting.md` § 4 Uninstalling](docs/troubleshooting.md), or `claude plugin uninstall ai-baton@ai-baton-kit`
+on the plugin path.
+
+Both paths set `$BATON`, the kit root the docs write as `$BATON/…`: `.claude` on a clone, the plugin cache on a
+plugin install. You never set it (`docs/glossary.md`).
 
 ## Your first session
 
@@ -59,6 +80,34 @@ $ python3 $BATON/skills/kit-health/kit-health.py --stale 90 --quiet
 
 The first run is AMBER: each warning names its fix (here the unfetched ctx store and the missing stamp).
 
+## A handoff
+
+The handoff that produced this section, trimmed (`…`), the owner's name removed: the ending session's prompt, the
+index's one-line starter, the successor's read-back before its first edit.
+
+```text
+$ make -C $BATON/context-db session-end NAME=kit-14 NEXT=…/next.md
+ended sessions/kit-14.md (+ stats block, ledger row)
+wrote SESSION_INDEX.md — 0 active, 1 ended listed, 0 with no prompt
+
+# SESSION_INDEX.md § Ended — the paste-ready starter for the next session
+Register as the successor of kit-14; your prompt is in sessions/kit-14.md § Next session.
+
+# sessions/kit-14.md § Next session (what the successor reads)
+Register as `kit-15`, successor of `kit-14` (`SUCCESSOR_OF=kit-14`), lane kit; epic: none open …
+Owns: ai-baton worktrees, PRs, merges and the next release; do not touch the other lane's docs or worktrees.
+State: v0.11.1 released 2026-10-17 and installed here (kit-health stamped at 150d3c8, AMBER: one doc size).
+Open issues (2): #587 stays open until the other environment runs `/memory-prune` — do not close it from here.
+First task: … triage anything new (contributor PRs are reviewed, never rewritten); a small chore is ready …
+Release: cut 0.11.2 only once a user-visible fix lands after #604.
+Open PRs / watchers to re-arm: none.
+
+# the successor's narrate-back, before its first edit
+Owns: ai-baton worktrees, PRs, merges, the next release · Landed: v0.11.1, #591–#599, #603, #604 ·
+Open: #587 (closes from the other environment) · First step: gh issue list + gh pr list, triage ·
+Not known: whether the other environment has updated yet
+```
+
 ## The loop
 
 The kit exists to run this loop: an issue is sized once, picked up by a worker matched
@@ -77,18 +126,14 @@ flowchart LR
   retro -.->|"a kit gap"| issue
 ```
 
-- **`ticket-open`** writes the ticket's Sizing line once: which model, and whether the job stays in the main
-  session or goes to a worker (`docs/delegation.md` § Sizing).
+- **`ticket-open`** writes the Sizing line once: which model, main session or a worker (`docs/delegation.md`).
 - **`ticket-pickup`** re-checks that call against the current default branch, then claims the ticket.
-- A worker sized to the ticket does the fix — in the main session for a judgment call, in the background when
-  it's one of a queue (`docs/delegation.md` § The worker brief).
-- **`pr-open`** opens the PR with its diagrams, labels and reviewers; **`pr-watch`** keeps it current and
-  surfaces only what needs a decision.
-- Claude reads the diff against one rule file ([`docs/REVIEW.md`](docs/REVIEW.md)) and posts a verdict; an
-  approved, green PR merges itself. A human gates only the sensitive paths: `.github/` and the review's own rule
-  and gate files.
-- **`session-handoff`** flushes what the session learned; **`session-retro`** checks the session against the
-  kit and offers a kit gap back as an issue, closing the loop.
+- A worker sized to the ticket does the fix: in the main session for a judgment call, in the background for one
+  of a queue.
+- **`pr-open`** opens the PR with diagrams, labels and reviewers; **`pr-watch`** surfaces only what needs a decision.
+- Claude reviews the diff against one rule file ([`docs/REVIEW.md`](docs/REVIEW.md)); an approved, green PR merges
+  itself. A human gates only `.github/` and the review's own rule and gate files.
+- **`session-handoff`** flushes what the session learned; **`session-retro`** offers a kit gap back as an issue.
 
 ## Why a kit
 
@@ -98,20 +143,8 @@ flowchart LR
 | A skills plugin | Skills hardcode your org, channels and ids, or ask you for them every time | An env fact store: a fact is found once, then read everywhere |
 | Nothing | Each session starts cold and forgets what the last one learned | `.context/`, an indexed markdown DB, plus a session registry and handoff docs |
 
-Use a plain `CLAUDE.md` for one repo and one person. The kit pays off past that: several repos, machines or people ([vision](docs/vision.md)).
-
-## How it works
-
-1. Every session loads `WORKSPACE.md` (the shared rules): a clone's root `CLAUDE.md` imports `.claude/WORKSPACE.md`,
-   a plugin's SessionStart hook injects it. The root `CLAUDE.md` imports `.context/reference/environment.md`
-   (your environment's prose).
-2. Only the skills' names and descriptions load into a session. A skill's body loads when it runs.
-3. A skill that needs a value, such as a channel id, reads it from the env store in `.context/reference/env/`. It
-   discovers a missing value once and writes it back.
-4. What sessions learn goes into `.context/` as rows of a markdown DB with a generated index.
-5. Sessions register in a live registry and hand off through one context doc per initiative.
-6. Kit changes are PR-only. Each machine picks up a release itself: a clone's SessionEnd hook holds the new tag
-   with a preview and `make claude_sync` applies it, a plugin install runs `claude plugin update`.
+Use a plain `CLAUDE.md` for one repo and one person. The kit pays off past that: several repos, machines or people
+([vision](docs/vision.md)). Mechanics: [`docs/architecture.md`](docs/architecture.md).
 
 ## Stays healthy on every machine
 
@@ -119,11 +152,11 @@ Each machine checks its own copy:
 
 | Loop | What it does |
 |---|---|
-| `/kit-health` | Audits the kit and this machine's wiring (frontmatter, leaked values, env store, hooks, an engine smoke), names the update command when a release is out, and stamps `.context/kit-health/HEALTH-<env>.md` |
-| Versioned units | Every skill and agent carries a version; each PR says what a machine must do, usually nothing, and the release log is generated |
-| Updates | A clone fast-forwards itself at session end, a plugin install updates per release, each machine re-stamps itself |
-| Many sessions | A live registry with heartbeats, one PR watcher per repo and a handoff prompt per session, so successor sessions pick up in-flight work |
-| The kit's own PRs | Claude reviews every PR, a gate blocks leaked values and missing version bumps, and auto-merge lands it on green |
+| `/kit-health` | Audits the kit and this machine's wiring (frontmatter, leaked values, env store, hooks, engine smoke), names the update command when a release is out, stamps `.context/kit-health/HEALTH-<env>.md` |
+| Versioned units | Every skill and agent carries a version; each PR says what a machine must do, usually nothing; the release log is generated |
+| Updates | A clone fast-forwards itself at session end, a plugin install updates per release; each machine re-stamps itself |
+| Many sessions | A live registry with heartbeats, one PR watcher per repo, a handoff prompt per session |
+| The kit's own PRs | Claude reviews every PR, a gate blocks leaked values and missing bumps, auto-merge lands it on green |
 
 ```mermaid
 flowchart LR
@@ -142,17 +175,14 @@ flowchart LR
 
 ### Quick start: a GitHub-only machine
 
-It asks no questions: run the block for your path above, from your workspace root. `--personal` takes
-your login and name from `gh`, your repos from the clones under the workspace root, and the timezone from the OS.
-It sets every `systems.*` flag to false, so a skill that needs Jira, Slack or a warehouse stops with one "not
-applicable here" line. Re-running is safe. Fetch the pinned ctx-store first
-(`python3 <kit>/context-db/bin/ctx_adapter.py install`) and setup also adopts `.context/` as a ctx store, so every
-write to a context doc goes through ctx's validated, audited verbs.
+It asks no questions: run the block for your path above, from your workspace root. `--personal` takes your login
+and name from `gh`, your repos from the clones under the root and the timezone from the OS; every `systems.*` flag
+is false, so a skill that needs Jira, Slack or a warehouse stops with one "not applicable" line. Re-running is safe.
+Setup also adopts `.context/` as a ctx store: every context write goes through validated, audited verbs.
 
-On the plugin path `/kit-setup` runs the plugin's own `setup.sh` from inside the session, since the plugin's root
-moves on every update. It seeds `.context/` and the root `CLAUDE.md` but no `Makefile` include: the hook loads the rules. To set your identity without `gh`, run `/plugin configure ai-baton`.
-[`docs/plugin-setup.md`](docs/plugin-setup.md) walks the plugin path step by step, including updates and a switch
-from a clone.
+On the plugin path `/kit-setup` runs the plugin's own `setup.sh` from inside the session (the plugin root moves on
+every update); it seeds `.context/` and the root `CLAUDE.md`, no `Makefile` include. Identity without `gh`:
+`/plugin configure ai-baton`. [`docs/plugin-setup.md`](docs/plugin-setup.md) walks the path, updates included.
 
 ### Full path: a tracker, chat or warehouse
 
@@ -190,31 +220,31 @@ It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `contex
 | Page | Read it for |
 |---|---|
 | [vision](docs/vision.md) | What the kit is and is not |
-| [layout](docs/layout.md) | What every file and directory is |
-| [conventions](docs/conventions.md) | The six rules that keep the kit portable |
-| [carousel](docs/carousel.md) · [assumptions](docs/assumptions.md) | The `AskUserQuestion` shape for every open decision a session returns |
+| [layout](docs/layout.md) | Every file and directory |
+| [conventions](docs/conventions.md) | The six portability rules |
+| [carousel](docs/carousel.md) · [assumptions](docs/assumptions.md) | The shape of every open decision |
 | [diagrams](docs/diagrams.md) · [cold-reader](docs/cold-reader.md) | Whiteboard-defence diagram contract |
-| [architecture](docs/architecture.md) | One diagram: session → imports → skills → engine → context DB |
-| [env-facts](docs/env-facts.md) | The env fact store, `kb.py`, and how a skill resolves a fact |
-| [env-vars](docs/env-vars.md) | Every environment variable a kit script reads: default, reader, purpose |
-| [new-environment](docs/new-environment.md) | Setting up a machine with a tracker, chat or warehouse |
-| [plugin-setup](docs/plugin-setup.md) | The plugin install step by step, updating it, switching from a clone |
-| [troubleshooting](docs/troubleshooting.md) | Silent hooks, the five most common `kit-health` RED findings, uninstalling |
+| [architecture](docs/architecture.md) | Session → imports → skills → engine → context DB |
+| [env-facts](docs/env-facts.md) | The env fact store and how a skill resolves a fact |
+| [env-vars](docs/env-vars.md) | Every environment variable a kit script reads |
+| [new-environment](docs/new-environment.md) | A machine with a tracker, chat or warehouse |
+| [plugin-setup](docs/plugin-setup.md) | The plugin install, updates, switching from a clone |
+| [troubleshooting](docs/troubleshooting.md) | Silent hooks, common `kit-health` RED findings, uninstalling |
 | [loading](docs/loading.md) | What loads when, and the byte budgets |
 | [packaging](docs/packaging.md) | Plugin versus clone |
 | [sync](docs/sync.md) | How the kit moves between machines |
 | [context-sync](docs/context-sync.md) | `.context/` as a private git repo the hooks sync |
 | [authoring](docs/authoring.md) | The checklist for a new skill or agent |
-| [delegation](docs/delegation.md) | When to hand a read or a fix to a subagent, sized by cost |
+| [delegation](docs/delegation.md) | When to hand work to a subagent, sized by cost |
 | [engine-cli](docs/engine-cli.md) | Every engine command and flag |
-| [decisions](docs/decisions/README.md) | Design choices worth not re-litigating (ADR-style notes) |
+| [decisions](docs/decisions/README.md) | Design choices worth not re-litigating |
 | [commit-style](docs/commit-style.md) · [REVIEW](docs/REVIEW.md) · [glossary](docs/glossary.md) · [CHANGELOG](CHANGELOG.md) · [contributing](docs/contributing.md) | Contributor reference |
 
 ## Contributing
 
-Issues and PRs are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md) starts with the short version;
-[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) sets the standard for the space. Found a security or token-handling
-issue? Report it privately per [`SECURITY.md`](SECURITY.md), not as a public issue.
+Issues and PRs are welcome: [`CONTRIBUTING.md`](CONTRIBUTING.md) has the short version,
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) the standard. A security or token-handling issue goes privately per
+[`SECURITY.md`](SECURITY.md), never as a public issue.
 
 ## License
 
