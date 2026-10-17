@@ -17,6 +17,8 @@
       "<owner/repo tracked with GitHub issues — github only>"
     ],
     "key_regex": "<regex with ONE capture group matching a ticket key in free text; jira: \\b((?:KEY)-\\d+)\\b — github: (?:^|[^\\w/])#(\\d+)\\b>",
+    "links_section": "",
+    "_comment": "links_section: the epic template's tracker-links heading `adopt` seeds `resolve.section` with — set it only when that heading is not the first `## ` one ending in `& links`. Optional; empty = derive it from the template.",
     "url_template": "<https://…/{key} — github: https://github.com/{repo}/issues/{key}>",
     "transitions": {
       "in_review": 0,

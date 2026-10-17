@@ -1669,6 +1669,69 @@ class ResolveSeed(Base):
         self.assertEqual(self.handed_rule()["section"], "tracker AND  links")  # first match, fenced one skipped
         self.assertNotIn("no `## Tracker & links`", r.stderr)
 
+    def links_template(self, heading: str) -> str:
+        return "---\ntitle: {{TITLE}}\n---\n# {{TITLE}}\n\n## " + heading + "\n\n## Goal\n\n## Remaining work\n"
+
+    def test_a_heading_named_after_the_tracker_is_the_section(self):
+        """The first `## ` heading ending in `& links`, whatever precedes it: no per-environment name is known."""
+        heading = "Board & links"
+        self.env_store(JIRA_ENV, self.links_template(heading))
+        r = self.adopt_fake()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.handed_rule()["section"], heading)
+        self.assertNotIn("has no `## Tracker & links`", r.stderr)
+
+    def test_a_heading_that_merely_contains_links_is_not_the_section(self):
+        self.env_store(JIRA_ENV, self.links_template("Useful links") + "\n## Brand links\n")
+        r = self.adopt_fake()
+        self.assertEqual(self.handed_rule()["section"], "Tracker & links")
+        self.assertEqual(r.stderr.count("has no `## Tracker & links` heading"), 1, r.stderr)
+
+    def test_the_literal_heading_still_wins_when_it_comes_first(self):
+        self.env_store(JIRA_ENV, self.links_template("Tracker and links") + "\n## Board & links\n")
+        self.adopt_fake()
+        self.assertEqual(self.handed_rule()["section"], "Tracker and links")
+
+    def test_the_config_key_names_the_section_over_the_template(self):
+        heading = "Desk & links"
+        cfg = dict(JIRA_ENV, tracker=dict(JIRA_ENV["tracker"], links_section=heading))
+        self.env_store(cfg, self.links_template("Board & links"))
+        r = self.adopt_fake()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.handed_rule()["section"], heading)
+        self.assertEqual(r.stderr, "")
+
+    def test_a_blank_config_key_falls_back_to_the_template(self):
+        cfg = dict(JIRA_ENV, tracker=dict(JIRA_ENV["tracker"], links_section="  "))
+        self.env_store(cfg, self.links_template("Board & links"))
+        self.adopt_fake()
+        self.assertEqual(self.handed_rule()["section"], "Board & links")
+
+    def test_check_is_clean_for_a_store_whose_rule_already_matches_a_tracker_named_heading(self):
+        """What kit-health reads: a store carrying the heading its template names is not drift."""
+        self.env_store(JIRA_ENV, self.links_template("Board & links"))
+        self.adopt_fake()
+        self.write_store_file()
+        stored = json.loads([c["settings"] for c in self.calls() if c["settings"]][-1])
+        stored["resolve"]["section"] = "Board & links"  # the store's hand-set rule
+        (self.root / "ctx-store.json").write_text(json.dumps(stored), encoding="utf-8")
+        for args in (("--check",), ("--check", "--no-validate")):
+            r = self.adopt_fake(*args)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn("drift", r.stdout)
+
+    def test_check_reports_a_real_section_drift_naming_the_config_key_as_source(self):
+        cfg = dict(JIRA_ENV, tracker=dict(JIRA_ENV["tracker"], links_section="Desk & links"))
+        self.env_store(cfg, self.links_template("Board & links"))
+        self.adopt_fake()
+        self.write_store_file()
+        stored = json.loads([c["settings"] for c in self.calls() if c["settings"]][-1])
+        stored["resolve"]["section"] = "Board & links"
+        (self.root / "ctx-store.json").write_text(json.dumps(stored), encoding="utf-8")
+        r = self.adopt_fake("--check", "--no-validate")
+        self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
+        self.assertIn('drift: resolve.section is "Board & links" in the store, "Desk & links" from the env config', r.stdout)
+
     def test_a_template_without_the_heading_keeps_the_shipped_title_and_says_so(self):
         """Never the first heading by position: a template that dropped the section must not turn `Goal` into it."""
         self.env_store(JIRA_ENV, "---\ntitle: {{TITLE}}\n---\n# {{TITLE}}\n\n## Goal\n\n## Links\n")

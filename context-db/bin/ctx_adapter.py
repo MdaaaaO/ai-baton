@@ -35,9 +35,10 @@ Resolve rule — the `resolve` block of the `ctx-store.json` `adopt` hands `init
 shipped verbatim (`_resolve_rule`), so `ctx resolve <key>` finds the context doc wherever the kit runs: `key_regex` is
 the env config's `tracker.key_regex` on a `jira` tracker (a `github` or `none` tracker keeps the shipped
 `<owner>/<repo>#<n>` shape — its `tracker.key_regex` reads a bare `#<n>` and cannot match the repo-qualified key a
-session's `epic:` field carries); `section` is the `Tracker & links` heading of the epic template (the env store's
-`_templates/epic.md` override, else the engine's; picked by name, case-insensitive, `and` for `&` allowed — a template
-without it keeps `Tracker & links`, with one stderr note); `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
+session's `epic:` field carries); `section` is the env config's `tracker.links_section` when set, else the first `## ` heading of the epic
+template (the env store's `_templates/epic.md` override, else the engine's) that ends in `& links` — the shipped
+`Tracker & links`, or one named after the tracker; picked by name, case-insensitive, `and` for `&` allowed — a template
+without one keeps `Tracker & links`, with one stderr note; `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
 match wins; the section match is the fallback for a doc without one — it collides as soon as a sub-epic doc links its
 parent there). `adopt --check` (with or without `--no-validate`) compares the store's own `ctx-store.json` with that
 rule and prints one line per setting that differs, read-only:
@@ -495,16 +496,33 @@ def _epic_template_text() -> str:
 TRACKER_SECTION = "Tracker & links"  # the shipped title of the epic template's tracker-links section
 
 
-def _tracker_section(headings: list[str]) -> str:
-    """The first `## ` heading that reads `Tracker & links` (case-insensitive; `and` for `&` allowed), as the
-    template spells it. None matches — an env template that dropped or renamed it — falls back to the shipped
-    title, never to whichever heading comes first, with one stderr note: `ctx resolve` then matches a section
-    the docs made from that template do not carry, which is the template's fault to fix."""
+LINKS_HEADING = re.compile(r"(?:^|\s)(?:&|and)\s+links$", re.IGNORECASE)  # a heading that ends in `& links` / `and links`
+
+
+def _configured_section() -> str:
+    """The env config's `tracker.links_section` (the epic template's tracker-links heading, spelled as the
+    template spells it) when it is a non-blank string, else ""."""
+    sys.path.insert(0, str(BIN))
+    import kit_profile  # same dir
+    value = kit_profile.get("tracker.links_section")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _tracker_section(headings: list[str], configured: str = "") -> str:
+    """The section a context doc lists its tracker links under: `configured` (the env config's
+    `tracker.links_section`) when set, else the first `## ` heading that ends in `& links` (`and` for `&`
+    allowed, case-insensitive), as the template spells it — the shipped `Tracker & links`, or one an environment
+    names after its tracker. None matches — an env template that dropped or renamed it — falls back to the
+    shipped title, never to whichever heading comes first, with one stderr note: `ctx resolve` then matches a
+    section the docs made from that template do not carry, which is the template's fault to fix."""
+    if configured:
+        return configured
     for h in headings:
-        if re.sub(r"\s+", " ", h.strip()).lower() in ("tracker & links", "tracker and links"):
+        if LINKS_HEADING.search(re.sub(r"\s+", " ", h.strip())):
             return h.strip()
-    print(f"ctx_adapter.py: the epic template has no `## {TRACKER_SECTION}` heading — resolve.section stays "
-          f"`{TRACKER_SECTION}`; add the heading to the template", file=sys.stderr)
+    print(f"ctx_adapter.py: the epic template has no `## {TRACKER_SECTION}` heading (nor another ending in "
+          f"`& links`) — resolve.section stays `{TRACKER_SECTION}`; add the heading to the template, or set "
+          "`tracker.links_section` in the env config", file=sys.stderr)
     return TRACKER_SECTION
 
 
@@ -515,9 +533,10 @@ def _resolve_rule() -> dict:
       it is a valid regex. A `github` tracker keeps the shipped `<owner>/<repo>#<n>` shape: its `tracker.key_regex`
       reads the bare `#<n>` out of free text and cannot match the repo-qualified key a session's `epic:` field and a
       context doc's links carry; `none` has no keys to derive from.
-    - `section`: the epic template's (`_epic_template_text`) `Tracker & links` heading (`_tracker_section`), where
-      a doc lists its tracker links; the fallback match, since a doc linking its parent there matches the
-      parent's key too. Picked by name, never by position: a template that dropped it keeps the shipped title.
+    - `section`: the env config's `tracker.links_section`, else the epic template's (`_epic_template_text`)
+      first `& links` heading (`_tracker_section`), where a doc lists its tracker links; the fallback match, since
+      a doc linking its parent there matches the parent's key too. Picked by name, never by position: a template
+      that dropped it keeps the shipped title.
     - `fields`: the shipped `["key"]` — a field match wins over a section match, and an epic doc's own `key:`
       frontmatter names exactly one doc per key."""
     sys.path.insert(0, str(BIN))
@@ -531,7 +550,7 @@ def _resolve_rule() -> dict:
             rule["key_regex"] = rx
         except re.error:
             pass  # a broken env regex must not break the store: the shipped shape stays, and kit-health names the config
-    rule["section"] = _tracker_section(type_template.heading_list(_epic_template_text()))
+    rule["section"] = _tracker_section(type_template.heading_list(_epic_template_text()), _configured_section())
     return rule
 
 
@@ -558,9 +577,12 @@ def _resolve_drift(root: Path) -> list[str]:
     for name, want in _resolve_rule().items():
         if have.get(name) != want:
             # where the derived value comes from: the env config only for a key_regex that differs from the
-            # shipped one (a jira tracker's); the epic template for the section; the kit for what it ships as is
-            source = "the epic template" if name == "section" else "the kit" if want == shipped.get(name) \
-                else "the env config"
+            # shipped one (a jira tracker's) and for a configured links section; the epic template for the
+            # section otherwise; the kit for what it ships as is
+            if name == "section":
+                source = "the env config" if _configured_section() else "the epic template"
+            else:
+                source = "the kit" if want == shipped.get(name) else "the env config"
             out.append(f"drift: resolve.{name} is {json.dumps(have.get(name))} in the store, "
                        f"{json.dumps(want)} from {source} — `python3 $BATON/context-db/bin/ctx_adapter.py "
                        "adopt` (`--replace` when this store's ctx-store.json was edited here)")
