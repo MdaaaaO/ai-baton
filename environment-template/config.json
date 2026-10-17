@@ -17,6 +17,7 @@
       "<owner/repo tracked with GitHub issues — github only>"
     ],
     "key_regex": "<regex with ONE capture group matching a ticket key in free text; jira: \\b((?:KEY)-\\d+)\\b — github: (?:^|[^\\w/])#(\\d+)\\b>",
+    "links_section": "<optional: the epic template's tracker-links heading, e.g. when it is not the first one ending in `& links`; empty = derive it>",
     "url_template": "<https://…/{key} — github: https://github.com/{repo}/issues/{key}>",
     "transitions": {
       "in_review": 0,

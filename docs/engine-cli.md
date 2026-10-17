@@ -426,9 +426,10 @@ Resolve rule — the `resolve` block of the `ctx-store.json` `adopt` hands `init
 shipped verbatim (`_resolve_rule`), so `ctx resolve <key>` finds the context doc wherever the kit runs: `key_regex` is
 the env config's `tracker.key_regex` on a `jira` tracker (a `github` or `none` tracker keeps the shipped
 `<owner>/<repo>#<n>` shape — its `tracker.key_regex` reads a bare `#<n>` and cannot match the repo-qualified key a
-session's `epic:` field carries); `section` is the `Tracker & links` heading of the epic template (the env store's
-`_templates/epic.md` override, else the engine's; picked by name, case-insensitive, `and` for `&` allowed — a template
-without it keeps `Tracker & links`, with one stderr note); `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
+session's `epic:` field carries); `section` is the env config's `tracker.links_section` when set, else the first `## ` heading of the epic
+template (the env store's `_templates/epic.md` override, else the engine's) that ends in `& links` — the shipped
+`Tracker & links`, or one named after the tracker; picked by name, case-insensitive, `and` for `&` allowed — a template
+without one keeps `Tracker & links`, with one stderr note; `fields` is `["key"]`, the `key:` frontmatter of an epic doc (a field
 match wins; the section match is the fallback for a doc without one — it collides as soon as a sub-epic doc links its
 parent there). `adopt --check` (with or without `--no-validate`) compares the store's own `ctx-store.json` with that
 rule and prints one line per setting that differs, read-only:

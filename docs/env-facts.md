@@ -56,7 +56,7 @@ still carries one. Add a new kind only when no existing one means the same thing
 lists the vocabulary.
 
 `config.json` carries only what scripts branch on: `tracker.kind` (`kit_profile.TRACKER_KINDS`: `jira`|`github`|`none`), `tracker.key_regex`,
-`tracker.url_template`, `tracker.mcp_tools`, `tracker.write_api` (jira only — true when this environment holds a
+`tracker.url_template`, `tracker.links_section` (optional — the epic template's tracker-links heading `adopt` seeds `resolve.section` with, else derived from the template), `tracker.mcp_tools`, `tracker.write_api` (jira only — true when this environment holds a
 real write credential for the tracker's REST API, gating `ticket-update`'s remote-link POST; false or absent
 skips it), `tracker.close_reasons`, `tracker.repos`, `github.org`,
 `github.review_bot`, `github.bots`, `github.sandbox_token_prefix`,
