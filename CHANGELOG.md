@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.11.1 (2026-10-17)
+
+
+### Bug Fixes
+
+* **engine:** verify exempts archive/ docs, uses ctx size guard (#590) ([#591](https://github.com/MdaaaaO/ai-baton/issues/591)) ([6cf2c7c](https://github.com/MdaaaaO/ai-baton/commit/6cf2c7c9d8027dd5e4dae2e567cf14bba08ed1e3))
+* **evals:** mock the ctx tools and align pr-open criteria ([#596](https://github.com/MdaaaaO/ai-baton/issues/596)) ([29d5db1](https://github.com/MdaaaaO/ai-baton/commit/29d5db1ea222512424fb5585aeda59f600d79a0c))
+* **ticket-open:** sketch hash survives a connector's markdown rewrite ([#598](https://github.com/MdaaaaO/ai-baton/issues/598)) ([3bd4226](https://github.com/MdaaaaO/ai-baton/commit/3bd4226fafcd4deaa1b09051f81b1dd5a47167d8))
+* **engine:** adopt derives resolve.section from the links heading ([#597](https://github.com/MdaaaaO/ai-baton/issues/597)) ([7479bec](https://github.com/MdaaaaO/ai-baton/commit/7479becbc9c23ccdcb73627efb5199e8a7352267))
+
+
+### Documentation
+
+* **mission-control:** description prints the path; restamp reviewed ([#595](https://github.com/MdaaaaO/ai-baton/issues/595)) ([a13c0a7](https://github.com/MdaaaaO/ai-baton/commit/a13c0a780224ec0bf95156245048a6e4311e2175))
+* **session-handoff:** cap MEMORY.md lines at 150 chars, check after ([#599](https://github.com/MdaaaaO/ai-baton/issues/599)) ([2e81efe](https://github.com/MdaaaaO/ai-baton/commit/2e81efe0a423341eeb35593a15dc383fc711b03c))
+
+
+### CI
+
+* **deps:** bump dompurify from 3.4.16 to 3.4.17 in /skills/pr-open ([#594](https://github.com/MdaaaaO/ai-baton/issues/594)) ([37e607b](https://github.com/MdaaaaO/ai-baton/commit/37e607be3d598cfd5a2d7afe5f68203138c8f86a))
+* **deps:** bump astral-sh/setup-uv from 10.2.0 to 10.3.0 ([#592](https://github.com/MdaaaaO/ai-baton/issues/592)) ([1cbc3db](https://github.com/MdaaaaO/ai-baton/commit/1cbc3db65be6b3381f566f42669b2111a1efdc28))
+* **deps:** bump anthropics/claude-code-action from 1.0.245 to 1.0.250 ([#593](https://github.com/MdaaaaO/ai-baton/issues/593)) ([719768b](https://github.com/MdaaaaO/ai-baton/commit/719768be7069c5304a0fdd20fa982e8b83ac6f5f))
+
 ## 0.11.0 (2026-10-15)
 
 
