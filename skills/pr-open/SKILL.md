@@ -111,7 +111,7 @@ Exit codes, the facet → question matrix, the `ddl` facet and the block rules: 
    --draft`, keep the failing tail, say so in your one-line report — never hide or retry it.
 2. No declared command → cite the commands you actually ran, one `` `cmd` → `output` `` line each; ran none →
    `Not verified locally: <reason>`. A section that only claims ("tests pass") is refused.
-3. `## Not in this PR` and `## One honest limit` are optional, ≤ 3 lines each — `## One honest limit` also carries every assumption still open on the session (`docs/assumptions.md`), each as its own line in that doc's grammar, `Assumed: <one line> (revisit: pr-open)` — the `(revisit: pr-open)` tag is part of the line, not commentary — outside those three lines (at most 4), asked in the carousel before `gh pr create`.
+3. `## Not in this PR` and `## One honest limit` are optional, ≤ 3 lines each — `## One honest limit` also carries every due `Assumed:` line still open on the session whose tag is `(revisit: pr-open)` (`docs/assumptions.md` § Checkpoints — `ticket-update` and `session-end` lines stay where they are), each verbatim in that doc's grammar, `Assumed: <one line> (revisit: pr-open)` — the tag is part of the line, not commentary — outside those three lines (at most 4), asked in the carousel before `gh pr create`.
 4. Before `gh pr create`, and on every later push: `python3 $BATON/skills/pr-open/verified.py check <file>
    [--pr <o>/<r> <n>]` — refuses a bare claim; with `--pr` prints `STALE <old> → <new>` (exit 3) when the
    recorded head moved; rerun it in the same turn as the push. Shapes and examples: `reference/verified.md`.
