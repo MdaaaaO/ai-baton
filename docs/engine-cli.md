@@ -734,7 +734,7 @@ Checks every content doc for:
 
 Size budgets (all non-fatal, all in bytes, each overridable by an environment variable of the same name; a set
 but unusable value prints one `verify: ignoring NAME=value (…)` stderr line and keeps the default):
-  ACTIVE_SIZE_WARN       30 KB  one non-archived doc of any type but `reference`/`repo`
+  ACTIVE_SIZE_WARN    30,000 B  one non-archived doc of any type but `reference`/`repo` (ctx-store's SIZE_GUARD)
   REFERENCE_SIZE_WARN    64 KB  one non-archived `type: reference` or `type: repo` doc (repo deep-dives, snapshots:
                                 read in slices, so expected to be large)
   INDEX_SIZE_WARN        10 KB  the `status: active` and `status: closed` rows of INDEX.md. Closed rows count (they

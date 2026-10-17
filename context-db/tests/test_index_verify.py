@@ -445,13 +445,15 @@ class IndexReferenceFold(ContextRoot):
 
 
 class SizeBudgets(ContextRoot):
-    """verify.py's per-doc budgets: ACTIVE_SIZE_WARN (30 KB) for any type but reference/repo, REFERENCE_SIZE_WARN
-    (64 KB) for `type: reference` and `type: repo`; one folded line per domain, remedy named by what dominates the largest doc."""
+    """verify.py's per-doc budgets: ACTIVE_SIZE_WARN (30,000 B, the ctx-store SIZE_GUARD) for any type but
+    reference/repo, REFERENCE_SIZE_WARN (64 KB) for `type: reference` and `type: repo`; archive/ and
+    `status: archived` docs exempt; one folded line per domain, remedy named by what dominates the largest doc."""
 
     def big_doc(self, rel: str, *, type: str, status: str = "active", log_kb: int = 0, total_kb: int = 31,
-                sections: tuple[str, ...] = ("Goal", "Notes")) -> Path:
-        domain = rel.split("/")[0]
-        (self.root / domain).mkdir(exist_ok=True)
+                sections: tuple[str, ...] = ("Goal", "Notes"), domain: str = "") -> Path:
+        folder = rel.split("/")[0]
+        domain = domain or folder
+        (self.root / folder).mkdir(exist_ok=True)
         head = f"---\ntitle: Big\ntype: {type}\ndomain: {domain}\nstatus: {status}\nupdated: 2026-09-30\n---\n\n# Big\n\n"
         body = ""
         if log_kb:
@@ -541,6 +543,19 @@ class SizeBudgets(ContextRoot):
         self.assertIn("repos: 1 doc over budget, largest live", self.verify(ACTIVE_SIZE_WARN="1024").stderr)
         self.big_doc("reference/ref.md", type="reference", status="reference", total_kb=2)
         self.assertIn("reference: 1 doc over budget, largest ref", self.verify(REFERENCE_SIZE_WARN="1024").stderr)
+
+    def test_archive_folder_docs_are_exempt_whatever_their_frontmatter_says(self):
+        # `ctx maintain` gives a new archive/<slug>-log.md its source doc's domain and the log type's first status
+        p = self.big_doc("archive/old-log.md", type="log", domain="repos", total_kb=40)
+        self.assertIn("domain: repos\nstatus: active\n", p.read_text(encoding="utf-8"))
+        self.assertNotIn("over budget", self.verify().stderr)
+
+    def test_active_budget_is_the_ctx_store_size_guard(self):
+        # ctx validate warns, and ctx maintain rotates, past 30,000 B (SIZE_GUARD): verify warns past the same size
+        p = self.big_doc("repos/edge.md", type="epic", total_kb=30)
+        self.assertGreater(p.stat().st_size, 30000)
+        self.assertLessEqual(p.stat().st_size, 30 * 1024)
+        self.assertIn("repos: 1 doc over budget, largest edge (30 KB)", self.verify().stderr)
 
 
 class LedgerWarnings(ContextRoot):
@@ -727,6 +742,13 @@ class ReadmeTemplateBudgets(unittest.TestCase):
         self.assertIn(f"more than {fold} (`INDEX_REFERENCE_FOLD`)", text)
         self.assertIn(f"`active` and `closed` rows pass {size_kb} KB (`INDEX_SIZE_WARN`;", text)
         self.assertIn(f"whole file passes {2 * int(size_kb)} KB (`INDEX_TOTAL_SIZE_WARN`", text)
+
+    def test_template_names_the_default_active_budget(self):
+        env = {k: v for k, v in os.environ.items() if k != "ACTIVE_SIZE_WARN"}
+        code = "import verify; print(verify.ACTIVE_SIZE_WARN)"
+        out = subprocess.run([sys.executable, "-c", code], env=env, cwd=BIN, capture_output=True, text=True, check=True)
+        text = " ".join((BIN.parent / "context-README.template.md").read_text(encoding="utf-8").split())
+        self.assertIn(f"doc exceeds **{int(out.stdout):,} B**", text)
 
 
 if __name__ == "__main__":

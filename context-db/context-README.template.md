@@ -80,7 +80,7 @@ updated: 2026-09-24
 | `self-assessment/` | Charter + per-week logs (the report format follows the environment: Lattice block, week file, …). |
 | `kit-health/` | `kit-health` audit reports (`YYYY-MM-DD-<env>.md`, plus the local `HEALTH-<env>.md` stamp). |
 | `onboarding.md` | The onboarding master checklist (done = onboarded). |
-| `archive/` | Closed/superseded docs and the historical tails split off big epic docs. Indexed as `status: archived`. |
+| `archive/` | Closed/superseded docs and the historical tails split off big epic docs. A tail log keeps the `status` it was created with (`active` when `ctx_maintain` creates it); `make verify` exempts the whole folder from the size budget. |
 | *environment domains* | One folder per entry in `domains` of the env config (e.g. an epic area, a product, an on-call rotation); described in `reference/environment.md`. Add the rows here when you adopt them. |
 
 **Rule:** one fact lives in exactly one doc. A **context doc** (the local living doc for an
@@ -90,16 +90,18 @@ rules do **not** live here — they live in `.claude/WORKSPACE.md` § Rules (imp
 (`.context/memory/`, the harness auto-memory) hold situational recall and point here; they don't duplicate.
 
 **Keep active docs lean — the 30KB guardrail.** `make verify` warns (non-fatal) when any
-active (non-`archive/`, non-`status: archived`) doc exceeds **30 KB** (~8k tokens; 64 KB for `type: reference`/`repo`). A context doc
+active (non-`archive/`, non-`status: archived`) doc exceeds **30,000 B** (~8k tokens; 64 KB for `type: reference`/`repo`) —
+the same size guard at which `ctx validate` warns and `ctx_maintain` rotates. A context doc
 is a *handoff* — a cold session re-reads it whole to re-ground, so an oversized one pulled in
 after a compact is what makes autocompact **thrash** (context refills to the limit within a few
-turns of every compact). When verify flags a doc, create `archive/<slug>-log.md` first if it does not exist
-yet (`ctx_new` TYPE=log, same DOMAIN, SLUG=`<slug>-log` — `maintain`'s own fallback for a missing archive doc
-only fills in `title`/`type`/`updated`, short of what the `log` type requires), then run `ctx_maintain` (Bash
+turns of every compact). When verify flags a doc, run `ctx_maintain` (Bash
 fallback: `ctx_adapter.py ctx maintain`): it keeps the newest **Session log** entries in the doc
-(`maintain.keep_log`, ~6) — oldest-first, as the log already reads — and moves the rest, verbatim, into the
-archive doc, newest-first (the `log` type's order); no manual move-and-reverse. The archive tail can grow
-without limit; it is exempt because it is never read by default.
+(`maintain.keep_log`, ~6) — oldest-first, as the log already reads — and moves the rest, verbatim, into
+`archive/<slug>-log.md`, newest-first (the `log` type's order); no manual move-and-reverse. When that archive doc
+does not exist yet, `maintain` creates it with the source doc's `domain` and the `log` type's first status
+(`active`); create it first with `ctx_new` (TYPE=log, SLUG=`<slug>-log`) to give it other values. The archive tail
+can grow without limit. `make verify` exempts every doc under `archive/`, whatever its frontmatter says, because it
+is never read by default; `ctx validate` has no such exemption and still lists a large one under `SIZE_GUARD`.
 
 ## Live session registry (operational, not knowledge)
 
