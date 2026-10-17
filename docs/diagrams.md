@@ -89,7 +89,7 @@ hash are the same in both shapes: the fence lines are never hashed (a fence of 4
 | `repo` | `<owner>/<repo>` | the repo whose default branch the checks read |
 | `paths` | repo-relative POSIX paths, comma-separated, or `-` | a trailing `/` is a directory; a leading `+` is a path the ticket creates; no spaces, commas, `..` or leading `/` |
 | `components` | `[A-Za-z0-9._-]+`, comma-separated, or `-` | in-repo units named rather than located (a dbt model, a table, a DAG id); matched by file stem, never checked at pickup |
-| `hash` | first 12 hex digits of SHA-256 | over the lines between the Sketch's heading (a `#` heading or a `**Sketch**` line) and the marker: CRLF → LF, each line right-stripped, leading and trailing blank lines dropped, joined by `\n` |
+| `hash` | first 12 hex digits of SHA-256 | over the lines between the Sketch's heading (a `#` heading or a `**Sketch**` line) and the marker: CRLF → LF, each line right-stripped; outside code fences in canonical markdown — table cells stripped and separator cells as `---` (colons kept), bullets as `- <text>` with the indent dropped, `\[`/`\]` unescaped, blank lines dropped — so a tracker connector that rewrites markdown on store (Jira: `|---|` → `| --- |`, `-` → `*`, `[` → `\[`) keeps the hash; fenced lines verbatim; joined by `\n`. A Sketch stamped before this canonical form reads `STALE SKETCH` once — restamp it |
 
 Lists are sorted by byte order and deduplicated. Keys appear in this order. The parse regex is
 `^\s*<!-- sketch: repo=(\S+) paths=(\S+) components=(\S+) hash=([0-9a-f]{12}) -->\s*$`, so prose that quotes the

@@ -2,8 +2,8 @@
 name: ticket-open
 description: "Checklist for CREATING a ticket (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing-gated Sketch), the cold-reader gate, public/length checks, and the matching .context/ doc. Use when creating a ticket, right before/after posting it."
 metadata:
-  version: "17"
-  updated: "2026-10-15"
+  version: "18"
+  updated: "2026-10-17"
   reviewed: "2026-10-15"
   facts: "tracker.kind"
 user-invocable: true

@@ -14,7 +14,9 @@ with an info string (```text) as well.
 ending in `/` is a directory, a leading `+` is a path the ticket creates (checked by its parent
 directory instead). `hash` is the first 12 hex digits of a SHA-256 over the Sketch's own text (from
 its heading — a `#`-heading line or a `**Sketch**` line — to the marker block, CRLF normalized,
-each line right-stripped, leading/trailing blank lines dropped, joined by `\n`).
+each line right-stripped, and outside code fences in canonical markdown — table cells stripped with
+`---` separators, bullets as `- <text>` with no indent, escaped brackets plain, blank lines dropped — so a
+tracker connector's markdown rewrite (Jira's) keeps the hash; fenced lines verbatim; joined by `\n`).
 
 Usage (stdlib only, no network):
   sketch.py stamp [FILE] --repo-slug <owner/repo> [--paths <entry>[,<entry>…]] [--components <name>[,<name>…]]
@@ -95,10 +97,53 @@ def validate_components(entries: list[str]) -> None:
             raise SystemExit(2)
 
 
+TABLE_SEP_CELL_RE = re.compile(r"^(:?)-+(:?)$")  # a separator-row cell: `---`, `:--`, `--:`, `:-:` (any dash count)
+LIST_ITEM_RE = re.compile(r"^\s*[-*+]\s+(\S.*)$")  # a bullet line, any marker, any indent
+BRACKET_ESCAPE_RE = re.compile(r"\\([\[\]])")  # `\[` / `\]` — a connector's escaping of plain brackets
+
+
+def canonical_line(line: str) -> str:
+    """One rstripped line outside a code fence in the form every markdown round-trip agrees on — what a tracker
+    connector that rewrites markdown (Jira: `|---|` → `| --- |`, `| |` → `|  |`, `-` → `*`, 2 → 4 indent
+    spaces, `[` → `\\[`) leaves unchanged, so the posted text and the stored text hash the same (#589).
+    A table row keeps its cells, stripped, with a separator cell as `---` plus its colons; a bullet keeps its
+    text behind one `- `, its indent dropped; escaped brackets are plain. Anything else is returned as is."""
+    stripped = line.strip()
+    if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 1:
+        cells = [c.strip() for c in stripped[1:-1].split("|")]
+        cells = [f"{m.group(1)}---{m.group(2)}" if (m := TABLE_SEP_CELL_RE.match(c)) else c for c in cells]
+        line = "|" + "|".join(cells) + "|"
+    elif (m := LIST_ITEM_RE.match(line)):
+        line = "- " + m.group(1)
+    return BRACKET_ESCAPE_RE.sub(r"\1", line)
+
+
 def normalize_lines(lines: list[str]) -> list[str]:
-    """CRLF → LF (the caller already split on `\\n`, so this only right-strips each line) then drops
-    leading and trailing blank lines — the hash's own normalization, shared by `stamp` and `check`."""
-    out = [ln.rstrip() for ln in lines]
+    """The hash's own normalization, shared by `stamp` and `check`: CRLF → LF (the caller already split on
+    `\\n`, so this right-strips each line), then — outside code fences only — `canonical_line` on every
+    line and blank lines dropped (a connector inserts whitespace-only lines between nested items). Lines
+    inside a fence (the ASCII WHERE box, the marker's own fence) are kept verbatim: a connector returns them
+    byte-identical, and `|` or `-` there is drawing, not a table or a list."""
+    out: list[str] = []
+    fence: tuple[str, int] | None = None  # (fence char, length) of the fence currently open
+    for raw in lines:
+        ln = raw.rstrip()
+        m = FENCE_RE.match(ln)
+        if m:
+            run, info = m.groups()
+            if fence is None:
+                fence = (run[0], len(run))
+            elif run[0] == fence[0] and len(run) >= fence[1] and not info.strip():
+                fence = None
+            out.append(ln)
+            continue
+        if fence is not None:
+            out.append(ln)
+            continue
+        ln = canonical_line(ln)
+        if ln == "":
+            continue
+        out.append(ln)
     while out and out[0] == "":
         out.pop(0)
     while out and out[-1] == "":
