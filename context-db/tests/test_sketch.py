@@ -482,10 +482,6 @@ class TicketOpenJiraSketchShape(unittest.TestCase):
             self.assertIn(needle, self.diagrams)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 
 class ConnectorRewrites(unittest.TestCase):
     """A tracker connector that rewrites markdown on store (Jira, #589: `|---|` → `| --- |`, `| |` → `|  |`,
@@ -593,3 +589,7 @@ class ConnectorRewrites(unittest.TestCase):
         doc = (KIT / "docs" / "diagrams.md").read_text(encoding="utf-8")
         self.assertIn("canonical markdown", doc)
         self.assertIn("reads `STALE SKETCH` once", doc)
+
+
+if __name__ == "__main__":
+    unittest.main()
