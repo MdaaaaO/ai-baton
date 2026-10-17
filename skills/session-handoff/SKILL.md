@@ -55,8 +55,8 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    `MEMORY.md`: `- [Title](<note>.md) — <hook>`, the whole line ≤ 150 characters (`MEMORY_LINE_WARN`) —
    the hook says when the note applies, never what it says. Prefer updating an existing note over adding
    a duplicate; delete notes proven wrong. Then `python3 $BATON/skills/memory-prune/memory_check.py` must
-   print no finding; a `LONG_LINE` or `INDEX_BUDGET` is fixed now, by shortening the line or running
-   `memory-prune` — never left for the next kit-health run.
+   exit 0 (no `LONG_LINE`, `INDEX_BUDGET` or `SECRET`); a `LONG_LINE` or `INDEX_BUDGET` is fixed now, by
+   shortening the line or running `memory-prune` — never left for the next kit-health run.
 5. **Index integrity and context sync** — nothing to run: after every `.context/` write the kit's hooks validate
    the doc, regenerate `INDEX.md` and `SESSION_INDEX.md`, touch your registry row and — when `.context/` is its
    own git repository with a remote (`context.sync`, `docs/context-sync.md`) — commit and push it. A
