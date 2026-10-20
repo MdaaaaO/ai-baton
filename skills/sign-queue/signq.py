@@ -463,6 +463,9 @@ FAIL_HINTS = [
     # ` ! [remote rejected] …`). The commit already exists with that e-mail, so a rebase or a plain
     # re-push cannot help; it has to be rewritten. Listed before the generic remote-rejected entry.
     # anchored to the remote's own lines: a commit subject echoed into the tail may mention the word
+    (re.compile(r"PUSH NOT LANDED"), "the push exited 0 but origin's branch is not at HEAD (a stale local ref, "
+     "or a remote that moved during the push): compare `git ls-remote origin <branch>` with the worktree HEAD, then "
+     "`make sign_retry JOB=<n>`"),
     (re.compile(r"remote: error: GH007|push declined due to email privacy"),
      "GH007: the commit author e-mail is private on the account — set `user.email` to the no-reply address on "
      "github.com/settings/emails (`<id>+<login>@users.noreply.github.com`), then `git commit --amend --reset-author "

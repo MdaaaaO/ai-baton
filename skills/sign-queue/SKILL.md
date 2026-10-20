@@ -3,9 +3,9 @@ name: sign-queue
 description: "Commits and pushes in a signed-commits repo from a process with no signing identity: worktree-first, exact staging, a message file, then a queued job the user drains on the host with `make sign`. Use when committing, pushing or rebasing there, or when asked why signing happens on the host; never paste git one-liners. Inert when `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "25"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "26"
+  updated: "2026-10-20"
+  reviewed: "2026-10-20"
   requires: "signed_commits"
 ---
 
@@ -70,5 +70,5 @@ make sign_retry JOB=1    # un-park a .failed        make sign_drop JOB=1  # dele
 ```
 
 Jobs run in enqueue order: stage → `commit -S` → optional `rebase -S` → verify every pushed commit is signed →
-push. Output, locking and the job files: `reference/drain.md`. A `gh` call in any of this follows the `gh-cli`
+push `HEAD:refs/heads/<branch>` → confirm the remote tip is HEAD (else the job parks as `PUSH NOT LANDED`). Output, locking and the job files: `reference/drain.md`. A `gh` call in any of this follows the `gh-cli`
 skill.

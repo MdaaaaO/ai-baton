@@ -156,6 +156,14 @@ fi
 # (explicit flags still hold) and the drain, which can reach the remote, catches a non-fast-forward.
 # Only the clean push-only retry stops on it: with no tip it cannot tell whether anything is left to push.
 clean=0; [ -n "$(git -C "$wt" status --short)" ] || clean=1
+# A detached worktree whose local refs/heads/<branch> is not HEAD: the job pushes HEAD by explicit refspec
+# (#608), never the stale local ref; say so, since the local branch stays where it is.
+if ! git -C "$wt" symbolic-ref -q HEAD >/dev/null; then
+  local_ref=$(git -C "$wt" rev-parse -q --verify "refs/heads/$br" 2>/dev/null || true)
+  if [ -n "$local_ref" ] && [ "$local_ref" != "$(git -C "$wt" rev-parse HEAD)" ]; then
+    echo "note: detached HEAD; local refs/heads/$br is at $(printf '%.12s' "$local_ref"), not HEAD -> the job pushes HEAD:refs/heads/$br (the local branch is not moved)" >&2
+  fi
+fi
 remote_tip=""; remote_read=0
 if [ $clean = 1 ] || git -C "$wt" remote get-url origin >/dev/null 2>&1; then
   ls_remote_err=$(mktemp)
@@ -422,9 +430,17 @@ tmp="$job.tmp.$$"
     echo '# never push a row the drain would have to report as unsigned: refuse and park the job instead'
     echo 'if [ -n "$unsigned" ]; then echo "UNSIGNED$unsigned"; exit 1; fi'
   fi
-  if [ $newbr = 1 ]; then echo 'git -C "$WT" push -u origin "$BR"'
-  elif [ -n "$lease" ]; then echo "LEASE=$(sq "$lease")"; echo '# rewritten history of an already-pushed branch: land only if the remote tip is still the one we inspected'; echo 'git -C "$WT" push --force-with-lease="refs/heads/$BR:$LEASE" origin "$BR"'
-  else echo 'git -C "$WT" push origin "$BR"'; fi
+  # An explicit HEAD:refs/heads/<branch> refspec in every shape (#608): a bare "$BR" resolves to the LOCAL
+  # refs/heads/<branch>, which in a worktree detached at origin/<branch> still points at the old tip — git
+  # says "Everything up-to-date", exits 0, and the signed commit stays on the detached HEAD.
+  if [ $newbr = 1 ]; then echo 'git -C "$WT" push -u origin "HEAD:refs/heads/$BR"'
+  elif [ -n "$lease" ]; then echo "LEASE=$(sq "$lease")"; echo '# rewritten history of an already-pushed branch: land only if the remote tip is still the one we inspected'; echo 'git -C "$WT" push --force-with-lease="refs/heads/$BR:$LEASE" origin "HEAD:refs/heads/$BR"'
+  else echo 'git -C "$WT" push origin "HEAD:refs/heads/$BR"'; fi
+  # The push's exit status is not proof that it landed: ask the remote. A failed ls-remote leaves TIP empty,
+  # which fails the check too. Only then print the "pushed" marker the drain records as success.
+  echo 'HEAD_SHA=$(git -C "$WT" rev-parse HEAD)'
+  echo 'TIP=$(git -C "$WT" ls-remote origin "refs/heads/$BR" | awk -v r="refs/heads/$BR" '"'"'$2 == r { print $1; exit }'"'"')'
+  echo 'if [ "$TIP" != "$HEAD_SHA" ]; then [ -n "$TIP" ] || TIP="<none>"; echo "PUSH NOT LANDED: origin $BR is at $TIP, HEAD is $HEAD_SHA"; exit 1; fi'
   echo 'git -C "$WT" log --format="pushed %h %G? %s" -1'
 } > "$tmp"
 # --supersede's actual deletion: every check above (--onto, --force-with-lease, --files, signq.py meta) has
