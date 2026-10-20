@@ -459,6 +459,10 @@ MILESTONES = [
 FAIL_HINTS = [
     (re.compile(r"^UNSIGNED "), "a commit below HEAD would have pushed unsigned — the job refused the push "
      "before it landed; a sandbox-made commit surviving a no-op re-stack is the usual cause"),
+    # anchored to the job's own line, so a commit subject echoed into the tail cannot match it
+    (re.compile(r"^PUSH NOT LANDED"), "the push exited 0 but origin's branch is not at HEAD (a stale local ref, "
+     "or a remote that moved during the push): compare `git ls-remote origin <branch>` with the worktree HEAD, then "
+     "`make sign_retry JOB=<n>`"),
     # GitHub refuses a commit whose author e-mail is private (`remote: error: GH007: …` followed by
     # ` ! [remote rejected] …`). The commit already exists with that e-mail, so a rebase or a plain
     # re-push cannot help; it has to be rewritten. Listed before the generic remote-rejected entry.

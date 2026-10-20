@@ -18,7 +18,8 @@ per job and its PR link. Git runs with `GIT_PAGER=cat`, `GIT_EDITOR=true`, `GIT_
 Plain sh files under `.context/state/sign-queue/` — in the workspace, so a plugin update never deletes them;
 the first `enqueue.sh` creates the directory. Each runs: stage → `commit -S -F <msg>` (skipped when nothing is
 staged, so a push-only retry works) → optional `fetch` + `rebase -S -f` → verify every commit about to be pushed →
-`push`. Success deletes the job. A failure parks it as `<job>.failed`, the drain continues with the next job, the
+`push origin HEAD:refs/heads/<branch>` → confirm origin's branch is at HEAD (else the job exits 1 with `PUSH NOT
+LANDED`, so a push that moved nothing never reads as pushed). Success deletes the job. A failure parks it as `<job>.failed`, the drain continues with the next job, the
 summary names the failed topics and their owning sessions, and the exit status is 1.
 
 ## One drain at a time

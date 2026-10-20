@@ -312,7 +312,7 @@ class RemoteDecidesFlags(unittest.TestCase):
             r = _enqueue(tmp, wt, ctx, "auto-new", "--files", "a.txt", "--by", "t")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             lines = _job_lines(r)
-            self.assertIn('git -C "$WT" push -u origin "$BR"', lines)
+            self.assertIn('git -C "$WT" push -u origin "HEAD:refs/heads/$BR"', lines)
             self.assertNotIn('git -C "$WT" rebase -S -f FETCH_HEAD', lines)
 
     def test_a_remote_tip_outside_head_gets_rebase(self):
@@ -324,7 +324,7 @@ class RemoteDecidesFlags(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             lines = _job_lines(r)
             self.assertIn('git -C "$WT" rebase -S -f FETCH_HEAD', lines)
-            self.assertIn('git -C "$WT" push origin "$BR"', lines)
+            self.assertIn('git -C "$WT" push origin "HEAD:refs/heads/$BR"', lines)
 
     def test_a_remote_tip_already_in_head_needs_neither_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -333,7 +333,7 @@ class RemoteDecidesFlags(unittest.TestCase):
             r = _enqueue(tmp, wt, ctx, "plain", "--files", "a.txt", "--by", "t")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             lines = _job_lines(r)
-            self.assertIn('git -C "$WT" push origin "$BR"', lines)
+            self.assertIn('git -C "$WT" push origin "HEAD:refs/heads/$BR"', lines)
             self.assertNotIn('git -C "$WT" rebase -S -f FETCH_HEAD', lines)
 
     def test_explicit_rebase_still_forces_the_rebase(self):
@@ -408,12 +408,12 @@ class RemoteDecisionGuards(unittest.TestCase):
                           r.stderr)
             self.assertEqual(r.stderr.count("remote not reachable here"), 1)
             lines = _job_lines(r)
-            self.assertIn('git -C "$WT" push origin "$BR"', lines)
-            self.assertNotIn('git -C "$WT" push -u origin "$BR"', lines)
+            self.assertIn('git -C "$WT" push origin "HEAD:refs/heads/$BR"', lines)
+            self.assertNotIn('git -C "$WT" push -u origin "HEAD:refs/heads/$BR"', lines)
             self.assertNotIn(_PLAIN_REBASE, lines)
 
     def test_an_unreachable_remote_still_honours_explicit_flags(self):
-        for flag, expect in (("--rebase", _PLAIN_REBASE), ("--new-branch", 'git -C "$WT" push -u origin "$BR"')):
+        for flag, expect in (("--rebase", _PLAIN_REBASE), ("--new-branch", 'git -C "$WT" push -u origin "HEAD:refs/heads/$BR"')):
             with self.subTest(flag=flag), tempfile.TemporaryDirectory() as tmp:
                 tmp = Path(tmp)
                 ctx, wt = self._ssh_origin(tmp)
@@ -520,7 +520,7 @@ class RemoteDecisionGuards(unittest.TestCase):
             self.assertNotIn("ls-remote", r.stderr)
             self.assertNotIn("remote not reachable", r.stderr)
             lines = _job_lines(r)
-            self.assertIn('git -C "$WT" push origin "$BR"', lines)
+            self.assertIn('git -C "$WT" push origin "HEAD:refs/heads/$BR"', lines)
             self.assertNotIn(_PLAIN_REBASE, lines)
 
     def test_a_lease_on_a_branch_missing_on_the_remote_adds_no_new_branch(self):
@@ -534,8 +534,8 @@ class RemoteDecisionGuards(unittest.TestCase):
                          "--force-with-lease", _git(tmp, wt, "rev-parse", "HEAD"))
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             lines = _job_lines(r)
-            self.assertNotIn('git -C "$WT" push -u origin "$BR"', lines)
-            self.assertIn('git -C "$WT" push --force-with-lease="refs/heads/$BR:$LEASE" origin "$BR"', lines)
+            self.assertNotIn('git -C "$WT" push -u origin "HEAD:refs/heads/$BR"', lines)
+            self.assertIn('git -C "$WT" push --force-with-lease="refs/heads/$BR:$LEASE" origin "HEAD:refs/heads/$BR"', lines)
 
     def test_only_the_exact_ref_counts_as_the_branch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -548,7 +548,7 @@ class RemoteDecisionGuards(unittest.TestCase):
             r = _enqueue(tmp, wt, ctx, "exact-ref", "--files", "a.txt", "--by", "t")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             lines = _job_lines(r)
-            self.assertIn('git -C "$WT" push -u origin "$BR"', lines)
+            self.assertIn('git -C "$WT" push -u origin "HEAD:refs/heads/$BR"', lines)
             self.assertNotIn(_PLAIN_REBASE, lines)
 
     def test_explicit_new_branch_stays_on_against_an_existing_remote_branch(self):
@@ -560,7 +560,7 @@ class RemoteDecisionGuards(unittest.TestCase):
             (wt / "a.txt").write_text("a\n")
             r = _enqueue(tmp, wt, ctx, "forced-new", "--files", "a.txt", "--by", "t", "--new-branch")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn('git -C "$WT" push -u origin "$BR"', _job_lines(r))
+            self.assertIn('git -C "$WT" push -u origin "HEAD:refs/heads/$BR"', _job_lines(r))
 
 
 @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can write through directory permissions")
