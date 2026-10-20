@@ -4,7 +4,7 @@ description: "Verifies a ticket's Sizing line against the default branch, decide
 metadata:
   version: "6"
   updated: "2026-10-17"
-  reviewed: "2026-10-02"
+  reviewed: "2026-10-20"
   facts: "tracker.kind"
 user-invocable: true
 argument-hint: "<ticket>"
