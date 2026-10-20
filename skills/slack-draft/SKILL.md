@@ -3,9 +3,9 @@ name: slack-draft
 description: "Every Slack draft a session makes for the user: create it (never paste text), record it, and read the channel/thread before any follow-up or status claim, since the user may edit drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
-  version: "10"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "11"
+  updated: "2026-10-20"
+  reviewed: "2026-10-20"
   requires: "slack"
 ---
 
@@ -27,9 +27,10 @@ the draft text as a prose question. The session only ever creates the draft; sen
 - `slack_send_message_draft` into the target channel / DM / thread (`thread_ts` for replies).
   Never paste draft text in the terminal (WORKSPACE.md § Rules). Formatting: `reference/formatting.md`
   beside this file (`**bold**`, `<url|label>`, ≤55-char code-block lines).
-- **One attached draft per channel.** If the tool returns `draft_already_exists`, that pending
-  draft is the one to update — do not create a second. A thread draft counts against the same
-  channel slot.
+- **One attached draft per conversation** — a channel's top level, or one thread. If the tool returns
+  `attached_draft_exists`, that pending draft is the one to update — do not create a second. Drafts in
+  different threads of one channel coexist (observed 2026-10-20, not yet reproduced), so a thread draft
+  does not use the channel's slot, and a draft elsewhere in the channel says nothing about this one.
 - Tell the user in one line where it is. **Thread drafts hide in the thread's reply box and under
   "Drafts & Sent", not in the channel composer** — say so when the draft is a thread reply.
 
@@ -57,12 +58,14 @@ follow-up to the same people, or acting on "no reply yet".
      shifts). Their edits are signal: they tell you which of your positions they did not want stated,
      so downstream messages and context docs must follow the sent version, not your draft.
      Then read the replies (threads included) before any follow-up.
-   - **Still pending** (no matching message; recreate attempt returns `draft_already_exists`) →
+   - **Still pending** (no matching message; a recreate attempt **in the same conversation** — same
+     channel, same `thread_ts` or none — returns `attached_draft_exists`) →
      leave it; do not nudge.
-   - **Gone, not sent** (no matching message and recreate succeeds) → only now is "the draft
-     vanished" a true statement; say so and record the new `draft_id`.
+   - **Gone, not sent** (no matching message and a recreate in the same conversation succeeds) → only
+     now is "the draft vanished" a true statement; say so and record the new `draft_id`. A create that
+     succeeds in another thread, or at the channel's top level, proves nothing about this draft.
 3. Never infer "sent" or "vanished" from the draft tool alone — the tool cannot list or delete
-   drafts, and a successful re-create proves only that no draft is attached *now*.
+   drafts, and a successful re-create proves only that no draft is attached to that conversation *now*.
 
 ## 4. Duplicates
 
@@ -74,6 +77,6 @@ must discard it themselves in the thread reply box / "Drafts & Sent". Don't leav
 A summary's "draft pending" is a claim to re-verify per §3, not a fact. Do it before the first
 status line you give the user about that message.
 
-Related: `pr-open` § 6 (review-request drafts). One draft per channel (§1) — it may still vanish (sent or
+Related: `pr-open` § 6 (review-request drafts). One draft per conversation (§1) — it may still vanish (sent or
 discarded) without telling you, so verify the surface, not the tool result; a timed-out tracker write needs
 the same discipline (it usually still landed).
