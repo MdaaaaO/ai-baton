@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.12.0 (2026-10-20)
+
+
+### Features
+
+* **evals:** stamp mocks/ctx/_tools.json with the pinned ctx version ([#604](https://github.com/MdaaaaO/ai-baton/issues/604)) ([f38270e](https://github.com/MdaaaaO/ai-baton/commit/f38270e849ad44b911b3fce9ab5d2a7cce2bd16d))
+
+
+### Bug Fixes
+
+* **sign-queue:** push HEAD by refspec, confirm it landed (#608) ([#612](https://github.com/MdaaaaO/ai-baton/issues/612)) ([29f41f5](https://github.com/MdaaaaO/ai-baton/commit/29f41f5c9aa07e7430ae03dee646e5677727cb7b))
+
+
+### Documentation
+
+* **pr-open:** spell the Assumed line grammar with its revisit tag ([#603](https://github.com/MdaaaaO/ai-baton/issues/603)) ([2ef5316](https://github.com/MdaaaaO/ai-baton/commit/2ef5316e910aeeefa784a9962fddf5e64f6930d4))
+* **readme:** what the kit delivers, footprint and a real handoff ([#606](https://github.com/MdaaaaO/ai-baton/issues/606)) ([192878c](https://github.com/MdaaaaO/ai-baton/commit/192878cd47180b4bc35226d5f85633be67c7e8d1))
+* **slack-draft:** one draft per conversation, real error code (#609) ([#610](https://github.com/MdaaaaO/ai-baton/issues/610)) ([07fdce0](https://github.com/MdaaaaO/ai-baton/commit/07fdce00d3544a2d66a2a24f72fe5fcd3648b798))
+
+
+### Chore
+
+* **skills:** restamp reviewed on handoff, ticket-open, ticket-pickup ([#611](https://github.com/MdaaaaO/ai-baton/issues/611)) ([a7ac86a](https://github.com/MdaaaaO/ai-baton/commit/a7ac86a13173dd34e4e422a16f9adb83709d52e2))
+
 ## 0.11.1 (2026-10-17)
 
 
