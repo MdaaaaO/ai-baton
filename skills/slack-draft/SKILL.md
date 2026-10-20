@@ -29,7 +29,7 @@ the draft text as a prose question. The session only ever creates the draft; sen
   beside this file (`**bold**`, `<url|label>`, ≤55-char code-block lines).
 - **One attached draft per conversation** — a channel's top level, or one thread. If the tool returns
   `attached_draft_exists`, that pending draft is the one to update — do not create a second. Drafts in
-  different threads of one channel coexist (observed 2026-10-20, not yet reproduced), so a thread draft
+  different threads of one channel coexist (seen once, not yet reproduced — #609), so a thread draft
   does not use the channel's slot, and a draft elsewhere in the channel says nothing about this one.
 - Tell the user in one line where it is. **Thread drafts hide in the thread's reply box and under
   "Drafts & Sent", not in the channel composer** — say so when the draft is a thread reply.
