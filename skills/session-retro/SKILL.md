@@ -2,9 +2,9 @@
 name: session-retro
 description: "Sonnet-forked self-check of this session against the kit: corrections, denials, failures and rule slips from the transcript, each judged kit gap or session slip. Use when winding down after session-handoff, or on \"run a retro\". Not for the weekly self-assessment or the handoff."
 metadata:
-  version: "2"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "3"
+  updated: "2026-10-23"
+  reviewed: "2026-10-23"
 user-invocable: true
 argument-hint: "[<session-id> | <transcript.jsonl>]"
 context: fork
@@ -90,6 +90,8 @@ The main session shows the findings as returned, then asks once, listing every p
   adding a duplicate. When the rule is already in § Rules word for word, offer nothing: it was a one-off.
 - `CLEAN`: say so in one line. Offer nothing.
 - A session that added memory notes (a `MEMORY.md` line, a slip note above) → suggest `/memory-prune` in one line.
+- A session that touched three or more docs of the store → offer `/kit-health lint` in one line
+  (`docs/knowledge-lint.md`). Offer only; never run it from the retro.
 
 ## Related
 
