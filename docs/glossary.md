@@ -65,9 +65,9 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Lane** — a continuing thread of work under one session registry `NAME`, spanning a chain of sessions: a
   predecessor ends leaving a next-session prompt (`session-handoff`), a successor registers under the same name and
   starts from it (`session-register`). Not one session's lifetime — the name's.
-- **Miss check** — a planned fork (#622) that asks "what did you miss?" of the artefact, the ticket's `## Done when`
+- **Miss check** — a fork (`docs/miss-check.md`) that asks "what did you miss?" of the artefact, the ticket's `## Done when`
   and a diff summary, before a PR is marked ready, a ticket is closed or a handoff is written. It returns `MISSED`
-  lines or `CLEAN`. The model that did the work never grades it. Not built yet.
+  lines or `CLEAN`. The model that did the work never grades it.
 - **NEEDS return** — the exact line `NEEDS <system>.<kind> <name>` a forked worker returns when a fact it needs is
   missing from the env store; the main session resolves it (`env-init`) and re-runs.
 - **Not applicable** — the one-line stop `<skill>: not applicable here — <why>` a capability-tier unit prints when
