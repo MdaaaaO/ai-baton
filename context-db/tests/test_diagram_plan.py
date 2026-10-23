@@ -164,6 +164,16 @@ class SketchSkillsAndNewDirs(unittest.TestCase):
         self.assertEqual(minus, [])
         self.assertEqual(plus, ["docs/knowledge-lint.md"])
 
+    def test_the_635_marker_matches_its_own_diff_end_to_end(self):
+        """`context-db/_templates/epic.md` sits in a supporting facet: it is no `+` (not substantive), and since the PR
+        does change it, its sketched entry is no `−` either."""
+        with tempfile.TemporaryDirectory() as tmp:
+            f = write(tmp, "ticket.txt", f"**Sketch**\n<!-- sketch: repo={REPO} {MARKER_635} hash=cccccccccccc -->\n")
+            rc, out, err = run(["--repo", REPO, "--files", "skills/walkthrough/SKILL.md",
+                                "context-db/_templates/epic.md", "skills/session-handoff/SKILL.md", "--sketch", f])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(out.strip(), "Sketch: matches")
+
     def test_component_names_a_path_by_its_parent_directory_name_or_its_stem(self):
         self.assertEqual(dp.component_names("skills/walkthrough/SKILL.md"), {"SKILL", "walkthrough"})
         self.assertEqual(dp.component_names("models/orders.sql"), {"orders", "models"})
