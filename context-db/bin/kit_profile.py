@@ -52,6 +52,9 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                #   SessionStart context, never into <file>; byte-budgeted and value-safe
                                                                #   (kit_profile.py get's own values; a secret-shaped one prints <redacted>)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
+                        python3 kit_profile.py link-repo-skills  # the plugin's SessionStart hook: link <workspace>/<repo>/.claude/skills/<skill> into
+                                                               #   <workspace>/.claude/skills (depth 1, SKILL.md present), prune only links it made
+                                                               #   whose SKILL.md is gone; a taken name is one stderr line; silent when nothing changes
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
                         python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 otherwise
@@ -846,6 +849,103 @@ def workspace_rules(environ: dict | None = None, kit: Path | None = None) -> str
     return (kit / "WORKSPACE.md").read_text(encoding="utf-8")  # unreadable in a kit workspace = broken: raise, the hook says so
 
 
+def repo_skills(root: Path) -> list[tuple[str, Path]]:
+    """`(name, dir)` of every `<root>/<repo>/.claude/skills/<name>/` holding a `SKILL.md`, sorted by repo then name.
+    Depth 1 only: a repo's own `.claude/worktrees/` (and any other nesting) is never looked at, and neither is a
+    dot-directory beside the repos (`.worktrees`, `.context`). The dir is the path as the workspace spells it, not a
+    resolved one, so a link made from it survives a moved checkout that keeps its place under `root`."""
+    found: list[tuple[str, Path]] = []
+    try:
+        repos = sorted(p for p in root.iterdir() if not p.name.startswith(".") and p.is_dir())
+    except OSError:
+        return found
+    for repo in repos:
+        skills = repo / ".claude" / "skills"
+        try:
+            names = sorted(p for p in skills.iterdir() if not p.name.startswith(".") and (p / "SKILL.md").is_file())
+        except OSError:
+            continue
+        found.extend((p.name, p) for p in names)
+    return found
+
+
+def repo_skills_applicable(root: Path) -> bool:
+    """False on a clone install: there `<root>/.claude` is the kit's own checkout, so `.claude/skills` is the kit's
+    tracked skill dir and a link dropped into it would dirty the checkout. A plugin install keeps `<root>/.claude/skills`
+    for the workspace's own use."""
+    return not (root / ".claude" / "WORKSPACE.md").is_file()
+
+
+def _link_target(link: Path) -> Path | None:
+    """Where `link` points as an absolute path (a relative target read from the link's own dir); None when `link`
+    is not a symlink."""
+    try:
+        raw = os.readlink(link)
+    except OSError:
+        return None
+    return Path(os.path.normpath(os.path.join(link.parent, raw)))
+
+
+def _into_repo_skills(target: Path, root: Path) -> bool:
+    """True when `target` is `<root>/<repo>/.claude/skills/<name>` — a repo's skill dir, which is all the hook may prune."""
+    return (target.parent.name == "skills" and target.parent.parent.name == ".claude"
+            and target.parent.parent.parent.parent == root)
+
+
+def link_repo_skills(root: Path) -> list[str]:
+    """Link each repo skill (`repo_skills`) into `<root>/.claude/skills/<name>` and prune the links this made whose
+    `SKILL.md` is gone; returns one line per skill that could not be linked. Claude Code loads a repo's
+    `.claude/skills` only after the session reads or edits a file in that repo, so a session started at the workspace
+    root, or one that drives a repo through its tools alone, would otherwise never see the skill.
+
+    Never touches a real skill dir or a link that points anywhere but into a repo's `.claude/skills`: a taken name is
+    skipped (the first repo in sorted order wins a clash between repos). Silent and a no-op when everything is
+    linked already; `<root>/.claude/skills` is created only when there is something to link."""
+    if not repo_skills_applicable(root):
+        return []
+    dst = root / ".claude" / "skills"
+    msgs: list[str] = []
+    try:
+        stale = [p for p in dst.iterdir() if p.is_symlink()]
+    except OSError:
+        stale = []
+    for link in stale:
+        t = _link_target(link)
+        if t is not None and _into_repo_skills(t, root) and not (t / "SKILL.md").is_file():
+            try:
+                link.unlink()
+            except OSError as e:
+                msgs.append(f"repo skills: cannot remove the stale link {link.name}: {e}")
+    for name, skill in repo_skills(root):
+        link = dst / name
+        if link.is_symlink() or link.exists():
+            if _link_target(link) != skill:
+                repo = skill.parent.parent.parent.name
+                msgs.append(f"repo skills: {name} in {repo} not linked - the name is taken in .claude/skills")
+            continue
+        try:
+            dst.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(skill)
+        except OSError as e:
+            msgs.append(f"repo skills: cannot link {name}: {e}")
+    return msgs
+
+
+def unlinked_repo_skills(root: Path) -> list[tuple[str, str, str]]:
+    """`(name, repo, why)` for each repo skill whose `<root>/.claude/skills/<name>` is not a link to it: `taken` (a real
+    dir or a link elsewhere — a name clash the hook can only report) or `missing` (not linked yet: the hook has not run
+    since the skill appeared). Empty on a clone install."""
+    if not repo_skills_applicable(root):
+        return []
+    out: list[tuple[str, str, str]] = []
+    for name, skill in repo_skills(root):
+        link = root / ".claude" / "skills" / name
+        if _link_target(link) == skill:
+            continue
+        out.append((name, skill.parent.parent.parent.name, "taken" if link.is_symlink() or link.exists() else "missing"))
+    return out
+
+
 FOOTER = "session `{}`"  # the bare self-identifier — no AI attribution anywhere (owner decision, 2026-09-28)
 
 
@@ -1187,6 +1287,12 @@ def main(argv: list[str]) -> int:
     elif cmd == "workspace-rules":
         # the plugin's SessionStart hook: WORKSPACE.md on stdout (→ the session's context) for a plugin-path workspace (#3)
         sys.stdout.write(workspace_rules())
+    elif cmd == "link-repo-skills":
+        # the plugin's SessionStart hook: repo-level skills visible from a session started at the workspace root.
+        # Always exit 0 — a hook must never fail a session start; the lines are stderr (stdout is session context).
+        ws = _workspace_env_root()
+        for line in (link_repo_skills(ws) if ws is not None else []):
+            print(line, file=sys.stderr)
     elif cmd == "install-mode":
         # clone | plugin | dev-checkout (#34); --to-record: the mode setup.sh writes to `kit.install_mode`
         detected = install_mode()
