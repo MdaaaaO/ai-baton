@@ -87,7 +87,7 @@ Tools: `tracker.mcp_tools.create` / `.edit` / `.comment`; project `tracker.proje
    `bug`/`documentation`/`data-migration` spelled identically to the PR labels so ticket and PR
    carry matching signal.
 3. **Link it.** Epic link / parent on create; related tickets via `createIssueLink`.
-4. **Opening block goes in the description** — write the Core step 3 block (Goal, Out of scope, Plan, Links, Sizing) into
+4. **Opening block goes in the description** — write the Core step 3 block into
    `tracker.mcp_tools.create`'s `description` field at creation, or set it right after with
    `tracker.mcp_tools.edit` if create didn't take it. The description is the durable, always-visible home; it
    is never a comment. Post a comment only to cc someone who must act, a one-line ADF mention — never
