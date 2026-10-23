@@ -659,6 +659,25 @@ class NewSh(ContextRoot):
         self.assertEqual(run(self.root, "gen_index.py").returncode, 0)
         self.assertEqual(run(self.root, "verify.py").returncode, 0)
 
+    def test_epic_and_repo_scaffolds_carry_the_optional_plain_words_section(self):
+        # the section is in both templates but in neither type's required list: a fresh scaffold carries it
+        # (after the section it follows), and the doc still validates with the kit's own light checker.
+        run(self.root, "kb.py", "config-set", "domains", '["airflow"]')
+        r = self.new(TYPE="epic", DOMAIN="airflow", SLUG="words-smoke", TITLE="Words smoke")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = Path(r.stdout.strip()).read_text(encoding="utf-8")
+        self.assertIn("## In plain words", text)
+        self.assertLess(text.index("## Key decisions & gotchas"), text.index("## In plain words"))
+        self.assertLess(text.index("## In plain words"), text.index("## Architecture"))
+        self.assertIn("operator", text.split("## In plain words", 1)[1].split("##", 1)[0])  # the comment says who confirms
+        r = self.new(TYPE="repo", DOMAIN="airflow", SLUG="words-card", TITLE="Words card")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        card = Path(r.stdout.strip()).read_text(encoding="utf-8")
+        self.assertLess(card.index("## What it is"), card.index("## In plain words"))
+        self.assertLess(card.index("## In plain words"), card.index("## Where things are"))
+        self.assertEqual(run(self.root, "gen_index.py").returncode, 0)
+        self.assertEqual(run(self.root, "verify.py").returncode, 0)
+
     def test_special_characters_in_values_survive(self):
         # the sed substitution was unescaped — `/`, `&`, `\\` and the `|` delimiter corrupted the scaffold
         title = "A/B & C\\D | E $x"

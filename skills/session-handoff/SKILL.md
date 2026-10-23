@@ -2,9 +2,9 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "36"
-  updated: "2026-10-17"
-  reviewed: "2026-10-20"
+  version: "37"
+  updated: "2026-10-23"
+  reviewed: "2026-10-23"
 user-invocable: true
 ---
 
@@ -35,6 +35,12 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
      nested list (`docs/diagrams.md` § Rendering), through `ctx_str_replace`/`ctx_insert`. When the map does
      not move, add one Session log line instead: `Architecture unchanged: <reason>`. A landed PR with no
      `where=` needs nothing here.
+   - **Plain words** — only when the doc has an optional `## In plain words` section. Keep it current the way
+     `## Architecture` is kept: when a PR on this initiative landed since the last flush and makes a line
+     there untrue, drop that line (`ctx_str_replace`) and log `Plain words: dropped <n> line(s) (#<pr>)`; keep the
+     section at ≤10 lines. When nothing moved, add one Session log line instead: `Plain words unchanged:
+     <reason>`. Never add or reword a line: only the operator confirms one, in a `walkthrough`. A doc
+     without the section needs nothing here.
    - **Cap the Session log.** Run `ctx_maintain` on the doc's store (Bash fallback: `ctx_adapter.py ctx
      maintain`) — a no-op below the store's size guard (30KB); past it, it keeps the newest ~6 entries
      (`maintain.keep_log` in `ctx-store.json`) in the doc, oldest-first, and moves the rest verbatim into the

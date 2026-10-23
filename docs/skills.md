@@ -22,6 +22,10 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 - **mission-control** — builds, checks and opens the private page that shows the store (sessions, spend, docs,
   priorities, queues, pointers) as one local HTML file; rebuilt locally, never published.
 
+- **walkthrough** — leads you through a PR, repo area or epic (purpose, how it runs, where it breaks), then asks
+  three questions in one carousel; a wrong answer re-opens the step, and only what you confirm is kept as
+  `## In plain words` in the context doc.
+
 ## Pull requests
 
 - **pr-open** — the checklist for opening a PR: diagrams derived from the diff, labels, commit style, reviewers,
