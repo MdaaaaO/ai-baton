@@ -74,7 +74,7 @@ is on `main` today. A status with a version means it shipped in that release. `p
 | `verified.py`: the `## Verified` lines of a PR body | verifier | PR body | #100 | existing |
 | `review_gate.py`: leak shapes and version bumps | verifier | CI, PR | n/a | existing |
 | `kit-verify` (`kit_verify.py`): the kit's own units | verifier | CI, machine | n/a | existing |
-| miss check: a fork asks "what did you miss?" | verifier | PR, close, handoff | #622 | planned (#622) |
+| miss check: a fork asks "what did you miss?" | verifier | PR, close, handoff | #622 | shipped (`0.13.0`) |
 | `pr-open`: the PR checklist and body gates | verifier | PR | n/a | existing |
 | `pr-watch`: surfaces only events you can act on | verifier | PR | n/a | existing |
 | `pr-event-brief`: triage of one watch event | verifier | PR | n/a | existing |

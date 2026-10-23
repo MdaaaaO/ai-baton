@@ -60,9 +60,8 @@ class VisionLayers(unittest.TestCase):
 
     def test_children_status(self):
         by_issue = {r[3]: r[4] for r in self.rows}
-        for issue in ("#620", "#621", "#623", "#625", "#626"):
+        for issue in ("#620", "#621", "#622", "#623", "#625", "#626"):
             self.assertEqual(by_issue[issue], "shipped (`0.13.0`)", issue)
-        self.assertEqual(by_issue["#622"], "planned (#622)")
 
     def test_glossary_has_the_nine_terms(self):
         glossary = (KIT / "docs" / "glossary.md").read_text(encoding="utf-8")
