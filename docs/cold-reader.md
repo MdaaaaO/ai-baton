@@ -3,17 +3,18 @@
 Owner decision, 2026-09-30 (design comment on #378, recorded against the `docs/diagrams.md` contract):
 the gate is a fixed worker brief, not a new skill. A `haiku` fork reads **only** the artefact text — no
 repo, no transcript, no context doc, and no tool use (by instruction — see § The brief) — and answers
-three fixed questions in one line each. The main session compares the answers to what it knows; `ticket-open` and `session-handoff` call this brief
-today as their last relevant step and point here instead of restating it. `pr-open`'s step is planned:
-it lands with the follow-up on that skill.
+three fixed questions in one line each. The main session compares the answers to what it knows.
+`ticket-open`, `pr-open` and `session-handoff` call this brief as their last relevant step and point here
+instead of restating it. `pr-open` has run it on `## Diagrams` since #386.
 
 ## Gate
 
 Runs only on an artefact that is not `SKIP` under the `docs/diagrams.md` contract: a design-sized ticket
-(Sizing `opus`, carries a Sketch), a PR whose diagram plan is not `SKIP` (planned — the contract holds,
-but `pr-open` does not call this gate until its follow-up lands), or a `## Next session` handoff prompt
-that hands over open work. Everything else costs nothing — skip the gate. The operator block
-(`docs/operator-brief.md`) has its own brief, § The operator block, and runs on every block that has a line other than `Nothing.`.
+(Sizing `opus`, carries a Sketch), a PR whose diagram plan is not `SKIP` (`pr-open` runs the gate on
+`## Diagrams` before it creates or updates the PR), or a `## Next session` handoff prompt that hands over
+open work. Everything else costs nothing — skip the gate. The operator block
+(`docs/operator-brief.md`) has its own brief, § The operator block, and runs on every block that has a line
+other than `Nothing.`.
 
 ## The brief
 
