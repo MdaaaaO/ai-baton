@@ -4,7 +4,7 @@ description: "Flushes durable knowledge before a session ends or a ticket/PR/epi
 metadata:
   version: "37"
   updated: "2026-10-23"
-  reviewed: "2026-10-20"
+  reviewed: "2026-10-23"
 user-invocable: true
 ---
 
