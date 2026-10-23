@@ -126,7 +126,7 @@ cold-reader gate on the four lines alone (`docs/cold-reader.md` § The operator 
 5. **Done when, beside step 4.** A ticket whose `## Done when` carries `DW-<n>` ids: one `## Verified` line per id the PR proves,
    `DW-<n> · <evidence>`, then `python3 $BATON/context-db/bin/done_when.py coverage --ticket <ticket-file> --body <file>` (the
    ticket file holds its body, then its comments, oldest first) with every `verified.py check`. `DONE WHEN: covered` (exit 0) → go on; `gap DW-n[, …]` (exit 3) → prove the id, or answer it in `## One honest limit` as `DW-<n> · <why it is not verified>`, then re-run; exit 1 → no ids, skip. Step 7 reports the line (`reference/verified.md`).
-6. **Miss check, before ready.** Fork `docs/miss-check.md` on the body; its result line (`Miss check: clean` or `fixed <n>, open <m>`) goes under `## One honest limit`, an unfixed `MISSED` into the same turn's carousel, the run into the log through `ctx_log`.
+6. **Miss check, before ready.** Fork `docs/miss-check.md` on the body; its result line (`Miss check: clean` or `fixed <n>, open <m>`) goes under `## One honest limit`, outside its three lines like the `Assumed:` lines, an unfixed `MISSED` into the same turn's carousel, the run into the log through `ctx_log`.
 
 ## Commit style, links, scope
 

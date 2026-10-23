@@ -17,7 +17,7 @@ and says so in one line.
 Call the `Agent` tool with `subagent_type: general-purpose` and the model below, the same fork as the cold reader
 (`docs/cold-reader.md` § The brief): the harness offers no way to strip a fork's tools, so "use no tool" is by
 instruction, and the worker gets only the pasted text. `model: haiku`; `model: sonnet` when the diff is above
-`deep_lines` changed lines (`deep_lines` in the review `config.json`, 600 by default; `git diff --shortstat`
+`deep_lines` changed lines (`deep_lines` in pr-scan's `$PR_REVIEW_HOME/config.json`, default `.context/state/pr-review/`, 600 by default; `git diff --shortstat`
 insertions plus deletions). Paste the three inputs in place of the marks: `<artefact>` is the PR body, the close
 comment or the next-session prompt; `<done-when>` is the ticket's `## Done when` list (`none` when it has none);
 `<diff>` is `git diff --stat` of the work, against the base. Hand it exactly this prompt:

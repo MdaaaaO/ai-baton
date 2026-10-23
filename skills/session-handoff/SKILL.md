@@ -150,7 +150,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       rest — never a paraphrase, only verbatim lines or that pointer. Before `session-end`, run the
       cold-reader gate on the drafted prompt (`docs/cold-reader.md`) and fix it on a miss before handing
       it off. Also, before this step's prompt is written, fork the miss check (`docs/miss-check.md`) on the draft, the
-      epic's `## Done when` and the session's `git diff --stat`: its result line goes under `### Since last handoff`,
+      `## Done when` of each ticket the session worked (read from the tracker; `none` when none has one) and the session's `git diff --stat`: its result line goes under `### Since last handoff`,
       each unfixed `MISSED` becomes a bullet there and an item in the same turn's carousel, the run is logged through `ctx_log`. Run `python3
       $BATON/context-db/bin/kit_profile.py scratch` once and use the **printed path** (a per-session dir
       that exists on every machine — never a bare `/tmp` path, which sessions overwrite; shell variables do
