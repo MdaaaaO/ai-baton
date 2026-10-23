@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.13.0 (2026-10-23)
+
+
+### Features
+
+* **engine:** link repo-level skills into the workspace at SessionStart ([#634](https://github.com/MdaaaaO/ai-baton/issues/634)) ([07c091f](https://github.com/MdaaaaO/ai-baton/commit/07c091ff28c25424edfea18493bcfb467d8ae067))
+* **ticket-open:** done-when ids carried from ticket to close ([#627](https://github.com/MdaaaaO/ai-baton/issues/627)) ([7fac2cb](https://github.com/MdaaaaO/ai-baton/commit/7fac2cb6fa82a6a43ffc11f92362a97e78c9ea51))
+* **walkthrough:** operator walkthrough and a plain-words section ([#635](https://github.com/MdaaaaO/ai-baton/issues/635)) ([bcf2715](https://github.com/MdaaaaO/ai-baton/commit/bcf271564bc75b32f763d5714d461394c80c64af))
+* **kit-health:** knowledge lint mode over the context store ([#636](https://github.com/MdaaaaO/ai-baton/issues/636)) ([c43fc97](https://github.com/MdaaaaO/ai-baton/commit/c43fc97b7be0e169df7d4dffa9e2a65c3434f8cc))
+* **pr-open:** operator brief, four plain lines on every landed change ([#644](https://github.com/MdaaaaO/ai-baton/issues/644)) ([15376dd](https://github.com/MdaaaaO/ai-baton/commit/15376dd1a998fa56fc3c9f6e7407becc395810c6))
+* **ticket-open:** goal interview before the opening block ([#642](https://github.com/MdaaaaO/ai-baton/issues/642)) ([ee5e68e](https://github.com/MdaaaaO/ai-baton/commit/ee5e68efd2722594e89539441cdddc7cb7dbdcbb))
+* **kit:** miss-check, a forked critique before ready, close and handoff ([#648](https://github.com/MdaaaaO/ai-baton/issues/648)) ([9c32f55](https://github.com/MdaaaaO/ai-baton/commit/9c32f551c2a8013b6df2bb7037b7cd1da709fee2))
+
+
+### Bug Fixes
+
+* **alerts-sweep:** write the state doc's updated date unquoted ([#637](https://github.com/MdaaaaO/ai-baton/issues/637)) ([598f9f5](https://github.com/MdaaaaO/ai-baton/commit/598f9f5fdc854f1c71c5dee2cf8dfccace43abff))
+* **pr-open:** sketch check names skill components and new dirs ([#641](https://github.com/MdaaaaO/ai-baton/issues/641)) ([54e597d](https://github.com/MdaaaaO/ai-baton/commit/54e597d691b4c38a772d311c58dce54d3cbab9aa))
+* **engine:** ctx maintain rotates a log doc's log_section ([#645](https://github.com/MdaaaaO/ai-baton/issues/645)) ([f5f5946](https://github.com/MdaaaaO/ai-baton/commit/f5f5946c1757cbfbb44fe78ab35bd7831ac550b9))
+
+
+### Documentation
+
+* **session-handoff:** name session-end, monitor stop, mission-control ([#640](https://github.com/MdaaaaO/ai-baton/issues/640)) ([8b2fb58](https://github.com/MdaaaaO/ai-baton/commit/8b2fb5868291e90b93b345814cb082d288cb2025))
+* **vision:** the four layers cross-walk and attribution ([#647](https://github.com/MdaaaaO/ai-baton/issues/647)) ([0aa34b3](https://github.com/MdaaaaO/ai-baton/commit/0aa34b327681d4ac7bfeb1485e385290cd915118))
+* **ticket-open:** name the out of scope line in the opening block ([#646](https://github.com/MdaaaaO/ai-baton/issues/646)) ([70861ed](https://github.com/MdaaaaO/ai-baton/commit/70861ed3ee9f5a3e09262bce8a90ed62e1e6ced2))
+
+
+### Tests
+
+* keep leaked make variables out of recipe-rendering tests ([#638](https://github.com/MdaaaaO/ai-baton/issues/638)) ([0b78066](https://github.com/MdaaaaO/ai-baton/commit/0b780661352217ce76e8276377355012c93e3853))
+
+
+### CI
+
+* pin python-floor to ubuntu-24.04, where setup-python has 3.9 ([#632](https://github.com/MdaaaaO/ai-baton/issues/632)) ([5372727](https://github.com/MdaaaaO/ai-baton/commit/53727276776393beec203855f457495a01717942))
+
+
+### Chore
+
+* **skills:** restamp reviewed on alerts-sweep and ticket-pickup ([#643](https://github.com/MdaaaaO/ai-baton/issues/643)) ([b1b5ecb](https://github.com/MdaaaaO/ai-baton/commit/b1b5ecb6ee8d558fa3e544fd821aa5428121d531))
+
 ## 0.12.1 (2026-10-23)
 
 
