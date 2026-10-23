@@ -25,7 +25,7 @@ What you get, from the top:
 - **Lightweight.** One install command, one setup run, no names or ids in the kit. If you already start Claude Code
   from the directory that holds your repos, the first session benefits.
 
-Plus skills for PRs, tickets, sessions and docs, and one store for per-machine values.
+Plus skills for PRs, tickets, sessions and docs, built on four layers: spec, verifier, environment and understanding ([vision](docs/vision.md#the-four-layers)).
 
 **Plugin**: Claude Code installs and updates it.
 
@@ -78,7 +78,7 @@ $ python3 $BATON/skills/kit-health/kit-health.py --stale 90 --quiet
 **AMBER** — 0 errors · 4 warnings · 29 checks passed · environment `you`
 ```
 
-The first run is AMBER: each warning names its fix (here the unfetched ctx store and the missing stamp).
+The first run is AMBER: each warning names its fix.
 
 ## A handoff
 

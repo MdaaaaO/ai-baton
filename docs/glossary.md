@@ -25,7 +25,8 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   DB, the env store, the session registry and the kit's own checks. Reference: `docs/engine-cli.md`.
 - **Environment** — everything about *where* the kit runs: tracker, chat, org, which systems exist, extra domains,
   prose rules. One machine = one environment; it lives in the env store (values) and `environment.md` (prose),
-  never in the kit (`docs/new-environment.md`).
+  never in the kit (`docs/new-environment.md`). As a layer, it is the third of the four: what the agent works in must stay true
+  (`docs/vision.md` § The four layers).
 - **Env store (env fact store)** — `.context/reference/env/`: `config.json` with the structural switches scripts
   branch on, plus one markdown table per system (`name · value · purpose · learned-from`) holding the ids and
   names skills need. Managed by `kb.py`; read by `kit_profile.py get`; spec `docs/env-facts.md`.
@@ -42,6 +43,10 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Fork** — a skill with `context: fork` runs its body in a subagent under the agent its `agent:` key names
   (`triage`, `review-runner`, `auto-runner`); it returns a brief and never acts, so its reading stays out of the main
   prefix. A fork that hits a missing fact returns the NEEDS line.
+- **Goal interview** — four questions the session asks the author in one carousel before `ticket-open` or
+  `ticket-carousel` writes the opening block: the goal, what is out of scope, how we will know it is done, and the
+  first slice that can be verified on its own. The answers become the block. A small, specified fix skips it with
+  `Interview: SKIP (<reason>)`.
 - **Handoff artefact** — what a skill leaves for a step only a specific machine can perform (sign a commit, reach
   a host): a queued job, a `commit.sh` — never a pasted one-liner or a silent substitute.
 - **Heartbeat** — the session registry row's liveness signal: `skills/session-register/heartbeat.sh` touches
@@ -53,13 +58,23 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   `kit-health` warns when the two disagree (`kit_profile.MODES`).
 - **Kit** — this repository, installed as `<workspace root>/.claude/` (clone path) or as the `ai-baton`
   plugin: skills, agents, engine, settings, docs. Machine- and user-agnostic by construction; `main` is PR-only.
+- **Knowledge lint** — `/kit-health lint`: a check that the context store still says what is true. A script finds
+  orphan docs, dead links and tracker claims the tracker contradicts. A few forks read what only a reader can
+  judge. The session walks every finding in one carousel and applies only the accepted ones. It reads
+  current-state sections only, never history; `docs/knowledge-lint.md`.
 - **Lane** — a continuing thread of work under one session registry `NAME`, spanning a chain of sessions: a
   predecessor ends leaving a next-session prompt (`session-handoff`), a successor registers under the same name and
   starts from it (`session-register`). Not one session's lifetime — the name's.
+- **Miss check** — a planned fork (#622) that asks "what did you miss?" of the artefact, the ticket's `## Done when`
+  and a diff summary, before a PR is marked ready, a ticket is closed or a handoff is written. It returns `MISSED`
+  lines or `CLEAN`. The model that did the work never grades it. Not built yet.
 - **NEEDS return** — the exact line `NEEDS <system>.<kind> <name>` a forked worker returns when a fact it needs is
   missing from the env store; the main session resolves it (`env-init`) and re-runs.
 - **Not applicable** — the one-line stop `<skill>: not applicable here — <why>` a capability-tier unit prints when
   a required flag is false. Never improvise around it.
+- **Operator brief** — the four plain lines that end every landed change, for the person who runs the result:
+  `Can now`, `Do differently`, `Check with`, `Not covered`. Each line is at most 20 words. It is `## For the
+  operator` in the PR body, copied into the close comment and the next-session prompt; `docs/operator-brief.md`.
 - **`/plugin configure ai-baton`** — the Claude Code command that opens the plugin's `userConfig` dialog on a
   plugin install (`user_name`, `github_login`, `tz`, `slack_self_dm`, `slack_lattice_dm`); `/config` is Claude
   Code's own settings command (theme, model, …), a different command — never write that spelling for identity.
@@ -72,12 +87,23 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Session registry** — `.context/sessions/<name>.md`, one file per live session (what it owns, a ≤ 12 h heartbeat,
   a `stats:` line), aggregated into `SESSION_INDEX.md` by `gen_sessions.py`; managed by `session.py` and the
   `session-register` / `session-handoff` skills.
+- **Spec** — the first layer: what the person wants and how they will know it is done. The person owns it; the
+  agent does not guess it. The kit's mechanisms are the goal interview, the Goal/Plan block and the Sizing line
+  (`docs/vision.md` § The four layers).
 - **Stamp** — `.context/kit-health/HEALTH-<env>.md`, written by `kit-health --stamp` after a run with no errors:
   the kit commit and version this environment was last green at.
 - **Ticket** — one tracker item (a Jira issue or a GitHub issue, per `tracker.kind`), always cited by its key as a
   link. `ticket-open` / `ticket-update` / `ticket-close` act on it; `tracker.key_regex` recognises it.
+- **Understanding** — the fourth layer and the kit's keystone: the person knows what changed and why. A person cannot
+  delegate it. The operator brief, the walkthrough and the diagrams exist for it (`docs/vision.md` § The four layers).
 - **Unit** — one skill (`skills/<name>/SKILL.md`) or one agent (`agents/<name>.md`): the thing `kit-verify`
   validates and `review_gate.py` bumps by version.
+- **Verifier** — the second layer: the checks that say whether the result is right, set before the work and read
+  after it. The kit's mechanisms are the `## Done when` criteria with their `DW-n` ids, `evidence_check.py`,
+  `## Verified` and the review gates (`docs/vision.md` § The four layers).
+- **Walkthrough** — the `walkthrough` skill: it leads the operator through a PR, a repo area or an epic in three
+  steps (purpose, how it runs, where it breaks), then asks three questions in one carousel. A wrong answer
+  re-opens the step. Only what the operator confirms is kept, as `## In plain words` in the context doc.
 - **Wording-only** — a PR that changes text but no behaviour: no version bump, declared with the `wording` label or
   `[skip-bump]` in the title or body (`review_gate.py --skip-bump`); the reviewer may question the claim. `ci.yml`
   grants the same `--skip-bump` a third way, computed rather than declared: a Dependabot npm PR whose diff touches
