@@ -2,7 +2,7 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, the paste-ready next-session prompt; then stops its monitors, closes the registry row and rebuilds mission-control. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "39"
+  version: "40"
   updated: "2026-10-23"
   reviewed: "2026-10-23"
 user-invocable: true
@@ -149,7 +149,9 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       only the newest ones that do and point at the context doc's *Key decisions & gotchas* section for the
       rest — never a paraphrase, only verbatim lines or that pointer. Before `session-end`, run the
       cold-reader gate on the drafted prompt (`docs/cold-reader.md`) and fix it on a miss before handing
-      it off. Run `python3
+      it off. Also, before this step's prompt is written, fork the miss check (`docs/miss-check.md`) on the draft, the
+      `## Done when` of each ticket the session worked (read from the tracker; `none` when none has one) and the session's `git diff --stat`: its result line goes under `### Since last handoff`,
+      each unfixed `MISSED` becomes a bullet there and an item in the same turn's carousel, the run is logged through `ctx_log`. Run `python3
       $BATON/context-db/bin/kit_profile.py scratch` once and use the **printed path** (a per-session dir
       that exists on every machine — never a bare `/tmp` path, which sessions overwrite; shell variables do
       not survive between tool calls, so the Write call takes the literal path) to write the prompt to

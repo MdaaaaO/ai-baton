@@ -521,6 +521,16 @@ it runs the same sync pass itself: commit + push, the pass's one line (`pushed �
 on stderr, silent when sync is off or the store is not its own git repository. A sync failure never changes the
 exit status; reads are untouched; `CTX_ADAPTER_NO_SYNC=1` skips the pass.
 
+`maintain` also rotates a `type: log` doc's `log_section:` (log_rotate.py): ctx-store's own pass rotates only the
+section its type schema names, and the kit's `log` type names none, so an oversized log doc with a `log_section:
+<heading>` frontmatter field has that section's oldest entries moved to `archive/<folder>-<slug>-log.md` first — by
+the Bash route just before ctx's pass, by the PostToolUse hook right after a `ctx_maintain` MCP call (its lines go to
+the hooks log). The entries leave the source through ctx's own `str_replace`, under ctx's lock, so an entry appended
+meanwhile is kept and a changed block is refused and retried next pass. `maintain` takes no options of its own
+(no dry-run, no single-doc key): a command line with anything beyond `--json`, `--stdin` and `--now <ts>` is ctx's to
+refuse and rotates nothing, `--store` names a store this pass cannot rotate, and `--json` sends the lines to stderr.
+An oversized log doc without the field is named on stdout with the add-the-field hint.
+
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 

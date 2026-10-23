@@ -222,16 +222,16 @@ It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `contex
 | [vision](docs/vision.md) | What the kit is and is not |
 | [layout](docs/layout.md) | Every file and directory |
 | [conventions](docs/conventions.md) | The six portability rules |
-| [carousel](docs/carousel.md) · [assumptions](docs/assumptions.md) | The shape of every open decision |
-| [diagrams](docs/diagrams.md) · [cold-reader](docs/cold-reader.md) · [operator-brief](docs/operator-brief.md) | Diagrams, operator lines |
+| [carousel](docs/carousel.md) · [assumptions](docs/assumptions.md) | The shape of an open decision |
+| [diagrams](docs/diagrams.md) · [cold-reader](docs/cold-reader.md) · [operator-brief](docs/operator-brief.md) · [miss-check](docs/miss-check.md) | Diagrams, operator lines, misses |
 | [knowledge-lint](docs/knowledge-lint.md) | Store lint |
 | [architecture](docs/architecture.md) | Session → imports → skills → engine → context DB |
 | [env-facts](docs/env-facts.md) | The env fact store and how a skill resolves a fact |
 | [env-vars](docs/env-vars.md) | Every environment variable a kit script reads |
 | [new-environment](docs/new-environment.md) | A machine with a tracker, chat or warehouse |
 | [plugin-setup](docs/plugin-setup.md) | The plugin install, updates, switching from a clone |
-| [troubleshooting](docs/troubleshooting.md) | Silent hooks, common `kit-health` RED findings, uninstalling |
-| [loading](docs/loading.md) | What loads when, and the byte budgets |
+| [troubleshooting](docs/troubleshooting.md) | Silent hooks, `kit-health` RED findings, uninstalling |
+| [loading](docs/loading.md) | What loads when, byte budgets |
 | [packaging](docs/packaging.md) | Plugin versus clone |
 | [sync](docs/sync.md) | How the kit moves between machines |
 | [context-sync](docs/context-sync.md) | `.context/` as a private git repo the hooks sync |

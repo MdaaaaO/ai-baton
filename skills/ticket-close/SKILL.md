@@ -2,7 +2,7 @@
 name: ticket-close
 description: "Checklist for closing a ticket (Jira or GitHub issues): a final outcome comment, the right transition/close reason, delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "16"
+  version: "17"
   updated: "2026-10-23"
   reviewed: "2026-10-23"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
@@ -48,6 +48,7 @@ kind X in this environment" and stop.
    <repo> --base <merge sha>` and fold a `MOVED`/`STALE` result in as a further difference. Add
    `As-built: #<pr> — Sketch: matches` (or `differs (+a, −b) — <reason>`) to the final comment. No
    marker → nothing.
+   **Miss check — before the comment posts.** Fork `docs/miss-check.md` on the drafted comment, the ticket's `## Done when` and the delivering diff; write its result line (`Miss check: clean` or `fixed <n>, open <m>`) into the comment, put an unfixed `MISSED` into the same turn's carousel and log the run through `ctx_log`. No delivering diff → skip it in one line.
 2. **Post via a file — both adapters run this, not just GitHub's.** Write the comment to a file, then run,
    in order: `python3 $BATON/context-db/bin/evidence_check.py <file>` — exit 0 → continue; exit 3 → fix the
    comment (add the missing evidence item(s), named on stderr) and re-check, never post as is; exit 2 → the

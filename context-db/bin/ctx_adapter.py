@@ -127,6 +127,16 @@ it runs the same sync pass itself: commit + push, the pass's one line (`pushed �
 on stderr, silent when sync is off or the store is not its own git repository. A sync failure never changes the
 exit status; reads are untouched; `CTX_ADAPTER_NO_SYNC=1` skips the pass.
 
+`maintain` also rotates a `type: log` doc's `log_section:` (log_rotate.py): ctx-store's own pass rotates only the
+section its type schema names, and the kit's `log` type names none, so an oversized log doc with a `log_section:
+<heading>` frontmatter field has that section's oldest entries moved to `archive/<folder>-<slug>-log.md` first — by
+the Bash route just before ctx's pass, by the PostToolUse hook right after a `ctx_maintain` MCP call (its lines go to
+the hooks log). The entries leave the source through ctx's own `str_replace`, under ctx's lock, so an entry appended
+meanwhile is kept and a changed block is refused and retried next pass. `maintain` takes no options of its own
+(no dry-run, no single-doc key): a command line with anything beyond `--json`, `--stdin` and `--now <ts>` is ctx's to
+refuse and rotates nothing, `--store` names a store this pass cannot rotate, and `--json` sends the lines to stderr.
+An oversized log doc without the field is named on stdout with the add-the-field hint.
+
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
@@ -179,7 +189,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path, PurePosixPath
-from typing import Callable
+from typing import Callable, Optional
 
 CTX_VERSION = "0.8.0"  # the ctx-store release (its PyPI version) the kit's adapters are written against — bump here only
 CTX_WHEEL_SHA256 = "2b12616125816ea5c8594d1256dec04e7ccf13bbdcf8e3b6f5f179c37e6c6218"  # sha256 of that release's
@@ -862,6 +872,10 @@ def run_ctx(args: list[str], mcp: bool = False) -> int:
         name = kit_profile.session_name()
         if name:
             env["CTX_ACTOR"] = name
+    plan = _maintain_plan(args) if not mcp and _verb(args) == "maintain" and not {"-h", "--help"} & set(args) else None
+    if plan is not None:  # --json keeps stdout a JSON document: the report lines go to stderr
+        _rotate_logs(ctx, store, root, env, (lambda line: print(line, file=sys.stderr)) if plan["json"] else print,
+                     plan["today"])
     sys.stdout.flush()
     if mcp or not _syncs_after(args, env):
         os.execve(str(ctx), [str(ctx), *store, *args], env)
@@ -870,6 +884,74 @@ def run_ctx(args: list[str], mcp: bool = False) -> int:
     if rc == 0:
         _sync_after_write(root)
     return 128 - rc if rc < 0 else rc  # a signal death is -N: exit 128+N like a shell, not 256-N
+
+
+def _maintain_plan(args: list[str]) -> Optional[dict]:
+    """What the kit's rotation may take from a `ctx maintain` command line: `{"today": <YYYY-MM-DD or None>,
+    "json": <bool>}`, or None when it must not rotate. ctx's `maintain` has no options of its own (no dry-run, no
+    single-doc key): beyond the globals `--json`, `--stdin`, `--now <ts>` and `--store <path>`, an extra word or option
+    is a usage error that ctx answers itself, so nothing is rotated ahead of it; `--store` names a store this pass
+    does not know the root of."""
+    plan: dict = {"today": None, "json": False}
+    it = iter(args)
+    seen = False
+    for a in it:
+        if a == "--":
+            return None
+        name, _, inline = a.partition("=")
+        if name in CTX_VALUE_OPTIONS:
+            value = inline or next(it, "")
+            if name == "--store":
+                return None
+            m = re.match(r"\d{4}-\d{2}-\d{2}", value)
+            plan["today"] = m.group(0) if m else None
+        elif a in ("--json", "--stdin"):
+            plan["json"] = plan["json"] or a == "--json"
+        elif not seen and a == "maintain":
+            seen = True
+        else:
+            return None
+    return plan if seen else None
+
+
+def _ctx_ops(ctx: Path, store: list[str], env: dict) -> tuple[Callable[[str, str], None], Callable[[str, str], None]]:
+    """(write, remove) for log_rotate.rotate_store, both through ctx so its lock and audit trail stay in charge:
+    `write(key, text)` is `ctx create <key> --from <file>` (a whole doc), `remove(key, old)` is `ctx str_replace`
+    of the exact text `old` by nothing, which ctx runs against the doc's current text and refuses (`NO_MATCH`)
+    when `old` is no longer there once. Both raise OSError with ctx's own message."""
+
+    def run(args: list[str], stdin: Optional[str] = None) -> None:
+        r = subprocess.run([str(ctx), *store, *args], env=env, check=False, input=stdin,  # noqa: S603
+                           capture_output=True, text=True, timeout=ADOPT_TIMEOUT)
+        if r.returncode != 0:
+            raise OSError((_lines(r.stderr) or [f"ctx {args[0]} exit {r.returncode}"])[-1])
+
+    def write(key: str, text: str) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "doc.md"
+            src.write_text(text, encoding="utf-8")
+            run(["create", key, "--from", str(src)])
+
+    def remove(key: str, old: str) -> None:  # a JSON payload on stdin: the block can pass the argv size limit
+        run(["--stdin", "str_replace"], json.dumps({"doc": key, "old": old, "new": ""}))
+
+    return write, remove
+
+
+def _rotate_logs(ctx: Path, store: list[str], root: Path, env: dict, say: Callable[[str], None],
+                 today: Optional[str] = None) -> None:
+    """The kit's half of `maintain` (log_rotate.py): rotate every oversized `type: log` doc that names a
+    `log_section:` through `_ctx_ops`, and `say` each report line. Never raises — ctx's own pass is what the
+    caller runs next."""
+    try:
+        sys.path.insert(0, str(BIN))
+        import log_rotate  # same dir
+        keep = int(_store_settings().get("maintain", {}).get("keep_log", log_rotate.KEEP_LOG))
+        write, remove = _ctx_ops(ctx, store, env)
+        for line in log_rotate.rotate_store(root, write, remove, keep=keep, today=today):
+            say(line)
+    except Exception as e:  # noqa: BLE001 — a failed pass must not stop ctx's own maintain
+        say(f"log: rotation skipped — {e}")
 
 
 def _verb(args: list[str]) -> str:
@@ -1403,6 +1485,9 @@ def hook(name: str) -> str:
                 _ctx(ctx, store, "touch", "--session", sid)
             except (OSError, subprocess.SubprocessError) as e:
                 _log(f"ctx touch: {e}")
+        if via_ctx and str(payload.get("tool_name", "")).endswith("__ctx_maintain") and ctx is not None \
+                and store is not None:
+            _rotate_logs(ctx, store, root, {**os.environ, "CTX_ACTOR": os.environ.get("CTX_ACTOR", MCP_ACTOR)}, _log)
         refresh_catalogs(root)
         _sync(root)
         return ""
