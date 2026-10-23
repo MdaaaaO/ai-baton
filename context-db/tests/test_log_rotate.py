@@ -322,7 +322,7 @@ class Concurrency(Store):
         self.assertEqual(self.lines("ops/rot.md"), ["- 2026-10-24 — appended in the window"] + entries[:6])
         self.assertEqual(self.lines("archive/ops-rot-log.md"), entries[6:])
 
-    def test_a_block_that_changed_in_the_window_is_not_removed_and_the_next_pass_does_not_duplicate(self):
+    def test_a_block_that_changed_in_the_window_is_not_removed_and_the_next_pass_copies_it_again(self):
         entries = newest_first()
         self.put("ops/rot.md", log_doc(entries))
         path = self.root / "ops" / "rot.md"
@@ -333,16 +333,31 @@ class Concurrency(Store):
         self.assertTrue(report[0].startswith("log: ops/rot not rotated — NO_MATCH"), report)
         self.assertEqual(len(self.lines("ops/rot.md")), 8)  # nothing lost from the source
         self.assertEqual(self.lines("archive/ops-rot-log.md"), entries[6:])  # the archive has what was moved
-        # the edit is undone and the pass runs again: the archive already holds both entries, so it is not touched
+        # the edit is undone and the pass runs again: it moves both entries again, so the archive holds a copy twice
+        # rather than a pass guessing from the text that an entry was archived already
         self.before_remove = None
         path.write_text(path.read_text(encoding="utf-8").replace("entry 1 (edited) ", "entry 1 "), encoding="utf-8")
-        self.writes.clear()
         self.assertEqual(self.rotate(), ["archived: 2 log entries of ops/rot → archive/ops-rot-log"])
-        self.assertEqual(self.writes, ["ops/rot"])  # no archive write
-        self.assertEqual(self.lines("archive/ops-rot-log.md"), entries[6:])  # not duplicated
+        self.assertEqual(self.lines("archive/ops-rot-log.md"), entries[6:] + entries[6:])
         self.assertEqual(self.lines("ops/rot.md"), entries[:6])
 
-    def test_a_pass_cut_short_after_the_archive_write_is_finished_by_the_next(self):
+    def test_a_remove_that_fails_once_is_retried_on_the_same_entries_without_a_second_archive_write(self):
+        entries = newest_first()
+        self.put("ops/rot.md", log_doc(entries))
+        calls = []
+
+        def once() -> None:
+            calls.append(1)
+            if len(calls) == 1:
+                raise OSError("ctx: LOCK_TIMEOUT")
+
+        self.before_remove = once
+        self.assertEqual(self.rotate(), ["archived: 2 log entries of ops/rot → archive/ops-rot-log"])
+        self.assertEqual(self.writes.count("archive/ops-rot-log"), 1)
+        self.assertEqual(self.lines("archive/ops-rot-log.md"), entries[6:])  # archived once
+        self.assertEqual(self.lines("ops/rot.md"), entries[:6])
+
+    def test_a_pass_cut_short_after_the_archive_write_leaves_the_entries_in_both_docs(self):
         entries = newest_first()
         self.put("ops/rot.md", log_doc(entries))
 
@@ -351,18 +366,25 @@ class Concurrency(Store):
 
         self.before_remove = die
         self.assertIn("not rotated — ctx: LOCK_TIMEOUT", self.rotate()[0])
+        self.assertEqual(self.lines("ops/rot.md"), entries)  # still in the source
+        self.assertEqual(self.lines("archive/ops-rot-log.md"), entries[6:])  # and in the archive: never in neither
         self.before_remove = None
         self.rotate()
-        self.assertEqual(self.lines("archive/ops-rot-log.md"), entries[6:])
         self.assertEqual(self.lines("ops/rot.md"), entries[:6])
+        self.assertEqual(self.lines("archive/ops-rot-log.md"), entries[6:] + entries[6:])
 
-    def test_add_to_archive_skips_only_whole_entries_already_there(self):
+    def test_a_new_entry_that_equals_an_archived_one_is_archived_too(self):
+        entries = newest_first()
+        self.put("ops/rot.md", log_doc(entries))
+        self.put("archive/ops-rot-log.md", log_doc([entries[7]]))  # an older rotation holds the very same line
+        self.rotate()
+        self.assertEqual(self.lines("archive/ops-rot-log.md"), [entries[6], entries[7], entries[7]])
+        self.assertEqual(self.lines("ops/rot.md"), entries[:6])  # both copies survive; the source gave up its own
+
+    def test_add_to_archive_adds_every_entry_even_one_it_already_holds(self):
         have = log_doc(["- 2026-09-02 — keep", "- 2026-09-01 — keep"])
-        self.assertIsNone(lr.add_to_archive(have, [["- 2026-09-02 — keep"]], "Day log", "newest-first", "ops/x", "ops", "d"))
-        out = lr.add_to_archive(have, [["- 2026-09-02 — kee"], ["- 2026-09-02 — keep"]], "Day log", "newest-first",
-                                "ops/x", "ops", "d")
-        self.assertIn("- 2026-09-02 — kee\n- 2026-09-02 — keep\n", out)  # a prefix of an entry is not that entry
-        self.assertEqual(out.count("- 2026-09-02 — keep"), 1)  # the whole entry was already there: not added twice
+        out = lr.add_to_archive(have, [["- 2026-09-02 — keep"]], "Day log", "newest-first", "ops/x", "ops", "d")
+        self.assertEqual(out.count("- 2026-09-02 — keep"), 2)
 
 
 class NoField(Store):

@@ -18,9 +18,11 @@ For a `type: log` doc outside `archive/` that is over the size guard (30,000 B, 
 
 Writes go through ctx, never around its lock. The archive is written first (`create`), then the moved block is
 removed from the source with one `str_replace` of that exact block, which ctx runs under its lock against the
-doc's current text: an entry appended in between is kept, and a block that changed in between is refused
-(`NO_MATCH`), reported as not rotated, and left for the next pass — which skips the entries the archive already
-holds. A failure between the two writes leaves the entries in both docs, never in neither.
+doc's current text: an entry appended in between is kept. If the remove is refused (the block changed, `NO_MATCH`,
+or ctx's lock timed out) the pass reads the doc again and, when the same entries are still the ones to move,
+removes them without archiving them twice; otherwise it reports the doc as not rotated. A failure between the two
+writes leaves the entries in both docs, never in neither; the next pass moves them again, so the archive may hold
+a copy twice, but an entry that only looks like an archived one is never dropped.
 Stdlib only; no CLI — imported by `ctx_adapter.py`.
 """
 from __future__ import annotations
@@ -174,16 +176,13 @@ def split_old(text: str, section: str, keep: int, default: str) -> Optional[Cut]
 
 
 def add_to_archive(existing: Optional[str], moved: list[list[str]], section: str, order: str, key: str, domain: str,
-                   today: str) -> Optional[str]:
+                   today: str) -> str:
     """The archive doc's text with `moved` added under `## section`: before the first entry for a newest-first
-    section, after the last for an oldest-first one. An entry the archive already holds, whole, is skipped (a
-    pass that was cut short between its two writes); None when nothing is left to add. A new archive doc is
-    `type: log` with the source's domain."""
-    have = "\n" + (existing or "") + "\n"
-    fresh = [e for e in moved if "\n" + "\n".join(e) + "\n" not in have]
-    if not fresh:
-        return None
-    lines = [line for e in fresh for line in e]
+    section, after the last for an oldest-first one. Every entry is added, even one the archive already holds
+    word for word: two identical entries are two entries, and a pass cut short between its two writes leaves
+    a copy in both docs (see `rotate_store`), never a missing one. A new archive doc is `type: log` with the
+    source's domain."""
+    lines = [line for e in moved for line in e]
     if existing is None:
         return (f"---\ntitle: Log of {key}\ntype: log\ndomain: {domain}\nstatus: active\nlog_section: {section}\n"
                 f"updated: {today}\n---\n\n# Log of {key}\n\n## {section}\n\n" + "\n".join(lines) + "\n")
@@ -265,11 +264,19 @@ def rotate_store(root: Path, write: Write, remove: Remove, size_guard: int = SIZ
         target_path = root / f"{target}.md"
         try:
             existing = target_path.read_text(encoding="utf-8") if target_path.is_file() else None
-            added = add_to_archive(existing, cut.moved, section, cut.order, key, meta.get("domain", "") or "archive",
-                                   today)
-            if added is not None:
-                write(target, added)
-            remove(key, cut.old)
+            write(target, add_to_archive(existing, cut.moved, section, cut.order, key,
+                                         meta.get("domain", "") or "archive", today))
+            try:
+                remove(key, cut.old)
+            except OSError:
+                # the doc changed between the read and the remove, or ctx's lock timed out: read it again and, if
+                # the very same entries are still the ones to move, remove them now. Those were archived by THIS
+                # pass, so they are not archived a second time; an entry that merely looks like an older archived
+                # one is a new entry and is always moved.
+                again = split_old(path.read_text(encoding="utf-8"), section, keep, default_order)
+                if again is None or again.moved != cut.moved:
+                    raise
+                remove(key, again.old)
         except OSError as e:
             report.append(f"log: {key} not rotated — {e}")
             continue
