@@ -51,7 +51,7 @@ The kit sorts what it does into four layers. Each layer answers one question abo
 - **Understanding.** Does the person know what changed and why? This is the keystone. A person cannot delegate understanding.
 
 **Attribution.** "Spec / verifier / environment" is Austin Marchese's organisation of Andrej Karpathy's talks. Karpathy did
-not name it as a taxonomy. His own words are "people have to be in charge of the spec and plan". This round of models
+not name it as a taxonomy. His own words are "people have to be in charge of the spec and plan". He says this round of models
 "can automate what you can verify". And "understanding is still the bottleneck because you cannot be a good director if
 you do not understand" (Sequoia Ascent talk, Apr 2026). His own literal "three layers" are in his LLM-wiki gist: raw
 sources, wiki and schema, with the operations ingest, query and lint. The fourth layer, understanding, is the kit's
@@ -63,13 +63,12 @@ is on `main` today. A status with a version means it shipped in that release. `p
 | Mechanism | Layer | Surface | Issue | Status |
 |---|---|---|---|---|
 | goal interview | spec | ticket | #620 | shipped (`0.13.0`) |
-| `ticket-open`: Goal/Plan block, Sizing line | spec | ticket | n/a | existing |
+| `ticket-open`: Goal/Out of scope/Plan block, Sizing line | spec | ticket | n/a | existing |
 | `ticket-carousel`: a batch of candidates, one at a time | spec | ticket batch | #105 | existing |
 | `ticket-pickup`: checks the Sizing line against `main` | spec | ticket | n/a | existing |
 | `ticket-update`: one dated delta comment per step | spec | ticket | n/a | existing |
 | carousel: every open decision as one question set | spec | any step | #354 | existing |
 | sketch (`sketch.py`): the ticket's stamped diagram | spec | ticket | #384 | existing |
-| cold reader: a haiku fork narrates the artefact cold | spec | ticket, PR, handoff | #378 | existing |
 | Done-when ids (`done_when.py`): `DW-n` criteria from ticket to close | verifier | ticket, PR, close | #621 | shipped (`0.13.0`) |
 | `evidence_check.py`: each Verified claim cites evidence | verifier | PR body, ticket comment | #60 | existing |
 | `verified.py`: the `## Verified` lines of a PR body | verifier | PR body | #100 | existing |
@@ -101,6 +100,7 @@ is on `main` today. A status with a version means it shipped in that release. `p
 | `aws-sso-login`: cloud access by device code | environment | machine | n/a | existing |
 | operator brief (`docs/operator-brief.md`): four plain lines | understanding | PR body, close, handoff | #623 | shipped (`0.13.0`) |
 | `walkthrough`: leads you through a change, confirms by question | understanding | context doc | #625 | shipped (`0.13.0`) |
+| cold reader: a haiku fork narrates the artefact cold | understanding | ticket, PR, handoff | #378 | existing |
 | diagrams (`docs/diagrams.md`): a cold reader can draw the change | understanding | ticket, PR, handoff | #374 | existing |
 | `diagram-plan.py`: the diagram set a PR needs | understanding | PR | #386 | existing |
 | `length_check.py`: a reading-time budget | understanding | ticket, PR, handoff | #383 | existing |

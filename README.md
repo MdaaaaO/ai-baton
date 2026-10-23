@@ -25,7 +25,7 @@ What you get, from the top:
 - **Lightweight.** One install command, one setup run, no names or ids in the kit. If you already start Claude Code
   from the directory that holds your repos, the first session benefits.
 
-Plus skills for PRs, tickets, sessions and docs, built on four layers: spec, verifier, environment and understanding ([vision](docs/vision.md#the-four-layers)).
+Plus skills for PRs, tickets, sessions and docs. The kit rests on four layers: spec, verifier, environment and understanding ([vision](docs/vision.md#the-four-layers)).
 
 **Plugin**: Claude Code installs and updates it.
 
