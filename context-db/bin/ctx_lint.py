@@ -498,7 +498,7 @@ def plan(docs: list[Doc], since: str, unread: set[str], max_forks: int, sonnet_o
 # ── CLI ──────────────────────────────────────────────────────────────────────────────────────────
 
 def stamp_file(root: Path) -> Path:
-    return root / "kit-health" / f"LINT-{kit_profile.name()}.md"
+    return root / "kit-health" / f"lint-{kit_profile.name()}.md"
 
 
 def parser() -> argparse.ArgumentParser:
@@ -518,7 +518,7 @@ def parser() -> argparse.ArgumentParser:
             p.add_argument("--max-keys", type=int, default=MAX_KEYS, help=f"distinct tracker keys read per run ({MAX_KEYS})")
             p.add_argument("--today", help="YYYY-MM-DD, the day the archive rule counts from (default: today)")
         if name == "plan":
-            p.add_argument("--stamp-file", help="the lint stamp (default: kit-health/LINT-<env>.md under the root)")
+            p.add_argument("--stamp-file", help="the lint stamp (default: kit-health/lint-<env>.md under the root)")
             p.add_argument("--since", help="YYYY-MM-DD, instead of the stamp")
             p.add_argument("--max-forks", type=int, default=MAX_FORKS, help=f"forks per run ({MAX_FORKS})")
             p.add_argument("--sonnet-over", type=int, default=SONNET_OVER, help=f"bundle bytes past which a domain gets sonnet ({SONNET_OVER})")

@@ -77,5 +77,5 @@ a health run: it stamps nothing in HEALTH and changes no kit file.
    option stating its consequence. Apply nothing before the answers are in.
 5. **Apply** only the accepted fixes, through the ctx tools (`ctx_str_replace`, `ctx_fm`, `ctx_move`), never a direct
    write of a `.context/` doc; each fix adds one `Session log` line to its doc naming the finding. Then write the
-   stamp `kit-health/LINT-<env>` (`last_lint`, `not_read`) with `ctx_fm`, creating it with `make -C $BATON/context-db
-   new TYPE=log DOMAIN=kit-health SLUG=LINT-<env>` the first time.
+   stamp `kit-health/lint-<env>` (`last_lint`, `not_read`) with `ctx_fm`, creating it with `make -C $BATON/context-db
+   new TYPE=log DOMAIN=kit-health SLUG=lint-<env>` the first time.

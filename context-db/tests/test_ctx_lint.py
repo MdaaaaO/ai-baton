@@ -334,8 +334,19 @@ class Plan(unittest.TestCase):
         self.assertEqual(out["a"], "haiku")
         self.assertEqual(self.plan(since="2026-10-01", sonnet_over=10 ** 9)[0].split()[2], "haiku")
 
+    def test_the_default_stamp_is_a_doc_new_sh_can_scaffold(self):
+        """the session step creates the stamp with `make new TYPE=log DOMAIN=kit-health SLUG=<stem>`; new.sh refuses a
+        slug outside [a-z0-9._-], so the default name must pass it and land exactly where `plan` reads it."""
+        from tests import hermetic_env
+        stamp = ctx_lint.stamp_file(self.root)
+        env = hermetic_env(self.tmp.name)
+        env.update(CONTEXT_ROOT=str(self.root), TYPE="log", DOMAIN="kit-health", SLUG=stamp.stem)
+        r = subprocess.run(["sh", str(BIN / "new.sh")], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(stamp.is_file(), r.stdout)
+
     def test_the_stamp_file_is_read_never_written(self):
-        stamp = self.root / "kit-health" / "LINT-x.md"
+        stamp = self.root / "kit-health" / "lint-x.md"
         stamp.parent.mkdir()
         stamp.write_text("---\ntitle: lint stamp\ntype: log\ndomain: kit-health\nstatus: reference\nupdated: 2026-10-10\n"
                          "last_lint: 2026-10-10T08:00Z\nnot_read: [a, b]\n---\n", encoding="utf-8")

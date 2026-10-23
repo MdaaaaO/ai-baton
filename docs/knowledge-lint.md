@@ -68,10 +68,10 @@ contradicts. A line that does not parse as the grammar above is dropped, not rep
 
 ## The stamp
 
-`.context/kit-health/LINT-<env>.md` (`type: log`, `status: reference`) holds two frontmatter fields:
+`.context/kit-health/lint-<env>.md` (`type: log`, `status: reference`) holds two frontmatter fields:
 `last_lint: <ISO timestamp>` and `not_read: [<domain>, …]`. The script only **reads** it. The session step writes
 it, with the ctx tools, after the carousel: create it once with `make -C $BATON/context-db new TYPE=log
-DOMAIN=kit-health SLUG=LINT-<env>`, then `ctx_fm` the two fields. A missing or malformed stamp means never linted:
+DOMAIN=kit-health SLUG=lint-<env>`, then `ctx_fm` the two fields. A missing or malformed stamp means never linted:
 every domain is planned.
 
 ## The carousel
