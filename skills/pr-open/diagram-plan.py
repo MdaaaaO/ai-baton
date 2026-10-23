@@ -486,20 +486,40 @@ def path_stem(path: str) -> str:
 
 
 def covers(entry: str, path: str) -> bool:
-    """The sketch marker's general "covers" relation: `entry == path`, or `entry` ends in `/` and `path`
-    starts with it; a leading `+` is dropped first. The same relation the pickup check (`sketch.py`) uses,
-    read against the PR's changed paths here instead of the default branch's tree."""
-    e = entry[1:] if entry.startswith("+") else entry
-    return e == path or (e.endswith("/") and path.startswith(e))
+    """Whether a sketch marker entry covers a changed path, read against the PR's diff here.
+    `entry == path`, or a non-`+` entry ending in `/` covers paths under it. A `+` entry whose last
+    segment has no `.` is a directory the ticket creates and covers every path under `entry + "/"`;
+    a `+file.ext` entry covers only itself. (`sketch.py`'s pickup check reads a `+` entry differently:
+    it checks that the entry's parent directory exists on the default branch, not what lies under it.)"""
+    plus = entry.startswith("+")
+    e = entry[1:] if plus else entry
+    if e == path or (e.endswith("/") and path.startswith(e)):
+        return True
+    return plus and "." not in e.rsplit("/", 1)[-1] and path.startswith(e + "/")
 
 
-def sketch_diff(entries: list[str], components: list[str], paths: list[str]) -> tuple[list[str], list[str]]:
-    """(`+`, `−`) — `+` the changed `paths` no `entries` member covers and no `components` member names by
-    stem, sorted; `−` the `entries`/`components` that cover (or name) no `path`, sorted."""
-    stems = {path_stem(p) for p in paths}
-    plus = sorted({p for p in paths if not any(covers(e, p) for e in entries) and path_stem(p) not in components})
-    minus_entries = (e for e in entries if not any(covers(e, p) for p in paths))
-    minus_components = (c for c in components if c not in stems)
+def component_names(path: str) -> set[str]:
+    """The component names a changed path answers to: its stem, and its parent directory's name, so
+    `skills/<name>/SKILL.md` is named by `<name>` as well as by `SKILL`."""
+    names = {path_stem(path)}
+    parts = path.split("/")
+    if len(parts) > 1:
+        names.add(parts[-2])
+    return names
+
+
+def sketch_diff(entries: list[str], components: list[str], paths: list[str],
+                touched: "list[str] | None" = None) -> tuple[list[str], list[str]]:
+    """(`+`, `−`) — `+` the changed `paths` no `entries` member covers and no `components` member names
+    (by stem or parent directory name), sorted; `−` the `entries`/`components` that cover (or name) no path in
+    `touched` (default `paths`), sorted. The caller passes every changed path as `touched`, so a sketched file in
+    a supporting facet the PR does change is not reported missing."""
+    touched = paths if touched is None else touched
+    named = set().union(*(component_names(p) for p in touched)) if touched else set()
+    plus = sorted({p for p in paths
+                   if not any(covers(e, p) for e in entries) and not (component_names(p) & set(components))})
+    minus_entries = (e for e in entries if not any(covers(e, p) for p in touched))
+    minus_components = (c for c in components if c not in named)
     minus = sorted(set(minus_entries) | set(minus_components))
     return plus, minus
 
@@ -523,12 +543,13 @@ def render_sketch(plus: list[str], minus: list[str]) -> str:
 def sketch_line(ticket_text: str, repo: str, by_facet: dict[str, list[str]]) -> str:
     """The one line `pr-open` pastes under `## Diagrams`: `Sketch: none` when the ticket carries no marker
     for `repo` (no Sketch section, a `Sketch: SKIP` line, or a marker that does not parse), else `matches` or
-    `differs (...)` against the PR's changed paths in a substantive facet."""
+    `differs (...)`: `+` against the PR's changed paths in a substantive facet, `−` against every changed path."""
     markers = ticket_sketch.parse_markers(ticket_text)
     entry = markers.get(repo)
     if entry is None:
         return "Sketch: none"
-    plus, minus = sketch_diff(entry["paths"], entry["components"], substantive_paths(by_facet))
+    every = [p for ps in by_facet.values() for p in ps]
+    plus, minus = sketch_diff(entry["paths"], entry["components"], substantive_paths(by_facet), every)
     return render_sketch(plus, minus)
 
 
