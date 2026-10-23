@@ -2,9 +2,9 @@
 name: ticket-close
 description: "Checklist for closing a ticket (Jira or GitHub issues): a final outcome comment, the right transition/close reason, delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "15"
+  version: "16"
   updated: "2026-10-23"
-  reviewed: "2026-10-02"
+  reviewed: "2026-10-23"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
 user-invocable: true
 ---
@@ -27,6 +27,7 @@ kind X in this environment" and stop.
      `DW-<n>` ids, one line per id, none skipped: `DW-<n> · <evidence>` or `DW-<n> · not delivered — <why>`
    **Verified** — the final check against the system of record · <evidence> (a numbers table, if
      used, is illustration only — the citation itself stays on the claim line)
+   **For the operator** — the delivering PR's four lines, copied unchanged (one block per PR, under its link)
    **Out of scope / left as is** — anything deliberately not done, so it doesn't read as missed
    ```
    Evidence-dense, not narrative. Links rendered from `tracker.url_template`. Each Verified claim
@@ -35,6 +36,11 @@ kind X in this environment" and stop.
    `## Verified` and `## One honest limit` lines are where the evidence for each comes from, and a line
    written from memory is not evidence. A `not delivered` id with the ticket closing as `done` also appears
    under **Out of scope / left as is**.
+
+   **For the operator — copy, never retype.** `python3 $BATON/skills/pr-open/operator_brief.py extract --pr <o>/<r> <n>`
+   prints the PR's `## For the operator` lines (`docs/operator-brief.md`); paste them as they are under the
+   `**For the operator**` head. Exit 1 → that PR predates the rule: write `For the operator: none recorded (<PR link>
+   predates it)` and do not invent four lines now. No delivering PR (decided against, abandoned) → leave the head out.
 
    **As-built — only when the ticket carries a sketch marker** (`docs/diagrams.md` § The sketch
    marker). Name the delivering PR's `## Diagrams` section as the as-built picture and copy its own

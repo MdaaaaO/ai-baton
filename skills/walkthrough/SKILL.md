@@ -2,7 +2,7 @@
 name: walkthrough
 description: "Leads a linear walkthrough of a PR, repo area or epic, then three questions in one carousel; confirmed answers land in the context doc's `## In plain words`. Use when asked to walk through, explain or teach back a change. Not for reviewing."
 metadata:
-  version: "1"
+  version: "2"
   updated: "2026-10-23"
   reviewed: "2026-10-23"
 user-invocable: true
@@ -25,7 +25,7 @@ in, and keeps only what they confirmed. One bounded conversation: three steps, o
 
 ## 2. Gather — artefacts first, never the raw diff first
 
-- A PR: the body's `## Diagrams` and `## Verified`, via
+- A PR: the body's `## Diagrams`, `## For the operator` and `## Verified`, via
   `gh pr view <n> -R <repo> --json title,body,files` (`gh-cli` for the traps).
 - The home doc: `## Goal`, `## What was built`, `## Key decisions & gotchas`, `## Architecture` and any
   `## In plain words` lines already there. A repo card: its sections.
@@ -38,7 +38,8 @@ Three steps, in this order, one per turn; after each, stop and wait (the operato
 answer from the artefacts, then continue).
 
 1. **Purpose** — what it is for and who or what changes because of it. Plain words, no file names.
-2. **How it runs** — one run end to end, from `## Diagrams`: name the picture, do not redraw it.
+2. **How it runs** — one run end to end, from `## Diagrams` and the operator's side of it from
+   `## For the operator`: name the picture, do not redraw it.
 3. **Where it breaks** — the failure paths and guards, and what `## Verified` proves and does not.
 
 A step is at most 8 lines. It states claims the artefacts back, so the questions below have an answer in them.

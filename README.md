@@ -223,7 +223,7 @@ It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `contex
 | [layout](docs/layout.md) | Every file and directory |
 | [conventions](docs/conventions.md) | The six portability rules |
 | [carousel](docs/carousel.md) · [assumptions](docs/assumptions.md) | The shape of every open decision |
-| [diagrams](docs/diagrams.md) · [cold-reader](docs/cold-reader.md) | Whiteboard-defence diagram contract |
+| [diagrams](docs/diagrams.md) · [cold-reader](docs/cold-reader.md) · [operator-brief](docs/operator-brief.md) | Diagram contract, operator lines |
 | [architecture](docs/architecture.md) | Session → imports → skills → engine → context DB |
 | [env-facts](docs/env-facts.md) | The env fact store and how a skill resolves a fact |
 | [env-vars](docs/env-vars.md) | Every environment variable a kit script reads |
