@@ -95,6 +95,7 @@ The four fattest cells above, unabridged:
   which `CLAUDE.md` import is missing.
 - **`docs/`** — `vision.md` (what the kit is and is not — principles, non-goals, what waits for evidence),
   `delegation.md` (what to hand a subagent — reads and code — and which model, by size),
+  `operator-brief.md` (the four plain lines every landed change ends with, and the check on them),
   `env-facts.md` (the env fact store — schema, `kb.py`, how a skill resolves a fact), `new-environment.md`
   (checklist for a new environment), `commit-style.md` (the commit-subject styles and how a repo's is resolved),
   `REVIEW.md` (the review rules — what CI decides, the four lenses, grading, the one-line finding shape; the CI

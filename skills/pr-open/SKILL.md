@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: sizing gate, body with the diagram set and a ## Verified section, public-text-check and length_check, labels, reviewers, pr-watch, tracker link, Slack review draft where enabled. Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "36"
+  version: "37"
   updated: "2026-10-23"
   reviewed: "2026-10-23"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
@@ -34,7 +34,7 @@ environment has Slack (`systems.slack`); everything else holds in every environm
    commit + push go through `/sign-queue` — enqueue, tell the user in one line, create the PR once the branch is
    on the remote. Otherwise commit and `git push -u origin <branch>` directly.
 1. **Create** with a body file (`gh pr create --body-file …`): Overview with the tracker link (`reference/links.md`),
-   Changes, **Diagrams** (§ Diagrams), `## Verified` (§ Verified — real command output, never a claim). Detail
+   Changes, **Diagrams** (§ Diagrams), `## For the operator` (§ For the operator), `## Verified` (§ Verified — real command output, never a claim). Detail
    lives here, not in chat. Where `tracker.kind` is `github`, add `Closes #<n>` (or `Refs #<n>` for a partial
    step). The body's last line is the footer from the resolved-profile block in your SessionStart context —
    `session `<name>`` (`session-register` records the name); once a compaction drops that block, or it never
@@ -97,10 +97,17 @@ the diff, never by habit (`reference/diagrams.md` § Why this shape).
    `LINT:` lines only warn (`reference/diagrams.md` § Lint). On drift, redraw in the same turn as the code (and
    re-run `--sketch` when the ticket has a marker). Before creating or updating the PR, and after any redraw, run
    the cold-reader gate on `## Diagrams` (`docs/cold-reader.md`) unless the plan is `SKIP`. The `pr-watch`
-   head-move event is the reminder for all three body checks (diagram marker, `verified.py check`, `length_check.py`),
-   none of which block.
+   head-move event is the reminder for all four body checks (diagram marker, `operator_brief.py check`,
+   `verified.py check`, `length_check.py`), none of which block.
 
 Exit codes, the facet → question matrix, the `ddl` facet and the block rules: `reference/diagrams.md`.
+
+## For the operator — what the change means for whoever runs it
+
+Between `## Diagrams` and `## Verified`, write `## For the operator`: the four lines of `docs/operator-brief.md` (`Can now:` ·
+`Do differently:` · `Check with:` · `Not covered:`; ≤ 20 words each; `Nothing.` when nothing applies), from the diff and `## Done when`.
+Before `gh pr create` and on every push run `python3 $BATON/skills/pr-open/operator_brief.py check <file>` (warns, exit 0, never blocks); then the
+cold-reader gate on the four lines alone (`docs/cold-reader.md` § The operator block) unless all say `Nothing.`; a miss rewrites the block first.
 
 ## Verified — real command output, never a claim
 
@@ -116,14 +123,10 @@ Exit codes, the facet → question matrix, the `ddl` facet and the block rules: 
 4. Before `gh pr create`, and on every later push: `python3 $BATON/skills/pr-open/verified.py check <file>
    [--pr <o>/<r> <n>]` — refuses a bare claim; with `--pr` prints `STALE <old> → <new>` (exit 3) when the
    recorded head moved; rerun it in the same turn as the push. Shapes and examples: `reference/verified.md`.
-5. **Done when, beside step 4.** A ticket whose `## Done when` carries `DW-<n>` ids (save its body, then its
-   comments, oldest first, to a scratch file): write one `## Verified` line per id the PR proves, `DW-<n> · <evidence>`
-   (the evidence shapes of step 4; `DW-1, DW-2 · …` for one proof of two), then run `python3
-   $BATON/context-db/bin/done_when.py coverage --ticket <ticket-file> --body <file>` with every `verified.py check`.
-   `DONE WHEN: covered` (exit 0) → go on; `DONE WHEN: gap DW-n[, …]` (exit 3) → prove the id, or answer it in
-   `## One honest limit` as `DW-<n> · <why it is not verified>` (counted covered, stated not proven), then re-run — a
-   PR that verifies things the ticket never asked for and leaves a criterion unanswered is not open. Exit 1 → the
-   ticket predates the ids: say so in one line and skip. Tell the user the `DONE WHEN:` line in step 7's report.
+5. **Done when, beside step 4.** A ticket whose `## Done when` carries `DW-<n>` ids: one `## Verified` line per id the PR proves,
+   `DW-<n> · <evidence>`, then `python3 $BATON/context-db/bin/done_when.py coverage --ticket <ticket-file> --body <file>` (the
+   ticket file holds its body, then its comments, oldest first) with every `verified.py check`. `DONE WHEN: covered` (exit 0) → go on; `gap DW-n[, …]` (exit 3) → prove the id, or answer it in `## One honest
+   limit` as `DW-<n> · <why it is not verified>`, then re-run; exit 1 → no ids, skip. Step 7 reports the line (`reference/verified.md`).
 
 ## Commit style, links, scope
 
