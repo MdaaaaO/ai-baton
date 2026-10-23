@@ -315,10 +315,11 @@ jobs:
   # The floor the kit declares (kit_profile.py's own guard; docs/contributing.md § Testing): the engine's stdlib
   # code uses zoneinfo, Path.is_relative_to and str.removeprefix, all 3.9+-only, so 3.9 is the oldest interpreter
   # that must still pass. ubuntu-latest only — a Python-version floor is orthogonal to the macos leg above
-  # (BSD/macOS shell behaviour, not the interpreter version), so it stays its own always-on job.
+  # (BSD/macOS shell behaviour, not the interpreter version), so it stays its own always-on job. Pinned to
+  # ubuntu-24.04: setup-python ships no 3.9 build for the Ubuntu 26.04 image that ubuntu-latest moved to.
   python-floor:
     name: python-floor (3.9)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
