@@ -80,6 +80,23 @@ with open(GIT_CONFIG_FILE, "w", encoding="utf-8") as _f:
     _f.write("[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n")
 
 
+# What an outer `make test T=<module> JOBS=<n>` hands every test process: make exports its own bookkeeping
+# (MAKEFLAGS and friends) and each command-line variable, so a test that renders a recipe with `make -n` would see
+# the caller's T / JOBS as if it had passed them itself.
+MAKE_BOOKKEEPING = ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES")
+MAKE_COMMAND_LINE_VARS = ("T", "JOBS")
+
+
+def make_env(base=None, **extra: str) -> dict:
+    """`base` (default: this process's environment) without the variables an outer `make` leaks into a test, plus
+    `extra`. Build the env of every subprocess that runs `make` — `make -n` renders a recipe, and the recipe must
+    depend only on the arguments the test passes, never on how the suite itself was started."""
+    env = {k: v for k, v in (os.environ if base is None else base).items()
+           if k not in MAKE_BOOKKEEPING and k not in MAKE_COMMAND_LINE_VARS}
+    env.update(extra)
+    return env
+
+
 def hermetic_env(tmp, trust=None) -> dict:
     """A subprocess env for a test that spawns git, sh or make against a throw-away fixture: `tmp` becomes both
     HOME and TMPDIR (no inherited .gitconfig, no real scratch dir), the system git config is disabled and the

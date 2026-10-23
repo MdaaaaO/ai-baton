@@ -10,11 +10,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 KIT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(KIT / "context-db" / "bin"))
 import ctx_adapter  # noqa: E402
 import eval_check  # noqa: E402
+from tests import make_env  # noqa: E402
 
 PROMPT = "---\nmax_turns: 6\nallowed_tools: [Read, Skill]\ntags: [trigger, {kind}]\n{extra}---\n\n{body}\n"
 FIRED = "---\ntype: tool_used\ntool: Skill\ninput_match: '(?<![\\w-]){skill}(?![\\w-])'\n{bounds}{arm}---\n"
@@ -478,8 +480,7 @@ class Coverage(unittest.TestCase):
 
 class Wiring(unittest.TestCase):
     def make_n(self, *args: str, extra_env: "dict[str, str] | None" = None) -> str:
-        env = {k: v for k, v in os.environ.items() if k not in ("CONTEXT", "CONTEXT_ROOT")}
-        env.update(extra_env or {})
+        env = make_env({k: v for k, v in os.environ.items() if k not in ("CONTEXT", "CONTEXT_ROOT")}, **(extra_env or {}))
         p = subprocess.run(["make", "-C", str(KIT / "context-db"), "-n", *args], env=env, capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         return p.stdout
@@ -490,6 +491,14 @@ class Wiring(unittest.TestCase):
         for part in ("claude plugin eval .", "--no-publish", "--ablation none", "--case 'pr-open-*'",
                      "--model 'some-model'", "--runs 1", "--concurrency 2", "--trust-plugin"):
             self.assertIn(part, cmd)
+
+    def test_leaked_make_variables_do_not_reach_the_rendered_recipe(self):
+        """an outer `make test JOBS=<n>` exports JOBS (and MAKEFLAGS) to this process; `make eval` rendered here
+        must not grow a --concurrency flag the test never asked for."""
+        with mock.patch.dict(os.environ, {"JOBS": "3", "T": "test_kb", "MAKEFLAGS": " -- JOBS=3 T=test_kb", "MAKELEVEL": "1"}):
+            cmd = " ".join(self.make_n("eval").split())
+            self.assertNotIn("--concurrency", cmd)
+            self.assertIn("--concurrency 2", " ".join(self.make_n("eval", "JOBS=2").split()))
 
     def test_make_target_without_arguments_runs_every_case(self):
         out = self.make_n("eval")
