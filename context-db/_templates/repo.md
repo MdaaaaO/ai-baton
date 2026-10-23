@@ -14,6 +14,11 @@ updated: {{DATE}}
 
 ## What it is
 
+## In plain words
+<!-- Optional — only lines the operator confirmed in a `walkthrough` of an area of this repo, each
+     `- <date> — <line> (walkthrough <target>)`, at most 10, a superseded line replaced. Never model
+     prose alone. -->
+
 ## Where things are
 
 ## Traps & machinery facts
