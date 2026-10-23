@@ -212,6 +212,9 @@ Usage from shell:       python3 kit_profile.py                # environment name
                                                                #   SessionStart context, never into <file>; byte-budgeted and value-safe
                                                                #   (kit_profile.py get's own values; a secret-shaped one prints <redacted>)
                         python3 kit_profile.py workspace-rules  # WORKSPACE.md for the SessionStart hook to inject, or nothing (#3)
+                        python3 kit_profile.py link-repo-skills  # the plugin's SessionStart hook: link <workspace>/<repo>/.claude/skills/<skill> into
+                                                               #   <workspace>/.claude/skills (depth 1, SKILL.md present), prune only links it made
+                                                               #   whose SKILL.md is gone; a taken name is one stderr line; silent when nothing changes
                         python3 kit_profile.py install-mode [--to-record]  # clone | plugin | dev-checkout (#34); --to-record: what setup.sh records
                         python3 kit_profile.py mode-hint kit_ref  # how a workspace shell names the kit in this mode (also workspace_md, makefile)
                         python3 kit_profile.py plugin         # {"repo","commit","version"} of a plugin install; exit 1 otherwise

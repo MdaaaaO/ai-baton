@@ -1631,6 +1631,28 @@ def memory_wiring(r: Report) -> None:
         r.add(WARN, "machine", f"auto-memory: `memory_check.py` did not answer ({line or f'exit {rc}'})")
 
 
+def repo_skills_wiring(r: Report, ws: Path | None = None) -> None:
+    """§ 4's repo-skill row: the SessionStart hook links each `<repo>/.claude/skills/<skill>` into the workspace's
+    `.claude/skills` (`kit_profile.link_repo_skills`). A skill it could not link because the name is taken (a real
+    skill dir, a link elsewhere, or the same name in two repos) is one WARN naming it; one not linked yet only needs
+    a new session. Nothing is said on a clone install, where the hook does not apply."""
+    ws = root() if ws is None else ws
+    if not kit_profile.repo_skills_applicable(ws):
+        return
+    unlinked = kit_profile.unlinked_repo_skills(ws)
+    taken = [u for u in unlinked if u[2] == "taken"]
+    for name, repo, _why in taken:
+        r.add(WARN, "machine", f"repo skill `{name}` in `{repo}` is not linked into `.claude/skills` — the name is taken; "
+              f"rename one of them, or remove the other if it is not wanted")
+    waiting = [u for u in unlinked if u[2] == "missing"]
+    if waiting:
+        r.raw(f"- repo skills: {len(waiting)} not linked yet ({', '.join(f'`{n}`' for n, _, _ in waiting)}) — the next session start links them")
+    if not taken:
+        total = len(kit_profile.repo_skills(ws))
+        if total:
+            r.add(OK, "machine", f"repo skills: {total - len(waiting)} of {total} linked into `.claude/skills`")
+
+
 def sec_machine(r: Report) -> str:
     r.h("4 · This machine — wiring")
     envname = kit_profile.name()
@@ -1640,6 +1662,7 @@ def sec_machine(r: Report) -> str:
     env_file_wiring(r)
     sync_wiring(r)
     memory_wiring(r)
+    repo_skills_wiring(r)
     if not (ENV / "config.json").is_file():
         r.add(ERR, "machine", "no configuration at all — `python3 $BATON/context-db/bin/kb.py init --blank`")
     elif kit_profile.env_config().get("environment"):
