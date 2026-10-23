@@ -9,6 +9,8 @@ labels: []
 
 <!-- The change in how sessions behave, in 1–3 sentences. -->
 
+**Out of scope** — <what this change will not do, or "none beyond the goal">
+
 ## Whiteboard
 
 <!-- Only when the change moves a session flow (a step order, a hook, a hand-off): one line — where it

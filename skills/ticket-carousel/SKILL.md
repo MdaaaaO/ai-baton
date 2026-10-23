@@ -2,9 +2,9 @@
 name: ticket-carousel
 description: "Turns candidates (a list, free text, or a repo/URL to mine) into tickets one at a time: draft, dedup, before any is created via ticket-open. Invoke when asked to turn a landscape read, retro or idea list into tickets."
 metadata:
-  version: "1"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "2"
+  updated: "2026-10-23"
+  reviewed: "2026-10-23"
   facts: "tracker.kind"
 user-invocable: true
 ---
@@ -51,7 +51,15 @@ unresolved and say so on its card.
 ## Draft
 
 Use the repo's own issue template where it has one; otherwise `ticket-open`'s opening block (Goal +
-Plan + Links + Sizing) — every draft carries a Sizing line regardless of template. On a GitHub tracker,
+Out of scope + Plan + Links + Sizing) — every draft carries a Sizing line regardless of template.
+
+**Interview first.** Each candidate runs `ticket-open`'s step 1b before its draft is written — the four
+questions of `docs/carousel.md` § Goal interview, in one carousel per candidate — so the drafted Goal, `Out of
+scope`, `## Done when` and Plan step 1 are the author's answers. Candidates that share a goal ask Goal and `Out
+of scope` once for the group and the other two per candidate. A `haiku`-sized candidate writes `Interview: SKIP
+(<reason>)`, no other size does; a candidate Dedup matched to an open issue is not interviewed unless the Walk
+turns it into a Submit, and then the interview runs before Create. No `AskUserQuestion` → the questions join the
+`Decisions` block below. On a GitHub tracker,
 before a draft is ever shown, run the outgoing-text scan against the target repo (mirror `ticket-open`'s
 GitHub adapter step): `python3 $BATON/context-db/bin/kit_profile.py public-text-check <file> --repo
 <repo>` — exit 0 → show it; exit 1 → rewrite the hits generically (never show the flagged text) and
@@ -94,9 +102,9 @@ accounting in the chat reply instead.
 ## No tool — headless or scheduled runs
 
 No `AskUserQuestion` available → create nothing; follow `docs/carousel.md` § No tool instead: end the
-reply with a numbered `Decisions` block, one line per candidate, recommended option first, and list the
-same candidates under `## Open decisions` in the session file, per that section, so the next
-interactive session's walk starts from them. Write the drafts to the **stable**, per-user scratch dir —
+reply with a numbered `Decisions` block — each candidate's four interview questions, then its Submit / Merge / Skip
+line, recommended option first — and list the same candidates under `## Open decisions` in the session file, per that
+section, so the next interactive session's walk starts from them. Write the drafts to the **stable**, per-user scratch dir —
 `python3 $BATON/context-db/bin/kit_profile.py scratch --stable ticket-carousel` (mirrors how `pr-scan`
 keeps its own output dir) — never the per-session default, which the next interactive session cannot
 reach.
