@@ -52,7 +52,7 @@
 #   make -C $BATON/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
 #   make -C $BATON/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
 #   make -C $BATON/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
-#   make -C $BATON/context-db test [T=test_kb]          # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file
+#   make -C $BATON/context-db test [T=test_kb] [JOBS=N] # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file, JOBS= caps the parallel modules
 #   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
 #   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=sonnet] [RUNS=3] [JOBS=4] [JSON_DIR=<dir>]  # run the eval suite (SPENDS TOKENS)
 #   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
@@ -179,10 +179,16 @@ verify:
 # CONTEXT_ROOT or the directory it runs from (a kit worktree resolves the workspace's live store). The suite refuses a
 # CONTEXT_ROOT outside the temp dir (tests/__init__.py), so a test can never write a real store. T=<module> runs one
 # file (tests/test_kb.py) instead of the full discovery. ISOLATED=1, the old opt-in, is accepted and changes nothing.
+# The full suite runs one module per process, JOBS at a time (default: the CPU count; tests/run_parallel.py, #615),
+# each on its own blank store that the test package builds; JOBS=1 runs it serially, as a busy host may want.
 test:
+ifdef T
 	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; ctx="$$tmp/.context"; \
 	  CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py init --blank >/dev/null && CONTEXT_ROOT="$$ctx" $(PY) $(BIN)/kb.py config-set environment ci >/dev/null && \
-	  cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_JOB_DIR -u KIT_SCRATCH $(PY) -m unittest $(if $(T),tests.$(T),discover -s tests -t .) -v
+	  cd $(BIN)/.. && CONTEXT_ROOT="$$ctx" env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_JOB_DIR -u KIT_SCRATCH $(PY) -m unittest tests.$(T) -v
+else
+	@cd $(BIN)/.. && env -u CONTEXT_ROOT -u CLAUDE_CODE_SESSION_ID -u CLAUDE_JOB_DIR -u KIT_SCRATCH $(PY) tests/run_parallel.py $(if $(JOBS),--jobs $(JOBS),)
+endif
 
 # make kit-verify [STALE=90]  — every skill/agent carries the versioning frontmatter
 kit-verify:
