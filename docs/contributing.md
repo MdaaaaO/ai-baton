@@ -11,8 +11,8 @@ skills. The floor is **Python 3.9**: `context-db/bin/kit_profile.py` — importe
 `sys.version_info` before its first import and exits with one line (`ai-baton needs Python 3.9+ (found …)`) on
 anything older, because the engine itself uses 3.9-only stdlib (`zoneinfo`, `Path.is_relative_to`,
 `str.removeprefix`). `ci.yml`'s `python-floor` job runs `make test` and `verify-skill` under 3.9 on
-`ubuntu-latest`, pinned by commit SHA like every other action (`docs/contributing.md` § Where CI runs); no macOS
-leg yet — BSD-vs-GNU `date`/`sed`/`awk` differences need their own fix first, tracked separately. `README.md`'s
+`ubuntu-24.04` (setup-python has no 3.9 build for the Ubuntu 26.04 image behind `ubuntu-latest`), its actions
+pinned by commit SHA like every other action (`docs/contributing.md` § Where CI runs); no macOS leg yet — BSD-vs-GNU `date`/`sed`/`awk` differences need their own fix first, tracked separately. `README.md`'s
 own prerequisites table gets the same minimum-versions line from a different PR; this is the floor's one other
 statement, not a second source of truth for it.
 
@@ -284,7 +284,8 @@ tokens), the README install smoke (`install_smoke.py`, clone and plugin) and `ki
 SHA and bumped by Dependabot. `evals.yml` — `claude plugin eval` on the `CLAUDE_CODE_OAUTH_TOKEN` secret — runs only
 by hand (`workflow_dispatch`, inputs `skill` and `models`), never on a pull request, so no PR's code meets the token.
 
-Every workflow runs on GitHub-hosted `ubuntu-latest` — free for a public repository, and GitHub's hardening guide
+Every workflow runs on a GitHub-hosted runner — `ubuntu-latest`, except `ci.yml`'s `macos` leg (`macos-latest`) and
+its `python-floor` job (`ubuntu-24.04`, for the 3.9 build) — free for a public repository, and GitHub's hardening guide
 says a self-hosted runner "should almost never be used for public repositories". A job triggered by a pull request
 runs the PR's code, which can come from anyone: a fork's PR runs with no secrets (GitHub's rule), so `ci` and
 `pr-title` still check it; the reviewer needs its token and does not run for a fork — the owner reviews outside PRs
