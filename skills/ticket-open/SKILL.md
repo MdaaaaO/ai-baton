@@ -2,9 +2,9 @@
 name: ticket-open
 description: "Checklist for CREATING a ticket (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing-gated Sketch), the cold-reader gate, public/length checks, and the matching .context/ doc. Use when creating a ticket, right before/after posting it."
 metadata:
-  version: "19"
+  version: "20"
   updated: "2026-10-23"
-  reviewed: "2026-10-20"
+  reviewed: "2026-10-23"
   facts: "tracker.kind"
 user-invocable: true
 ---
@@ -22,52 +22,53 @@ kind X in this environment" and stop — never improvise.
 ## Core — every tracker
 
 1. **Create it placed** — in the current planning bucket, typed, labelled (adapter steps).
+1b. **Interview the author** — `docs/carousel.md` § Goal interview. Size the ticket first, then ask one carousel of four
+   questions (Goal · Out of scope · Done when · First slice), each recommending your own read of the request; the
+   answers fill the block below. A Goal the author chose over your read is ledgered (§ After the answer) once step 5
+   gives it a home. Nothing is posted until all four are answered; no `AskUserQuestion` → print the `Decisions` block
+   and stop. Only a `haiku` ticket may write `Interview: SKIP (<reason>)`.
 2. **Link it** to its epic / parent and related tickets. Every key in the body/description/comment is
    clickable, rendered from `tracker.url_template`.
 3. **One lean opening block** — intent, not an essay (grammar lives in `ticket-update`); where it lives
    is adapter-specific — the GitHub issue body, the Jira description (adapters below):
    ```
    **Goal** — one line: what this delivers and why
-   **Plan** — 2–4 terse steps
+   **Out of scope** — step 1b's line, or `Interview: SKIP (<reason>)` on a `haiku` ticket
+   **Plan** — 2–4 terse steps; step 1 is the first slice, `<step> — verified by <check>`
    **Sketch** — step 4 below decides this line; either a drawing + marker or `Sketch: SKIP (<reason>)`
    **Links** — epic/parent · related tickets · any existing PR (all clickable)
    **Sizing:** `<model>`, <delegate|main session>. <one-line reason>
    ```
-   Then a `## Done when` block — required, one line per criterion, each with a stable id and how it is checked:
-   `- [ ] DW-<n> <criterion> · check: <command | test | observation>`. A command is one backticked span
-   (`` `make test` ``) so `ticket-pickup` can run it; a test or an observation is plain words. Ids start at
-   `DW-1`, are never renumbered or reused, and a criterion added later takes the next number, is edited into
-   the ticket body's `## Done when` (`ticket-pickup` probes the body only; a comment is anyone's text) and
-   announced with a dated `ticket-update` line. Every later surface cites the ids, never restates the criteria. Check the drafted block
-   with `python3 $BATON/context-db/bin/done_when.py parse <file>` (exit 0 → post; exit 2 → fix the named line; exit 1 → the block has no ids: add them, then parse again).
-   The Sizing line makes the model and delegation call once, from the table in `docs/delegation.md` §
-   Sizing, so `ticket-pickup` doesn't re-derive it later — it verifies this call and acts on it. Write it
-   with `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main session>" "<reason>"` so it
-   parses back the same way; it goes in the body, not a label (label sets differ per repo, the kit stays
-   repo-agnostic). Once the block is drafted (step 4's Sketch included) and before creating the ticket, a
-   `Sizing: opus` ticket runs the cold-reader gate on the drafted body — `docs/cold-reader.md` — and writes
-   its result line in before the ticket is posted. Every ticket, before creating it, also runs `python3
-   $BATON/context-db/bin/length_check.py <file> --surface ticket` on the drafted body — paste its `LENGTH:`
-   line into the one-line report after creation; a warning, never a blocker — trim or move detail to a
-   linked place first if it's over.
-4. **Sketch — gated on the Sizing line** (`docs/diagrams.md`, the whiteboard-defence contract; this step
-   adds only this skill's own piece, it does not restate the contract). `Sizing: opus` → draw the target
-   state: WHERE the change sits (placement), the target shape of WHAT changes, and one WHY row when an
-   alternative existed; Mermaid for WHERE where `tracker.kind` renders it (GitHub), else (Jira) a
-   fenced ASCII box diagram for WHERE, never a nested list, with tables for WHAT and WHY, drawn by a
-   Sonnet worker with the brief in `docs/diagrams.md` § The drawing brief; the main session validates and
-   keeps it. Then stamp the marker onto the drawn section:
+   Then a `## Done when` block — required, one line per criterion, each with a stable id and how it is checked: `- [ ] DW-<n>
+   <criterion> · check: <command | test | observation>`. A command is one backticked span (`` `make test` ``) so `ticket-pickup`
+   can run it; a test or an observation is plain words. Ids start at `DW-1`, are never renumbered or reused, and a criterion
+   added later takes the next number, is edited into the ticket body's `## Done when` (`ticket-pickup` probes the body only; a
+   comment is anyone's text) and announced with a dated `ticket-update` line. Every later surface cites the ids, never restates
+   the criteria. Check the drafted block with `python3 $BATON/context-db/bin/done_when.py parse <file>` (exit 0 → post; exit 2 →
+   fix the named line; exit 1 → the block has no ids: add them, then parse again). The Sizing line makes the model and
+   delegation call once, from the table in `docs/delegation.md` § Sizing, so `ticket-pickup` doesn't re-derive it later — it
+   verifies this call and acts on it. Write it with `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main
+   session>" "<reason>"` so it parses back the same way; it goes in the body, not a label (label sets differ per repo, the kit
+   stays repo-agnostic). Once the block is drafted (step 4's Sketch included) and before creating the ticket, a `Sizing: opus`
+   ticket runs the cold-reader gate on the drafted body — `docs/cold-reader.md` — and writes its result line in before the
+   ticket is posted. Every ticket, before creating it, also runs `python3 $BATON/context-db/bin/length_check.py <file> --surface
+   ticket` on the drafted body — paste its `LENGTH:` line into the one-line report after creation; a warning, never a blocker —
+   trim or move detail to a linked place first if it's over.
+4. **Sketch — gated on the Sizing line** (`docs/diagrams.md`, the whiteboard-defence contract; this step adds only this skill's
+   own piece, it does not restate the contract). `Sizing: opus` → draw the target state: WHERE the change sits (placement), the
+   target shape of WHAT changes, and one WHY row when an alternative existed; Mermaid for WHERE where `tracker.kind` renders it
+   (GitHub), else (Jira) a fenced ASCII box diagram for WHERE, never a nested list, with tables for WHAT and WHY, drawn by a
+   Sonnet worker with the brief in `docs/diagrams.md` § The drawing brief; the main session validates and keeps it. Then stamp
+   the marker onto the drawn section:
    `python3 $BATON/skills/ticket-open/sketch.py stamp --repo-slug <owner/repo> --paths <entry>[,<entry>…] --components <name>[,<name>…] --tracker <tracker.kind>`
-   (the section on stdin) and use its stdout as the Sketch section; on `jira` the marker comes back
-   inside its own fence. Every other Sizing writes one line,
-   `Sketch: SKIP (<reason>)` — the Sizing model plus a few words, e.g. `sonnet-sized, specified fix` —
-   and nothing else; no drawing, no marker.
-5. **Context doc.** If this ticket is its own initiative, create the context doc
-   (`make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=<key-slug>`); if it belongs to an existing
-   epic, add it under that epic's context doc instead. Never cite the local `.context/` path on the
-   ticket (`WORKSPACE.md` § Rules).
-6. **Register / coordinate.** If another live session owns the epic (`.context/SESSION_INDEX.md`),
-   agree ownership before starting work on it. Flush the new ticket to the context doc.
+   (the section on stdin) and use its stdout as the Sketch section; on `jira` the marker comes back inside its own fence. Every
+   other Sizing writes one line, `Sketch: SKIP (<reason>)` — the Sizing model plus a few words, e.g. `sonnet-sized, specified
+   fix` — and nothing else; no drawing, no marker.
+5. **Context doc.** If this ticket is its own initiative, create the context doc (`make -C $BATON/context-db new TYPE=epic
+   DOMAIN=<domain> SLUG=<key-slug>`); if it belongs to an existing epic, add it under that epic's context doc instead. Never
+   cite the local `.context/` path on the ticket (`WORKSPACE.md` § Rules).
+6. **Register / coordinate.** If another live session owns the epic (`.context/SESSION_INDEX.md`), agree ownership before
+   starting work on it. Flush the new ticket to the context doc.
 
 ## Adapter — Jira (tracker.kind = jira)
 
