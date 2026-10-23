@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.12.1 (2026-10-23)
+
+
+### CI
+
+* run the engine suite one module per process, in parallel ([#616](https://github.com/MdaaaaO/ai-baton/issues/616)) ([fc9da91](https://github.com/MdaaaaO/ai-baton/commit/fc9da91c6e7f5447066c273a529a3fd299613e3a))
+
 ## 0.12.0 (2026-10-20)
 
 
