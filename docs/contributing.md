@@ -297,8 +297,8 @@ parallel reviews never race on one shared Claude Code install.
 
 ## Testing
 
-The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C $BATON/context-db test` (discovery, < 10 s,
-no install) — and CI runs it on every PR. `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
+The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C $BATON/context-db test` (no install;
+one module per process, `JOBS=N` at a time, default the CPU count — `JOBS=1` on a busy host) — and CI runs it on every PR. `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
 discovery — useful while iterating on one module. The suite always runs on a **throw-away env store**, never this
 machine's `.context/`: `make test` builds a blank one under the temp dir as CI does (`kb.py init --blank`, environment
 `ci`), whatever `CONTEXT` or `CONTEXT_ROOT` says and wherever it runs from — a kit worktree resolves the workspace's

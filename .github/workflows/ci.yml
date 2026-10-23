@@ -28,8 +28,9 @@ jobs:
   kit-verify:
     name: kit-verify
     runs-on: ubuntu-latest
-    # The suite runs twice in this job (Engine tests, then Test isolation), about five minutes each:
-    # the limit leaves room for both plus the steps after them, so a green run is not cut off at the end.
+    # The suite runs twice in this job (Engine tests, then Test isolation). `make test` runs its modules in
+    # parallel (#615; serially it outgrew the 10-minute legs), so both runs plus the steps after them fit well
+    # inside the limit.
     timeout-minutes: 20
     steps:
       # The kit lives at <workspace>/.claude and finds the env store at <workspace>/.context, so
