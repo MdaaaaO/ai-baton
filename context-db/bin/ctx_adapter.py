@@ -127,6 +127,12 @@ it runs the same sync pass itself: commit + push, the pass's one line (`pushed �
 on stderr, silent when sync is off or the store is not its own git repository. A sync failure never changes the
 exit status; reads are untouched; `CTX_ADAPTER_NO_SYNC=1` skips the pass.
 
+`maintain` also rotates a `type: log` doc's `log_section:` (log_rotate.py): ctx-store's own pass rotates only the
+section its type schema names, and the kit's `log` type names none, so an oversized log doc with a `log_section:
+<heading>` frontmatter field has that section's oldest entries moved to `archive/<slug>-log.md` first — by the Bash
+route just before ctx's pass, by the PostToolUse hook right after a `ctx_maintain` MCP call (its lines go to the
+hooks log). An oversized log doc without the field is named on stdout with the add-the-field hint.
+
 The store a call names: `CTX_STORE` when set (ctx reads it itself), else `--store <content root>`
 (kit_profile.context_root()) — a write always names its store. `adopt` and `pre-tool-use` always name the content root.
 
@@ -862,6 +868,8 @@ def run_ctx(args: list[str], mcp: bool = False) -> int:
         name = kit_profile.session_name()
         if name:
             env["CTX_ACTOR"] = name
+    if not mcp and _verb(args) == "maintain" and not {"-h", "--help"} & set(args):
+        _rotate_logs(ctx, store, root, env, print)
     sys.stdout.flush()
     if mcp or not _syncs_after(args, env):
         os.execve(str(ctx), [str(ctx), *store, *args], env)
@@ -870,6 +878,30 @@ def run_ctx(args: list[str], mcp: bool = False) -> int:
     if rc == 0:
         _sync_after_write(root)
     return 128 - rc if rc < 0 else rc  # a signal death is -N: exit 128+N like a shell, not 256-N
+
+
+def _rotate_logs(ctx: Path, store: list[str], root: Path, env: dict, say: Callable[[str], None]) -> None:
+    """The kit's half of `maintain` (log_rotate.py): rotate every oversized `type: log` doc that names a
+    `log_section:`, writing through `ctx create`, and `say` each report line. Never raises — ctx's own pass is
+    what the caller runs next."""
+    try:
+        sys.path.insert(0, str(BIN))
+        import log_rotate  # same dir
+        keep = int(_store_settings().get("maintain", {}).get("keep_log", log_rotate.KEEP_LOG))
+
+        def write(key: str, text: str) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                src = Path(tmp) / "doc.md"
+                src.write_text(text, encoding="utf-8")
+                r = subprocess.run([str(ctx), *store, "create", key, "--from", str(src)], env=env, check=False,  # noqa: S603
+                                   capture_output=True, text=True, timeout=ADOPT_TIMEOUT)
+            if r.returncode != 0:
+                raise OSError((_lines(r.stderr) or [f"ctx create {key} exit {r.returncode}"])[-1])
+
+        for line in log_rotate.rotate_store(root, write, keep=keep):
+            say(line)
+    except Exception as e:  # noqa: BLE001 — a failed pass must not stop ctx's own maintain
+        say(f"log: rotation skipped — {e}")
 
 
 def _verb(args: list[str]) -> str:
@@ -1403,6 +1435,9 @@ def hook(name: str) -> str:
                 _ctx(ctx, store, "touch", "--session", sid)
             except (OSError, subprocess.SubprocessError) as e:
                 _log(f"ctx touch: {e}")
+        if via_ctx and str(payload.get("tool_name", "")).endswith("__ctx_maintain") and ctx is not None \
+                and store is not None:
+            _rotate_logs(ctx, store, root, {**os.environ, "CTX_ACTOR": os.environ.get("CTX_ACTOR", MCP_ACTOR)}, _log)
         refresh_catalogs(root)
         _sync(root)
         return ""

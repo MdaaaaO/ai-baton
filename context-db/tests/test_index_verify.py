@@ -508,6 +508,23 @@ class SizeBudgets(ContextRoot):
         self.assertIn("largest sections: ", v.stderr)
         self.assertNotIn("move its entries", v.stderr)
 
+    def test_oversized_log_doc_without_log_section_says_to_add_the_field_not_to_run_maintain(self):
+        p = self.big_doc("repos/daylog.md", type="log", sections=("Day log", "Notes"))
+        self.assertGreater(p.stat().st_size, 30 * 1024)
+        v = self.verify()
+        self.assertIn("repos: 1 doc over budget, largest daylog (31 KB)", v.stderr)
+        self.assertIn("cannot rotate it: no `log_section:`", v.stderr)
+        self.assertIn("add `log_section: <heading>`", v.stderr)
+        self.assertIn("split it by hand", v.stderr)
+
+    def test_oversized_log_doc_with_log_section_names_the_section_maintain_rotates(self):
+        p = self.big_doc("repos/daylog.md", type="log", sections=("Day log", "Notes"))
+        p.write_text(p.read_text(encoding="utf-8").replace("status: active\n", "status: active\nlog_section: Day log\n", 1),
+                     encoding="utf-8")
+        v = self.verify()
+        self.assertIn("rotates its `## Day log` section (`log_section:`) into archive/daylog-log.md", v.stderr)
+        self.assertNotIn("cannot rotate", v.stderr)
+
     def test_reference_doc_is_held_to_its_own_budget(self):
         p = self.big_doc("reference/deepdive.md", type="reference", status="reference", total_kb=31)
         self.assertGreater(p.stat().st_size, 30 * 1024)
