@@ -322,7 +322,7 @@ class ConsumedHandoff(unittest.TestCase):
         self.assertNotIn("would archive sess-r", run(self.root, "--dry-run"))
 
     def test_equal_timestamps_and_unparsable_ones_do_not_count(self):
-        hb = "2026-10-14T10:00:00Z"
+        hb = stamp(1)  # relative, never a fixed date: one that ages past ARCHIVE_DAYS archives both lanes by age
         session_file(self.root, "sess-s", "ended", 0, "Register as sess-t.", hb=hb)
         session_file(self.root, "sess-t", "active", 0, "", hb=hb)  # same second: not provably later
         session_file(self.root, "sess-u", "ended", 0, "Register as sess-v.", hb=hb)

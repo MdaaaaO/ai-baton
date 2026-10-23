@@ -507,13 +507,15 @@ class ApprovalTrust(unittest.TestCase):
 
 class EngineMakefile(unittest.TestCase):
     def test_t_selects_one_module_else_full_discovery(self):
-        """`make test T=<module>` runs one file instead of the whole suite (docs/contributing.md § Testing)."""
+        """`make test T=<module>` runs one file instead of the whole suite (docs/contributing.md § Testing); the whole
+        suite goes through the parallel runner, JOBS= capping it (#615)."""
         def recipe(**make_vars: str) -> str:
             p = subprocess.run(["make", "-C", str(KIT / "context-db"), "-n", "test", *(f"{k}={v}" for k, v in make_vars.items())],
                                capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stderr)
             return p.stdout
-        self.assertIn("python3 -m unittest discover -s tests -t .", recipe(ISOLATED="1"))
+        self.assertIn("python3 tests/run_parallel.py", recipe(ISOLATED="1"))
+        self.assertIn("tests/run_parallel.py --jobs 2", recipe(JOBS="2"))
         self.assertNotIn("tests.test_kb ", recipe(ISOLATED="1"))
         self.assertIn("python3 -m unittest tests.test_kb -v", recipe(ISOLATED="1", T="test_kb"))
 

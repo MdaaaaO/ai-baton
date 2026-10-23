@@ -65,7 +65,7 @@ Kit / config (env fact store .context/reference/env/):
   make -C $BATON/context-db review-gate [BASE=origin/main] [SKIP_BUMP=1]  # tier 0 of the review: leak shapes on added lines, bumps
   make -C $BATON/context-db review-gate-tree                                # leak shapes over EVERY tracked file (#95), not the diff
   make -C $BATON/context-db review-evidence [BASE=origin/main]           # the evidence file the reviewer reads (.review/evidence.md)
-  make -C $BATON/context-db test [T=test_kb]          # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file
+  make -C $BATON/context-db test [T=test_kb] [JOBS=N] # the engine's stdlib unittest suite (context-db/tests/) on a throw-away store; T= runs one file, JOBS= caps the parallel modules
   make -C $BATON/context-db eval-check                # static check of evals/ (no tokens): case format, trigger suites
   make -C $BATON/context-db eval [SKILL=pr-open] [MODEL=sonnet] [RUNS=3] [JOBS=4] [JSON_DIR=<dir>]  # run the eval suite (SPENDS TOKENS)
   make -C $BATON/context-db sync-check                # warn when the kit checkout is ahead of origin or the last sync errored
