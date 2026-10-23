@@ -80,7 +80,7 @@ class VisionLayers(unittest.TestCase):
         text = " ".join((KIT / "docs" / "cold-reader.md").read_text(encoding="utf-8").split())
         self.assertNotIn("step is planned", text)
         self.assertNotIn("(planned", text)
-        self.assertIn("`pr-open` has run it on `## Diagrams` since #378", text)
+        self.assertIn("`pr-open` has run it on `## Diagrams` since #386", text)
 
 
 if __name__ == "__main__":

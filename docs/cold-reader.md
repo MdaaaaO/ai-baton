@@ -5,7 +5,7 @@ the gate is a fixed worker brief, not a new skill. A `haiku` fork reads **only**
 repo, no transcript, no context doc, and no tool use (by instruction — see § The brief) — and answers
 three fixed questions in one line each. The main session compares the answers to what it knows.
 `ticket-open`, `pr-open` and `session-handoff` call this brief as their last relevant step and point here
-instead of restating it. `pr-open` has run it on `## Diagrams` since #378.
+instead of restating it. `pr-open` has run it on `## Diagrams` since #386.
 
 ## Gate
 
