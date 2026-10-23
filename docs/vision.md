@@ -115,8 +115,8 @@ is on `main` today. A status with a version means it shipped in that release. `p
 | `slack-draft`: you send every message | understanding | chat | n/a | existing |
 | `notion-page-review`: you approve every comment | understanding | Notion | n/a | existing |
 
-The layers are not equally thick. Most rows record or gate. Few ask the person to act. The miss check is the one gap
-left in the verifier layer, and it is not built.
+The layers are not equally thick. Most rows record or gate. Few ask the person to act. The miss check closes the
+last gap in the verifier layer: a fork that grades the work before its author signs it.
 
 ## Non-goals
 
