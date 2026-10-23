@@ -101,12 +101,13 @@ A pivot redraw (#385) posts a new Sketch with a new marker. A ticket with only a
 and nothing downstream checks it.
 
 **The checks are set comparisons.** Entry `e` covers path `p` when `e == p`, or `e` ends in `/` and `p` starts with
-`e`; a leading `+` is dropped before comparing.
+`e`; a leading `+` is dropped before comparing. In the PR-body check a `+` entry with no `.` in its last segment is a
+new directory and covers every path under it.
 
 | Check | Input | Result |
 |---|---|---|
 | pickup | each entry vs the default branch (`git cat-file -e <base>:<path>`) | a plain entry that is missing → `MOVED <entry>`; a `+` entry checks its parent directory instead |
-| PR body | entries and components vs the PR's changed paths in substantive facets (the plan's classifier, overlay and `.ignore` included; a rename counts as its new path) | `+` = changed paths no entry covers and no component names by stem; `−` = entries and components that match no changed path; both empty → `matches`; `+` items first, sorted, more than 6 → the first 6 and `+N more` |
+| PR body | entries and components vs the PR's changed paths in substantive facets (the plan's classifier, overlay and `.ignore` included; a rename counts as its new path) | `+` = changed paths no entry covers and no component names by stem or parent directory (`skills/<name>/SKILL.md`); `−` = entries and components that match no changed path; both empty → `matches`; `+` items first, sorted, more than 6 → the first 6 and `+N more` |
 | lint | each `(this PR)` node label in the body's Mermaid blocks | warns when the label contains no changed path, basename or stem; warns on every edge without a label |
 
 `sketch.py` (#384, in `skills/ticket-open/`) owns the grammar: `stamp --repo-slug <owner/repo> --paths … --components …
