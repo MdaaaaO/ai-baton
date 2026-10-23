@@ -1,8 +1,8 @@
 ---
 name: ticket-open
-description: "Checklist for CREATING a ticket (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing-gated Sketch), the cold-reader gate, public/length checks, and the matching .context/ doc. Use when creating a ticket, right before/after posting it."
+description: "Checklist for CREATING a ticket (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Out of scope/Plan/Links/Sizing-gated Sketch), the cold-reader gate, public/length checks, and the matching .context/ doc. Use when creating a ticket, right before/after posting it."
 metadata:
-  version: "20"
+  version: "21"
   updated: "2026-10-23"
   reviewed: "2026-10-23"
   facts: "tracker.kind"
@@ -87,7 +87,7 @@ Tools: `tracker.mcp_tools.create` / `.edit` / `.comment`; project `tracker.proje
    `bug`/`documentation`/`data-migration` spelled identically to the PR labels so ticket and PR
    carry matching signal.
 3. **Link it.** Epic link / parent on create; related tickets via `createIssueLink`.
-4. **Opening block goes in the description** — write the Goal/Plan/Links/Sizing block into
+4. **Opening block goes in the description** — write the Core step 3 block into
    `tracker.mcp_tools.create`'s `description` field at creation, or set it right after with
    `tracker.mcp_tools.edit` if create didn't take it. The description is the durable, always-visible home; it
    is never a comment. Post a comment only to cc someone who must act, a one-line ADF mention — never
@@ -129,7 +129,7 @@ in terminal replies, bare `#162` (auto-linked) inside GitHub.
    `- [ ] #<new>` to the parent/tracking issue (`gh issue edit <n> -R <repo> --body-file …`, after
    reading its current body — same `public-text-check` step before posting). Related issues: a
    `Related: #a, #b` line.
-3. **Opening block goes in the body** — the Goal/Plan/Links/Sizing block is the issue body itself (the
+3. **Opening block goes in the body** — the Core step 3 block is the issue body itself (the
    body is the opening comment on GitHub); `gh issue comment` only when the body was written by someone
    else. Mention whoever must act with `@login` on one line.
 
