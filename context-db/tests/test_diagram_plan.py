@@ -137,6 +137,58 @@ class SketchLine(unittest.TestCase):
         self.assertIn("--sketch needs a repo", err)
 
 
+# ── --sketch: skill components and new-directory entries (#639) ─────────────────────────────
+# The two markers from #635 and #636, verbatim, parsed by sketch.py's own grammar.
+MARKER_635 = ("paths=+skills/walkthrough,context-db/_templates/epic.md,skills/session-handoff/SKILL.md "
+              "components=session-handoff,walkthrough")
+MARKER_636 = ("paths=+context-db/bin/ctx_lint.py,skills/kit-health/SKILL.md,skills/session-retro/SKILL.md "
+              "components=ctx_lint,kit-health,session-retro")
+
+
+def marker_entry(fields: str) -> dict:
+    text = f"**Sketch**\n<!-- sketch: repo={REPO} {fields} hash=cccccccccccc -->\n"
+    return dp.ticket_sketch.parse_markers(text)[REPO]
+
+
+class SketchSkillsAndNewDirs(unittest.TestCase):
+    def test_skill_component_names_its_skill_md_so_635_matches(self):
+        e = marker_entry(MARKER_635)
+        changed = ["skills/walkthrough/SKILL.md", "context-db/_templates/epic.md", "skills/session-handoff/SKILL.md"]
+        self.assertEqual(dp.sketch_diff(e["paths"], e["components"], changed), ([], []))
+
+    def test_636_leaves_only_the_unsketched_doc_in_plus_and_nothing_in_minus(self):
+        e = marker_entry(MARKER_636)
+        changed = ["context-db/bin/ctx_lint.py", "skills/kit-health/SKILL.md",
+                   "skills/session-retro/SKILL.md", "docs/knowledge-lint.md"]
+        plus, minus = dp.sketch_diff(e["paths"], e["components"], changed)
+        self.assertEqual(minus, [])
+        self.assertEqual(plus, ["docs/knowledge-lint.md"])
+
+    def test_the_635_marker_matches_its_own_diff_end_to_end(self):
+        """`context-db/_templates/epic.md` sits in a supporting facet: it is no `+` (not substantive), and since the PR
+        does change it, its sketched entry is no `−` either."""
+        with tempfile.TemporaryDirectory() as tmp:
+            f = write(tmp, "ticket.txt", f"**Sketch**\n<!-- sketch: repo={REPO} {MARKER_635} hash=cccccccccccc -->\n")
+            rc, out, err = run(["--repo", REPO, "--files", "skills/walkthrough/SKILL.md",
+                                "context-db/_templates/epic.md", "skills/session-handoff/SKILL.md", "--sketch", f])
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(out.strip(), "Sketch: matches")
+
+    def test_component_names_a_path_by_its_parent_directory_name_or_its_stem(self):
+        self.assertEqual(dp.component_names("skills/walkthrough/SKILL.md"), {"SKILL", "walkthrough"})
+        self.assertEqual(dp.component_names("models/orders.sql"), {"orders", "models"})
+
+    def test_plus_directory_entry_without_trailing_slash_covers_files_under_it(self):
+        self.assertTrue(dp.covers("+skills/walkthrough", "skills/walkthrough/SKILL.md"))
+        self.assertTrue(dp.covers("+skills/walkthrough", "skills/walkthrough/refs/a.md"))
+        self.assertFalse(dp.covers("+skills/walkthrough", "skills/walkthroughs/SKILL.md"))
+
+    def test_plus_file_entry_with_an_extension_stays_exact(self):
+        self.assertTrue(dp.covers("+skills/x/file.md", "skills/x/file.md"))
+        self.assertFalse(dp.covers("+skills/x/file.md", "skills/x/file.md/other"))
+        self.assertFalse(dp.covers("+skills/x/file.md", "skills/x/file.md/other.md"))
+
+
 # ── the `ddl` facet: overlay-only ───────────────────────────────────────────────────────────
 class DdlFacet(unittest.TestCase):
     """Points kb/kit_profile at a throw-away store (never .context/, per the worker brief's hard rules)."""
