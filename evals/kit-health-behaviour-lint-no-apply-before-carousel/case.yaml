@@ -1,0 +1,4 @@
+schema_version: "1.0"
+name: kit-health-behaviour-lint-no-apply-before-carousel
+context:
+  scaffold_script: fixture.sh

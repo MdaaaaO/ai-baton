@@ -32,6 +32,8 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `SESSION_STATS_PRICES` | the engine's built-in per-model table | `context-db/bin/session_stats.py` | override token prices as `in,cw,cr,out[,cw_1h]`, for a model the built-in table does not price | user-facing |
 | `SESSION_STATS_SPLIT_THRESHOLD` | `150000` (tokens) | `context-db/bin/session_stats.py` | avg context over the window at/above which the split hint fires | user-facing |
 | `SESSION_STATS_SPLIT_WINDOW` | `20` (turns) | `context-db/bin/session_stats.py` | how many of the most recent turns the split hint averages before firing | user-facing |
+| `CTX_LINT_OFFLINE` | unset | `context-db/bin/ctx_lint.py` | `1` makes `ctx_lint.py check` skip `gh` entirely: every tracker claim is reported `UNCHECKED`, the mechanical checks still run | user-facing |
+| `CTX_LINT_GH` | `gh` | `context-db/bin/ctx_lint.py` | the `gh` executable `ctx_lint.py check` calls for the batched tracker-state query; the tests point it at a stand-in | test-only |
 | `EVAL_MIN_CASES` | `10` | `context-db/bin/eval_check.py` | minimum eval-suite case count before `eval_check.py` stops warning | test-only |
 | `EVAL_MIN_EACH` | `3` | `context-db/bin/eval_check.py` | minimum near-miss count per eval case before `eval_check.py` stops warning | test-only |
 

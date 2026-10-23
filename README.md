@@ -206,7 +206,7 @@ explains the clone's hooks and guards.
 
 | Category | Skills |
 |---|---|
-| Sessions and knowledge | **`kit-health`** · **`session-register`** · **`session-handoff`** · `session-retro` · `memory-prune` · `env-init` · `kit-setup` · `cost-report` · `self-assessment` · `mission-control` |
+| Sessions and knowledge | **`kit-health`** · **`session-register`** · **`session-handoff`** · `session-retro` · `memory-prune` · `env-init` · `kit-setup` · `cost-report` · `self-assessment` · `mission-control` · `walkthrough` |
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
@@ -224,6 +224,7 @@ It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `contex
 | [conventions](docs/conventions.md) | The six portability rules |
 | [carousel](docs/carousel.md) · [assumptions](docs/assumptions.md) | The shape of every open decision |
 | [diagrams](docs/diagrams.md) · [cold-reader](docs/cold-reader.md) | Whiteboard-defence diagram contract |
+| [knowledge-lint](docs/knowledge-lint.md) | The store lint |
 | [architecture](docs/architecture.md) | Session → imports → skills → engine → context DB |
 | [env-facts](docs/env-facts.md) | The env fact store and how a skill resolves a fact |
 | [env-vars](docs/env-vars.md) | Every environment variable a kit script reads |
