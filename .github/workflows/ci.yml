@@ -314,7 +314,7 @@ jobs:
 
   # The floor the kit declares (kit_profile.py's own guard; docs/contributing.md § Testing): the engine's stdlib
   # code uses zoneinfo, Path.is_relative_to and str.removeprefix, all 3.9+-only, so 3.9 is the oldest interpreter
-  # that must still pass. ubuntu-latest only — a Python-version floor is orthogonal to the macos leg above
+  # that must still pass. One Linux leg only — a Python-version floor is orthogonal to the macos leg above
   # (BSD/macOS shell behaviour, not the interpreter version), so it stays its own always-on job. Pinned to
   # ubuntu-24.04: setup-python ships no 3.9 build for the Ubuntu 26.04 image that ubuntu-latest moved to.
   python-floor:
