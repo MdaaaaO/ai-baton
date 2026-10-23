@@ -85,6 +85,17 @@ class IndexAndVerify(ContextRoot):
                        "repos/bad.md: updated '26.09.2026'", "repos/nofm.md: no frontmatter block"):
             self.assertIn(needle, v.stderr)
 
+    def test_verify_accepts_a_quoted_updated_date_and_still_rejects_a_bad_one(self):
+        self.doc("repos/quoted.md", title="Quoted", type="repo", domain="repos", status="active", updated='"2026-10-23"')
+        run(self.root, "gen_index.py")
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 0, v.stderr)
+        self.doc("repos/quoted.md", title="Quoted", type="repo", domain="repos", status="active", updated="'26.10.2026'")
+        run(self.root, "gen_index.py")
+        v = run(self.root, "verify.py")
+        self.assertEqual(v.returncode, 1)
+        self.assertIn("repos/quoted.md: updated ''26.10.2026'' is not YYYY-MM-DD", v.stderr)
+
     def test_stale_index_is_detected(self):
         run(self.root, "gen_index.py")
         self.doc("repos/new.md", title="New", type="repo", domain="repos", status="active")
