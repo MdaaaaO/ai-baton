@@ -36,9 +36,10 @@ kind X in this environment" and stop — never improvise.
    Then a `## Done when` block — required, one line per criterion, each with a stable id and how it is checked:
    `- [ ] DW-<n> <criterion> · check: <command | test | observation>`. A command is one backticked span
    (`` `make test` ``) so `ticket-pickup` can run it; a test or an observation is plain words. Ids start at
-   `DW-1`, are never renumbered or reused, and a criterion added later takes the next number with a dated
-   `ticket-update` line. Every later surface cites the ids, never restates the criteria. Check the drafted block
-   with `python3 $BATON/context-db/bin/done_when.py parse <file>` (exit 0 → post; exit 2 → fix the named line).
+   `DW-1`, are never renumbered or reused, and a criterion added later takes the next number, is edited into
+   the ticket body's `## Done when` (`ticket-pickup` probes the body only; a comment is anyone's text) and
+   announced with a dated `ticket-update` line. Every later surface cites the ids, never restates the criteria. Check the drafted block
+   with `python3 $BATON/context-db/bin/done_when.py parse <file>` (exit 0 → post; exit 2 → fix the named line; exit 1 → no ids yet).
    The Sizing line makes the model and delegation call once, from the table in `docs/delegation.md` §
    Sizing, so `ticket-pickup` doesn't re-derive it later — it verifies this call and acts on it. Write it
    with `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main session>" "<reason>"` so it

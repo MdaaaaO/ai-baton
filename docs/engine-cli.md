@@ -950,11 +950,14 @@ Usage:
   done_when.py probe --ticket <ticket-file | -> --repo-dir <dir> [--timeout <s>]
       Runs each command check in <dir> (shell, default 120 s timeout) and prints one line per id:
       `DW-<n> passing`, `DW-<n> failing (exit <code>)`, `DW-<n> timeout` or `DW-<n> manual`. It runs the
-      ticket's text as a shell command: only on a ticket you trust.
+      ticket's text as a shell command, so the file is the issue BODY only — never comments, which anyone can
+      post — and a file holding more than one `## Done when` section is refused (exit 2). A timeout kills the
+      check's whole process group.
 
-Exit codes: 0 ok (`coverage`: covered); 1 the ticket has no `DW-<n>` criteria (a ticket that predates the
-block); 2 bad usage, an unreadable file, or a malformed block (a checkbox line with no id or no `· check:`, a
-repeated id); 3 (`coverage` only) a gap. Stdlib only.
+Exit codes: 0 ok (`coverage`: covered); 1 the ticket has no `DW-<n>` criteria (it predates the ids, including a
+`## Done when` block of plain checkboxes); 2 bad usage, an unreadable file, or a block that uses ids but is
+malformed (a `DW-<n>` line with no `· check:`, a plain checkbox beside id lines, a repeated id), or `probe` on a
+file with more than one `## Done when` section; 3 (`coverage` only) a gap. Stdlib only.
 
 positional arguments:
   {parse,coverage,probe}

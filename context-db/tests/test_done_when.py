@@ -2,9 +2,11 @@
 covers, and the probe that runs the command checks. Pure text plus throwaway temp dirs; no env store touched.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -62,7 +64,10 @@ class Parse(unittest.TestCase):
     def test_a_ticket_without_the_block_has_no_criteria(self):
         self.assertEqual(dw.parse_ticket("## What\n\n- [ ] DW-1 x · check: y\n"), ([], []))
 
-    def test_a_legacy_checkbox_with_no_id_is_a_problem(self):
+    def test_a_block_of_plain_checkboxes_predates_the_ids(self):
+        self.assertEqual(dw.parse_ticket("## Done when\n\n- [ ] one thing\n- [ ] another\n"), ([], []))
+
+    def test_a_legacy_checkbox_beside_id_lines_is_a_problem(self):
         _, problems = dw.parse_ticket("## Done when\n\n- [ ] DW-1 a · check: b\n- [ ] plain old line\n")
         self.assertEqual(len(problems), 1)
         self.assertIn("plain old line", problems[0])
@@ -176,6 +181,19 @@ class Cli(unittest.TestCase):
         p = run("parse", "-", stdin="## What\n\nlegacy\n")
         self.assertEqual((p.returncode, p.stdout), (1, ""))
 
+    def test_parse_exits_1_on_a_block_of_plain_checkboxes(self):
+        p = run("parse", "-", stdin="## Done when\n\n- [ ] one thing\n- [ ] another\n")
+        self.assertEqual((p.returncode, p.stdout), (1, ""))
+        self.assertIn("no DW-<n> criteria", p.stderr)
+
+    def test_parse_exits_2_on_an_id_line_without_a_check(self):
+        p = run("parse", "-", stdin="## Done when\n\n- [ ] DW-1 criterion with no check\n")
+        self.assertEqual(p.returncode, 2)
+
+    def test_parse_exits_2_on_a_repeated_id(self):
+        p = run("parse", "-", stdin="## Done when\n\n- [ ] DW-1 a · check: b\n- [ ] DW-1 c · check: d\n")
+        self.assertEqual(p.returncode, 2)
+
     def test_parse_exits_2_on_a_malformed_block(self):
         p = run("parse", "-", stdin="## Done when\n\n- [ ] DW-1 a · check: b\n- [ ] legacy\n")
         self.assertEqual(p.returncode, 2)
@@ -229,6 +247,35 @@ class Probe(unittest.TestCase):
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertEqual(p.stdout.splitlines(),
                              ["DW-1 passing", "DW-2 failing (exit 1)", "DW-3 manual", "DW-4 timeout"])
+
+    def test_refuses_a_file_with_more_than_one_done_when_section(self):
+        # a comment appended to the body carries its own block: the probe must never run it
+        with tempfile.TemporaryDirectory() as td:
+            ticket = TICKET + "\n---\ncomment\n\n## Done when\n\n- [ ] DW-9 evil · check: `touch pwned`\n"
+            p = run("probe", "--ticket", "-", "--repo-dir", td, stdin=ticket)
+            self.assertEqual((p.returncode, p.stdout), (2, ""))
+            self.assertEqual(len(p.stderr.strip().splitlines()), 1)
+            self.assertFalse((Path(td) / "pwned").exists())
+
+    def test_parse_and_coverage_still_read_every_section(self):
+        ticket = TICKET + "\n## Done when\n\n- [ ] DW-4 later · check: unit tests\n"
+        self.assertEqual(run("parse", "-", stdin=ticket).stdout.count("\n"), 4)
+
+    def test_a_timeout_kills_the_children_of_a_compound_check(self):
+        with tempfile.TemporaryDirectory() as td:
+            ticket = "## Done when\n\n- [ ] DW-1 slow · check: `sleep 30 & echo $! > child.pid; wait`\n"
+            p = run("probe", "--ticket", "-", "--repo-dir", td, "--timeout", "1", stdin=ticket)
+            self.assertEqual(p.stdout.strip(), "DW-1 timeout")
+            pid = int((Path(td) / "child.pid").read_text())
+            for _ in range(20):  # the kill is delivered; give the reaper a moment
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.1)
+            else:
+                os.kill(pid, 9)
+                self.fail("the sleep child outlived the timed-out check")
 
     def test_runs_in_the_given_directory(self):
         with tempfile.TemporaryDirectory() as td:

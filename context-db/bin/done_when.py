@@ -27,15 +27,20 @@ Usage:
   done_when.py probe --ticket <ticket-file | -> --repo-dir <dir> [--timeout <s>]
       Runs each command check in <dir> (shell, default 120 s timeout) and prints one line per id:
       `DW-<n> passing`, `DW-<n> failing (exit <code>)`, `DW-<n> timeout` or `DW-<n> manual`. It runs the
-      ticket's text as a shell command: only on a ticket you trust.
+      ticket's text as a shell command, so the file is the issue BODY only — never comments, which anyone can
+      post — and a file holding more than one `## Done when` section is refused (exit 2). A timeout kills the
+      check's whole process group.
 
-Exit codes: 0 ok (`coverage`: covered); 1 the ticket has no `DW-<n>` criteria (a ticket that predates the
-block); 2 bad usage, an unreadable file, or a malformed block (a checkbox line with no id or no `· check:`, a
-repeated id); 3 (`coverage` only) a gap. Stdlib only.
+Exit codes: 0 ok (`coverage`: covered); 1 the ticket has no `DW-<n>` criteria (it predates the ids, including a
+`## Done when` block of plain checkboxes); 2 bad usage, an unreadable file, or a block that uses ids but is
+malformed (a `DW-<n>` line with no `· check:`, a plain checkbox beside id lines, a repeated id), or `probe` on a
+file with more than one `## Done when` section; 3 (`coverage` only) a gap. Stdlib only.
 """
 from __future__ import annotations
 import argparse
+import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +55,7 @@ LIMIT_HEAD = "## One honest limit"
 FOOTER_RE = re.compile(r"^session `")  # a PR body's mandatory last line ends the section above it
 FENCE_RE = re.compile(r"^(`{3,})")
 BOX_RE = re.compile(r"^\s*[-*]\s*\[[ xX]\]")
+DW_BOX_RE = re.compile(r"^\s*[-*]\s*\[[ xX]\]\s+DW-\d+\b")
 # `- [ ] DW-3 <criterion> · check: <check>` — the criterion may hold ` · ` itself; the LAST `· check:` splits.
 CRITERION_RE = re.compile(
     r"^\s*[-*]\s*\[[ xX]\]\s+DW-(?P<n>\d+)\s+(?P<crit>\S.*?)\s+·\s+check:\s*(?P<check>\S.*?)\s*$"
@@ -106,7 +112,10 @@ def sections(text: str, heading: str, pr_body: bool = False) -> list[list[tuple[
 # ── parse ────────────────────────────────────────────────────────────────────────────────────
 def parse_ticket(text: str) -> tuple[list[Criterion], list[str]]:
     """(the criteria in file order, the problems). A problem is a checkbox line in a `## Done when` section that
-    is not criterion-shaped, or an id defined twice; a section with no checkbox line adds nothing."""
+    is not criterion-shaped, or an id defined twice; a section with no checkbox line adds nothing. A text whose
+    checkbox lines carry no `DW-<n>` id at all is a block that predates the ids: no criteria, no problems."""
+    if not any(DW_BOX_RE.match(line) for sec in sections(text, DONE_WHEN_HEAD) for _, line in sec):
+        return [], []
     crits: list[Criterion] = []
     problems: list[str] = []
     seen: set[str] = set()
@@ -159,20 +168,35 @@ def coverage(crits: list[Criterion], body: str) -> tuple[list[str], list[str], l
 
 # ── probe ────────────────────────────────────────────────────────────────────────────────────
 def probe(c: Criterion, repo_dir: str, timeout: int) -> str:
+    """One line for `c`. A command runs in its own session so a timeout can kill the whole process group — the
+    children of a compound check (`a && sleep 60`) die with the shell, not after it."""
     if c.command is None:
         return f"{c.id} manual"
+    proc = subprocess.Popen(c.command, shell=True, cwd=repo_dir, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, start_new_session=True)
     try:
-        p = subprocess.run(c.command, shell=True, cwd=repo_dir, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=timeout)
+        rc = proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
         return f"{c.id} timeout"
-    return f"{c.id} passing" if p.returncode == 0 else f"{c.id} failing (exit {p.returncode})"
+    return f"{c.id} passing" if rc == 0 else f"{c.id} failing (exit {rc})"
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────────────────────
-def load_ticket(arg: str) -> tuple[list[Criterion] | None, int]:
-    """(criteria, 0), or (None, the exit code) after printing why: 1 no criteria, 2 a malformed block."""
-    crits, problems = parse_ticket(fsutil.read_arg(arg))
+def load_ticket(arg: str, body_only: bool = False) -> tuple[list[Criterion] | None, int]:
+    """(criteria, 0), or (None, the exit code) after printing why: 1 no criteria, 2 a malformed block. With
+    `body_only`, a text holding more than one `## Done when` section is refused (2): a second section means
+    comments were concatenated onto the body, and a comment is anyone's text."""
+    text = fsutil.read_arg(arg)
+    if body_only and len(sections(text, DONE_WHEN_HEAD)) > 1:
+        print("done_when: probe runs the issue body only — this file holds more than one `## Done when` section "
+              "(comments concatenated?)", file=sys.stderr)
+        return None, 2
+    crits, problems = parse_ticket(text)
     if problems:
         for p in problems:
             print(f"done_when: {p}", file=sys.stderr)
@@ -192,12 +216,13 @@ def _main(argv: list[str]) -> int:
     p_cov.add_argument("--ticket", required=True, help="the ticket text, or - for stdin")
     p_cov.add_argument("--body", required=True, help="the PR body file, or - for stdin")
     p_probe = sub.add_parser("probe", help="run each command check and report passing/failing")
-    p_probe.add_argument("--ticket", required=True, help="the ticket text, or - for stdin")
+    p_probe.add_argument("--ticket", required=True,
+                         help="the issue BODY only (never comments — they are anyone's text), or - for stdin")
     p_probe.add_argument("--repo-dir", required=True, help="the checkout the commands run in")
     p_probe.add_argument("--timeout", type=int, default=DEFAULT_PROBE_TIMEOUT, help="seconds per command")
     a = ap.parse_args(argv)
 
-    crits, rc = load_ticket(a.file if a.cmd == "parse" else a.ticket)
+    crits, rc = load_ticket(a.file if a.cmd == "parse" else a.ticket, body_only=a.cmd == "probe")
     if crits is None:
         return rc
     if a.cmd == "parse":
