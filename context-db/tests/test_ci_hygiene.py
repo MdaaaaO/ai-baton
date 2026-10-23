@@ -9,6 +9,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+from tests import make_env
 
 KIT = Path(__file__).resolve().parents[2]
 BIN = KIT / "context-db" / "bin"
@@ -16,6 +19,15 @@ WORKFLOWS = KIT / ".github" / "workflows"
 KIT_HEALTH = KIT / "skills" / "kit-health" / "kit-health.py"
 USES = re.compile(r"^\s*-?\s*uses:\s*([^\s#]+)", re.M)
 PINNED = re.compile(r"^[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
+
+
+def render_test_recipe(**make_vars: str) -> str:
+    """`make -n test` with exactly `make_vars` as its arguments, whatever make variables this process inherited."""
+    p = subprocess.run(["make", "-C", str(KIT / "context-db"), "-n", "test", *(f"{k}={v}" for k, v in make_vars.items())],
+                       env=make_env(), capture_output=True, text=True)
+    if p.returncode != 0:
+        raise AssertionError(p.stderr)
+    return p.stdout
 
 
 def run_block(workflow_text: str, step_name: str) -> str:
@@ -510,14 +522,21 @@ class EngineMakefile(unittest.TestCase):
         """`make test T=<module>` runs one file instead of the whole suite (docs/contributing.md § Testing); the whole
         suite goes through the parallel runner, JOBS= capping it (#615)."""
         def recipe(**make_vars: str) -> str:
-            p = subprocess.run(["make", "-C", str(KIT / "context-db"), "-n", "test", *(f"{k}={v}" for k, v in make_vars.items())],
-                               capture_output=True, text=True)
-            self.assertEqual(p.returncode, 0, p.stderr)
-            return p.stdout
+            return render_test_recipe(**make_vars)
         self.assertIn("python3 tests/run_parallel.py", recipe(ISOLATED="1"))
         self.assertIn("tests/run_parallel.py --jobs 2", recipe(JOBS="2"))
         self.assertNotIn("tests.test_kb ", recipe(ISOLATED="1"))
         self.assertIn("python3 -m unittest tests.test_kb -v", recipe(ISOLATED="1", T="test_kb"))
+
+    def test_leaked_make_variables_do_not_reach_a_rendered_recipe(self):
+        """an outer `make test T=<module> JOBS=<n>` exports T and JOBS (and MAKEFLAGS) to this process; a recipe
+        rendered here must still be the one for the arguments the test passes."""
+        leaked = {"T": "test_kb", "JOBS": "3", "MAKEFLAGS": " -- T=test_kb JOBS=3", "MAKELEVEL": "1", "MFLAGS": "-- T=test_kb JOBS=3"}
+        with mock.patch.dict(os.environ, leaked):
+            self.assertNotIn("unittest tests.test_kb", render_test_recipe())
+            self.assertNotIn("--jobs", render_test_recipe())
+            self.assertIn("--jobs 2", render_test_recipe(JOBS="2"))
+            self.assertIn("python3 tests/run_parallel.py", render_test_recipe(ISOLATED="1"))
 
     def test_context_value_has_no_trailing_blanks(self):
         """an inline `# comment` after `CONTEXT := …` leaves the blanks before it in the value, and every recipe
