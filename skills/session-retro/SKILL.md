@@ -4,7 +4,7 @@ description: "Sonnet-forked self-check of this session against the kit: correcti
 metadata:
   version: "3"
   updated: "2026-10-23"
-  reviewed: "2026-10-15"
+  reviewed: "2026-10-23"
 user-invocable: true
 argument-hint: "[<session-id> | <transcript.jsonl>]"
 context: fork
