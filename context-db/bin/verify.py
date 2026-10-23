@@ -43,6 +43,7 @@ import re
 import sys
 from datetime import datetime
 
+import frontmatter as fm  # same dir — `unquote` for a quoted scalar
 import gen_index as gi  # same dir
 import kit_profile as profile  # same dir — the active profile's extra domains
 
@@ -282,8 +283,8 @@ def main() -> int:
             errors.append(f"{p}: domain '{d}' not in {sorted(DOMAINS)}")
         u = r.get("updated")
         if u:
-            try:
-                datetime.strptime(u, "%Y-%m-%d")
+            try:  # a YAML-quoted date ("2026-10-23") is the same date as the bare one
+                datetime.strptime(fm.unquote(u), "%Y-%m-%d")
             except ValueError:
                 errors.append(f"{p}: updated '{u}' is not YYYY-MM-DD")
 

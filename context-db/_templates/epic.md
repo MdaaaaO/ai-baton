@@ -28,6 +28,11 @@ current state.
 
 ## Key decisions & gotchas
 
+## In plain words
+<!-- Optional — only lines the operator confirmed in a `walkthrough`, each
+     `- <date> — <line> (walkthrough <target>)`, at most 10, a superseded line replaced. Never model
+     prose alone: a line nobody confirmed does not belong here. Most docs never need this section. -->
+
 ## Architecture
 <!-- Optional — the living container/component map and model lineage, as a plain nested list
      (docs/diagrams.md's epic-doc rendering); most docs never need this section. -->
