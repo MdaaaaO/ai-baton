@@ -56,6 +56,7 @@ TOOLS = (
     "length_check.py",
     "migrate_frontmatter.py",
     "check_links.py",
+    "ctx_lint.py",
     "transcripts.py",
     "leak_shapes.py",
     "gen_eval_rules.py",

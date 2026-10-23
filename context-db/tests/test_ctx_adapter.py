@@ -795,6 +795,10 @@ EPIC_WITH_ARCHITECTURE = EPIC.replace(
     "## Remaining work",
     "## Architecture\n\n- `widget` [service] (existing)\n  - → `queue` [service] (existing): enqueues a job\n\n"
     "## Remaining work")
+# the optional section: only operator-confirmed dated lines, not in the epic type's required list either
+EPIC_WITH_PLAIN_WORDS = EPIC.replace(
+    "## Remaining work",
+    "## In plain words\n\n- 2026-01-06 — the widget retries a failed job once (walkthrough #42)\n\n## Remaining work")
 
 
 class StoreData(unittest.TestCase):
@@ -822,6 +826,7 @@ class StoreData(unittest.TestCase):
         self.assertEqual(epic["version"], 1)
         self.assertEqual(epic["migrations"][0]["log_order_from"], "newest-first")
         self.assertNotIn("Architecture", epic["sections"])  # optional (#389): the template has it, the type does not
+        self.assertNotIn("In plain words", epic["sections"])  # optional likewise: operator-confirmed lines only
         log = json.loads((data / "types" / "log.json").read_text(encoding="utf-8"))
         # no section: `ctx log`/`maintain`'s archive moves work the body-level dated list, newest entry first
         self.assertEqual(log["log"], {"order": "newest-first"})
@@ -1100,6 +1105,19 @@ class Adopt(Base):
         (self.root / "d").mkdir()
         (self.root / "d" / "bare.md").write_text(EPIC, encoding="utf-8")
         (self.root / "d" / "drawn.md").write_text(EPIC_WITH_ARCHITECTURE, encoding="utf-8")
+        r = self.adapter("adopt", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("finding:", r.stdout)
+        self.assertIn("2 adopted", r.stdout)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_the_optional_plain_words_section_is_not_required_either_way(self):
+        """`## In plain words` lives in the epic and repo templates but not in the epic type's required
+        `sections` list — an epic doc without it, and one with it, both validate clean."""
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        (self.root / "d").mkdir()
+        (self.root / "d" / "bare.md").write_text(EPIC, encoding="utf-8")
+        (self.root / "d" / "worded.md").write_text(EPIC_WITH_PLAIN_WORDS, encoding="utf-8")
         r = self.adapter("adopt", **env)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("finding:", r.stdout)
