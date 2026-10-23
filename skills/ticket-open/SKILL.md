@@ -21,7 +21,7 @@ kind X in this environment" and stop — never improvise.
 
 ## Core — every tracker
 
-1. **Create it placed** — in the current planning bucket, typed, labelled (adapter steps).
+1. **Create it placed** — once 1b is answered, never before: in the current planning bucket, typed, labelled (adapter steps).
 1b. **Interview the author** — `docs/carousel.md` § Goal interview. Size the ticket first, then ask one carousel of four
    questions (Goal · Out of scope · Done when · First slice), each recommending your own read of the request; the
    answers fill the block below. A Goal the author chose over your read is ledgered (§ After the answer) once step 5
