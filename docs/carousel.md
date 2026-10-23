@@ -63,6 +63,36 @@ goes into the ticket's next delta comment instead (`ticket-update`), same gramma
 through the headless `Decisions` block (below) is ledgered when it is answered, by the session that
 receives the answer.
 
+## Goal interview — four questions before a ticket's opening block
+
+`ticket-open` (step 1b) and `ticket-carousel`'s Draft step ask these before the opening block is written, so the
+person in charge of the spec agrees with it before a cold reader sees it (`docs/cold-reader.md` checks
+legibility, not agreement). One carousel, exactly four questions, in this order, in the shape § Shape sets:
+
+| `header` | question | options (recommended first) | the answer becomes |
+|---|---|---|---|
+| `Goal` | What is this for, and why? | the session's own read of the request (Recommended) · the nearest narrower or broader reading | the `**Goal**` line |
+| `Out of scope` | What must this not do? | the boundary the session infers (Recommended) · nothing beyond the goal · a wider exclusion | the `**Out of scope**` line |
+| `Done when` | How will we know it is done? | the criteria the session would write, each with its check, as the `preview` (Recommended) · a stricter set | the `## Done when` lines |
+| `First slice` | What is the first slice that can be verified on its own? | the smallest such step (Recommended) · a different cut · the whole change in one go | Plan step 1, written `<step> — verified by <check>` |
+
+The recommended option of each question is the session's own reading of the request, never a blank: the author
+corrects it instead of dictating from nothing. A free-text answer is an edit: redraft from it and re-ask that
+question once more, never write it unseen. Size the ticket first (`docs/delegation.md` § Sizing): the SKIP rule
+below reads the Sizing line.
+
+The `## Done when` lines use the grammar `ticket-open` documents (`- [ ] DW-<n> <criterion> · check: …`, ids from
+`DW-1`); check the drafted block with `done_when.py parse` before posting. Nothing is posted, filed or created until
+the author has answered all four; a headless run follows § No tool and stops at the `Decisions` block.
+
+**Ledger.** A Goal answer other than the session's own read is ledgered in § After the answer's grammar, naming the
+session's read as the rejected option: it is the one answer the ticket body cannot show on its own. The other three
+answers are the block itself, their durable home, and need no ledger line.
+
+**SKIP.** A `haiku`-sized ticket (the Sizing table's smallest row: a symptom that reproduces and a fix the request
+already names, so there is no goal to choose) skips with one line in the block, `Interview: SKIP (<reason>)`, and
+the block is written from the request. A `sonnet` or `opus` ticket is always interviewed and never carries the line.
+
 ## No tool — headless or scheduled runs
 
 A run with no `AskUserQuestion` (a headless CLI run, a scheduled Routine) ends its reply with a
@@ -80,6 +110,6 @@ Decisions
 ## Who calls this
 
 `pr-watch` (merge past a settled red check, or wait), `slack-draft` (send a draft now, edit it, or
-skip it), `pr-event-brief`'s recommended `ACTION` when standing go does not already cover it, and the
+skip it), `ticket-open` and `ticket-carousel` (the goal interview above), `pr-event-brief`'s recommended `ACTION` when standing go does not already cover it, and the
 per-item walk loops in `pr-review`, `notion-page-review`, `kit-health` and `env-init` all route their
 decision point through this shape instead of restating it.

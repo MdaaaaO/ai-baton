@@ -46,7 +46,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Goal interview** — four questions the session asks the author in one carousel before `ticket-open` or
   `ticket-carousel` writes the opening block: the goal, what is out of scope, how we will know it is done, and the
   first slice that can be verified on its own. The answers become the block. A small, specified fix skips it with
-  `Interview: SKIP (<reason>)`.
+  `Interview: SKIP (<reason>)`; `docs/carousel.md` § Goal interview.
 - **Handoff artefact** — what a skill leaves for a step only a specific machine can perform (sign a commit, reach
   a host): a queued job, a `commit.sh` — never a pasted one-liner or a silent substitute.
 - **Heartbeat** — the session registry row's liveness signal: `skills/session-register/heartbeat.sh` touches

@@ -20,7 +20,7 @@ class WalkthroughSkill(unittest.TestCase):
         head = self.text.split("---", 2)[1]
         self.assertIn("name: walkthrough", head)
         self.assertIn("user-invocable: true", head)
-        self.assertRegex(head, r'version: "1"')
+        self.assertRegex(head, r'version: "2"')
         description = re.search(r'^description: "(.*)"$', head, re.M).group(1)
         self.assertLessEqual(len(description.encode("utf-8")), 250)
 
@@ -30,9 +30,14 @@ class WalkthroughSkill(unittest.TestCase):
         self.assertIn("one per turn", self.body)
 
     def test_reads_the_artefacts_before_the_diff(self):
-        for section in ("## Diagrams", "## Verified"):
+        for section in ("## Diagrams", "## For the operator", "## Verified"):
             self.assertIn(section, self.body)
         self.assertIn("never the raw diff first", self.body)
+
+    def test_how_it_runs_takes_the_operator_block_beside_the_diagrams(self):
+        step = self.body.split("**How it runs**", 1)[1].split("**Where it breaks**", 1)[0]
+        self.assertIn("`## Diagrams`", step)
+        self.assertIn("`## For the operator`", step)
 
     def test_three_questions_in_one_carousel_with_a_headless_fallback(self):
         self.assertIn("exactly three questions", self.body)

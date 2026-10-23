@@ -12,7 +12,9 @@ instead of restating it. `pr-open` has run it on `## Diagrams` since #378.
 Runs only on an artefact that is not `SKIP` under the `docs/diagrams.md` contract: a design-sized ticket
 (Sizing `opus`, carries a Sketch), a PR whose diagram plan is not `SKIP` (`pr-open` runs the gate on
 `## Diagrams` before it creates or updates the PR), or a `## Next session` handoff prompt that hands over
-open work. Everything else costs nothing — skip the gate.
+open work. Everything else costs nothing — skip the gate. The operator block
+(`docs/operator-brief.md`) has its own brief, § The operator block, and runs on every block that has a line
+other than `Nothing.`.
 
 ## The brief
 
@@ -42,3 +44,24 @@ once. A second miss is not silently accepted — it goes to the user as a decisi
 
 Write exactly one line into the artefact: `Cold read: ok`, or `Cold read: fixed <question>` naming the
 question the fix answered.
+
+## The operator block
+
+The four lines of `## For the operator` (`docs/operator-brief.md`) are read alone: not the diff, not the PR
+body, not the other sections. Same worker as § The brief (`model: haiku`, `subagent_type: general-purpose`, no
+tool by instruction), same pasting rule, a different prompt:
+
+```
+Read the following four lines. They are written for the person who runs a change. Answer in exactly three
+lines, one each: CAN what that person can do now, MUST what that person must do differently, CHECK what that
+person runs or looks at to see it work. If the text does not say, reply with exactly one line instead: UNSURE
+<question> naming what is missing. Answer from this text alone — use no tool, read nothing else. No other
+prose.
+
+<block>
+```
+
+The main session compares the answers to the change it made. A wrong answer, or an `UNSURE`, means the block
+restates the diff or leaves out the action: rewrite it, then re-run once. A second miss goes to the user as a
+decision ([`docs/carousel.md`](carousel.md)). The block carries no result line: the rewrite happens before the
+block is posted.
