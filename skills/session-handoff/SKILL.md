@@ -1,8 +1,8 @@
 ---
 name: session-handoff
-description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, and the paste-ready next-session prompt. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
+description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, the paste-ready next-session prompt; then stops its monitors, closes the registry row and rebuilds mission-control. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "38"
+  version: "39"
   updated: "2026-10-23"
   reviewed: "2026-10-23"
 user-invocable: true
