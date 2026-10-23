@@ -146,7 +146,7 @@ def main(argv: list[str]) -> int:
     a = ap.parse_args(argv[1:])
     try:
         body = read_body(a)
-    except (OSError, SystemExit) as e:
+    except (OSError, SystemExit, ValueError) as e:
         print(f"operator: {e}", file=sys.stderr)
         return 2
     return cmd_check(body) if a.mode == "check" else cmd_extract(body)

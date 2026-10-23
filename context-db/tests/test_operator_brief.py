@@ -105,6 +105,13 @@ class Check(unittest.TestCase):
             rc = ob.main(["operator_brief.py", "check", "/nonexistent/body.md"])
         self.assertEqual(rc, 2)
 
+    def test_a_non_numeric_pr_number_is_exit_2_not_a_traceback(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            rc = ob.main(["operator_brief.py", "extract", "--pr", "o/r", "abc"])
+        self.assertEqual(rc, 2)
+        self.assertIn("operator:", err.getvalue())
+
 
 class Extract(unittest.TestCase):
     def test_prints_the_four_lines_in_order_and_nothing_else(self):
@@ -158,6 +165,11 @@ class Wiring(unittest.TestCase):
         handoff = self.read("skills/session-handoff/SKILL.md")
         self.assertIn("### What changed, in plain words", handoff)
         self.assertIn("operator_brief.py extract", handoff)
+
+    def test_a_failed_read_is_never_copied_as_no_block(self):
+        # exit 2 (gh failed) must not read as exit 1 (no section) in either copy step
+        self.assertIn("Exit 2 → the read failed", self.read("skills/ticket-close/SKILL.md"))
+        self.assertIn("exit 2 (the read failed) is reported", self.read("skills/session-handoff/SKILL.md"))
 
     def test_the_cold_reader_has_an_operator_block_brief(self):
         self.assertIn("## The operator block", self.read("docs/cold-reader.md"))

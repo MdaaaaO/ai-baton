@@ -124,8 +124,8 @@ cold-reader gate on the four lines alone (`docs/cold-reader.md` § The operator 
    [--pr <o>/<r> <n>]` — refuses a bare claim; with `--pr` prints `STALE <old> → <new>` (exit 3) when the
    recorded head moved; rerun it in the same turn as the push. Shapes and examples: `reference/verified.md`.
 5. **Done when, beside step 4.** A ticket whose `## Done when` carries `DW-<n>` ids: one `## Verified` line per id the PR proves,
-   `DW-<n> · <evidence>`, then `python3 $BATON/context-db/bin/done_when.py coverage --ticket <ticket-file> --body <file>` with every
-   `verified.py check`. `DONE WHEN: covered` (exit 0) → go on; `gap DW-n[, …]` (exit 3) → prove the id, or answer it in `## One honest
+   `DW-<n> · <evidence>`, then `python3 $BATON/context-db/bin/done_when.py coverage --ticket <ticket-file> --body <file>` (the
+   ticket file holds its body, then its comments, oldest first) with every `verified.py check`. `DONE WHEN: covered` (exit 0) → go on; `gap DW-n[, …]` (exit 3) → prove the id, or answer it in `## One honest
    limit` as `DW-<n> · <why it is not verified>`, then re-run; exit 1 → no ids, skip. Step 7 reports the line (`reference/verified.md`).
 
 ## Commit style, links, scope

@@ -40,7 +40,7 @@ kind X in this environment" and stop.
    **For the operator — copy, never retype.** `python3 $BATON/skills/pr-open/operator_brief.py extract --pr <o>/<r> <n>`
    prints the PR's `## For the operator` lines (`docs/operator-brief.md`); paste them as they are under the
    `**For the operator**` head. Exit 1 → that PR predates the rule: write `For the operator: none recorded (<PR link>
-   predates it)` and do not invent four lines now. No delivering PR (decided against, abandoned) → leave the head out.
+   predates it)` and do not invent four lines now. Exit 2 → the read failed: report it and re-run, never write `none recorded`. No delivering PR (decided against, abandoned) → leave the head out.
 
    **As-built — only when the ticket carries a sketch marker** (`docs/diagrams.md` § The sketch
    marker). Name the delivering PR's `## Diagrams` section as the as-built picture and copy its own

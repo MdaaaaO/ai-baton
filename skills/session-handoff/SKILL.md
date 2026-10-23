@@ -138,7 +138,7 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
       of the block. The block sits above the cap. Directly under it, write `### What changed, in plain words`: for
       each PR landed since the last handoff, its link and the four lines of its `## For the operator` block
       (`python3 $BATON/skills/pr-open/operator_brief.py extract --pr <o>/<r> <n>`, copied unchanged —
-      `docs/operator-brief.md`); a PR with no block gets `no operator block` after its link, and no PR landed
+      `docs/operator-brief.md`); exit 1 (no block) gets `no operator block` after its link, exit 2 (the read failed) is reported, never written as no block; no PR landed
       means no section. Then the full state as today:
       ≤12 plain lines (no code fence inside), covering the session `NAME` to register (successor of `<this
       name>`, as `SUCCESSOR_OF=<this name>`), the epic and tickets *this session* owned, the files to read first (context doc sections,
