@@ -8,9 +8,9 @@ page says where to look, and how to remove the kit once you no longer want it.
 
 ### SessionStart (`hooks/hooks.json`)
 
-Runs two things every session: `kit_profile.py session-env` (exports the plugin identity into
-`$CLAUDE_ENV_FILE`) and `kit_profile.py workspace-rules` (prints `WORKSPACE.md` into the session on a plugin
-install). The hook always `exit 0`s — Claude Code itself never sees it as failed — so the only signal is what it
+Runs three things every session: `kit_profile.py session-env` (exports the plugin identity into
+`$CLAUDE_ENV_FILE`), `kit_profile.py workspace-rules` (prints `WORKSPACE.md` into the session on a plugin
+install) and `kit_profile.py link-repo-skills` (see the end of this section). The hook always `exit 0`s — Claude Code itself never sees it as failed — so the only signal is what it
 prints and where its stderr went:
 
 - **stderr** is appended to `<scratch>/hooks.log` when the scratch directory exists and is writable, else it is
@@ -27,8 +27,15 @@ prints and where its stderr went:
   (kit_profile.py workspace-rules failed) - the always-on rules are missing from this session; run /kit-health`.
   Do that — § 4 of a kit-health run checks the exact wiring this hook depends on (below).
 
-Nothing prints at all only when both commands succeed — a session with no `ai-baton:` line at start had a clean
+Nothing prints at all only when the first two commands succeed — a session with no `ai-baton:` line at start had a clean
 SessionStart hook.
+
+`link-repo-skills` makes each `<repo>/.claude/skills/<skill>/` in the workspace visible to a session started at the
+workspace root, which Claude Code would otherwise load only after the session touches a file in that repo: it links
+it as `<workspace>/.claude/skills/<skill>` (depth 1 only), prunes only the links it made whose `SKILL.md` is gone and
+never touches a real skill dir. A name that is already taken is skipped with one `repo skills: <skill> in <repo> not
+linked` line in `hooks.log`, and `/kit-health` § 4 warns about it. It does nothing on a clone install, where
+`.claude/` is the kit checkout itself.
 
 ### SessionEnd (`settings.json`, clone only)
 

@@ -348,6 +348,51 @@ class AutoCompactCheck(unittest.TestCase):
         self.assertEqual(r.counts[kh.WARN], 1, "\n".join(r.lines))
 
 
+class RepoSkillsWiring(unittest.TestCase):
+    """`repo_skills_wiring()`: § 4 warns on a repo skill the SessionStart hook could not link into the workspace's
+    `.claude/skills/` (a taken name); one not linked yet is a plain line, a clone install says nothing."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ws = Path(self.tmp.name).resolve()
+        for repo, name in (("alpha", "crafting"), ("alpha", "shared"), ("beta", "stash")):
+            d = self.ws / repo / ".claude" / "skills" / name
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
+        (self.ws / ".claude" / "skills" / "shared").mkdir(parents=True)  # the workspace's own: a name clash
+        self.kh = load_kit_health()
+
+    def check(self):
+        r = self.kh.Report()
+        self.kh.repo_skills_wiring(r, self.ws)
+        return r, "\n".join(r.lines)
+
+    def test_a_name_clash_is_one_warning_naming_the_skill_and_repo(self):
+        kit_profile.link_repo_skills(self.ws)
+        r, text = self.check()
+        self.assertEqual(r.counts[self.kh.WARN], 1, text)
+        self.assertIn("`shared` in `alpha`", text)
+
+    def test_not_yet_linked_is_a_plain_line_not_a_warning(self):
+        r, text = self.check()
+        self.assertEqual(r.counts[self.kh.WARN], 1, text)  # only the clash
+        self.assertIn("not linked yet", text)
+        self.assertIn("`stash`", text)
+
+    def test_all_linked_is_ok(self):
+        (self.ws / ".claude" / "skills" / "shared").rmdir()
+        kit_profile.link_repo_skills(self.ws)
+        r, text = self.check()
+        self.assertEqual((r.counts[self.kh.WARN], r.counts[self.kh.OK]), (0, 1), text)
+        self.assertIn("3 of 3 linked", text)
+
+    def test_a_clone_install_says_nothing(self):
+        (self.ws / ".claude" / "WORKSPACE.md").write_text("rules\n", encoding="utf-8")
+        r, text = self.check()
+        self.assertEqual((r.counts[self.kh.WARN], r.lines), (0, []), text)
+
+
 class MemoryWiring(unittest.TestCase):
     """`memory_wiring()`: § 4 runs `memory-prune`'s `memory_check.py` — past its budget one WARN naming
     `/memory-prune`, within it an OK line, no memory dir a plain (uncounted) line. `MEMORY_DIR` names the fixture."""
