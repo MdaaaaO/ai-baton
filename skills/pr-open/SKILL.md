@@ -2,8 +2,8 @@
 name: pr-open
 description: "Checklist for opening a PR: sizing gate, body with the diagram set and a ## Verified section, public-text-check and length_check, labels, reviewers, pr-watch, tracker link, Slack review draft where enabled. Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "34"
-  updated: "2026-10-17"
+  version: "35"
+  updated: "2026-10-23"
   reviewed: "2026-10-17"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
 ---
@@ -71,7 +71,8 @@ environment has Slack (`systems.slack`); everything else holds in every environm
    never duplicated.** Shape and routing: `reference/slack-review-request.md`.
 7. **Tell the user** in one line: PR link + labels + where the ask went ("review-request draft is in
    #<channel>" or "reviewers requested: …") + the resolved Sizing line from step 0 when a ticket was sized
-   ("sizing: `sonnet`, delegate") + step 1's `LENGTH:` line (`LENGTH: over (<n> words, budget <m>)` when over).
+   ("sizing: `sonnet`, delegate") + step 1's `LENGTH:` line (`LENGTH: over (<n> words, budget <m>)` when over)
+   + the `DONE WHEN:` line of § Verified step 5 when the ticket has ids.
 
 ## Diagrams — the right set for this PR's content, derived from the diff
 
@@ -115,6 +116,14 @@ Exit codes, the facet → question matrix, the `ddl` facet and the block rules: 
 4. Before `gh pr create`, and on every later push: `python3 $BATON/skills/pr-open/verified.py check <file>
    [--pr <o>/<r> <n>]` — refuses a bare claim; with `--pr` prints `STALE <old> → <new>` (exit 3) when the
    recorded head moved; rerun it in the same turn as the push. Shapes and examples: `reference/verified.md`.
+5. **Done when, beside step 4.** A ticket whose `## Done when` carries `DW-<n>` ids (save its body, then its
+   comments, oldest first, to a scratch file): write one `## Verified` line per id the PR proves, `DW-<n> · <evidence>`
+   (the evidence shapes of step 4; `DW-1, DW-2 · …` for one proof of two), then run `python3
+   $BATON/context-db/bin/done_when.py coverage --ticket <ticket-file> --body <file>` with every `verified.py check`.
+   `DONE WHEN: covered` (exit 0) → go on; `DONE WHEN: gap DW-n[, …]` (exit 3) → prove the id, or answer it in
+   `## One honest limit` as `DW-<n> · <why it is not verified>` (counted covered, stated not proven), then re-run — a
+   PR that verifies things the ticket never asked for and leaves a criterion unanswered is not open. Exit 1 → the
+   ticket predates the ids: say so in one line and skip. Tell the user the `DONE WHEN:` line in step 7's report.
 
 ## Commit style, links, scope
 

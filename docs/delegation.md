@@ -64,7 +64,9 @@ A worker starts cold. The brief carries everything it needs, and the rules the m
    a force-push: the branch may already carry a draft PR under review, and rewriting its history would orphan that
    review. Where `systems.signed_commits` is true, the merge commit and its push go through the sign-queue like any
    other commit on that branch.
-2. **Task:** the issue number (`gh issue view <n>`) and what "done" means.
+2. **Task:** the issue number (`gh issue view <n>`) and what "done" means — the ticket's `## Done when` block
+   quoted verbatim, ids included (`done_when.py parse` lists them), so the worker's tests, its `## Verified` lines and
+   its return all cite `DW-<n>`. A ticket without ids: quote its criteria as written.
 3. **Tests:** new tests must **fail on `origin/main`** and pass with the fix — prove it by restoring the main copy of
    the changed file, running them, and putting the fix back. The full suite and `kit-verify` pass before the commit.
 4. **Hard rules:** never write the live env store or workspace — every manual probe of a script that writes runs
@@ -74,8 +76,10 @@ A worker starts cold. The brief carries everything it needs, and the rules the m
    colon, ≤ 72 characters); `review_gate.py --base origin/main` is OK after committing.
 6. **Stop line:** push the branch; **do not open a PR, comment, or merge** (review-thread workers reply and resolve on
    the PR they were given, nothing else).
-7. **Return:** ≤ 25 lines — branch and sha, what changed and why, the tests and their fail-on-main proof, anything
-   uncertain — plus a ready PR body in a named scratch file.
+7. **Return:** ≤ 25 lines — branch and sha, what changed and why, the tests and their fail-on-main proof (naming
+   the `DW-<n>` ids each test covers), anything uncertain — plus a ready PR body in a named scratch file whose
+   `## Verified` carries a `DW-<n> · <evidence>` line per id and whose `## One honest limit` answers any id it cannot
+   prove (`done_when.py coverage --ticket <file> --body <file>` prints `DONE WHEN: covered` before the worker returns).
 
 ## The main session's loop
 
