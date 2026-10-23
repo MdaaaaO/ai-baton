@@ -100,7 +100,11 @@ fallback: `ctx_adapter.py ctx maintain`): it keeps the newest **Session log** en
 `archive/<slug>-log.md`, newest-first (the `log` type's order); no manual move-and-reverse. When that archive doc
 does not exist yet, `maintain` creates it with the source doc's `domain` and the `log` type's first status
 (`active`); create it first with `ctx_new` (TYPE=log, SLUG=`<slug>-log`) to give it other values. The archive tail
-can grow without limit. `make verify` exempts every doc under `archive/`, whatever its frontmatter says, because it
+can grow without limit. A `type: log` doc has no fixed log section, so `ctx_maintain` rotates it only when its
+frontmatter names one: `log_section: <heading>` (say `log_section: Day log`) moves that `## ` section's oldest
+entries into `archive/<folder>-<slug>-log.md` (`archive/<slug>-log.md` for a doc at the store root) under the same heading, keeping the newest ~6; an oversized `log` doc without
+the field is reported with the add-the-field hint (verify and `maintain` both say so) — add the field or split it by
+hand. `make verify` exempts every doc under `archive/`, whatever its frontmatter says, because it
 is never read by default; `ctx validate` has no such exemption and still lists a large one under `SIZE_GUARD`.
 
 ## Live session registry (operational, not knowledge)
