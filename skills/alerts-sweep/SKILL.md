@@ -5,7 +5,7 @@ compatibility: "Designed for Claude Code; needs airflow, slack (systems.*)"
 metadata:
   version: "16"
   updated: "2026-10-23"
-  reviewed: "2026-10-15"
+  reviewed: "2026-10-23"
   requires: "airflow,slack"
   facts: "slack.channel airflow-alerts,airflow.path alerts-state,airflow.path alerts-kb"
 context: fork
