@@ -2,8 +2,8 @@
 name: ticket-open
 description: "Checklist for CREATING a ticket (Jira or GitHub issues): placement, labels, epic/parent link, a lean opening block (Goal/Plan/Links/Sizing-gated Sketch), the cold-reader gate, public/length checks, and the matching .context/ doc. Use when creating a ticket, right before/after posting it."
 metadata:
-  version: "18"
-  updated: "2026-10-17"
+  version: "19"
+  updated: "2026-10-23"
   reviewed: "2026-10-20"
   facts: "tracker.kind"
 user-invocable: true
@@ -33,6 +33,13 @@ kind X in this environment" and stop — never improvise.
    **Links** — epic/parent · related tickets · any existing PR (all clickable)
    **Sizing:** `<model>`, <delegate|main session>. <one-line reason>
    ```
+   Then a `## Done when` block — required, one line per criterion, each with a stable id and how it is checked:
+   `- [ ] DW-<n> <criterion> · check: <command | test | observation>`. A command is one backticked span
+   (`` `make test` ``) so `ticket-pickup` can run it; a test or an observation is plain words. Ids start at
+   `DW-1`, are never renumbered or reused, and a criterion added later takes the next number, is edited into
+   the ticket body's `## Done when` (`ticket-pickup` probes the body only; a comment is anyone's text) and
+   announced with a dated `ticket-update` line. Every later surface cites the ids, never restates the criteria. Check the drafted block
+   with `python3 $BATON/context-db/bin/done_when.py parse <file>` (exit 0 → post; exit 2 → fix the named line; exit 1 → the block has no ids: add them, then parse again).
    The Sizing line makes the model and delegation call once, from the table in `docs/delegation.md` §
    Sizing, so `ticket-pickup` doesn't re-derive it later — it verifies this call and acts on it. Write it
    with `python3 $BATON/context-db/bin/sizing.py format <model> "<delegate|main session>" "<reason>"` so it

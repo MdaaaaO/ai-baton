@@ -78,3 +78,14 @@ directly after `## Verified`. Neither is checked by `verified.py` — they are p
 `## One honest limit` also carries every due `Assumed:` line (revisit: pr-open) still open on the
 session (`docs/assumptions.md`); those lines follow the 3-line limit and do not count toward it — at
 most 4, since more means the session should have asked earlier.
+
+## `DW-<n>` lines — which ticket criteria the section proves
+
+A ticket whose `## Done when` carries ids (`- [ ] DW-<n> <criterion> · check: …`) is answered line by line:
+`- DW-<n> · <evidence>` under `## Verified` (`DW-1, DW-2 · <evidence>` when one proof covers both), the evidence in
+`evidence_check.py`'s shapes above, so `check` passes them like any cited line. `done_when.py coverage --ticket <file>
+--body <file>` (`docs/engine-cli.md`) then prints `DONE WHEN: covered` (exit 0) or `DONE WHEN: gap DW-n[, …]` (exit 3).
+The rule: an id is covered when a `## Verified` line cites it with an evidence item, or a `## One honest limit` line
+reads `DW-<n> · <why it is not verified>` (covered with a limit: stated, not proven, and named on stderr). A Verified
+line with a bare claim, an id mentioned only in prose, or an id inside a fenced tail never covers. An id the ticket
+never defined is named on stderr and changes nothing. A ticket without ids exits 1 and is skipped.
