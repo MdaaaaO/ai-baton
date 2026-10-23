@@ -30,7 +30,7 @@ class WalkthroughSkill(unittest.TestCase):
         self.assertIn("one per turn", self.body)
 
     def test_reads_the_artefacts_before_the_diff(self):
-        for section in ("## Diagrams", "## For the operator", "## Verified"):
+        for section in ("## Diagrams", "## Verified"):
             self.assertIn(section, self.body)
         self.assertIn("never the raw diff first", self.body)
 

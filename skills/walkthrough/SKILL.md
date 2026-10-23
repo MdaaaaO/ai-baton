@@ -25,7 +25,7 @@ in, and keeps only what they confirmed. One bounded conversation: three steps, o
 
 ## 2. Gather — artefacts first, never the raw diff first
 
-- A PR: the body's `## Diagrams`, `## For the operator` (older PRs have none — skip it), `## Verified`, via
+- A PR: the body's `## Diagrams` and `## Verified`, via
   `gh pr view <n> -R <repo> --json title,body,files` (`gh-cli` for the traps).
 - The home doc: `## Goal`, `## What was built`, `## Key decisions & gotchas`, `## Architecture` and any
   `## In plain words` lines already there. A repo card: its sections.
@@ -38,8 +38,7 @@ Three steps, in this order, one per turn; after each, stop and wait (the operato
 answer from the artefacts, then continue).
 
 1. **Purpose** — what it is for and who or what changes because of it. Plain words, no file names.
-2. **How it runs** — one run end to end, from `## Diagrams` and `## For the operator`: name the picture, do not
-   redraw it.
+2. **How it runs** — one run end to end, from `## Diagrams`: name the picture, do not redraw it.
 3. **Where it breaks** — the failure paths and guards, and what `## Verified` proves and does not.
 
 A step is at most 8 lines. It states claims the artefacts back, so the questions below have an answer in them.
@@ -95,4 +94,4 @@ any parked step with what stayed unclear, and the home doc.
 ## Not in scope
 
 Reviewing someone's PR → `pr-review`. Flushing a session → `session-handoff`, which keeps `## In plain words`
-current but never adds a line. A PR body's own operator brief → `pr-open`.
+current but never adds a line.
