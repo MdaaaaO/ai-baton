@@ -90,7 +90,7 @@ def advance_state_text(text: str, ts: str, today: str) -> str:
     new_text, n = LAST_SWEPT.subn(lambda m: f"{m.group(1)}{ts}{m.group(2)}", text, count=1)
     if n == 0:
         raise SystemExit("advance-state.py: no '**Last swept through:** ts `...`' line in the state file")
-    new_text, n2 = UPDATED.subn(lambda m: f'{m.group(1)} "{today}"', new_text, count=1)
+    new_text, n2 = UPDATED.subn(lambda m: f"{m.group(1)} {today}", new_text, count=1)
     if n2 == 0:
         raise SystemExit("advance-state.py: no 'updated:' frontmatter line in the state file")
     return new_text

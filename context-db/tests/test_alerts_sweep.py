@@ -176,7 +176,14 @@ class AdvanceStatePureFunctions(unittest.TestCase):
         text = '---\nupdated: "2020-01-01"\n---\n\n**Last swept through:** ts `100.100`\n'
         out = self.mod.advance_state_text(text, "200.200", "2026-09-28")
         self.assertIn("ts `200.200`", out)
-        self.assertIn('updated: "2026-09-28"', out)
+        self.assertIn("\nupdated: 2026-09-28\n", out)
+        self.assertNotIn('"2026-09-28"', out)
+
+    def test_advance_state_text_writes_a_plain_date_over_either_input_form(self):
+        for old in ('updated: "2020-01-01"', "updated: 2020-01-01"):
+            out = self.mod.advance_state_text(f"---\n{old}\n---\n\n**Last swept through:** ts `1`\n", "2", "2026-09-28")
+            self.assertIn("\nupdated: 2026-09-28\n", out)
+            self.assertNotIn('"', out.split("---")[1])
 
     def test_advance_state_text_requires_both_markers(self):
         with self.assertRaises(SystemExit):
@@ -241,7 +248,7 @@ class AdvanceStateCLI(unittest.TestCase):
             self.assertEqual(p.returncode, 0, p.stderr)
             state_text = (tmp / ".context/oncall/state.md").read_text()
             self.assertIn("ts `999.500`", state_text)
-            self.assertIn(date.today().isoformat(), state_text)
+            self.assertIn(f"\nupdated: {date.today().isoformat()}\n", state_text)
             kb_text = (tmp / ".context/oncall/kb.md").read_text()
             self.assertIn("## Recurrence log", kb_text)
             self.assertIn(line, kb_text)
