@@ -901,6 +901,7 @@ def link_repo_skills(root: Path) -> list[str]:
     Never touches a real skill dir or a link that points anywhere but into a repo's `.claude/skills`: a taken name is
     skipped (the first repo in sorted order wins a clash between repos). Silent and a no-op when everything is
     linked already; `<root>/.claude/skills` is created only when there is something to link."""
+    root = root.resolve()  # the hook and kit-health reach one workspace by different spellings; links carry the resolved one
     if not repo_skills_applicable(root):
         return []
     dst = root / ".claude" / "skills"
@@ -935,6 +936,7 @@ def unlinked_repo_skills(root: Path) -> list[tuple[str, str, str]]:
     """`(name, repo, why)` for each repo skill whose `<root>/.claude/skills/<name>` is not a link to it: `taken` (a real
     dir or a link elsewhere — a name clash the hook can only report) or `missing` (not linked yet: the hook has not run
     since the skill appeared). Empty on a clone install."""
+    root = root.resolve()  # same spelling `link_repo_skills` links from, whatever path the caller reached the workspace by
     if not repo_skills_applicable(root):
         return []
     out: list[tuple[str, str, str]] = []

@@ -7,6 +7,7 @@ pruned; a second run changes nothing and prints nothing; a real skill dir is nev
 `kit_profile.py link-repo-skills`. Every test works in a throw-away workspace.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import importlib.util
 import json
 import os
 import subprocess
@@ -22,6 +23,13 @@ sys.path.insert(0, str(BIN))
 import kit_profile  # noqa: E402
 
 CMD = json.loads((KIT / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+
+
+def load_kit_health():
+    spec = importlib.util.spec_from_file_location("kit_health_under_test", KIT / "skills" / "kit-health" / "kit-health.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
 
 
 def make_skill(root: Path, repo: str, name: str, body: bool = True) -> Path:
@@ -150,6 +158,35 @@ class UnlinkedRepoSkills(Fixture):
     def test_only_the_clash_remains_after_linking(self):
         kit_profile.link_repo_skills(self.ws)
         self.assertEqual(kit_profile.unlinked_repo_skills(self.ws), [("shared", "alpha", "taken")])
+
+
+class SymlinkedWorkspace(Fixture):
+    """The hook links from the resolved workspace path, while a caller (kit-health) may hold the workspace as a
+    symlinked spelling: both must agree that a linked skill is linked."""
+
+    def setUp(self):
+        super().setUp()
+        self.alias = self.ws.parent / "alias"
+        self.alias.symlink_to(self.ws)
+
+    def test_nothing_linked_is_reported_unlinked_through_a_symlinked_root(self):
+        kit_profile.link_repo_skills(self.alias)
+        self.assertEqual(kit_profile.unlinked_repo_skills(self.alias), [("shared", "alpha", "taken")])
+        self.assertEqual(kit_profile.link_repo_skills(self.alias), kit_profile.link_repo_skills(self.ws))
+
+    def test_kit_health_does_not_warn_through_a_symlinked_root(self):
+        (self.dst / "shared" / "SKILL.md").unlink()
+        (self.dst / "shared").rmdir()
+        kit_profile.link_repo_skills(self.ws)
+        self.assertEqual(kit_profile.unlinked_repo_skills(self.alias), [])
+        kh = load_kit_health()
+        r = kh.Report()
+        kh.repo_skills_wiring(r, self.alias)
+        self.assertEqual(r.counts[kh.WARN], 0, "\n".join(r.lines))
+
+    def test_a_stale_link_is_pruned_through_a_symlinked_root(self):
+        kit_profile.link_repo_skills(self.alias)
+        self.assertFalse((self.dst / "gone").is_symlink())
 
 
 class SessionStartHook(Fixture):
