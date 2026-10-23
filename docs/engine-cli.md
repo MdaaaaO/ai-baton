@@ -968,6 +968,25 @@ options:
   --repo REPO
 ```
 
+## `ctx_lint.py`
+
+```text
+usage: ctx_lint.py [-h] {check,plan,bundle} ...
+
+Read-only lint over the context store: orphans, dead links, tracker states the
+store misstates, docs past the archive rule; plan and feed the judgement forks
+(docs/knowledge-lint.md).
+
+positional arguments:
+  {check,plan,bundle}
+    check              mechanical findings, one per line, or CLEAN
+    plan               which domains to fork since the last lint stamp
+    bundle             one domain's docs as the fork's input
+
+options:
+  -h, --help           show this help message and exit
+```
+
 ## `transcripts.py`
 
 No `--help` (the tool has no argument parser); the usage is the module docstring:

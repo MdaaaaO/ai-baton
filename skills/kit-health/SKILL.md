@@ -2,8 +2,8 @@
 name: kit-health
 description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Walks each finding, reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, and when a skill misbehaves."
 metadata:
-  version: "82"
-  updated: "2026-10-15"
+  version: "83"
+  updated: "2026-10-23"
   reviewed: "2026-10-15"
   facts: "aws.profile kit-health"
 user-invocable: true
@@ -13,6 +13,7 @@ user-invocable: true
 
 A run proves the kit is sound (frontmatter, no environment value in a kit file, the engine loads) and that
 **this** machine is wired to its env store; each machine stamps `.context/kit-health/HEALTH-<env>.md`.
+`/kit-health lint` is a different run: it checks what the store says, not the kit (§ Mode: lint, below).
 
 1. **Run.** `SCRATCH=$(python3 $BATON/context-db/bin/kit_profile.py scratch); echo "report: $SCRATCH/kit-health.md"`
    then `python3 $BATON/skills/kit-health/kit-health.py --stale 90 --quiet --report "$SCRATCH/kit-health.md"`
@@ -58,3 +59,23 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
 
 The script carries no environment's values: generic shapes plus this machine's configured values
 (redacted). Optional fact `aws.profile kit-health`: the `aws_sso` probe's profile.
+
+## Mode: lint (`/kit-health lint`)
+
+Does the store still say what is true? Contract, claim rules and the fork brief: `docs/knowledge-lint.md`. Not part of
+a health run: it stamps nothing in HEALTH and changes no kit file.
+
+1. **Mechanical.** `python3 $BATON/context-db/bin/ctx_lint.py check` (add `--offline` when `gh` is unavailable or
+   unwanted). One line per finding (`ORPHAN`, `DEAD`, `STALE`, `AGED`, `UNCHECKED`) or `CLEAN`; read-only.
+2. **Plan.** `ctx_lint.py plan` lists `FORK <domain> <model> <bytes>` lines (changed since the lint stamp, haiku, sonnet
+   past 60 KB, at most 6) and `NOT READ <domain>` for the rest. Per `FORK` line, call `Agent` with that model and the
+   brief in `docs/knowledge-lint.md`, the input being `ctx_lint.py bundle <domain>`; the forks run in parallel and use
+   no tool.
+3. **Verify.** Check each fork `STALE`/`CONTRADICTS` line against its system of record and drop what the record
+   contradicts. `UNCHECKED` and `NOT READ` lines are reported, not asked.
+4. **Walk** every remaining finding in **one** carousel (`docs/carousel.md`): **Fix**, **Ticket**, **Skip**, each
+   option stating its consequence. Apply nothing before the answers are in.
+5. **Apply** only the accepted fixes, through the ctx tools (`ctx_str_replace`, `ctx_fm`, `ctx_move`), never a direct
+   write of a `.context/` doc; each fix adds one `Session log` line to its doc naming the finding. Then write the
+   stamp `kit-health/LINT-<env>` (`last_lint`, `not_read`) with `ctx_fm`, creating it with `make -C $BATON/context-db
+   new TYPE=log DOMAIN=kit-health SLUG=LINT-<env>` the first time.
