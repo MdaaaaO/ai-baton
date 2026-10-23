@@ -30,6 +30,10 @@ labels: []
 
 ## Done when
 
-- [ ]
+<!-- One line per criterion, a stable id each, and how it is checked: a `command` in backticks (runnable), a
+     test, or an observation. Ids are never renumbered; a later criterion takes the next one.
+     `done_when.py parse` reads this block. -->
+
+- [ ] DW-1 <criterion> · check: <command | test | observation>
 
 <!-- Add one area: label — area:skills, area:engine, area:sync, area:docs, area:ci. -->

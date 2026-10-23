@@ -920,6 +920,58 @@ options:
   -h, --help  show this help message and exit
 ```
 
+## `done_when.py`
+
+```text
+usage: done_when.py [-h] {parse,coverage,probe} ...
+
+done_when.py — a ticket's `## Done when` block as stable, checkable criteria, and which of them a PR body covers.
+
+`ticket-open` writes the block, `ticket-pickup` probes it, the worker brief quotes it, `pr-open` proves each
+criterion or names the gap, `ticket-close` delivers per id. One grammar, one line per criterion, under a
+`## Done when` heading:
+
+  - [ ] DW-<n> <criterion> · check: <command | test | observation>
+
+`DW-<n>` is stable for the ticket's life (a later criterion takes the next number, never a reused one). The
+check is a command when it is exactly one backticked span (`` `make test` ``), else a test or an observation a
+person confirms — only a command is runnable.
+
+Usage:
+  done_when.py parse <ticket-file | ->
+      One line per criterion: `DW-<n>`, `command` or `manual`, the check (a command is printed without its
+      backticks), the criterion — tab-separated. Reads every `## Done when` section in the text (pass the body,
+      then the comments, oldest first, as `sizing.py` does).
+  done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | ->
+      Prints exactly `DONE WHEN: covered` or `DONE WHEN: gap DW-<n>[, DW-<n>…]`. An id is covered when
+        - a line in the body's `## Verified` section reads `DW-<n>[, DW-<m>…] · <evidence>` and the evidence
+          is one of evidence_check.py's shapes (a `cmd` → `output`, a URL, a #<n> or commit reference), or
+        - a line in its `## One honest limit` section reads `DW-<n>[, DW-<m>…] · <why it is not verified>`
+          (covered with a limit: stated, not proven — each such id is also named on stderr).
+      Anything else, including a Verified line whose evidence is bare, leaves the id in the gap. An id the body
+      cites that the ticket never defined is named on stderr and changes nothing.
+  done_when.py probe --ticket <ticket-file | -> --repo-dir <dir> [--timeout <s>]
+      Runs each command check in <dir> (shell, default 120 s timeout) and prints one line per id:
+      `DW-<n> passing`, `DW-<n> failing (exit <code>)`, `DW-<n> timeout` or `DW-<n> manual`. It runs the
+      ticket's text as a shell command, so the file is the issue BODY only — never comments, which anyone can
+      post — and a file holding more than one `## Done when` section is refused (exit 2). A timeout kills the
+      check's whole process group.
+
+Exit codes: 0 ok (`coverage`: covered); 1 the ticket has no `DW-<n>` criteria (it predates the ids, including a
+`## Done when` block of plain checkboxes); 2 bad usage, an unreadable file, or a block that uses ids but is
+malformed (a `DW-<n>` line with no `· check:`, a plain checkbox beside id lines, a repeated id), or `probe` on a
+file with more than one `## Done when` section; 3 (`coverage` only) a gap. Stdlib only.
+
+positional arguments:
+  {parse,coverage,probe}
+    parse               list the ticket's criteria
+    coverage            which criteria a PR body covers
+    probe               run each command check and report passing/failing
+
+options:
+  -h, --help            show this help message and exit
+```
+
 ## `length_check.py`
 
 ```text
