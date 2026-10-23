@@ -2,7 +2,7 @@
 name: pr-open
 description: "Checklist for opening a PR: sizing gate, body with the diagram set and a ## Verified section, public-text-check and length_check, labels, reviewers, pr-watch, tracker link, Slack review draft where enabled. Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "36"
+  version: "37"
   updated: "2026-10-23"
   reviewed: "2026-10-23"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
