@@ -175,10 +175,11 @@ def size_remedy(path: str, doc_type: str, size: int, text: str) -> str:
     sections = section_sizes(text)
     if doc_type == "log":  # `ctx_maintain` rotates a log doc only through its own `log_section:` field
         field = log_rotate.fields(text).get("log_section", "")
+        target = log_rotate.archive_key(os.path.splitext(path)[0].replace(os.sep, "/")) + ".md"
         if field:
-            return f"`ctx_maintain` rotates its `## {field}` section (`log_section:`) into archive/{slug}-log.md"
+            return f"`ctx_maintain` rotates its `## {field}` section (`log_section:`) into {target}"
         return ("`ctx_maintain` cannot rotate it: no `log_section:` in its frontmatter — add `log_section: "
-                f"<heading>` (the `## ` section to rotate) or split it by hand into archive/{slug}-log.md")
+                f"<heading>` (the `## ` section to rotate) or split it by hand into {target}")
     log = sum(n for name, n in sections if SESSION_LOG_RE.match("## " + name))
     if log and log * 2 >= size:
         return f"the session log is {kb(log)} KB of it: move its entries to archive/{slug}-log.md"

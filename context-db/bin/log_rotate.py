@@ -8,14 +8,19 @@ needs its own answer: a frontmatter field `log_section: <heading>` on the doc. T
 
 For a `type: log` doc outside `archive/` that is over the size guard (30,000 B, the guard `ctx maintain` uses):
 
-* with `log_section: <heading>` — the `keep` newest entries of that `## ` section stay (an entry is a line that is
-  neither blank nor inside an HTML comment, as ctx counts it; the section's order is read from its dated entries,
-  `- YYYY-MM-DD …`, else the `log` type's) and the older ones move, verbatim, into `archive/<slug>-log.md` under
-  the same heading; a missing archive doc is created (`type: log`, the source's `domain`, `status: active`);
+* with `log_section: <heading>` — the `keep` newest entries of that `## ` section stay and the older ones move,
+  verbatim, into `archive/<folder>-<slug>-log.md` under the same heading (`archive/<slug>-log.md` for a doc at the
+  store root; the folder keeps `ops/rot` and `repos/rot` apart); a missing archive doc is created (`type: log`, the
+  source's `domain`, `status: active`). An entry is one dated line (`- YYYY-MM-DD …`; a section with no dated lines
+  takes every unindented line) plus its continuation lines up to the next entry, so a multi-line entry or a fenced
+  block is never cut; the section's order is read from the dated entries, else the `log` type's;
 * without it — nothing moves, and the pass says why: add `log_section:` or split the doc by hand.
 
-Writes go through `ctx create` (the caller's `write`), so the audit trail and the store lock stay ctx's. The
-archive is written first: a failure between the two writes leaves the entries in both docs, never in neither.
+Writes go through ctx, never around its lock. The archive is written first (`create`), then the moved block is
+removed from the source with one `str_replace` of that exact block, which ctx runs under its lock against the
+doc's current text: an entry appended in between is kept, and a block that changed in between is refused
+(`NO_MATCH`), reported as not rotated, and left for the next pass — which skips the entries the archive already
+holds. A failure between the two writes leaves the entries in both docs, never in neither.
 Stdlib only; no CLI — imported by `ctx_adapter.py`.
 """
 from __future__ import annotations
@@ -34,7 +39,8 @@ SKIP_FILES = {"INDEX.md", "README.md", "SESSION_INDEX.md"}
 HEADING = re.compile(r"^(#{1,6}) +(.*?)\s*$")
 DATED = re.compile(r"^- (\d{4}-\d{2}-\d{2})\b")
 FENCE = re.compile(r"^(```|~~~)")
-Write = Callable[[str, str], None]
+Write = Callable[[str, str], None]   # (key, whole text) — replaces a doc through ctx
+Remove = Callable[[str, str], None]  # (key, exact text) — removes it from the doc's current text, once
 
 
 def split_doc(text: str) -> tuple[list[str], list[str]]:
@@ -85,15 +91,50 @@ def section_span(body: list[str], name: str) -> Optional[tuple[int, int]]:
     return found[hits[0]][0] + 1, end
 
 
-def entries(body: list[str], start: int, end: int) -> list[int]:
-    """Indices of the entry lines in body[start:end]: neither blank nor inside an HTML comment."""
-    out, comment = [], False
+def classify(body: list[str], start: int, end: int) -> list[str]:
+    """One tag per line of body[start:end]: `blank`, `comment` (inside an HTML comment), `fence` (a fence line or a
+    line inside fenced code) or `text`."""
+    tags, comment, fence = [], False, None
     for i in range(start, end):
-        text = body[i].strip()
-        if comment or text.startswith("<!--"):
+        line = body[i]
+        text = line.strip()
+        mark = FENCE.match(line)
+        if comment:
+            tags.append("comment")
+            comment = "-->" not in text
+        elif fence is not None:
+            tags.append("fence")
+            if mark and line.startswith(fence):
+                fence = None
+        elif mark:
+            tags.append("fence")
+            fence = mark.group(1)
+        elif text.startswith("<!--"):
+            tags.append("comment")
             comment = "-->" not in text
         elif text:
-            out.append(i)
+            tags.append("text")
+        else:
+            tags.append("blank")
+    return tags
+
+
+def blocks(body: list[str], start: int, end: int) -> list[tuple[int, int]]:
+    """(first line, last line) of every entry in body[start:end], in document order. An entry starts at a dated line
+    (`- YYYY-MM-DD …`), or at an unindented line when the section has no dated line, and runs to the line before
+    the next entry start, minus trailing blank lines (and, for the last entry, trailing HTML comments). Fenced
+    lines never start an entry; text before the first entry is no entry."""
+    tags = classify(body, start, end)
+    text_lines = [start + k for k, tag in enumerate(tags) if tag == "text"]
+    dated = any(DATED.match(body[i]) for i in text_lines)
+    starts = [i for i in text_lines
+              if (DATED.match(body[i]) if dated else not body[i][:1].isspace())]
+    out = []
+    for n, first in enumerate(starts):
+        last = (starts[n + 1] if n + 1 < len(starts) else end) - 1
+        while last > first and tags[last - start] in (("blank",) if n + 1 < len(starts) else ("blank", "comment")):
+            last -= 1
+        out.append((first, last))
     return out
 
 
@@ -105,43 +146,60 @@ def order_of(lines: list[str], default: str) -> str:
     return default
 
 
-def split_old(text: str, section: str, keep: int, default: str) -> Optional[tuple[str, list[str], str]]:
-    """(the doc text without its old entries, the moved lines in their original order, the section's order); None
-    when the section is missing or ambiguous, or has no more than `keep` entries."""
+class Cut:
+    """What leaves a doc: `old` is the exact text to remove from the source (one contiguous block, its line break
+    included), `moved` the entries in their original order, one list of lines each, `order` the section's order."""
+
+    def __init__(self, old: str, moved: list[list[str]], order: str):
+        self.old, self.moved, self.order = old, moved, order
+
+
+def split_old(text: str, section: str, keep: int, default: str) -> Optional[Cut]:
+    """The cut that leaves `keep` entries in `section`, on entry boundaries only; None when the section is missing
+    or ambiguous, or has no more than `keep` entries."""
     head, body = split_doc(text)
     span = section_span(body, section)
     if span is None:
         return None
-    found = entries(body, *span)
-    order = order_of([body[i] for i in found], default)
+    found = blocks(body, *span)
+    order = order_of([body[first] for first, _ in found], default)
     old = found[keep:] if order == "newest-first" else found[: max(len(found) - keep, 0)]
     if not old:
         return None
-    gone = set(old)
-    kept = [line for i, line in enumerate(body) if i not in gone]
-    return "\n".join(head + kept), [body[i] for i in old], order
+    first, last = old[0][0], old[-1][1]
+    block = "\n".join(body[first:last + 1])
+    # the line break after the block goes with it; at the very end of a doc, the one before it
+    cut = block + "\n" if last + 1 < len(body) else ("\n" + block if first > 0 else block)
+    return Cut(cut, [body[a:b + 1] for a, b in old], order)
 
 
-def add_to_archive(existing: Optional[str], moved: list[str], section: str, order: str, key: str, domain: str,
-                   today: str) -> str:
+def add_to_archive(existing: Optional[str], moved: list[list[str]], section: str, order: str, key: str, domain: str,
+                   today: str) -> Optional[str]:
     """The archive doc's text with `moved` added under `## section`: before the first entry for a newest-first
-    section, after the last for an oldest-first one. A new archive doc is `type: log` with the source's domain."""
+    section, after the last for an oldest-first one. An entry the archive already holds, whole, is skipped (a
+    pass that was cut short between its two writes); None when nothing is left to add. A new archive doc is
+    `type: log` with the source's domain."""
+    have = "\n" + (existing or "") + "\n"
+    fresh = [e for e in moved if "\n" + "\n".join(e) + "\n" not in have]
+    if not fresh:
+        return None
+    lines = [line for e in fresh for line in e]
     if existing is None:
         return (f"---\ntitle: Log of {key}\ntype: log\ndomain: {domain}\nstatus: active\nlog_section: {section}\n"
-                f"updated: {today}\n---\n\n# Log of {key}\n\n## {section}\n\n" + "\n".join(moved) + "\n")
+                f"updated: {today}\n---\n\n# Log of {key}\n\n## {section}\n\n" + "\n".join(lines) + "\n")
     head, body = split_doc(existing)
     span = section_span(body, section)
     if span is None:  # the archive has no such section yet (or twice): a new one at the end
         while body and not body[-1].strip():
             body.pop()
-        return "\n".join(head + body + ["", f"## {section}", "", *moved, ""])
-    found = entries(body, *span)
+        return "\n".join(head + body + ["", f"## {section}", "", *lines, ""])
+    found = blocks(body, *span)
     if not found:  # an empty section: one blank line between the heading and the entries
-        body[span[0]:span[0]] = ([""] if span[0] < len(body) and body[span[0]].strip() else []) + moved
+        body[span[0]:span[0]] = ([""] if span[0] < len(body) and body[span[0]].strip() else []) + lines
     elif order == "newest-first":
-        body[found[0]:found[0]] = moved
+        body[found[0][0]:found[0][0]] = lines
     else:
-        body[found[-1] + 1:found[-1] + 1] = moved
+        body[found[-1][1] + 1:found[-1][1] + 1] = lines
     return "\n".join(head + body)
 
 
@@ -173,14 +231,25 @@ def no_field_note(key: str, size: int) -> str:
             "entries move to archive/), or split the doc by hand")
 
 
-def rotate_store(root: Path, write: Write, size_guard: int = SIZE_GUARD, keep: int = KEEP_LOG,
-                 default_order: str = "newest-first", today: Optional[str] = None) -> list[str]:
-    """Rotate every oversized `type: log` doc that has a `log_section:`; returns the report lines (`archived: …`
-    per rotation, the add-the-field note per doc without the field, `log: … — <why>` for one left alone).
-    `write(key, text)` replaces a doc through ctx and raises OSError when ctx refuses."""
+def archive_key(key: str) -> str:
+    """Where a log doc's old entries go: `archive/<folder>-<slug>-log`, the folder path joined with dashes
+    (`ops/rot` -> `archive/ops-rot-log`; a doc at the store root -> `archive/<slug>-log`), so two docs of one name in
+    two folders never share an archive."""
+    return "archive/" + key.replace("/", "-") + "-log"
+
+
+def rotate_store(root: Path, write: Write, remove: Remove, size_guard: int = SIZE_GUARD, keep: int = KEEP_LOG,
+                 default_order: str = "newest-first", today: Optional[str] = None,
+                 only: Optional[str] = None) -> list[str]:
+    """Rotate every oversized `type: log` doc that has a `log_section:` (only the doc `only` names, when given);
+    returns the report lines (`archived: …` per rotation, the add-the-field note per doc without the field,
+    `log: … — <why>` for one left alone). `write(key, text)` replaces a doc through ctx and `remove(key, old)`
+    removes `old` from the doc's current text through ctx; both raise OSError when ctx refuses."""
     today = today or _date.today().isoformat()
     report: list[str] = []
     for key, path in log_docs(root, size_guard):
+        if only is not None and key != only:
+            continue
         text = path.read_text(encoding="utf-8")
         meta = fields(text)
         section = meta.get("log_section", "")
@@ -192,16 +261,17 @@ def rotate_store(root: Path, write: Write, size_guard: int = SIZE_GUARD, keep: i
             report.append(f"log: {key} is over the size guard but its `## {section}` section is missing, "
                           f"ambiguous or holds no more than {keep} entries — nothing to rotate")
             continue
-        rest, moved, order = cut
-        target = f"archive/{key.rsplit('/', 1)[-1]}-log"
+        target = archive_key(key)
         target_path = root / f"{target}.md"
         try:
             existing = target_path.read_text(encoding="utf-8") if target_path.is_file() else None
-            write(target, add_to_archive(existing, moved, section, order, key, meta.get("domain", "") or "archive",
-                                         today))
-            write(key, rest)
+            added = add_to_archive(existing, cut.moved, section, cut.order, key, meta.get("domain", "") or "archive",
+                                   today)
+            if added is not None:
+                write(target, added)
+            remove(key, cut.old)
         except OSError as e:
             report.append(f"log: {key} not rotated — {e}")
             continue
-        report.append(f"archived: {len(moved)} log entries of {key} → {target}")
+        report.append(f"archived: {len(cut.moved)} log entries of {key} → {target}")
     return report
