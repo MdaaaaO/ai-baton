@@ -100,6 +100,7 @@ listed below for completeness, but their single source of truth is `docs/packagi
 | `PR_REVIEW_AUTO` | `0` | `skills/pr-review/scripts/submit-review.sh` | `1` takes the trivial-PR auto-approve path (still refused unless `auto_approve.mode == "live"`) | internal |
 | `PR_REVIEW_AUTO_COMMENT` | `0` | `skills/pr-review/scripts/submit-review.sh` | `1` takes the unattended auto-COMMENT path for direct review requests (still refused unless the event is `COMMENT`, `auto_comment.mode == "live"`, and the PR is not the user's own) | internal |
 | `PR_REVIEW_ALLOW_CLOSED` | `0` | `skills/pr-review/scripts/submit-review.sh` | `1` allows posting a review on a merged/closed PR (never APPROVE/REQUEST_CHANGES there) | internal |
+| `PR_REVIEW_ALLOW_OWN` | `0` | `skills/pr-review/scripts/submit-review.sh` | `1` lets `--auto-comment` post a COMMENT on the user's own PR, only when the user asked for reviews of their own PRs (a lane that watches every PR of an epic); never APPROVE/REQUEST_CHANGES there | internal |
 | `PR_REVIEW_FETCH_CONCURRENCY` | `6` | `skills/pr-review/scripts/fetch-context.sh` | how many blob fetches `fetch-context.sh` runs at once | user-facing |
 | `PR_REVIEW_FETCH_RETRY_DELAY` | `2` (seconds) | `skills/pr-review/scripts/fetch-context.sh` | base backoff before retrying a rate-limited blob fetch (tests set it near 0) | test-only |
 | `PR_SCAN_OUT` | `kit_profile.py scratch --stable pr-scan` | `skills/pr-scan/pr-scan.sh` | override pr-scan's output directory (shared across sweeps by default) | internal |

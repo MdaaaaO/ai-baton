@@ -71,7 +71,8 @@ last look, not a second triage. One `AskUserQuestion`: **Submit (Recommended)** 
 bash $BATON/skills/pr-review/scripts/submit-review.sh submit … --confirm <digest>
 ```
 The script refuses a closed/merged PR (set `PR_REVIEW_ALLOW_CLOSED=1` for a post-merge **COMMENT** with inline
-anchors; never APPROVE/REQUEST_CHANGES post-merge — a PR can merge mid-walk), a moved head, a digest mismatch, a
+anchors; never APPROVE/REQUEST_CHANGES post-merge — a PR can merge mid-walk), an unattended COMMENT on the user's
+own PR (set `PR_REVIEW_ALLOW_OWN=1` only when the user asked for their own PRs to be reviewed; COMMENT only), a moved head, a digest mismatch, a
 path outside the diff, and a second submit of the same digest; it appends `reviewed` to the ledger and prints
 `status: submitted · review <id> · url`. `uncertain` → check GitHub before any retry. `failed` → fix the request
 (usually a line outside a hunk) and preview again. The body gets no footer (config `footer` is empty by owner
