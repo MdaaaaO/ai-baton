@@ -2,8 +2,8 @@
 name: pr-review
 description: "Reviews another's PR as the user: snapshot, trap KB, Opus pass, walks findings, posts one review, replies in threads; a trivial PR auto-approves via Sonnet, an opt-in auto-COMMENT path skips the walk. Use when reviewing a PR pr-scan surfaces or the user names; never the user's own."
 metadata:
-  version: "44"
-  updated: "2026-10-15"
+  version: "45"
+  updated: "2026-10-29"
   reviewed: "2026-10-15"
   facts: "systems.jira,systems.datalake,systems.slack,tracker.mcp_tools.search,datalake.mcp_tools.probe"
 argument-hint: "<owner/repo> <pr> [--deep] [--post] [--local]"
@@ -78,7 +78,8 @@ them `A`). The whole contract: `reference/auto-approve.md`.
 
 ## Unattended auto-COMMENT path for direct review requests *(`review-runner` + main session; opt-in)*
 
-For PRs `pr-scan` flags `C` (`auto_comment` in `config.json`, `mode` off by default): steps 1–4 run unchanged,
+For PRs `pr-scan` flags `C` (`auto_comment` in `config.json`, `mode` off by default; the user's own PRs only with
+`PR_REVIEW_ALLOW_OWN=1`, at their explicit ask, COMMENT only): steps 1–4 run unchanged,
 only the walk and the Submit prompt are skipped, and only for a `COMMENT` with no STOP finding — or an `APPROVE`
 on a clean sheet when `auto_comment.approve_on_clean` is `live` (`shadow` posts the COMMENT and ledgers the
 verdict). Clean-sheet definition: `reference/runner.md` § `--unattended` 2a; spawn, `on_stop`, modes, logging,
