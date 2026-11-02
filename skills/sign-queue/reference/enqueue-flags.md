@@ -46,7 +46,10 @@ skipped as "already committed").
     it, a plain `rebase --onto` is a no-op and leaves the earlier unsigned commits unsigned. The job always
     force-rebases (`-S -f`) and then verifies every commit about to be pushed (`%G?`), refusing — parked,
     `UNSIGNED <sha>` — on N (none) or B (bad); U and E carry a signature this host cannot fully check, and the
-    drain reports them.
+    drain reports them. The check covers only commits not yet on the remote (`--not --remotes=origin`): a commit
+    any `origin/*` ref of the worktree already reaches — GitHub's own merge commit on the base branch, which a host
+    without gpg reads as N — is never this job's to sign or refuse (#656); `git fetch origin` first when the
+    refs lag.
 - `--files <path>` — one literal path per flag (never a glob or pathspec magic; `a*.txt` is that file). Given
   exactly once, the legacy space-separated form still works: `--files "a b"` is one path when `a b` exists or is
   tracked, otherwise split into `a` and `b`. A `git rm`-staged deletion is dropped from the add line (already in

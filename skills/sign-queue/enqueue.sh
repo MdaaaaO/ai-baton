@@ -420,7 +420,11 @@ tmp="$job.tmp.$$"
     # revs on its own line: a `for … in $(cmd)` list does not propagate cmd'"'"'s exit under `set -e` (the shell
     # only checks the exit of the whole pipeline/expansion at the point of the simple command it feeds), so a
     # bad OLDTIP (e.g. an unfetched --force-with-lease sha) would otherwise empty the loop instead of failing.
-    echo 'revs=$(git -C "$WT" log --format="%H:%G?" "$OLDTIP..HEAD")'
+    # --not --remotes=origin: only the commits this push ADDS are checked. A commit some origin/* ref already
+    # reaches — GitHub's own web-flow merge commit on the base branch a rebase just crossed, say — is not this
+    # job's to sign or refuse: a host without gpg reads its GPG signature as N and parked the job UNSIGNED for a
+    # commit it never made (#656). A lagging remote-tracking ref only widens the check, never narrows it.
+    echo 'revs=$(git -C "$WT" log --format="%H:%G?" "$OLDTIP..HEAD" --not --remotes=origin)'
     echo 'for sc in $revs; do'
     echo '  sig=${sc##*:}'
     echo '  # N = no signature, B = bad one: never push those. G/U/E carry a signature (U = key not in the allowed'
