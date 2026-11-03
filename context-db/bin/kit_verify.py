@@ -44,8 +44,8 @@ under a renamed kind (`kb.py migrate` moves them).
     prints them, then every unit's body lines and bytes largest first, without running the rest of the checks).
 With --stale N also lists units whose `reviewed` is older than N days (warning, not an error). Two more
 non-blocking notes, always on: a description that names no trigger ("Use when …", or plain "when …") or reads
-in the first person, and a `reviewed:` date older than the file's last committed edit (`--no-git` skips the
-latter — no git history to compare against).
+in the first person, and a `reviewed:` day the file's last commit postdates once that day has ended everywhere on
+Earth (`--no-git` skips the latter — no git history to compare against).
 
 `--no-env` is the ENVIRONMENT-FREE validator: everything above except the env-store checks, which are
 skipped and listed — it passes on a bare `git clone` with no `.context/` at all, so a contributor's PR (and CI,
@@ -60,7 +60,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import frontmatter as fmt
@@ -572,18 +572,26 @@ def check_reviewed_freshness(kit: Path, rel, reviewed: str, warn: list[str]) -> 
     """`reviewed:` is a claim that someone read the unit as of that date — stale the moment the file changes
     after it without a bump. `git log -1` on the committed history is the only source that is not itself
     `reviewed:` (a unit cannot attest its own freshness); a path git has never heard of (a new file, or no
-    repository at all — a temp fixture in a test) answers nothing, so it is silently skipped, never guessed at."""
+    repository at all — a temp fixture in a test) answers nothing, so it is silently skipped, never guessed at.
+    The commit stamp is an instant and `reviewed:` a calendar day with no zone, so they compare only once that day
+    has ended everywhere on Earth (UTC-12: midnight after `reviewed`, plus 12 hours) — a squash merge GitHub stamps
+    in UTC late on the evening the unit was reviewed is that day's work, not a later edit (#667)."""
     try:
-        out = subprocess.run(["git", "-C", str(kit), "log", "-1", "--format=%cs", "--", str(rel)],
+        day = datetime.strptime(reviewed, DATE).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return  # check_unit reports the shape; nothing to compare against
+    try:
+        out = subprocess.run(["git", "-C", str(kit), "log", "-1", "--format=%ct", "--", str(rel)],
                               capture_output=True, text=True, timeout=10)
     except OSError:
         return
     last = out.stdout.strip()
-    if out.returncode != 0 or not last:
+    if out.returncode != 0 or not last.isdigit():
         return
-    if last > reviewed:
-        warn.append(f"{rel}: reviewed {reviewed} predates the last edit {last} — bump metadata.reviewed "
-                     "(or metadata.version too, if the content itself changed)")
+    if int(last) >= (day + timedelta(days=1, hours=12)).timestamp():
+        stamp = datetime.fromtimestamp(int(last), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        warn.append(f"{rel}: reviewed {reviewed} predates the last edit {stamp} (past the end of that day anywhere "
+                     "on Earth) — bump metadata.reviewed (or metadata.version too, if the content itself changed)")
 
 
 # `kit_profile.py get <key>` / `kb.py get <key>` — the one read API every unit body uses (docs/env-facts.md):

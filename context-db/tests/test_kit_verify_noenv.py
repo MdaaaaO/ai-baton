@@ -517,10 +517,12 @@ class DescriptionShape(unittest.TestCase):
 
 
 class ReviewedFreshness(unittest.TestCase):
-    """`reviewed:` older than the file's last committed edit is a warning; --no-git and an unknown path
-    (no git repository, or a file git has never seen) are both silently skipped, never guessed at."""
+    """`reviewed:` older than the file's last committed edit is a warning — once that day has ended everywhere on
+    Earth (#667: a squash merge GitHub stamps in UTC on the evening of the reviewed day is not a later edit);
+    --no-git and an unknown path (no git repository, or a file git has never seen) are both silently skipped,
+    never guessed at."""
 
-    def repo(self, tmp: str, rel: str = "skill.md", content: str = "x") -> Path:
+    def repo(self, tmp: str, rel: str = "skill.md", content: str = "x", when: str = "2026-09-20T12:00:00+0000") -> Path:
         kit = Path(tmp)
         git_env = hermetic_env(kit)  # every git call below ignores the host's own commit.gpgsign / gpg.format
         for args in (["init", "-q"], ["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"]):
@@ -529,7 +531,7 @@ class ReviewedFreshness(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
         subprocess.run(["git", "add", rel], cwd=kit, check=True, capture_output=True, env=git_env)
-        commit_env = {**git_env, "GIT_AUTHOR_DATE": "2026-09-20T12:00:00", "GIT_COMMITTER_DATE": "2026-09-20T12:00:00"}
+        commit_env = {**git_env, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
         subprocess.run(["git", "commit", "-q", "-m", "x"], cwd=kit, check=True, capture_output=True, env=commit_env)
         return kit
 
@@ -545,6 +547,39 @@ class ReviewedFreshness(unittest.TestCase):
             kit = self.repo(tmp)
             warn: list[str] = []
             kit_verify.check_reviewed_freshness(kit, Path("skill.md"), "2026-09-25", warn)
+            self.assertEqual(warn, [])
+
+    def test_a_utc_stamp_on_the_evening_of_the_reviewed_day_is_silent(self):
+        """The #667 case: reviewed and squash-merged on the same local evening; GitHub stamps the merge in UTC,
+        already the next calendar day there — still before that day ended everywhere on Earth."""
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self.repo(tmp, when="2026-09-21T11:59:00+0000")
+            warn: list[str] = []
+            kit_verify.check_reviewed_freshness(kit, Path("skill.md"), "2026-09-20", warn)
+            self.assertEqual(warn, [])
+
+    def test_a_commit_past_the_end_of_the_reviewed_day_everywhere_warns_with_the_utc_stamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self.repo(tmp, when="2026-09-21T12:00:00+0000")
+            warn: list[str] = []
+            kit_verify.check_reviewed_freshness(kit, Path("skill.md"), "2026-09-20", warn)
+            self.assertEqual(len(warn), 1, warn)
+            self.assertIn("reviewed 2026-09-20 predates the last edit 2026-09-21 12:00 UTC", warn[0])
+            self.assertIn("anywhere on Earth", warn[0])
+
+    def test_the_authoring_row_states_the_rule(self):
+        # docs/authoring.md's `metadata.reviewed` row is what an author reads when the warning fires: it names
+        # the moment the check uses and the flag that skips it
+        rows = (KIT / "docs" / "authoring.md").read_text(encoding="utf-8").splitlines()
+        row = next(line for line in rows if line.startswith("| `metadata.reviewed` |"))
+        for phrase in ("anywhere on Earth", "`reviewed` + 1 day, 12:00 UTC", "`--no-git`"):
+            self.assertIn(phrase, row)
+
+    def test_an_unparsable_reviewed_is_left_to_the_shape_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = self.repo(tmp)
+            warn: list[str] = []
+            kit_verify.check_reviewed_freshness(kit, Path("skill.md"), "soon", warn)
             self.assertEqual(warn, [])
 
     def test_a_path_git_has_never_heard_of_is_silently_skipped(self):
