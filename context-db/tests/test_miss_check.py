@@ -126,6 +126,52 @@ class TheDoc(unittest.TestCase):
             under = doc.read_text(encoding="utf-8").split("\n## Log\n", 1)[1]
             self.assertRegex(under.lstrip(), r"^- \d{4}-\d{2}-\d{2} — probe entry")
 
+    def test_the_log_names_the_migration_of_a_doc_scaffolded_before_the_field(self):
+        """#666: a doc scaffolded before `log_section:` existed has no `## Log` heading and "scaffold it once" means it
+        is never re-scaffolded, so the doc says what the documented write exits with and the one-time migration."""
+        text = section("The log")
+        self.assertIn("`NO_SUCH_SECTION`", text)
+        self.assertIn("`ctx_fm` sets `log_section` to `Log`", text)
+        self.assertIn("`ctx_insert` puts a `## Log` line", text)
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_doc_scaffolded_before_the_field_takes_the_documented_migration_then_the_write(self):
+        """#666: the pre-field scaffold (frontmatter without `log_section`, entries at body level) refuses the
+        documented write with `NO_SUCH_SECTION`; `fm log_section Log` plus `insert "## Log"` before the first entry,
+        the migration the doc names, and the same write lands under the heading."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Path(tmp) / "store"
+            store.mkdir()
+            env = hermetic_env(tmp)
+            env.update(CONTEXT_ROOT=str(store), KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1", CTX_ADAPTER_NO_SYNC="1")
+
+            def adapter(*args: str) -> subprocess.CompletedProcess:
+                return subprocess.run([sys.executable, str(BIN / "ctx_adapter.py"), *args], env=env,
+                                      capture_output=True, text=True, timeout=120)
+
+            r = adapter("adopt")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            doc = store / "kit-health" / "miss-check-log.md"
+            doc.parent.mkdir(parents=True)
+            doc.write_text("---\ntitle: miss-check-log\ntype: log\ndomain: kit-health\ntags: []\nstatus: active\n"
+                           "updated: 2026-10-30\n---\n\n# miss-check-log\n\n<!-- Append-only log. Newest first. -->\n\n"
+                           "- 2026-10-30 — first entry\n", encoding="utf-8")
+            r = adapter("ctx", "log", "kit-health/miss-check-log", "probe entry", "--section", "Log")
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("NO_SUCH_SECTION", r.stdout + r.stderr)
+            r = adapter("ctx", "fm", "kit-health/miss-check-log", "log_section", "Log")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            lines = doc.read_text(encoding="utf-8").split("\n")
+            first_entry = next(i for i, line in enumerate(lines, 1) if line.startswith("- "))
+            r = adapter("ctx", "insert", "kit-health/miss-check-log", "## Log", "--line", str(first_entry - 1))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            r = adapter("ctx", "log", "kit-health/miss-check-log", "probe entry", "--section", "Log")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            text = doc.read_text(encoding="utf-8")
+            self.assertIn("\nlog_section: Log\n", text.split("\n---\n", 1)[0] + "\n")
+            under = text.split("\n## Log\n", 1)[1]
+            self.assertRegex(under.lstrip(), r"^- \d{4}-\d{2}-\d{2} — probe entry\n- 2026-10-30 — first entry")
+
 
 class TheWiring(unittest.TestCase):
     def skill(self, name: str) -> str:
