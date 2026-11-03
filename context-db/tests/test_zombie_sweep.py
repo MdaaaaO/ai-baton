@@ -4,8 +4,10 @@ from process to session comes from the heartbeat logs' `start name=<name> owner=
 is a throw-away log dir under TMPDIR, a throw-away .context/ with rows, and sleep processes standing in for
 the owners (a shell script named `node` carries a claude-shaped comm — a script's comm is its own basename —
 a plain sleep does not). Every verdict
-the script can print is covered once, and --kill must reach exactly the ZOMBIE owners — never a live,
-unregistered, stale, reused or dead one, nor the sweep's own ancestry. Run: make -C .claude/context-db test."""
+the script can print is covered once, the verdict is per owner across every log that names it (a handoff, then
+a new session registered in the same pane: the review finding on #665), and --kill must reach exactly the ZOMBIE
+owners — never a live, unregistered, stale, reused or dead one, never one with an active row, nor the sweep's
+own ancestry. Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import os
 import shutil
@@ -117,6 +119,33 @@ class ZombieSweepFixture(unittest.TestCase):
         (self.logs / "heartbeat-nostart.log").write_text("nothing here\n")   # → UNMAPPED
         return owners
 
+    def build_shared_owner_cases(self) -> dict[str, subprocess.Popen]:
+        """One owner, several logs: what a handoff followed by a new registration in the same pane, an earlier
+        key, or a log from before a reboot leave behind. The ended log sorts first in every pair, the shape the
+        review finding on #665 named."""
+        owners = {}
+        loop = self.loop.pid
+        owners["pair-live"] = self.spawn("node")                     # A ended, then B registered → LIVE
+        self.log("aa-ended", "aa-ended", owners["pair-live"].pid, loop)
+        self.row("aa-ended", "ended")
+        self.log("ab-active", "ab-active", owners["pair-live"].pid, loop)
+        self.row("ab-active", "active")
+        owners["pair-unreg"] = self.spawn("node")                    # A ended, B has no row → UNREGISTERED
+        self.log("ba-ended", "ba-ended", owners["pair-unreg"].pid, loop)
+        self.row("ba-ended", "ended")
+        self.log("bb-none", "bb-none", owners["pair-unreg"].pid, loop)
+        owners["pair-zombie"] = self.spawn("node")                   # A ended, B archived → one ZOMBIE, both named
+        self.log("ca-ended", "ca-ended", owners["pair-zombie"].pid, loop)
+        self.row("ca-ended", "ended")
+        self.log("cb-arch", "cb-arch", owners["pair-zombie"].pid, loop)
+        self.row("cb-arch", "ended", archived="cb-arch-20261101.md")
+        owners["stale-beside"] = self.spawn("node")                  # a dead-loop log (row active) beside a
+        self.log("da-old", "da-old", owners["stale-beside"].pid, self.gone())   # live-loop log (row ended):
+        self.row("da-old", "active")                                            # only the live loop vouches
+        self.log("db-ended", "db-ended", owners["stale-beside"].pid, loop)      # for a mapping → ZOMBIE
+        self.row("db-ended", "ended")
+        return owners
+
 
 class ListMode(ZombieSweepFixture):
     def test_every_verdict_and_the_summary(self):
@@ -128,7 +157,7 @@ class ListMode(ZombieSweepFixture):
         self.assertIn(f"ZOMBIE z-ended owner={pid['z-ended']} comm=node row=ended", out)
         self.assertIn(f"ZOMBIE z-arch owner={pid['z-arch']} comm=node row=archived", out)
         self.assertIn(f"LIVE l-active owner={pid['l-active']} row=active", out)
-        self.assertIn(f"UNREGISTERED u-none owner={pid['u-none']}", out)
+        self.assertIn(f"UNREGISTERED u-none owner={pid['u-none']} row=none", out)
         self.assertTrue(any(line.startswith(f"STALE s-stale owner={pid['s-stale']} ") for line in out), out)
         self.assertIn(f"REUSED r-reused owner={pid['r-reused']} comm=sleep", out)
         self.assertTrue(any(line.startswith("DEAD d-dead owner=") for line in out), out)
@@ -136,6 +165,21 @@ class ListMode(ZombieSweepFixture):
         # the second log for z-ended's owner adds no second verdict
         self.assertEqual(sum(1 for line in out if " z-ended " in line), 1, out)
         self.assertEqual(out[-1], "zombie-sweep: 2 zombie(s), 1 live, 1 unregistered, 1 stale, 1 reused, 1 dead, 1 unmapped")
+        for name, p in owners.items():
+            self.assertIsNone(p.poll(), f"list mode must not touch any process ({name})")
+
+    def test_one_verdict_per_owner_across_its_logs(self):
+        owners = self.build_shared_owner_cases()
+        r = self.sweep()
+        out = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        pid = {k: v.pid for k, v in owners.items()}
+        self.assertIn(f"LIVE aa-ended,ab-active owner={pid['pair-live']} row=ended,active", out)
+        self.assertIn(f"UNREGISTERED ba-ended,bb-none owner={pid['pair-unreg']} row=ended,none", out)
+        self.assertIn(f"ZOMBIE ca-ended,cb-arch owner={pid['pair-zombie']} comm=node row=ended,archived", out)
+        self.assertIn(f"ZOMBIE db-ended owner={pid['stale-beside']} comm=node row=ended", out)
+        self.assertFalse(any("da-old" in line for line in out), f"a dead-loop log beside a live one is ignored: {out}")
+        self.assertEqual(out[-1], "zombie-sweep: 2 zombie(s), 1 live, 1 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped")
         for name, p in owners.items():
             self.assertIsNone(p.poll(), f"list mode must not touch any process ({name})")
 
@@ -172,6 +216,20 @@ class KillMode(ZombieSweepFixture):
         for name in ("l-active", "u-none", "s-stale", "r-reused"):
             self.assertIsNone(owners[name].poll(), f"--kill must never reach {name}'s owner")
         self.assertIsNone(self.loop.poll(), "the heartbeat loops are never a target — they end the rows themselves")
+
+    def test_kill_spares_an_owner_with_an_active_or_missing_row(self):
+        owners = self.build_shared_owner_cases()
+        r = self.sweep("--kill")
+        out = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        pid = {k: v.pid for k, v in owners.items()}
+        self.assertIn(f"KILLED ca-ended,cb-arch owner={pid['pair-zombie']} comm=node row=ended,archived", out)
+        self.assertIn(f"KILLED db-ended owner={pid['stale-beside']} comm=node row=ended", out)
+        for name in ("pair-zombie", "stale-beside"):
+            self.assertIsNotNone(owners[name].wait(timeout=10), f"{name}'s owner must have been ended")
+        for name in ("pair-live", "pair-unreg"):
+            self.assertIsNone(owners[name].poll(), f"--kill must never reach {name}'s owner: a row of its is not ended")
+        self.assertIsNone(self.loop.poll(), "the heartbeat loops are never a target")
 
     def test_kill_never_targets_the_scripts_own_ancestry(self):
         # a claude-shaped process (a script named `node`) whose own heartbeat log maps it to an ended row runs
