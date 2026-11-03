@@ -1,5 +1,6 @@
 """done_when.py — a ticket's `## Done when` block (stable DW-<n> ids with a `· check:`), which of them a PR body
-covers, and the probe that runs the command checks. Pure text plus throwaway temp dirs; no env store touched.
+covers (per ticket, through the `(<key>)` qualifier, when one PR closes several), and the probe that runs the
+command checks. Pure text plus throwaway temp dirs; no env store touched.
 Run: make -C .claude/context-db test."""
 from __future__ import annotations
 import os
@@ -150,6 +151,40 @@ class Coverage(unittest.TestCase):
         b = f"## Verified\n- DW-1 · {CMD}\n\n## Not in this PR\n- DW-2 · {CMD}\n\nsession `x`\n"
         self.assertEqual(self.gap(b)[0], ["DW-2", "DW-3"])
 
+    # one PR closing two tickets whose ids collide: each line names its ticket, `DW-1 (#654) · …`
+    TWO = f"- DW-1 (#654) · {CMD}\n- DW-1 (#650) · {CMD}\n- DW-2 (#650) · {CMD}\n- DW-3 · {CMD}"
+
+    def test_a_line_qualified_with_this_key_covers_and_another_key_is_skipped(self):
+        self.assertEqual(dw.coverage(self.crits, body(self.TWO), key="#654"), (["DW-2"], [], []))
+        self.assertEqual(dw.coverage(self.crits, body(self.TWO), key="#650"), ([], [], []))
+
+    def test_without_a_key_a_qualified_line_covers_like_an_unqualified_one(self):
+        self.assertEqual(self.gap(body(self.TWO)), ([], [], []))
+
+    def test_a_qualified_limit_line_follows_the_key_too(self):
+        b = body(f"- DW-1 · {CMD}\n- DW-3 · {CMD}", limit="DW-2 (#650) · only checkable at the first real close")
+        self.assertEqual(dw.coverage(self.crits, b, key="#654"), (["DW-2"], [], []))
+        self.assertEqual(dw.coverage(self.crits, b, key="#650"), ([], ["DW-2"], []))
+
+    def test_the_key_in_the_qualifier_is_never_evidence(self):
+        b = body(f"- DW-1 (#654) · it works\n- DW-2 · {CMD}\n- DW-3 · {CMD}")
+        self.assertEqual(dw.coverage(self.crits, b, key="#654")[0], ["DW-1"])
+        self.assertEqual(self.gap(b)[0], ["DW-1"])
+
+    def test_an_undefined_id_qualified_with_another_key_is_not_reported(self):
+        b = body(f"- DW-1 · {CMD}\n- DW-2 · {CMD}\n- DW-3 · {CMD}\n- DW-9 (#650) · {CMD}")
+        self.assertEqual(dw.coverage(self.crits, b, key="#654"), ([], [], []))
+        self.assertEqual(self.gap(b), ([], [], ["DW-9"]))
+
+    def test_a_jira_shaped_key_qualifies_too(self):
+        b = body(f"- DW-1, DW-2 (KEY-123) · {CMD}\n- DW-3 (KEY-456) · {CMD}")
+        self.assertEqual(dw.coverage(self.crits, b, key="KEY-123")[0], ["DW-3"])
+        self.assertEqual(dw.coverage(self.crits, b, key="KEY-456")[0], ["DW-1", "DW-2"])
+
+    def test_keys_in_lists_every_key_the_body_uses_once(self):
+        self.assertEqual(dw.keys_in(body(self.TWO, limit="DW-3 (KEY-456) · later")), ["#654", "#650", "KEY-456"])
+        self.assertEqual(dw.keys_in(body(f"- DW-1 · {CMD}")), [])
+
 
 class Cli(unittest.TestCase):
     def setUp(self):
@@ -227,6 +262,20 @@ class Cli(unittest.TestCase):
         p = run("coverage", "--ticket", str(self.ticket), "--body", "-", stdin=body(f"- DW-1 · {CMD}"))
         self.assertEqual(p.returncode, 3)
         self.assertEqual(p.stdout, "DONE WHEN: gap DW-2, DW-3\n")
+
+    def test_coverage_key_counts_this_tickets_lines_only(self):
+        b = self.body_file(body(f"- DW-1 (#654) · {CMD}\n- DW-1, DW-2 (#650) · {CMD}\n- DW-3 · {CMD}"))
+        p = run("coverage", "--ticket", str(self.ticket), "--body", b, "--key", "#654")
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (3, "DONE WHEN: gap DW-2\n", ""))
+        p = run("coverage", "--ticket", str(self.ticket), "--body", b, "--key", "#650")
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, "DONE WHEN: covered\n", ""))
+
+    def test_coverage_without_key_counts_every_line_and_names_the_keys_on_stderr(self):
+        b = self.body_file(body(f"- DW-1 (#654) · {CMD}\n- DW-1, DW-2 (#650) · {CMD}\n- DW-3 · {CMD}"))
+        p = run("coverage", "--ticket", str(self.ticket), "--body", b)
+        self.assertEqual((p.returncode, p.stdout), (0, "DONE WHEN: covered\n"))
+        self.assertIn("#654, #650", p.stderr)
+        self.assertIn("--key", p.stderr)
 
 
 class Probe(unittest.TestCase):

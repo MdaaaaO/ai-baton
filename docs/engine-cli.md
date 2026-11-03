@@ -952,7 +952,7 @@ Usage:
       One line per criterion: `DW-<n>`, `command` or `manual`, the check (a command is printed without its
       backticks), the criterion — tab-separated. Reads every `## Done when` section in the text (pass the body,
       then the comments, oldest first, as `sizing.py` does).
-  done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | ->
+  done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | -> [--key <key>]
       Prints exactly `DONE WHEN: covered` or `DONE WHEN: gap DW-<n>[, DW-<n>…]`. An id is covered when
         - a line in the body's `## Verified` section reads `DW-<n>[, DW-<m>…] · <evidence>` and the evidence
           is one of evidence_check.py's shapes (a `cmd` → `output`, a URL, a #<n> or commit reference), or
@@ -960,6 +960,11 @@ Usage:
           (covered with a limit: stated, not proven — each such id is also named on stderr).
       Anything else, including a Verified line whose evidence is bare, leaves the id in the gap. An id the body
       cites that the ticket never defined is named on stderr and changes nothing.
+      A PR that closes several tickets whose ids collide qualifies each line with the ticket's key as the body
+      writes it, `DW-<n>[, DW-<m>…] (<key>) · …` (`DW-1 (#654) · …` beside `DW-1 (#650) · …`), and runs
+      coverage once per ticket with `--key <key>`: a line qualified with another key is ignored, an unqualified
+      line counts as it always did. Without `--key` every line counts, qualified or not (the keys the body uses
+      are then named on stderr). The qualifier sits before the ` · `, so it is never read as evidence.
   done_when.py probe --ticket <ticket-file | -> --repo-dir <dir> [--timeout <s>]
       Runs each command check in <dir> (shell, default 120 s timeout) and prints one line per id:
       `DW-<n> passing`, `DW-<n> failing (exit <code>)`, `DW-<n> timeout` or `DW-<n> manual`. It runs the
