@@ -1,6 +1,7 @@
 """submit-review.sh's `--auto-comment` flag — the unattended auto-COMMENT path for direct review
 requests (`pr-review/SKILL.md` § "Unattended auto-COMMENT path for direct review requests"): opt-in via
-`auto_comment.mode` (default `off`), COMMENT-only, refused on the user's own PR. Mirrors the existing
+`auto_comment.mode` (default `off`), COMMENT-only, refused on the user's own PR unless PR_REVIEW_ALLOW_OWN=1
+(then COMMENT only, #657). Mirrors the existing
 `--auto` (trivial-approve) gate shape but for this new path.
 
 Against a stub `gh` on PATH — no network. Stdlib unittest. Run: make -C .claude/context-db test."""
@@ -85,11 +86,14 @@ class AutoCommentSubmit(unittest.TestCase):
         self.state_dir.mkdir(parents=True)
         self.log = self.tmp / "gh.log"
 
-    def write_config(self, auto_comment_mode: str) -> None:
+    def write_config(self, auto_comment_mode: str, approve_on_clean: str | None = None) -> None:
+        auto_comment = {"mode": auto_comment_mode, "prios": [1], "max_per_tick": 3}
+        if approve_on_clean is not None:
+            auto_comment["approve_on_clean"] = approve_on_clean
         self.state_dir.joinpath("config.json").write_text(json.dumps({
             "footer": "", "submitted_retention_days": 14,
             "auto_approve": {"mode": "off"},
-            "auto_comment": {"mode": auto_comment_mode, "prios": [1], "max_per_tick": 3},
+            "auto_comment": auto_comment,
         }))
 
     def base_env(self, pr_author: str = "alice") -> dict:
@@ -116,6 +120,17 @@ class AutoCommentSubmit(unittest.TestCase):
         if not ledger.exists():
             return []
         return [json.loads(line) for line in ledger.read_text().splitlines() if line.strip()]
+
+    def posted_reviews(self) -> int:
+        """How many review POSTs the stub `gh` saw — what would actually have reached GitHub."""
+        if not self.log.exists():
+            return 0
+        return sum(1 for line in self.log.read_text().splitlines() if "POST" in line and "/reviews" in line)
+
+    def preview(self, req: str, env: dict, *extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(SUBMIT), "preview", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                               "--request", req, "--auto-comment", *extra], env=env,
+                              capture_output=True, text=True, timeout=30)
 
     # --- refusal when mode != live: the default `shadow` mode must never let a post through ---
 
@@ -164,6 +179,56 @@ class AutoCommentSubmit(unittest.TestCase):
                             capture_output=True, text=True, timeout=30)
         self.assertEqual(r.returncode, 8, r.stdout + r.stderr)
         self.assertIn("own PR", r.stderr)
+        self.assertIn("PR_REVIEW_ALLOW_OWN", r.stderr)  # the refusal names the opt-in
+        self.assertEqual(self.posted_reviews(), 0)
+
+    # --- the opt-in (#657): PR_REVIEW_ALLOW_OWN=1 lets a COMMENT through on the user's own PR — noted on
+    # stderr, ledgered `auto_commented` like any other auto-COMMENT ---
+
+    def test_allow_own_posts_a_comment_on_the_users_own_pr(self):
+        self.write_config(auto_comment_mode="live")
+        req = self.write_request("req.json", {"event": "COMMENT", "body": "Checked: looks fine.", "comments": []})
+        env = dict(self.base_env(pr_author=ME), PR_REVIEW_ALLOW_OWN="1")
+        preview = self.preview(req, env)
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        self.assertIn("own PR", preview.stderr)
+        self.assertIn("PR_REVIEW_ALLOW_OWN=1", preview.stderr)
+        digest = next(l.split()[-1] for l in preview.stdout.splitlines() if l.startswith("digest:"))
+        submit = subprocess.run(["bash", str(SUBMIT), "submit", "--repo", REPO, "--pr", PR, "--head", HEAD,
+                                  "--request", req, "--auto-comment", "--confirm", digest], env=env,
+                                 capture_output=True, text=True, timeout=30)
+        self.assertEqual(submit.returncode, 0, submit.stdout + submit.stderr)
+        self.assertIn("status: submitted", submit.stdout)
+        self.assertEqual(self.posted_reviews(), 1)
+        rows = self.ledger_rows()
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["status"], "auto_commented")
+        self.assertEqual(rows[0]["event"], "COMMENT")
+
+    # --- the opt-in permits COMMENT only: APPROVE and REQUEST_CHANGES on the user's own PR never post ---
+
+    def test_allow_own_never_approves_or_requests_changes(self):
+        """An APPROVE reaches the own-PR gate only once the clean-sheet gates let it through (approve_on_clean
+        live, a triage file given) — exit 8, COMMENT only; under the kit default (approve_on_clean off) the
+        clean-sheet gate refuses it first, exit 8 as well. A REQUEST_CHANGES is never valid on this path, own PR
+        or not: the event gate refuses it before the live PR is even read (exit 2). Nothing is posted either way."""
+        env = dict(self.base_env(pr_author=ME), PR_REVIEW_ALLOW_OWN="1")
+        approve = self.write_request("approve.json", {"event": "APPROVE", "body": "LGTM", "comments": []})
+        self.write_config(auto_comment_mode="live", approve_on_clean="live")
+        triage = self.write_request("triage.json", {"verdict": "clean"})
+        r = self.preview(approve, env, "--triage", triage)
+        self.assertEqual(r.returncode, 8, r.stdout + r.stderr)
+        self.assertIn("COMMENT only", r.stderr)
+        self.write_config(auto_comment_mode="live")
+        r = self.preview(approve, env)
+        self.assertEqual(r.returncode, 8, r.stdout + r.stderr)
+        self.assertNotIn("digest:", r.stdout)
+        changes = self.write_request("changes.json", {"event": "REQUEST_CHANGES", "body": "no", "comments": []})
+        r = self.preview(changes, env)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("never REQUEST_CHANGES", r.stderr)
+        self.assertEqual(self.posted_reviews(), 0)
+        self.assertEqual(self.ledger_rows(), [])
 
     # --- --auto and --auto-comment are mutually exclusive ---
 

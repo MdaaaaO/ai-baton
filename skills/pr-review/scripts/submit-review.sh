@@ -10,7 +10,7 @@
 # --auto-comment: the unattended auto-COMMENT path for direct review requests (or PR_REVIEW_AUTO_COMMENT=1).
 #          Refuses unless the request event is "COMMENT" (or "APPROVE" on a clean sheet, below; never
 #          REQUEST_CHANGES on this path), auto_comment.mode == "live", and the live PR author is not the user
-#          (never the user's own PR). Ledger status auto_commented. Mutually exclusive with --auto.
+#          (never the user's own PR unless PR_REVIEW_ALLOW_OWN=1, COMMENT only). Ledger status auto_commented. Mutually exclusive with --auto.
 #          APPROVE under --auto-comment (needs --triage FILE = the runner's triage.json, with the runner's
 #          sheet.json + traps.json beside it) is allowed only when auto_comment.approve_on_clean is "live" AND
 #          the clean-sheet gate holds on the exact --head (reference/runner.md § approve_on_clean has the full
@@ -123,7 +123,14 @@ live=$(gh api "repos/$repo/pulls/$pr" 2>/dev/null) || { echo "error: cannot read
 live_head=$(jq -r .head.sha <<<"$live"); base=$(jq -r .base.sha <<<"$live"); state=$(jq -r .state <<<"$live")
 if [ "$autoc" = 1 ]; then
   pr_author=$(jq -r .user.login <<<"$live")
-  [ "$pr_author" != "$ME" ] || { echo "error: --auto-comment refuses to post on the user's own PR" >&2; exit 8; }
+  if [ "$pr_author" = "$ME" ]; then
+    # Default: never on the user's own PR (pr-scan excludes them). Opt-in: the user asked for their own PRs to get
+    # the same unattended COMMENT (e.g. a lane that watches every PR of an epic) — set PR_REVIEW_ALLOW_OWN=1 for that
+    # session only. GitHub accepts a COMMENT review from the author; APPROVE/REQUEST_CHANGES on an own PR stay refused.
+    [ "${PR_REVIEW_ALLOW_OWN:-0}" = "1" ] || { echo "error: --auto-comment refuses to post on the user's own PR (set PR_REVIEW_ALLOW_OWN=1 only when the user asked for reviews of their own PRs)" >&2; exit 8; }
+    [ "$(jq -r '.event' "$req")" = "COMMENT" ] || { echo "error: PR_REVIEW_ALLOW_OWN permits COMMENT only on the user's own PR" >&2; exit 8; }
+    echo "note: own PR; posting under PR_REVIEW_ALLOW_OWN=1" >&2
+  fi
 fi
 if [ "$state" != "open" ]; then
   # A merged/closed PR still accepts reviews (post-merge findings keep their inline anchors); allow only on explicit opt-in.
