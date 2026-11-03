@@ -2,9 +2,9 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, session stats, the paste-ready next-session prompt; then stops its monitors, closes the registry row and rebuilds mission-control. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "40"
-  updated: "2026-10-23"
-  reviewed: "2026-10-23"
+  version: "41"
+  updated: "2026-11-02"
+  reviewed: "2026-11-02"
 user-invocable: true
 ---
 
@@ -172,12 +172,19 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
 12. **Retro (optional, last)** — offer `/session-retro` in one line, above the step-10 code block (or last in the final message when there is none): "Run a
     retro of this session against the kit?". It forks, so the main session pays only for its ≤ 15-line result;
     a yes runs it now, before the session ends. Skip the offer for a short read-only session.
+13. **Close the process — the last line of the final message.** Once step 9's `session-end` has run, say the
+    session is finished and that this claude process/pane should close now (`/exit`, or close the pane). A
+    handed-off session that keeps running is a zombie: its row says `ended`, but the live process pins the
+    transcript's mtime (a "move transcripts idle > N days" cleanup matches nothing and a dedicated transcript
+    volume fills) and its heartbeat keeps touching a row nobody works on. The ones already left behind:
+    `bash $BATON/skills/session-register/zombie-sweep.sh` lists them, `--kill` ends them
+    (`skills/session-register/reference/lifecycle.md` § Zombie sweep); `kit-health` § 4 warns while one runs.
 
 ## Done when
 
 The next session could pick up cold from `.context/` alone — no reliance on this transcript. Either its
 start prompt is in the registry **and** in your final chat message (step 10), or there genuinely is no
 follow-on work and your final message says so instead of inventing one.
-Then end the session (don't let it sprawl past its ticket; the backstop is a clone install's own
+Then end the session — the process closes (step 13), it does not idle on (don't let it sprawl past its ticket; the backstop is a clone install's own
 `settings.json`, or on a plugin install the user's `autoCompactWindow` setting in `~/.claude/settings.json`
 (`/autocompact 200k`), or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for cloud — not a reason to keep a session alive).

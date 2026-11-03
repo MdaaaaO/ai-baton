@@ -2,9 +2,9 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate back and carousel when paste-started as a successor, re-arm PR-watch, rename a session, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "38"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "39"
+  updated: "2026-11-02"
+  reviewed: "2026-11-02"
 user-invocable: true
 ---
 
@@ -146,6 +146,9 @@ Marks the row `ended`, stores the `NEXT` file as your `## Next session` prompt (
 whether there is one; nothing to hand over → omit `NEXT`; `NEXT=none` withdraws a stale one), writes
 `## Session stats` and appends the `_ledger.md` row. When an ended session leaves the index, and how a re-register
 reactivates it: `reference/lifecycle.md` § End and archiving. Then do the rest of the `session-handoff` close-out.
+A row that says `ended` while its claude process still runs (a pane never closed after the handoff) is a zombie:
+`bash $BATON/skills/session-register/zombie-sweep.sh` lists them, `--kill` ends them (`reference/lifecycle.md`
+§ Zombie sweep; `kit-health` § 4 reports them).
 
 Row fields: `reference/lifecycle.md` § Fields — operational state, **not** knowledge (excluded from
 `make index`/`make verify` and the doc DB count).

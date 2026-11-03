@@ -2,7 +2,7 @@
 name: kit-health
 description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Its `lint` mode (`/kit-health lint`) checks the store still says what is true. Walks each finding, reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, when a skill misbehaves, or to lint the store."
 metadata:
-  version: "85"
+  version: "86"
   updated: "2026-11-02"
   reviewed: "2026-11-02"
   facts: "aws.profile kit-health"
@@ -39,6 +39,8 @@ A run proves the kit is sound (frontmatter, no environment value in a kit file, 
    by bumping `metadata.reviewed` after re-reading it). A leak's Fix: `kb.py set …`, then the skill
    reads it back. § 4's "ended session(s) left … of scratch" warning: Fix is
    `python3 $BATON/skills/kit-health/kit-health.py --sweep-scratch` (removes only the listed ended sessions' scratch dirs);
+   § 4's "ended session(s) still run a claude process" warning: Fix is
+   `bash $BATON/skills/session-register/zombie-sweep.sh --kill` (SIGTERM to the listed owners only; their heartbeats end the rows);
    § 4's "auto-memory over budget": Fix is `/memory-prune` (its own carousel, archive first). A Fix that touches a skill bumps `metadata.version` + `metadata.updated`. **Every edit to a kit
    file** (an Accept, a Fix) is made in a worktree of a kit **checkout** off `origin/main`, never under `$BATON`
    on a plugin install: that is Claude Code's plugin cache, and `claude plugin update` overwrites it (§ 1 warns
