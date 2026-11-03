@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -2303,6 +2304,84 @@ class ArchiveOldLogs(unittest.TestCase):
             self.assertEqual(self.kh.main(), 2)
         self.assertIn("--keep-logs", err.getvalue())
         self.assertEqual(self.status(f"{self.DAYS[0]}-{self.ENV}"), "active")
+
+
+class ZombieSessions(unittest.TestCase):
+    """Section 4's zombie line (#655): an ended row whose claude process still runs — here a script named
+    `node` (a script's comm is its own basename), with a live heartbeat-loop stand-in — is one WARN naming the
+    `--kill` fix; nothing running is OK.
+    Throw-away TMPDIR and CONTEXT_ROOT only, never this machine's logs or registry."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        t = Path(self.tmp.name)
+        self.tdir = t / "t"
+        logs = self.tdir / f"ai-baton-{os.getuid()}"
+        logs.mkdir(parents=True)
+        self.ctx = t / "ws" / ".context"
+        (self.ctx / "sessions" / "archive").mkdir(parents=True)
+        node = t / "bin" / "node"
+        node.parent.mkdir()
+        node.write_text("#!/bin/sh\ntrap 'kill $! 2>/dev/null; exit 0' TERM\nsleep 300 &\nwait $!\n")
+        node.chmod(0o755)
+        self.owner = subprocess.Popen([str(node), "300"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.loop = subprocess.Popen(["sleep", "300"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        comm = subprocess.run(["ps", "-o", "comm=", "-p", str(self.owner.pid)], capture_output=True, text=True).stdout.strip()
+        if comm != "node":
+            self.skipTest("a script's comm is not its own name here")
+        self.log = logs / "heartbeat-z-ended.log"
+        self.log.write_text(f"2026-11-02 10:00 AM EST start name=z-ended owner={self.owner.pid} interval=21600 session=none\n")
+        (logs / "heartbeat-z-ended.pid").write_text(f"{self.loop.pid}\n")
+        (self.ctx / "sessions" / "z-ended.md").write_text("---\nsession: z-ended\nsession_id: none\nstatus: ended\n---\n")
+        self.env = {"TMPDIR": str(self.tdir), "CONTEXT_ROOT": str(self.ctx)}
+        self.kh = load_kit_health()
+
+    def tearDown(self):
+        for p in (self.owner, self.loop):
+            if p.poll() is None:
+                p.terminate()
+            p.wait(timeout=10)
+        self.tmp.cleanup()
+
+    def test_an_ended_row_still_running_warns_with_the_kill_fix(self):
+        r = self.kh.Report()
+        self.kh.zombie_wiring(r, env=self.env)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[self.kh.WARN], 1, text)
+        self.assertIn("1 ended session(s) still run a claude process", text)
+        self.assertIn("zombie-sweep.sh --kill", text)
+        self.assertIn(f"ZOMBIE z-ended owner={self.owner.pid} comm=node row=ended", text)
+        self.assertIsNone(self.owner.poll(), "the audit lists, it never kills")
+
+    def test_nothing_running_is_ok(self):
+        self.log.unlink()
+        r = self.kh.Report()
+        self.kh.zombie_wiring(r, env=self.env)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[self.kh.WARN], 0, text)
+        self.assertEqual(r.counts[self.kh.OK], 1, text)
+        self.assertIn("no ended session still runs a claude process", text)
+
+    def test_no_registry_is_ok_not_a_warning(self):
+        shutil.rmtree(self.ctx / "sessions")
+        r = self.kh.Report()
+        self.kh.zombie_wiring(r, env=self.env)
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[self.kh.WARN], 0, text)
+        self.assertIn("no session registry on this machine yet", text)
+
+    def test_a_sweep_that_did_not_run_is_a_warning_never_a_clean_line(self):
+        saved = self.kh.ZOMBIE_SWEEP
+        self.kh.ZOMBIE_SWEEP = Path(self.tmp.name) / "missing" / "zombie-sweep.sh"
+        try:
+            r = self.kh.Report()
+            self.kh.zombie_wiring(r, env=self.env)
+        finally:
+            self.kh.ZOMBIE_SWEEP = saved
+        text = "\n".join(r.lines)
+        self.assertEqual(r.counts[self.kh.WARN], 1, text)
+        self.assertEqual(r.counts[self.kh.OK], 0, text)
+        self.assertIn("zombie sweep did not run (exit 127)", text)
 
 
 if __name__ == "__main__":

@@ -1372,6 +1372,8 @@ def session_scratch_dirs(root: Path | None, ctx_root: Path, keep: Path | None = 
 
 
 SWEEP_FIX = "python3 $BATON/skills/kit-health/kit-health.py --sweep-scratch"
+ZOMBIE_SWEEP = KIT / "skills" / "session-register" / "zombie-sweep.sh"
+ZOMBIE_FIX = "bash $BATON/skills/session-register/zombie-sweep.sh --kill"
 
 
 def own_scratch() -> Path | None:
@@ -1405,6 +1407,29 @@ def scratch_wiring(r: Report, root: Path | None = None, ctx_root: Path | None = 
     r.add(WARN, "machine", f"{len(ended)} ended session(s) left {human_size(total)} of scratch ({other} other dir(s) kept) — Fix: `{SWEEP_FIX}`")
     for d, name, _status, size in ended:
         r.raw(f"  - `{name or d.name}`: {human_size(size)}")
+
+
+def zombie_wiring(r: Report, env: dict | None = None) -> None:
+    """Zombie sessions (#655): a session that ran session-handoff but whose claude process was never closed keeps
+    its transcript's mtime fresh (a "move transcripts idle > N days" cleanup matches nothing, a dedicated transcript
+    volume fills) and its heartbeat touching an `ended` row. Runs `zombie-sweep.sh` in list mode — nothing here
+    kills anything — and names `--kill` as the Fix. `env` lets a test point TMPDIR (the heartbeat logs) and
+    CONTEXT_ROOT (the registry) at a fixture."""
+    rc, out, err = sh(["bash", str(ZOMBIE_SWEEP)], env=env, timeout=60)
+    lines = out.splitlines()
+    zombies = [line for line in lines if line.startswith("ZOMBIE ")]
+    summary = next((line[len("zombie-sweep: "):] for line in lines if line.startswith("zombie-sweep: ")), "")
+    if rc == 3 and zombies:
+        r.add(WARN, "machine", f"{len(zombies)} ended session(s) still run a claude process — a handoff whose pane never "
+                               f"closed ({summary}) — Fix: `{ZOMBIE_FIX}`")
+        for line in zombies:
+            r.raw(f"  - {line}")
+    elif rc == 0:
+        r.add(OK, "machine", f"no ended session still runs a claude process ({summary})")
+    elif rc == 2 and "no sessions/" in err:
+        r.add(OK, "machine", "no session registry on this machine yet — nothing to sweep for zombie sessions")
+    else:
+        r.add(WARN, "machine", f"zombie sweep did not run (exit {rc}): {both(out, err)}")
 
 
 def sweep_scratch(root: Path | None = None, ctx_root: Path | None = None, keep: Path | None = None,
@@ -1810,6 +1835,7 @@ def sec_machine(r: Report) -> str:
         r.raw(f"- MCP-backed systems ({', '.join(mcp)}): not probeable from a shell — the skill's step 3 checks the servers are connected in this session")
     disk_wiring(r)
     scratch_wiring(r)
+    zombie_wiring(r)
     return envname
 
 

@@ -1,0 +1,198 @@
+"""session-register/zombie-sweep.sh — lists, and with --kill ends, the claude processes still running for
+sessions whose registry row already says `ended` (session-handoff ran, the pane never closed — #655). The map
+from process to session comes from the heartbeat logs' `start name=<name> owner=<pid>` lines, so the fixture
+is a throw-away log dir under TMPDIR, a throw-away .context/ with rows, and sleep processes standing in for
+the owners (a shell script named `node` carries a claude-shaped comm — a script's comm is its own basename —
+a plain sleep does not). Every verdict
+the script can print is covered once, and --kill must reach exactly the ZOMBIE owners — never a live,
+unregistered, stale, reused or dead one, nor the sweep's own ancestry. Run: make -C .claude/context-db test."""
+from __future__ import annotations
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+KIT = HERE.parents[1]
+SWEEP = KIT / "skills" / "session-register" / "zombie-sweep.sh"
+sys.path.insert(0, str(HERE.parent))
+from tests import hermetic_env  # noqa: E402
+
+LOG_LINE = "2026-11-02 10:00 AM EST start name={name} owner={owner} interval=21600 session=none\n"
+NODE_SCRIPT = """#!/bin/sh
+# stands in for a claude process: a script's comm is its own basename (`node`); SIGTERM ends it and its sleep
+trap 'kill $! 2>/dev/null; exit 0' TERM
+sleep 300 &
+wait $!
+"""
+
+
+def comm_of(pid: int) -> str:
+    return subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+
+
+class ZombieSweepFixture(unittest.TestCase):
+    """One heartbeat log per case, each with its own owner process; one shared live heartbeat-loop stand-in."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        t = Path(self.tmp.name)
+        self.tdir = t / "t"                                   # TMPDIR for the script: logs live under it
+        self.logs = self.tdir / f"ai-baton-{os.getuid()}"
+        self.logs.mkdir(parents=True)
+        self.ctx = t / "ws" / ".context"
+        (self.ctx / "sessions" / "archive").mkdir(parents=True)
+        self.node = t / "bin" / "node"                        # the stand-in claude process (comm `node`)
+        self.node.parent.mkdir()
+        self.node.write_text(NODE_SCRIPT)
+        self.node.chmod(0o755)
+        self.procs: list[subprocess.Popen] = []
+        self.loop = self.spawn("sleep")                       # the live heartbeat loop every mapped log points at
+        probe = self.spawn("node")
+        if comm_of(probe.pid) != "node":
+            self.skipTest("a script's comm is not its own name here")
+        self.env = dict(hermetic_env(t), TMPDIR=str(self.tdir), CONTEXT_ROOT=str(self.ctx))
+
+    def tearDown(self):
+        for p in self.procs:
+            if p.poll() is None:
+                p.terminate()
+            p.wait(timeout=10)
+        self.tmp.cleanup()
+
+    def spawn(self, kind: str) -> subprocess.Popen:
+        exe = str(self.node) if kind == "node" else "sleep"
+        p = subprocess.Popen([exe, "300"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.procs.append(p)
+        return p
+
+    def gone(self) -> int:
+        """A pid nothing runs under any more."""
+        p = subprocess.Popen(["true"])
+        p.wait(timeout=10)
+        return p.pid
+
+    def log(self, key: str, name: str, owner: int, loop: int | None = None) -> None:
+        (self.logs / f"heartbeat-{key}.log").write_text(LOG_LINE.format(name=name, owner=owner))
+        if loop is not None:
+            (self.logs / f"heartbeat-{key}.pid").write_text(f"{loop}\n")
+
+    def row(self, name: str, status: str, archived: str | None = None) -> None:
+        text = f"---\nsession: {name}\nsession_id: none\nstatus: {status}\n---\n"
+        if archived:
+            (self.ctx / "sessions" / "archive" / archived).write_text(text)
+        else:
+            (self.ctx / "sessions" / f"{name}.md").write_text(text)
+
+    def sweep(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(SWEEP), *args], env=self.env, capture_output=True, text=True,
+                              timeout=60)
+
+    def build_all_cases(self) -> dict[str, subprocess.Popen]:
+        owners = {}
+        loop = self.loop.pid
+        owners["z-ended"] = self.spawn("node")                       # ended row, claude-shaped, loop alive → ZOMBIE
+        self.log("z-ended", "z-ended", owners["z-ended"].pid, loop)
+        self.row("z-ended", "ended")
+        self.log("z-ended-oldkey", "z-ended", owners["z-ended"].pid, loop)   # a second log for the same owner
+        owners["z-arch"] = self.spawn("node")                        # row only under archive/ → ZOMBIE row=archived
+        self.log("z-arch", "z-arch", owners["z-arch"].pid, loop)
+        self.row("z-arch", "ended", archived="z-arch-20261101.md")
+        owners["l-active"] = self.spawn("node")                      # row active → LIVE
+        self.log("l-active", "l-active", owners["l-active"].pid, loop)
+        self.row("l-active", "active")
+        owners["u-none"] = self.spawn("node")                        # no row anywhere → UNREGISTERED
+        self.log("u-none", "u-none", owners["u-none"].pid, loop)
+        owners["s-stale"] = self.spawn("node")                       # loop pid dead → STALE (whatever the row says)
+        self.log("s-stale", "s-stale", owners["s-stale"].pid, self.gone())
+        self.row("s-stale", "ended")
+        owners["r-reused"] = self.spawn("sleep")                     # comm not claude-shaped → REUSED
+        self.log("r-reused", "r-reused", owners["r-reused"].pid, loop)
+        self.row("r-reused", "ended")
+        self.log("d-dead", "d-dead", self.gone(), loop)              # owner gone → DEAD
+        self.row("d-dead", "ended")
+        (self.logs / "heartbeat-nostart.log").write_text("nothing here\n")   # → UNMAPPED
+        return owners
+
+
+class ListMode(ZombieSweepFixture):
+    def test_every_verdict_and_the_summary(self):
+        owners = self.build_all_cases()
+        r = self.sweep()
+        out = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        pid = {k: v.pid for k, v in owners.items()}
+        self.assertIn(f"ZOMBIE z-ended owner={pid['z-ended']} comm=node row=ended", out)
+        self.assertIn(f"ZOMBIE z-arch owner={pid['z-arch']} comm=node row=archived", out)
+        self.assertIn(f"LIVE l-active owner={pid['l-active']} row=active", out)
+        self.assertIn(f"UNREGISTERED u-none owner={pid['u-none']}", out)
+        self.assertTrue(any(line.startswith(f"STALE s-stale owner={pid['s-stale']} ") for line in out), out)
+        self.assertIn(f"REUSED r-reused owner={pid['r-reused']} comm=sleep", out)
+        self.assertTrue(any(line.startswith("DEAD d-dead owner=") for line in out), out)
+        self.assertIn("UNMAPPED heartbeat-nostart.log", out)
+        # the second log for z-ended's owner adds no second verdict
+        self.assertEqual(sum(1 for line in out if " z-ended " in line), 1, out)
+        self.assertEqual(out[-1], "zombie-sweep: 2 zombie(s), 1 live, 1 unregistered, 1 stale, 1 reused, 1 dead, 1 unmapped")
+        for name, p in owners.items():
+            self.assertIsNone(p.poll(), f"list mode must not touch any process ({name})")
+
+    def test_nothing_to_sweep_exits_zero(self):
+        r = self.sweep()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.strip(), "zombie-sweep: 0 zombie(s), 0 live, 0 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped")
+
+    def test_no_registry_is_a_usage_error(self):
+        shutil.rmtree(self.ctx / "sessions")
+        r = self.sweep()
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("no sessions/", r.stderr)
+
+    def test_unknown_flag_is_refused(self):
+        r = self.sweep("--nuke")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("usage:", r.stderr)
+
+
+class KillMode(ZombieSweepFixture):
+    def test_kill_reaches_exactly_the_zombie_owners(self):
+        owners = self.build_all_cases()
+        r = self.sweep("--kill")
+        out = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        pid = {k: v.pid for k, v in owners.items()}
+        self.assertIn(f"KILLED z-ended owner={pid['z-ended']} comm=node row=ended", out)
+        self.assertIn(f"KILLED z-arch owner={pid['z-arch']} comm=node row=archived", out)
+        self.assertFalse(any(line.startswith("ZOMBIE ") for line in out), out)
+        self.assertTrue(out[-1].startswith("zombie-sweep: 2 zombie(s), "), out[-1])
+        for name in ("z-ended", "z-arch"):
+            self.assertIsNotNone(owners[name].wait(timeout=10), f"{name}'s owner must have been ended")
+        for name in ("l-active", "u-none", "s-stale", "r-reused"):
+            self.assertIsNone(owners[name].poll(), f"--kill must never reach {name}'s owner")
+        self.assertIsNone(self.loop.poll(), "the heartbeat loops are never a target — they end the rows themselves")
+
+    def test_kill_never_targets_the_scripts_own_ancestry(self):
+        # a claude-shaped process (a script named `node`) whose own heartbeat log maps it to an ended row runs
+        # the sweep with --kill itself: it is the sweep's parent, so it reads LIVE (this session) and survives
+        runner = Path(self.tmp.name) / "run" / "node"
+        runner.parent.mkdir()
+        runner.write_text("#!/bin/sh\n"
+                          "printf '2026-11-02 10:00 AM EST start name=self-run owner=%s interval=21600 session=none\\n' "
+                          "\"$$\" > \"$1/heartbeat-self-run.log\"\n"
+                          "printf '%s\\n' \"$2\" > \"$1/heartbeat-self-run.pid\"\n"
+                          "bash \"$3\" --kill\n")
+        runner.chmod(0o755)
+        (self.ctx / "sessions" / "self-run.md").write_text("---\nsession: self-run\nsession_id: none\nstatus: ended\n---\n")
+        r = subprocess.run([str(runner), str(self.logs), str(self.loop.pid), str(SWEEP)],
+                           env=self.env, capture_output=True, text=True, timeout=60)
+        out = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(any(line.startswith("LIVE self-run owner=") and line.endswith("(this session)") for line in out), out)
+        self.assertFalse(any(line.startswith("KILLED ") or line.startswith("ZOMBIE ") for line in out), out)
+        self.assertEqual(out[-1], "zombie-sweep: 0 zombie(s), 1 live, 0 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped")
+
+
+if __name__ == "__main__":
+    unittest.main()

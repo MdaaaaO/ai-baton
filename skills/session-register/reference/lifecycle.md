@@ -60,6 +60,22 @@ your `$CLAUDE_CODE_SESSION_ID` else your name — namespaced per user and per se
 session's). Later focus changes still go through `session-touch … WORKING=` — the script's own first tick only
 fills a still-blank `working_on`, never overwriting one you already registered.
 
+## Zombie sweep
+
+A session that ran `session-handoff` but whose claude process was never closed is a zombie: its row says `ended`,
+its heartbeat loop keeps running (the loop only ends a row when the owner dies) and the live process pins the
+transcript's mtime, so a "move transcripts idle > N days" cleanup matches nothing and a dedicated transcript volume
+fills (#655). `zombie-sweep.sh` beside `heartbeat.sh` reads the mapping the heartbeat logs already hold — each
+log's last `start name=<name> owner=<pid>` line — and prints one line per log: `ZOMBIE` (owner alive, its heartbeat
+loop alive, row `ended` or archived), `LIVE` (row active, or this script's own session), `UNREGISTERED` (no row in
+`sessions/` or `sessions/archive/`), `STALE` (the loop is gone, so the log may predate a reboot and the pid belong
+to anyone), `REUSED` (the pid's comm is no longer claude-shaped), `DEAD` (owner gone; the loop ends the row itself)
+or `UNMAPPED` (no start line), then a summary; exit 3 when it listed a zombie. Only `--kill` sends SIGTERM, and
+only to `ZOMBIE` rows — never to an unmapped, stale, reused or unregistered pid (an unregistered pane may be the
+user's own terminal) and never to this script's own ancestry; the heartbeats then end the rows on their own, final
+stats written, within a minute. `kit-health` § 4 runs the list mode and names `--kill` as the Fix; `session-handoff`
+step 13 is what keeps a session from becoming one.
+
 ## Stats
 
 (§ 2b.) The `stats:` line is derived from the session transcript (`~/.claude/projects/*/<session-id>.jsonl`, found
