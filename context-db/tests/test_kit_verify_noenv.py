@@ -567,6 +567,14 @@ class ReviewedFreshness(unittest.TestCase):
             self.assertIn("reviewed 2026-09-20 predates the last edit 2026-09-21 12:00 UTC", warn[0])
             self.assertIn("anywhere on Earth", warn[0])
 
+    def test_the_authoring_row_states_the_rule(self):
+        # docs/authoring.md's `metadata.reviewed` row is what an author reads when the warning fires: it names
+        # the moment the check uses and the flag that skips it
+        rows = (KIT / "docs" / "authoring.md").read_text(encoding="utf-8").splitlines()
+        row = next(line for line in rows if line.startswith("| `metadata.reviewed` |"))
+        for phrase in ("anywhere on Earth", "`reviewed` + 1 day, 12:00 UTC", "`--no-git`"):
+            self.assertIn(phrase, row)
+
     def test_an_unparsable_reviewed_is_left_to_the_shape_check(self):
         with tempfile.TemporaryDirectory() as tmp:
             kit = self.repo(tmp)
