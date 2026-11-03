@@ -69,7 +69,11 @@ comment or a handed-over prompt never carries `open <m>` with no carousel behind
 The check never blocks a ready, a close or a handoff until a follow-up issue has read the log below and decided.
 Every run, for the first twenty, appends one entry to the store doc `kit-health/miss-check-log` (type `log`, domain
 `kit-health`, slug `miss-check-log`; scaffold it once with `make -C $BATON/context-db new TYPE=log DOMAIN=kit-health
-SLUG=miss-check-log`). Writes go through `ctx_log`, never by editing the file:
+SLUG=miss-check-log`; the scaffold carries the `## Log` section and the `log_section: Log` field `ctx_maintain`
+rotates; a doc scaffolded before that field existed has no `## Log` heading, so `ctx_log` with `section: Log` exits
+`NO_SUCH_SECTION` — migrate it once: `ctx_fm` sets `log_section` to `Log`, then `ctx_insert` puts a `## Log` line
+before its first entry). Writes go through `ctx_log` with `section: Log` (`--section Log` on the Bash route), never by
+editing the file:
 
 ```
 <date> · <surface: pr-open|ticket-close|session-handoff> · <link to the PR/ticket> · <the MISSED lines, or CLEAN> · <verdict>

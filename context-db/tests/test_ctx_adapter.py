@@ -828,7 +828,8 @@ class StoreData(unittest.TestCase):
         self.assertNotIn("Architecture", epic["sections"])  # optional (#389): the template has it, the type does not
         self.assertNotIn("In plain words", epic["sections"])  # optional likewise: operator-confirmed lines only
         log = json.loads((data / "types" / "log.json").read_text(encoding="utf-8"))
-        # no section: `ctx log`/`maintain`'s archive moves work the body-level dated list, newest entry first
+        # no default section (#666): `ctx log` on a log doc names its section (the template's `## Log`), and
+        # `maintain` rotates nothing — log_rotate.py reads the doc's own `log_section:` field instead
         self.assertEqual(log["log"], {"order": "newest-first"})
         session = json.loads((data / "types" / "session.json").read_text(encoding="utf-8"))
         self.assertEqual(session["owner"], "session")  # back since v0.6.0 (#356): a per-call MCP actor names the owner
