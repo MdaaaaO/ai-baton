@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: "Reviews another's PR as the user: snapshot, trap KB, Opus pass, walks findings, posts one review, replies in threads; a trivial PR auto-approves via Sonnet, an opt-in auto-COMMENT path skips the walk. Use when reviewing a PR pr-scan surfaces or the user names; never the user's own."
+description: "Reviews another's PR as the user: snapshot, trap KB, Opus pass, walks findings, posts one review, replies in threads; a trivial PR auto-approves via Sonnet, an opt-in auto-COMMENT path skips the walk. Use when reviewing a PR pr-scan surfaces or the user names; the user's own only on their explicit ask (`PR_REVIEW_ALLOW_OWN=1`)."
 metadata:
   version: "45"
   updated: "2026-11-02"
@@ -78,14 +78,20 @@ them `A`). The whole contract: `reference/auto-approve.md`.
 
 ## Unattended auto-COMMENT path for direct review requests *(`review-runner` + main session; opt-in)*
 
-For PRs `pr-scan` flags `C` (`auto_comment` in `config.json`, `mode` off by default; the user's own PRs only with
-`PR_REVIEW_ALLOW_OWN=1`, at their explicit ask, COMMENT only): steps 1–4 run unchanged,
+For PRs `pr-scan` flags `C` (`auto_comment` in `config.json`, `mode` off by default): steps 1–4 run unchanged,
 only the walk and the Submit prompt are skipped, and only for a `COMMENT` with no STOP finding — or an `APPROVE`
 on a clean sheet when `auto_comment.approve_on_clean` is `live` (`shadow` posts the COMMENT and ledgers the
 verdict). Clean-sheet definition: `reference/runner.md` § `--unattended` 2a; spawn, `on_stop`, modes, logging,
 kill switch: `reference/runner.md` § `--unattended`.
 
+**The user's own PRs** never arrive as `C` rows (`pr-scan` excludes them) and the submit refuses them (exit 8) —
+except when the user explicitly asked for reviews of their own PRs (a lane told to review every PR of one epic,
+theirs included): then the session names each own PR itself (`<owner/repo> <pr>`), runs steps 1–4 as above and
+exports `PR_REVIEW_ALLOW_OWN=1` for that lane's `submit-review.sh` calls, which admit a `COMMENT` only (never
+APPROVE or REQUEST_CHANGES; `docs/env-vars.md`). Never set it from config, or for a lane the user did not point
+at their own PRs.
+
 ## Not in scope
-Our own PRs (`pr-open`, `pr-watch`, `pr-event-brief`); merging (`pr-merge.sh` in `pr-watch`); re-requesting
+Our own PRs (`pr-open`, `pr-watch`, `pr-event-brief`) beyond the opt-in COMMENT above; merging (`pr-merge.sh` in `pr-watch`); re-requesting
 the `github.review_bot`; review asks — Slack drafts only where `systems.slack` (`pr-open`); unattended
 REQUEST_CHANGES.

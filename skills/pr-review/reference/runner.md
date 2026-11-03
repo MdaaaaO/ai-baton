@@ -131,16 +131,18 @@ or, on a clean sheet under `auto_comment.approve_on_clean`, an `APPROVE` (step 2
    up to `auto_comment.max_per_tick` per tick. Skip a row whose ledger already carries `auto_commented` /
    `shadow_comment` / `auto_approved_clean` / `skipped` / `held` for this exact head (`shadow_approve_clean`
    alone is not one — it always sits beside the `auto_commented` row of the COMMENT it rode on), so a quiet queue does not re-spawn a runner
-   every tick. Never for the user's own PR — `pr-scan` already excludes every row whose author is the
-   login, for every prio, before it ever reaches the `C` gate.
+   every tick. The user's own PRs never arrive as `C` rows — `pr-scan` excludes every row whose author is the
+   login, for every prio, before it ever reaches the `C` gate; they take this path only when the user asked for
+   reviews of their own PRs, each named by the session itself, with `PR_REVIEW_ALLOW_OWN=1` exported for the
+   submit (COMMENT only — `SKILL.md` § Unattended auto-COMMENT path).
 2. **Decide from the sheet.** Read `$CTX/triage.json` (exactly as in the interactive path) for a STOP
    finding (`scope.md` § Classify):
    - **No STOP** → build `$CTX/request.json` with `event: "COMMENT"` (body: the same overview + numbered
      findings + FF pointers 5c would show a human), preview with `submit-review.sh preview`, then submit
      with `submit-review.sh submit … --auto-comment --confirm <digest>` — no `AskUserQuestion`, that is
      the "no hand-off" this path exists for. The script re-runs its own gate at submit time (event must
-     be `COMMENT`, `auto_comment.mode` must be `live`, the live PR author must not be the login) and
-     refuses otherwise. Ledger status `auto_commented`.
+     be `COMMENT`, `auto_comment.mode` must be `live`, the live PR author must not be the login unless
+     `PR_REVIEW_ALLOW_OWN=1`, which admits a `COMMENT` only) and refuses otherwise. Ledger status `auto_commented`.
    - **No STOP and a clean sheet** with `auto_comment.approve_on_clean` = `live` (2a): build `request.json`
      with `event: "APPROVE"`, an empty `comments` array and a ≤3-line "Checked: …" body, preview, then
      submit with `submit-review.sh submit … --auto-comment --triage $CTX/triage.json --confirm <digest>`.
