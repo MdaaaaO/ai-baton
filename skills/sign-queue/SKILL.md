@@ -3,9 +3,9 @@ name: sign-queue
 description: "Commits and pushes in a signed-commits repo from a process with no signing identity: worktree-first, exact staging, a message file, then a queued job the user drains on the host with `make sign`. Use when committing, pushing or rebasing there, or when asked why signing happens on the host; never paste git one-liners. Inert when `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "26"
-  updated: "2026-10-20"
-  reviewed: "2026-10-20"
+  version: "27"
+  updated: "2026-11-02"
+  reviewed: "2026-11-02"
   requires: "signed_commits"
 ---
 

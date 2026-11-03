@@ -458,7 +458,9 @@ MILESTONES = [
 ]
 FAIL_HINTS = [
     (re.compile(r"^UNSIGNED "), "a commit below HEAD would have pushed unsigned — the job refused the push "
-     "before it landed; a sandbox-made commit surviving a no-op re-stack is the usual cause"),
+     "before it landed; a sandbox-made commit surviving a no-op re-stack is the usual cause. A sha that is not "
+     "the session's own is a commit already on origin, e.g. a GitHub merge commit, on a host without gpg: the "
+     "check skips what the worktree's origin/* refs reach, so `git fetch origin` there, then `make sign_retry JOB=<n>`"),
     # anchored to the job's own line, so a commit subject echoed into the tail cannot match it
     (re.compile(r"^PUSH NOT LANDED"), "the push exited 0 but origin's branch is not at HEAD (a stale local ref, "
      "or a remote that moved during the push): compare `git ls-remote origin <branch>` with the worktree HEAD, then "
