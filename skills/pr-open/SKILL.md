@@ -2,9 +2,9 @@
 name: pr-open
 description: "Checklist for opening a PR: sizing gate, body with the diagram set and a ## Verified section, public-text-check and length_check, labels, reviewers, pr-watch, tracker link, Slack review draft where enabled. Use when writing a PR body and right after `gh pr create`."
 metadata:
-  version: "38"
-  updated: "2026-10-23"
-  reviewed: "2026-10-23"
+  version: "39"
+  updated: "2026-11-02"
+  reviewed: "2026-11-02"
   facts: "slack.review-venue,slack.channel,github.review_bot,github.owner_teams,tracker.kind,tracker.url_template"
 ---
 
@@ -125,7 +125,7 @@ cold-reader gate on the four lines alone (`docs/cold-reader.md` § The operator 
    recorded head moved; rerun it in the same turn as the push. Shapes and examples: `reference/verified.md`.
 5. **Done when, beside step 4.** A ticket whose `## Done when` carries `DW-<n>` ids: one `## Verified` line per id the PR proves,
    `DW-<n> · <evidence>`, then `python3 $BATON/context-db/bin/done_when.py coverage --ticket <ticket-file> --body <file>` (the
-   ticket file holds its body, then its comments, oldest first) with every `verified.py check`. `DONE WHEN: covered` (exit 0) → go on; `gap DW-n[, …]` (exit 3) → prove the id, or answer it in `## One honest limit` as `DW-<n> · <why it is not verified>`, then re-run; exit 1 → no ids, skip. Step 7 reports the line (`reference/verified.md`).
+   ticket file holds its body, then its comments, oldest first) with every `verified.py check`. `DONE WHEN: covered` (exit 0) → go on; `gap DW-n[, …]` (exit 3) → prove the id, or answer it in `## One honest limit` as `DW-<n> · <why it is not verified>`, then re-run; exit 1 → no ids, skip. A PR closing several tickets whose ids collide qualifies each line with its ticket's key, `DW-<n> (<key>) · <evidence>`, and runs `coverage` once per ticket with `--key <key>` (`reference/verified.md` § One PR, several tickets). Step 7 reports the line(s) (`reference/verified.md`).
 6. **Miss check, before ready.** Fork `docs/miss-check.md` on the body; its result line (`Miss check: clean` or `fixed <n>, open <m>`) goes under `## One honest limit`, outside its three lines like the `Assumed:` lines, an unfixed `MISSED` into the same turn's carousel, the run into the log through `ctx_log`.
 
 ## Commit style, links, scope

@@ -16,7 +16,7 @@ Usage:
       One line per criterion: `DW-<n>`, `command` or `manual`, the check (a command is printed without its
       backticks), the criterion — tab-separated. Reads every `## Done when` section in the text (pass the body,
       then the comments, oldest first, as `sizing.py` does).
-  done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | ->
+  done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | -> [--key <key>]
       Prints exactly `DONE WHEN: covered` or `DONE WHEN: gap DW-<n>[, DW-<n>…]`. An id is covered when
         - a line in the body's `## Verified` section reads `DW-<n>[, DW-<m>…] · <evidence>` and the evidence
           is one of evidence_check.py's shapes (a `cmd` → `output`, a URL, a #<n> or commit reference), or
@@ -24,6 +24,11 @@ Usage:
           (covered with a limit: stated, not proven — each such id is also named on stderr).
       Anything else, including a Verified line whose evidence is bare, leaves the id in the gap. An id the body
       cites that the ticket never defined is named on stderr and changes nothing.
+      A PR that closes several tickets whose ids collide qualifies each line with the ticket's key as the body
+      writes it, `DW-<n>[, DW-<m>…] (<key>) · …` (`DW-1 (#654) · …` beside `DW-1 (#650) · …`), and runs
+      coverage once per ticket with `--key <key>`: a line qualified with another key is ignored, an unqualified
+      line counts as it always did. Without `--key` every line counts, qualified or not (the keys the body uses
+      are then named on stderr). The qualifier sits before the ` · `, so it is never read as evidence.
   done_when.py probe --ticket <ticket-file | -> --repo-dir <dir> [--timeout <s>]
       Runs each command check in <dir> (shell, default 120 s timeout) and prints one line per id:
       `DW-<n> passing`, `DW-<n> failing (exit <code>)`, `DW-<n> timeout` or `DW-<n> manual`. It runs the
@@ -61,8 +66,11 @@ CRITERION_RE = re.compile(
     r"^\s*[-*]\s*\[[ xX]\]\s+DW-(?P<n>\d+)\s+(?P<crit>\S.*?)\s+·\s+check:\s*(?P<check>\S.*?)\s*$"
 )
 COMMAND_RE = re.compile(r"^`(?P<cmd>[^`]+)`$")
-# `[- ]DW-1[, DW-2…] · <tail>` — a covering line in `## Verified` / `## One honest limit`.
-IDS_LINE_RE = re.compile(r"^(?:[-*]\s+)?(?P<ids>DW-\d+(?:\s*,\s*DW-\d+)*)\s+·\s+(?P<tail>\S.*)$")
+# `[- ]DW-1[, DW-2…] [(<key>)] · <tail>` — a covering line in `## Verified` / `## One honest limit`; the optional
+# `(<key>)` names the ticket the line proves when one PR closes several whose ids collide (`DW-1 (#654) · …`).
+IDS_LINE_RE = re.compile(
+    r"^(?:[-*]\s+)?(?P<ids>DW-\d+(?:\s*,\s*DW-\d+)*)(?:\s+\((?P<key>[^()\s]+)\))?\s+·\s+(?P<tail>\S.*)$"
+)
 ID_RE = re.compile(r"DW-\d+")
 DEFAULT_PROBE_TIMEOUT = 120
 
@@ -137,13 +145,18 @@ def parse_ticket(text: str) -> tuple[list[Criterion], list[str]]:
 
 
 # ── coverage ─────────────────────────────────────────────────────────────────────────────────
-def ids_in(section_lines: list[tuple[int, str]], needs_evidence: bool) -> set[str]:
+def ids_in(section_lines: list[tuple[int, str]], needs_evidence: bool, key: str | None = None) -> set[str]:
     """The ids the section's covering lines name. In `## Verified` the line must carry an evidence item
-    (`needs_evidence`); in `## One honest limit` any non-empty reason after ` · ` does."""
+    (`needs_evidence`); in `## One honest limit` any non-empty reason after ` · ` does. With `key`, a line
+    qualified with another ticket's key (`DW-1 (#650) · …` when `key` is `#654`) is not this ticket's and is
+    skipped; an unqualified line always counts. The evidence is read after the ` · ` only, so the qualifier's
+    `#654` never passes as a reference."""
     found: set[str] = set()
     for _, line in section_lines:
         m = IDS_LINE_RE.match(line.strip())
         if m is None:
+            continue
+        if key is not None and m.group("key") not in (None, key):
             continue
         if needs_evidence and not ec.has_evidence(line.strip().lstrip("-* ").strip()):
             continue
@@ -151,14 +164,28 @@ def ids_in(section_lines: list[tuple[int, str]], needs_evidence: bool) -> set[st
     return found
 
 
-def coverage(crits: list[Criterion], body: str) -> tuple[list[str], list[str], list[str]]:
-    """(gap ids, ids covered only by a limit line, ids the body cites that the ticket never defined)."""
+def keys_in(body: str) -> list[str]:
+    """Every ticket key the body's covering lines are qualified with, in first-seen order."""
+    keys: list[str] = []
+    for head in (VERIFIED_HEAD, LIMIT_HEAD):
+        for sec in sections(body, head, pr_body=True):
+            for _, line in sec:
+                m = IDS_LINE_RE.match(line.strip())
+                if m and m.group("key") and m.group("key") not in keys:
+                    keys.append(m.group("key"))
+    return keys
+
+
+def coverage(crits: list[Criterion], body: str, key: str | None = None
+             ) -> tuple[list[str], list[str], list[str]]:
+    """(gap ids, ids covered only by a limit line, ids the body cites that the ticket never defined). `key` is
+    this ticket's key as the body writes it; lines qualified with another key are left out of all three."""
     proven: set[str] = set()
     for sec in sections(body, VERIFIED_HEAD, pr_body=True):
-        proven |= ids_in(sec, needs_evidence=True)
+        proven |= ids_in(sec, needs_evidence=True, key=key)
     limited: set[str] = set()
     for sec in sections(body, LIMIT_HEAD, pr_body=True):
-        limited |= ids_in(sec, needs_evidence=False)
+        limited |= ids_in(sec, needs_evidence=False, key=key)
     defined = [c.id for c in crits]
     gap = [i for i in defined if i not in proven and i not in limited]
     with_limit = [i for i in defined if i not in proven and i in limited]
@@ -215,6 +242,8 @@ def _main(argv: list[str]) -> int:
     p_cov = sub.add_parser("coverage", help="which criteria a PR body covers")
     p_cov.add_argument("--ticket", required=True, help="the ticket text, or - for stdin")
     p_cov.add_argument("--body", required=True, help="the PR body file, or - for stdin")
+    p_cov.add_argument("--key", help="this ticket's key as the body writes it (#654, KEY-123): a line qualified "
+                       "`DW-<n> (<other key>) · …` is then ignored; without it every line counts")
     p_probe = sub.add_parser("probe", help="run each command check and report passing/failing")
     p_probe.add_argument("--ticket", required=True,
                          help="the issue BODY only (never comments — they are anyone's text), or - for stdin")
@@ -233,7 +262,13 @@ def _main(argv: list[str]) -> int:
         for c in crits:
             print(probe(c, a.repo_dir, a.timeout))
         return 0
-    gap, with_limit, unknown = coverage(crits, fsutil.read_arg(a.body))
+    body = fsutil.read_arg(a.body)
+    gap, with_limit, unknown = coverage(crits, body, a.key)
+    if a.key is None:
+        keys = keys_in(body)
+        if keys:
+            print(f"done_when: the body qualifies lines with {', '.join(keys)} — every line counted; pass --key "
+                  "<key> for one ticket's", file=sys.stderr)
     for i in with_limit:
         print(f"done_when: {i} is covered by a limit line, not proven", file=sys.stderr)
     for i in unknown:

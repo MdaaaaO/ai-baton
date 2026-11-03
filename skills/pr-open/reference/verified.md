@@ -89,3 +89,10 @@ The rule: an id is covered when a `## Verified` line cites it with an evidence i
 reads `DW-<n> · <why it is not verified>` (covered with a limit: stated, not proven, and named on stderr). A Verified
 line with a bare claim, an id mentioned only in prose, or an id inside a fenced tail never covers. An id the ticket
 never defined is named on stderr and changes nothing. A ticket without ids exits 1 and is skipped.
+
+**One PR, several tickets.** When the PR closes two tickets whose ids collide (both carry `DW-1`), qualify each line
+with the ticket's key as the body writes it — `- DW-1 (#654) · <evidence>` beside `- DW-1 (#650) · <evidence>`, the
+same `DW-<n> (<key>)` shape in `## One honest limit` — and run `coverage` once per ticket with `--key <key>`: a line
+qualified with another key is ignored, an unqualified line counts for every ticket. The qualifier sits before the
+` · `, so its `#654` is never the evidence; the tail still needs a shape of its own. Without `--key` every line
+counts and the keys the body uses are named on stderr — the reminder that one run proved nothing per ticket.

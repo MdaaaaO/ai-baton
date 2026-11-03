@@ -2,9 +2,9 @@
 name: ticket-close
 description: "Checklist for closing a ticket (Jira or GitHub issues): a final outcome comment, the right transition/close reason, delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "17"
-  updated: "2026-10-23"
-  reviewed: "2026-10-23"
+  version: "18"
+  updated: "2026-11-02"
+  reviewed: "2026-11-02"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
 user-invocable: true
 ---
@@ -25,6 +25,8 @@ kind X in this environment" and stop.
 
    **Delivered** — what shipped under this ticket (PRs + sub-tasks, all clickable); where the ticket has
      `DW-<n>` ids, one line per id, none skipped: `DW-<n> · <evidence>` or `DW-<n> · not delivered — <why>`
+     (a PR that closed several tickets qualifies its lines `DW-<n> (<key>) · …` — take this ticket's key's
+     and the unqualified ones, as `done_when.py coverage --key <key>` counts them)
    **Verified** — the final check against the system of record · <evidence> (a numbers table, if
      used, is illustration only — the citation itself stays on the claim line)
    **For the operator** — the delivering PR's four lines, copied unchanged (one block per PR, under its link)
