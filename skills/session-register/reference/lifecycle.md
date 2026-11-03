@@ -62,23 +62,24 @@ fills a still-blank `working_on`, never overwriting one you already registered.
 
 ## Zombie sweep
 
-A session that ran `session-handoff` but whose claude process was never closed is a zombie: its row says `ended`,
-its heartbeat loop keeps running (the loop only ends a row when the owner dies) and the live process pins the
-transcript's mtime, so a "move transcripts idle > N days" cleanup matches nothing and a dedicated transcript volume
-fills (#655). `zombie-sweep.sh` beside `heartbeat.sh` reads the mapping the heartbeat logs already hold — each
-log's last `start name=<name> owner=<pid>` line. One process may own several logs (a handoff, then a new session
-registered in the same pane; an earlier key), so the verdict is per owner, judged across every log that names it,
-and only a log whose heartbeat loop still runs vouches for its mapping. One line per owner, its names comma-joined
-and `row=` their statuses in the same order: `ZOMBIE` (owner alive, a heartbeat loop alive, every row `ended` or
-archived), `LIVE` (any row active, or this script's own session), `UNREGISTERED` (a name with no row in
-`sessions/` or `sessions/archive/`, and none active), `STALE` (every loop is gone, so the logs may predate a reboot
-and the pid belong to anyone), `REUSED` (the pid's comm is no longer claude-shaped), `DEAD` (owner gone; the loop
-ends the row itself) or `UNMAPPED` (no start line), then a summary; exit 3 when it listed a zombie. Only `--kill`
-sends SIGTERM, and only to `ZOMBIE` owners — never to an unmapped, stale, reused or unregistered pid (an
-unregistered pane may be the user's own terminal), never to an owner with any active row, and never to this
-script's own ancestry; the heartbeats then end the rows on their own, final stats written, within a minute.
-`kit-health` § 4 runs the list mode and names `--kill` as the Fix; `session-handoff` step 13 is what keeps a
-session from becoming one.
+A session that ran `session-handoff` but whose claude process was never closed is a zombie: its row says `ended`, its
+heartbeat loop keeps running (the loop only ends a row when the owner dies) and the live process pins the transcript's
+mtime, so a "move transcripts idle > N days" cleanup matches nothing and a dedicated transcript volume fills (#655).
+`zombie-sweep.sh` beside `heartbeat.sh` reads the mapping the heartbeat logs already hold — each log's last `start
+name=<name> owner=<pid>` line. One process may own several logs (a handoff, then a new session registered in the same
+pane; an earlier key), so the verdict is per owner, judged across every log that names it. A log whose heartbeat loop
+is gone never vouches for a kill, yet an active row it names still keeps the owner `LIVE` (a loop can die under a
+working session, after an earlier handoff in the same pane) while a missing row from it proves nothing (a name renamed
+away, a log from before a reboot). One line per owner, every name its logs carry comma-joined and `row=` their
+statuses in the same order: `ZOMBIE` (owner alive, a heartbeat loop alive, every row `ended` or archived, a dead-loop
+log's missing one aside), `LIVE` (any row active, or this script's own session), `UNREGISTERED` (a live-loop name with
+no row in `sessions/` or `sessions/archive/`, and none active), `STALE` (every loop is gone, so the logs may predate a
+reboot and the pid belong to anyone), `REUSED` (the pid's comm is no longer claude-shaped), `DEAD` (owner gone; the
+loop ends the row itself) or `UNMAPPED` (no start line), then a summary; exit 3 when it listed a zombie. Only `--kill`
+sends SIGTERM, and only to `ZOMBIE` owners — never to an unmapped, stale, reused or unregistered pid (an unregistered
+pane may be the user's own terminal), never to an owner with any active row, and never to this script's own ancestry;
+the heartbeats then end the rows on their own, final stats written, within a minute. `kit-health` § 4 runs the list
+mode and names `--kill` as the Fix; `session-handoff` step 13 is what keeps a session from becoming one.
 
 ## Stats
 

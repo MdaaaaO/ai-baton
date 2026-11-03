@@ -10,15 +10,17 @@
 # log's last `start name=<name> owner=<pid>` line names the session and its owning claude process. One process
 # may own several logs (a handoff, then a new session registered in the same pane; an earlier key), so the
 # verdict is per owner, judged across every log that names it — never per log. A log whose heartbeat loop is
-# gone counts only when none of the owner's logs has a live loop: only a live loop vouches for its mapping.
-# One line per owner on stdout — <names> are the session names its live-loop logs carry, comma-joined, and
-# row= their statuses in the same order (`none` for no row) — then a summary:
+# gone never vouches for a kill (no live loop at all reads STALE), yet an active row it names still keeps the
+# owner LIVE — a loop can die under a working session — while a missing row from it proves nothing (a name
+# renamed away, a log from before a reboot). One line per owner on stdout — <names> are every session name
+# its logs carry, comma-joined, and row= their statuses in the same order (`none` for no row) — then a summary:
 #   ZOMBIE <names> owner=<pid> comm=<comm> row=<ended|archived,…>  owner alive, a heartbeat loop alive, every
-#                                                                  row ended or archived
+#                                                                  row ended or archived (a dead-loop log's
+#                                                                  missing one aside)
 #   LIVE <names> owner=<pid> row=<…>                               any row active (any status but ended), or
 #                                                                  this session
-#   UNREGISTERED <names> owner=<pid> row=<…>                       a name with no row in sessions/ or
-#                                                                  sessions/archive/, and none active
+#   UNREGISTERED <names> owner=<pid> row=<…>                       a live-loop name with no row in sessions/
+#                                                                  or sessions/archive/, and none active
 #   STALE <names> owner=<pid> …                                    every loop is gone: the logs may predate a
 #                                                                  reboot and the pid belong to anyone
 #   REUSED <names> owner=<pid> comm=<comm>                         the pid's comm is no longer claude-shaped
@@ -103,30 +105,31 @@ for ((i = 0; i < total; i++)); do
   comm=$(comm_of "$owner")
   [ -n "$comm" ] || { dead=$((dead+1)); echo "DEAD $anames owner=$owner"; continue; }
   [ -n "$fnames" ] || { stale=$((stale+1)); echo "STALE $anames owner=$owner (heartbeat loop gone — the log may predate a reboot)"; continue; }
-  case "$comm" in claude|node|[0-9]*.[0-9]*.[0-9]*) ;; *) reused=$((reused+1)); echo "REUSED $fnames owner=$owner comm=$comm"; continue;; esac
-  case "$anc" in *" $owner "*) live=$((live+1)); echo "LIVE $fnames owner=$owner (this session)"; continue;; esac
-  # the rows behind those names: one active row keeps the owner LIVE, else one missing row UNREGISTERED,
-  # else every row ended or archived — a ZOMBIE
-  rows=""; active=0; missing=0; rest=$fnames
+  case "$comm" in claude|node|[0-9]*.[0-9]*.[0-9]*) ;; *) reused=$((reused+1)); echo "REUSED $anames owner=$owner comm=$comm"; continue;; esac
+  case "$anc" in *" $owner "*) live=$((live+1)); echo "LIVE $anames owner=$owner (this session)"; continue;; esac
+  # the rows behind every name: one active row keeps the owner LIVE — a dead-loop log's too, a loop can die
+  # under a working session — else one live-loop name with no row UNREGISTERED (a dead-loop log's missing row
+  # proves nothing: a name renamed away, a log from before a reboot), else every row ended or archived — a ZOMBIE
+  rows=""; active=0; missing=0; rest=$anames
   while [ -n "$rest" ]; do
     nm=${rest%%,*}
     if [ "$nm" = "$rest" ]; then rest=""; else rest=${rest#*,}; fi
     st=$(row_status "$nm")
     case "$st" in
       ended|archived) ;;
-      '') missing=1; st=none;;
+      '') st=none; case ",$fnames," in *",$nm,"*) missing=1;; esac;;
       *) active=1;;
     esac
     rows="$rows${rows:+,}$st"
   done
-  if [ "$active" = 1 ]; then live=$((live+1)); echo "LIVE $fnames owner=$owner row=$rows"; continue; fi
-  if [ "$missing" = 1 ]; then unreg=$((unreg+1)); echo "UNREGISTERED $fnames owner=$owner row=$rows"; continue; fi
+  if [ "$active" = 1 ]; then live=$((live+1)); echo "LIVE $anames owner=$owner row=$rows"; continue; fi
+  if [ "$missing" = 1 ]; then unreg=$((unreg+1)); echo "UNREGISTERED $anames owner=$owner row=$rows"; continue; fi
   zombies=$((zombies+1))
   if [ "$kill_mode" = 1 ]; then
-    if kill -TERM "$owner" 2>/dev/null; then echo "KILLED $fnames owner=$owner comm=$comm row=$rows"
-    else failed=$((failed+1)); echo "KILL FAILED $fnames owner=$owner comm=$comm row=$rows"; fi
+    if kill -TERM "$owner" 2>/dev/null; then echo "KILLED $anames owner=$owner comm=$comm row=$rows"
+    else failed=$((failed+1)); echo "KILL FAILED $anames owner=$owner comm=$comm row=$rows"; fi
   else
-    echo "ZOMBIE $fnames owner=$owner comm=$comm row=$rows"
+    echo "ZOMBIE $anames owner=$owner comm=$comm row=$rows"
   fi
 done
 echo "zombie-sweep: $zombies zombie(s), $live live, $unreg unregistered, $stale stale, $reused reused, $dead dead, $unmapped unmapped"
