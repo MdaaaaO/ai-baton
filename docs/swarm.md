@@ -180,13 +180,13 @@ BLOCKED 123 budget orchestrator v=1 id=7f3b from=worker-a
 | `ASSIGN` | `<ticket> <assignment-file> [lease=<resource>] [rebrief=1]` | orchestrator | The tick assigns a ready ticket. With `rebrief=1` and a new id, the same line carries a re-brief, a fix request or a successor's re-brief; a fix request carries its findings inline in `note="…"`, because a scratch file can be lost in a restart. | Worker: reads the file, then the ticket, acks, sends `CLAIMED`. With `rebrief=1` it answers `ACK` alone and sends no `CLAIMED`, and the row does not move. With `lease=` it calls `lease.py acquire` before it touches the resource. |
 | `ACK` | `<scope> re=<id>` | the receiver of any line except `ACK` | It has read the line, whether it agrees or not. | Sender: `swarm_msg.py pending` stops listing that id. |
 | `CLAIMED` | `<ticket> <branch>` | worker | It read the assignment and found its worktree and branch. | Orchestrator: row `claimed`; the progress clock starts. |
-| `PR` | `<ticket> <branch> <sha> body=<file>` | worker | Its branch is pushed at that sha and the PR body file is written. A worker never opens the PR itself. | Orchestrator: opens the draft PR from the file and records its number; row `pr`. |
+| `PR` | `<ticket> <branch> <sha> body=<file>` | a peer-session worker, only if its assignment says so | Its branch is pushed at that sha and the PR body file is written. A worker never opens the PR itself. The default background worker does not send this line (§ Inbox drain and outbox return). | Orchestrator: opens the draft PR from the file and records its number; row `pr`. |
 | `READY` | `<ticket> <sha>` | worker | That head is on the remote, its checks pass and `done_when.py coverage` prints covered. After a fix request, every finding is also answered. | Orchestrator: records the head and runs the gates for exactly that sha. A `READY` names one head: a moved head needs a new `READY`, and the verifier's read, the gates and the merge all pin that head. |
 | `MERGED` | `<ticket> <pr> <sha>` | orchestrator | The merge is confirmed on the default branch: its own call, the owner's, or an auto-merge it observes. | Worker: stops pushing to the branch and sends `DONE`. Orchestrator: row `merged`; hands the PR to the verifier. |
 | `BLOCKED` | `<ticket> <reason> <who> [sha=<sha>] [ran="…"]` | worker | It cannot go on. `<reason>` is `budget`, `stop`, `lease`, `scope` (a change outside its area) or `input` (a fact, file or grant it lacks). `<who>` is `orchestrator`, `owner` or a lane: who must act. | `<who>` acts. The orchestrator re-briefs, reassigns, parks or asks the owner; row `blocked`. |
 | `DONE` | `<ticket>` | worker; the orchestrator writes it for a background worker whose run has ended | Its assignment has nothing left to do: `MERGED` read, leases released, nothing of its own still running. | Orchestrator: closes the assignment and frees the lane. It ends the assignment and never moves a row. |
-| `HOLD` | `<scope> releaser=<who> reason="…"` | orchestrator, also on the owner's word | A ticket, lane or resource must pause. | Receiver: finishes the current step, pushes, releases every lease it holds, starts nothing on that scope, acks and ends its turn. |
-| `RELEASE` | `<scope> [reason="…"]` | a hold's named releaser, or a lease holder giving its lease back, also when it expires | The hold is over, or the holder has finished with the resource. | A held worker re-reads the source of truth and resumes. Orchestrator: marks the hold or lease free; the next tick grants the next holder. |
+| `HOLD` | `<scope> releaser=<who> reason="…"` | orchestrator, also on the owner's word | A ticket, lane or resource must pause. | Receiver: finishes the current step, pushes, releases every lease it holds, starts nothing on that scope, acks and ends its turn. On resume it re-acquires them with `lease.py acquire`, under the grant its assignment carries, with no new `ASSIGN`; a lease another holder has taken by then is `BLOCKED <ticket> lease <who>`. |
+| `RELEASE` | `<scope> [reason="…"]` | a hold's named releaser, the owner, or a lease holder giving its lease back, also when it expires | The hold is over, or the holder has finished with the resource. | A held worker re-reads the source of truth and resumes. Orchestrator: marks the hold or lease free; the next tick grants the next holder. |
 | `STOP` | `<scope> reason="…"` | orchestrator, or the owner through `lease.py stop` | The owner's word, a budget hard stop or a safety doubt. | Receiver: stops at its next tool round and reports (§ STOP and the call in flight). |
 | `PARKED` | `<ticket> reason="…"` | orchestrator | Two stalls and one re-brief changed nothing, or the work waits on an answer. | Worker: pushes and stops work on the ticket. Row `parked`, with a ledger entry. Only a new `ASSIGN`, not a re-brief, restarts it. |
 | `STANDBY` | `<lane> until=<time>` | orchestrator | The lane has no work now but may get some. | Worker: takes registry state `standby` and ends its turn, with no polling. A new `ASSIGN` wakes it. Past `until` (at most `swarm.standby_hours`, default 24) the sweep retires it. |
@@ -246,8 +246,9 @@ with the same id. One more window without an ack and the receiver is `unreachabl
   it confirms the worker is reachable.
 
 A host restart can bring a session back within minutes under a new harness id. Inside `swarm.reopen_minutes` (default 10)
-a failed probe or a missing ack is a wait and a re-probe, never a loss. A background worker whose run has ended reads
-nothing and owes no ack; the orchestrator resumes it only for a line that needs work, such as a fix request.
+a failed probe or a missing ack is a wait and a re-probe, never a loss. A background worker whose run has ended is not
+`unreachable`. It reads nothing and owes no ack, so `MERGED` to it needs none and `swarm_msg.py pending` does not list it;
+the orchestrator resumes it only for a line that needs work, such as a fix request.
 
 ### Versions
 
@@ -259,24 +260,36 @@ previous version and refuses any other, naming what it accepts. A sender always 
 
 `SendMessage` is only the wake-up. The record is on disk, one append-only pair per worker:
 `.context/state/swarm/<key>/<worker>/in.ndjson` (the inbox) and `.context/state/swarm/<key>/<worker>/out.ndjson` (the
-outbox). A line to a busy or finished worker waits in its inbox file and is never invisible.
+outbox). The orchestrator has its own inbox, `.context/state/swarm/<key>/orchestrator/in.ndjson`. A line to a busy or
+finished worker waits in its inbox file and is never invisible. The read mark lives beside the file, never in it.
 
 - **The inbox drain.** At every tool round the worker runs `swarm_msg.py drain <worker>`, which prints its unread lines
   and marks them read. It acks each line and acts on it before its next step.
 - **The outbox return.** The worker writes its lines to its outbox with `swarm_msg.py send`, and ends its run with the
   same lines as its final message. Return lines only: `CLAIMED`, `PR`, `READY`, `BLOCKED`, `NEEDS`, `DECISION`,
-  `Assumed:` and `DONE`, plus any `ACK` and `RELEASE` it owes. No free-text progress, and nothing when nothing changed.
-  Detail goes in the scratch files the assignment names; the return points at them.
-- **The orchestrator** reads every outbox at each tick and writes to a worker's inbox before it wakes that worker.
+  `Assumed:` and `DONE`, plus any `RELEASE` it owes. No free-text progress, and nothing when nothing changed. Detail goes
+  in the scratch files the assignment names; the return points at them.
+- **The ack.** `swarm_msg.py ack` writes each `ACK` into the inbox of the line's sender: a worker's into the orchestrator's
+  inbox, the orchestrator's into the worker's. `swarm_msg.py pending` reads it there.
+- **The orchestrator** reads its own inbox and every outbox at each tick, and writes to a worker's inbox before it wakes
+  that worker.
+
+**The default background worker.** Its run ends when it returns `READY <ticket> <head>` with the branch pushed and green,
+and with no PR yet. The orchestrator opens the PR from the body file. On findings it resumes the worker with an
+`ASSIGN … rebrief=1` that carries the findings inline, and the new `READY` head replaces the old. A clean review needs no
+wake: the orchestrator itself moves the row to `ready-to-merge` when the gates hold at that head. A peer session may send
+`PR` itself only if its assignment says so.
 
 ### STOP and the call in flight
 
 A `STOP` cannot beat a call already in flight. A message reaches a busy worker only after its current tool call returns,
-and the `PreToolUse` hook that reads the file `.context/state/swarm/STOP-<scope>` can block only the next call. So:
+and the `PreToolUse` hook that reads the file `.context/state/swarm/STOP-<scope>` can block only the next call. The hook
+blocks work tools and lets through the calls this page requires after a `STOP`: the outbox send, the inbox drain, the ack,
+the lease release and ending the task. So:
 
 - The stop takes effect at the next tool round, and nobody kills a peer's process to get it.
 - The worker reports what ran before the stop landed: `BLOCKED <ticket> stop <who> ran="…"`, naming every call with an
-  outside effect since its last line. That line is its final message, because the hook blocks its tools.
+  outside effect since its last line. It sends that line to its outbox and ends its run with it.
 - The sender reads `ran=` and never assumes the stop was instant.
 - A long call on a serial resource runs in the background, so the holder's turn stays free. On `STOP` the holder ends that
   task by its own id. Nobody stops work by a process-name pattern or a peer's pid.
@@ -319,7 +332,7 @@ out; the order is fixed here.
 | 2 | Inbox | Drains every worker's return and outbox, peer messages, tracker comments, PR events, chat items where the machine has chat, and watches due. Applies the status lines (`swarm.py apply`) and acks. A `STOP` or `HOLD` takes effect first. |
 | 3 | Decisions | Handles `BLOCKED`, `NEEDS` and `DECISION` lines. A comment that adds scope becomes a dated delta. Every open decision goes in one batch: the carousel, or the digest's `Decisions` block (§ Never block on a human). |
 | 4 | Assignment | Assigns the next ready tickets of the current wave, up to `swarm.max_workers` (default 4), each with an assignment file and its own worktree, all spawned in one message with the model the Sizing line names. Never before the plan is approved, past the epic budget or under a `STOP`. Before any assignment to a peer it probes liveness (`ListAgents`, by ref, never heartbeat age). |
-| 5 | Stalls | A worker with no new commit, status or comment past `swarm.stall_minutes` (default 90) has stalled. At two stalls it gets one re-brief, then the ticket is reassigned or parked, with a ledger entry. An assignment whose worker is `unreachable`, ended without `DONE` or lost its background task returns here: `swarm.py resume` shows whether to drive its PR to merge, respawn it in place or reassign it. |
+| 5 | Stalls | Stall and failover rules apply only to `assigned` and `claimed` rows. Rows in `pr`, `ready-to-merge`, `blocked`, `parked` or under a `HOLD` are exempt and have their own watches: the PR watch, the owner's decision, the hold's releaser. A worker with no new commit, status or comment past `swarm.stall_minutes` (default 90) has stalled. At two stalls it gets one re-brief, then the ticket is reassigned or parked, with a ledger entry. An assignment whose worker is `unreachable`, whose registry row is `⚠ STALE`, that ended with no return or that lost its background task returns here: `swarm.py resume` shows whether to drive a PR it finds to merge, respawn it in place or reassign it. |
 | 6 | Budget | Reads spend per worker and per epic against the caps (`swarm_budget.py`). Past the epic cap it spawns nothing and the digest says so. A hard stop writes the STOP file. |
 | 7 | Integration | For each return: a draft PR from the worker's body file, the `review-runner` overview, fix requests back to the owning worker as `ASSIGN`, then ready and `pr-watch`. Owners per touched path come from the live code-owner rules; a path whose only reachable owner is the author is reported as `needs owner of <path>`. The merge is one standalone `pr-merge.sh` call for the head the `READY` line carried, checked just before the call. Protected paths wait for the owner. |
 | 8 | Verify | Hands the verifier each `READY` head before its merge and each merged PR after it. The verifier's `PASS` opens step 7 for that head at the next tick; its `FAIL` sends the ticket back. |
@@ -335,4 +348,4 @@ and never a merge already due. The digest comes last so that it reports this tic
 may make (step 7) and a budget cap (step 6). The work behind each one waits, and everything else goes on.
 
 **One scope per session.** The orchestrator ends its session at a wave boundary with a next-session prompt. Its successor
-registers with `SUCCESSOR_OF=`, starts at step 1 and re-briefs every worker that has an open assignment.
+registers with `SUCCESSOR_OF=`, starts at step 1 and sends `ASSIGN … rebrief=1` to every worker with an open assignment and a live run.
