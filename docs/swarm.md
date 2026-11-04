@@ -117,3 +117,103 @@ row of this matrix. It tells the receiver that something changed and where to re
 kept as a decision line or in the ledger's grants (scope, granted by, expiry). A receiver that cannot find that record
 treats the message as no go. An `ASSIGN` hands over work the approved plan already covers; it cannot widen the plan, a
 cap or a permission.
+
+## Message grammar
+
+Every message between swarm roles is one line of one shape. `swarm_msg.py format` writes a line; `swarm_msg.py parse`
+reads it and refuses free text.
+
+```
+<WORD> <scope> [<field>…] v=<n> id=<id> from=<lane> [<key>=<value>…]
+```
+
+| Part | Rule |
+|---|---|
+| `<scope>` | The ticket, or on a line that is not about a ticket, the lane, resource or epic key it concerns. |
+| `v=<n>` | The grammar version (§ Versions). |
+| `id=<id>` | Unique in the epic, written by `swarm_msg.py format`. A re-send keeps it. |
+| `from=<lane>` | The sender's lane: the stable name on its registry row, never the harness's session name, which can change on a restart. |
+| `reason="…"`, `note="…"` | One quoted line. A `note` can go on any line and changes nothing the line does. |
+
+```
+READY 123 a1b2c3d v=1 id=7f3a from=worker-a
+BLOCKED 123 budget orchestrator v=1 id=7f3b from=worker-a
+```
+
+### The lines
+
+| Line | Fields | Sender | Trigger | Receiver action |
+|---|---|---|---|---|
+| `ASSIGN` | `<ticket> <assignment-file> [lease=<resource>]` | orchestrator | The tick assigns a ready ticket. The same line with a new id carries a re-brief, a fix request or a successor's re-brief; the file says what changed. | Worker: reads the file, then the ticket, acks, sends `CLAIMED`. With `lease=` it calls `lease.py acquire` before it touches the resource. |
+| `ACK` | `<scope> re=<id>` | the receiver of any line except `ACK` | It has read the line, whether it agrees or not. | Sender: `swarm_msg.py pending` stops listing that id. |
+| `CLAIMED` | `<ticket> <branch>` | worker | It read the assignment and found its worktree and branch. | Orchestrator: row `claimed`; the progress clock starts. |
+| `PR` | `<ticket> <branch> <sha> body=<file>` | worker | Its branch is pushed at that sha and the PR body file is written. A worker never opens the PR itself. | Orchestrator: opens the draft PR from the file and records its number; row `pr`. |
+| `READY` | `<ticket> <sha>` | worker | That head is pushed, its checks pass, `done_when.py coverage` prints covered and every review finding is answered. | Orchestrator: row `ready-to-merge`; runs the gates for exactly that sha. A head that moved needs a new `READY`, unless the merge gate's own update from the base moved it. |
+| `MERGED` | `<ticket> <pr> <sha>` | orchestrator | The merge is confirmed on the default branch, by its own call or the owner's. | Worker: stops pushing to the branch and sends `DONE`. Orchestrator: row `merged`; hands the PR to the verifier. |
+| `BLOCKED` | `<ticket> <reason> <who> [sha=<sha>] [ran="…"]` | worker | It cannot go on. `<reason>` is `budget`, `stop`, `lease`, `scope` (a change outside its area) or `input` (a fact, file or grant it lacks). `<who>` is `orchestrator`, `owner` or a lane: who must act. | `<who>` acts. The orchestrator re-briefs, reassigns, parks or asks the owner; row `blocked`. |
+| `DONE` | `<ticket>` | worker; the orchestrator writes it for a background worker whose run has ended | Its assignment has nothing left to do: `MERGED` read, leases released, nothing of its own still running. | Orchestrator: closes the assignment and frees the lane. It ends the assignment, not the ticket: the row reaches `done` only from `verified`. |
+| `HOLD` | `<scope> releaser=<who> reason="…"` | orchestrator, also on the owner's word | A ticket, lane or resource must pause. | Receiver: finishes the current step, pushes, releases every lease it holds, starts nothing on that scope, acks and ends its turn. |
+| `RELEASE` | `<scope> [reason="…"]` | a hold's named releaser, or a lease holder giving its lease back, also when it expires | The hold is over, or the holder has finished with the resource. | A held worker re-reads the source of truth and resumes. Orchestrator: marks the hold or lease free; the next tick grants the next holder. |
+| `STOP` | `<scope> reason="…"` | orchestrator, or the owner through `lease.py stop` | The owner's word, a budget hard stop or a safety doubt. | Receiver: stops at its next tool round and reports (§ STOP and the call in flight). |
+| `PARKED` | `<ticket> reason="…"` | orchestrator | Two stalls and one re-brief changed nothing, or the work waits on an answer. | Worker: pushes and stops work on the ticket. Row `parked`, with a ledger entry. Only a new `ASSIGN` restarts it. |
+| `STANDBY` | `<lane> until=<time>` | orchestrator | The lane has no work now but may get some. | Worker: takes registry state `standby` and ends its turn, with no polling. A new `ASSIGN` wakes it. Past `until` (at most `swarm.standby_hours`, default 24) the sweep retires it. |
+| `RETIRED` | `<lane> [reason="…"]` | orchestrator; the sweep for a standby row past its time | The lane gets no more work. | Worker: runs `session-handoff` and ends. Peers stop waiting for it. |
+| `NEEDS` | `<system>.<kind> <name>`, as `docs/env-facts.md` § How a skill resolves a fact fixes it | worker | A fact it needs is missing. | Orchestrator: resolves the fact, then re-briefs. |
+| `DECISION` | `<question> \| <option> \| <option>`, as `docs/carousel.md` § Collection fixes it | worker | A choice only the owner can make touches its step. | Orchestrator: folds it into the next carousel or `Decisions` block. |
+| `Assumed:` | `<one line> (revisit: <checkpoint>)`, as `docs/assumptions.md` § Grammar fixes it | worker, orchestrator | It took a call a reasonable owner might have made differently. | Orchestrator: keeps it under `## Assumptions` and raises it at its checkpoint. |
+
+`NEEDS`, `DECISION` and `Assumed:` keep the text their own pages fix. `swarm_msg.py` carries their `v`, `id` and `from` as
+fields of the outbox record, not inside the text.
+
+### What every line obeys
+
+- **Idempotent.** A re-send keeps its id, and a second copy of an id changes nothing.
+- **Latest per ticket wins.** For one sender and one scope, the line latest in the file counts. `READY` at a new sha
+  replaces the old one; `BLOCKED` after `READY` takes the ticket out of the merge gate. From `merged` on, only `DONE`, the
+  verifier's pass and a new `ASSIGN` move a row.
+- **Delivered is not read.** A `SendMessage` that succeeded says only that the message arrived. Only an `ACK` means read.
+
+### The ack rule
+
+A receiver acks each line when it reads it: a worker at its drain, the orchestrator at its tick or at the return that
+wakes it. `swarm_msg.py pending` lists every id unacked past `swarm.ack_minutes` (default 20). The sender re-sends once,
+with the same id. One more window without an ack and the receiver is `unreachable`:
+
+- **A worker is unreachable.** Its assignment returns to the failover path in the tick's stalls step.
+- **The orchestrator is unreachable.** The worker finishes the step, pushes, writes its return files, releases every
+  lease and starts nothing new. The assignment stands until a successor orchestrator's `ASSIGN` re-brief arrives; acking
+  it confirms the worker is reachable.
+
+A host restart can bring a session back within minutes under a new harness id. Inside `swarm.reopen_minutes` (default 10)
+a failed probe or a missing ack is a wait and a re-probe, never a loss. A background worker whose run has ended reads
+nothing and owes no ack; the orchestrator resumes it only for a line that needs work, such as a fix request.
+
+### Versions
+
+`v=<n>` is on every line, so a grammar change is versioned. The table above is `v=1`. A change to a word, a field or a
+meaning raises `n`, in one PR that changes this table and `swarm_msg.py` together. A parser accepts the current and the
+previous version and refuses any other, naming what it accepts. A sender always writes the current one.
+
+### No relayed state
+
+A line says that something changed; it is not the state. Before it acts, a worker re-reads the source of truth (the
+ticket, the repo, a fresh scan), never a table, sha or grant a peer quoted. A decision reaches a worker as a link to its
+decision line, not a paraphrase. The orchestrator obeys the same rule at every tick.
+
+### Never block on a human
+
+A session that holds a lease or runs a child never waits on a human. It takes the default, raises the question without
+blocking and goes on. A worker raises it as a `DECISION` line, with an `Assumed:` line for the default it took. The
+orchestrator raises it in the digest's `Decisions` block (`docs/carousel.md` § No tool) and calls the carousel only when
+it holds no lease and runs no child. A question with no safe default, such as a human gate, holds only the work behind
+it: that ticket is parked or its lease released first, and everything else goes on.
+
+### Leases and holds
+
+A serial resource, one that only one holder can use at a time, is used only under a lease:
+`.context/state/leases/<resource>.json`, with the holder's lane, ref and pid, the acquire time, an expiry
+(`swarm.lease_minutes`, default 120), the named releaser and the reason. A lease can reserve `units` of a shared
+rate-limited resource. The orchestrator grants with `ASSIGN … lease=<resource>`, the worker calls `lease.py acquire`, and
+the owner pre-empts with `HOLD` or `STOP`. A dead pid means free. The holder enforces its own expiry and sends `RELEASE`
+itself. A hold names one releaser; only that releaser or the owner ends it, and the `RELEASE` goes in the ledger, so the
+other authority sees it at the next tick.
