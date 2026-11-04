@@ -245,8 +245,10 @@ def cmd_sign(a: argparse.Namespace) -> int:
         if g is None:
             print(f"gates: no {a.gate} in {a.file}", file=sys.stderr)
             return 1
-        why = refusal(g, a.by, a.decision, a.evidence)
-        field, value = ("decision", a.decision) if g.kind == "human" else ("proof", a.evidence)
+        decision = a.decision.strip() if a.decision is not None else None
+        evidence = a.evidence.strip() if a.evidence is not None else None
+        why = refusal(g, a.by, decision, evidence)
+        field, value = ("decision", decision) if g.kind == "human" else ("proof", evidence)
         if why is None and g.signed is not None:
             if g.ticked and g.signed == a.by and g.record == value:
                 print(f"{g.id} already closed by {g.signed}")

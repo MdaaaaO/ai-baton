@@ -258,6 +258,9 @@ class SignHuman(Base):
         p = self.gates("sign", str(self.plan), "VG-2", "--by", "owner", "--decision", DECISION)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(self.plan.read_bytes(), after)
+        p = self.gates("sign", str(self.plan), "VG-2", "--by", "owner", "--decision", DECISION + "  ")  # a stray space is the same line
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.plan.read_bytes(), after)
         self.assertRefused("--by", "owner", "--decision", "2026-02-03 · VG-2 again? → sign; not hold — a second answer",
                            why="already carries a signature")
 
