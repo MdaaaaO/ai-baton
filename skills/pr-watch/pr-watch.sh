@@ -288,9 +288,24 @@ while true; do
                   # dismiss_stale_reviews on, and GitHub counts it as approval only when reviewDecision says
                   # APPROVED (other touched paths may still wait on code owners). Read both; a read that
                   # fails is a line and no sync — never a silent default either way.
-                  gh_retry gh api "repos/$repo/branches/$base/protection/required_pull_request_reviews" --jq '.dismiss_stale_reviews'; disrc=$?; dismiss=$ghr_out
-                  if [ $disrc -ne 0 ] || { [ "$dismiss" != true ] && [ "$dismiss" != false ]; }; then
-                    lookup_failed "$pr" "branch protection" "${ghr_err:-dismiss_stale_reviews came back as $dismiss}; not auto-syncing an approved PR without knowing whether a push would dismiss the approval"
+                  # Rulesets first (200 and a list, empty when none applies): any pull_request rule with
+                  # dismiss_stale_reviews_on_push true means a push dismisses. Only when the rules do not say
+                  # true is classic protection read; its 404 "Branch not protected" is an answer (dismiss off),
+                  # every other failure on either read is a failed read.
+                  dismiss=""; disrc=0
+                  gh_retry gh api "repos/$repo/rules/branches/$base" --jq '[.[] | select(.type=="pull_request") | .parameters.dismiss_stale_reviews_on_push] | any'; disrc=$?; dismiss=$ghr_out
+                  if [ $disrc -eq 0 ] && [ "$dismiss" != true ] && [ "$dismiss" != false ]; then disrc=1; ghr_err="the rules read for $base came back as '$dismiss'"; fi
+                  if [ $disrc -eq 0 ] && [ "$dismiss" = false ]; then
+                    gh_retry gh api "repos/$repo/branches/$base/protection/required_pull_request_reviews" --jq '.dismiss_stale_reviews'; disrc=$?; dismiss=$ghr_out
+                    if [ $disrc -ne 0 ]; then
+                      case "$ghr_err" in
+                        *"Branch not protected"*) disrc=0; dismiss=false;;   # no classic protection: nothing dismisses
+                      esac
+                    elif [ "$dismiss" != true ] && [ "$dismiss" != false ]; then disrc=1; ghr_err="the protection read for $base came back as '$dismiss'"
+                    fi
+                  fi
+                  if [ $disrc -ne 0 ]; then
+                    lookup_failed "$pr" "branch protection" "${ghr_err:-no error text}; not auto-syncing an approved PR without knowing whether a push would dismiss the approval"
                   else
                     lookup_ok "branch protection"
                     if [ "$dismiss" = false ]; then

@@ -85,8 +85,12 @@ if [ "$1" = api ]; then
         if [ "$n" -le "$STUB_COMPARE_FAIL_COUNT" ]; then echo "stub gh: simulated transient compare failure" >&2; exit 1; fi
       fi
       body=$STUB_COMPARE_JSON ;;
+    */rules/branches/*)
+      [ -n "${STUB_RULES_FAIL:-}" ] && { echo "stub gh: simulated rules failure" >&2; exit 1; }
+      body=${STUB_RULES_JSON:-[]} ;;
     */branches/*/protection/required_pull_request_reviews)
       [ -n "${STUB_PROTECTION_FAIL:-}" ] && { echo "stub gh: simulated protection failure" >&2; exit 1; }
+      [ -n "${STUB_PROTECTION_ERR:-}" ] && { echo "${STUB_PROTECTION_ERR}" >&2; exit 1; }
       body="{\"dismiss_stale_reviews\": ${STUB_DISMISS:-true}}" ;;
     */commits/*/check-runs\?per_page=100) body=$STUB_CHECKRUNS_JSON ;;
     */check-runs/*/annotations\?per_page=100) body=$STUB_ANNOTATIONS_JSON ;;
@@ -535,6 +539,39 @@ class PrWatchStub(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn(f"PR {PR} LOOKUP FAILED: branch protection", r.stdout)
         self.assertIn("simulated protection failure", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("SYNCED", r.stdout + r.stderr)
+
+    RULE_DISMISS = '[{"type":"pull_request","parameters":{"dismiss_stale_reviews_on_push":%s}}]'
+
+    def test_a_ruleset_that_dismisses_stale_reviews_takes_the_dismiss_path(self):
+        r = self.behind_approved(STUB_RULES_JSON=self.RULE_DISMISS % "true", STUB_DISMISS="false")
+        self.assertIn("but APPROVED", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("branches/main/protection", self.calls())  # the rules answered; classic is not read
+
+    def test_no_ruleset_and_no_classic_protection_is_dismiss_off_and_synced(self):
+        r = self.behind_approved(STUB_PROTECTION_ERR="gh: Branch not protected (HTTP 404)")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} SYNCED with main", r.stderr)
+        self.assertNotIn("LOOKUP FAILED", r.stdout)
+        self.assertIn("-X PUT repos/o/r/pulls/7/update-branch", self.calls())
+
+    def test_a_ruleset_with_dismiss_off_and_no_classic_protection_is_synced(self):
+        r = self.behind_approved(STUB_RULES_JSON=self.RULE_DISMISS % "false",
+                                 STUB_PROTECTION_ERR="gh: Branch not protected (HTTP 404)")
+        self.assertIn(f"PR {PR} SYNCED with main", r.stderr)
+
+    def test_a_failed_rules_read_says_so_and_does_not_sync(self):
+        r = self.behind_approved(STUB_RULES_FAIL="1")
+        self.assertIn(f"PR {PR} LOOKUP FAILED: branch protection", r.stdout)
+        self.assertIn("simulated rules failure", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("SYNCED", r.stdout + r.stderr)
+
+    def test_a_classic_403_is_a_failed_read_not_dismiss_off(self):
+        r = self.behind_approved(STUB_PROTECTION_ERR="gh: Resource not accessible (HTTP 403)")
+        self.assertIn(f"PR {PR} LOOKUP FAILED: branch protection", r.stdout)
         self.assertNotIn("update-branch", self.calls())
         self.assertNotIn("SYNCED", r.stdout + r.stderr)
 
