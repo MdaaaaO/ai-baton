@@ -31,6 +31,7 @@
 # (an unregistered pane may be the user's own terminal), never to an owner with any active row, and never to
 # this script's own ancestry — printing KILLED / KILL FAILED per owner; exit 1 when a kill failed, else 0. The
 # heartbeats then end the rows on their own (final stats written) within a minute.
+# Leases: list mode names what a sweep would free ("would free", no write); --kill frees them.
 # CONTEXT_ROOT overrides the workspace's .context/ root; TMPDIR the log dir, exactly as for heartbeat.sh.
 set -u
 KITDIR=$(cd "$(dirname "$0")/../.." && pwd)
@@ -132,8 +133,10 @@ for ((i = 0; i < total; i++)); do
     echo "ZOMBIE $anames owner=$owner comm=$comm row=$rows"
   fi
 done
-# Leases a dead or expired holder left behind are freed in the same pass (lease.py sweep, one line each).
-python3 "$KITDIR/context-db/bin/lease.py" sweep 2>/dev/null || true
+# Leases a dead or expired holder left behind: list mode only names what a sweep would free (lease.py sweep
+# --dry-run), so a read never writes; --kill frees them (lease.py sweep, one line each).
+if [ "$kill_mode" = 1 ]; then python3 "$KITDIR/context-db/bin/lease.py" sweep 2>/dev/null || true
+else python3 "$KITDIR/context-db/bin/lease.py" sweep --dry-run 2>/dev/null || true; fi
 echo "zombie-sweep: $zombies zombie(s), $live live, $unreg unregistered, $stale stale, $reused reused, $dead dead, $unmapped unmapped"
 if [ "$kill_mode" = 1 ]; then [ "$failed" = 0 ] || exit 1; exit 0; fi
 [ "$zombies" = 0 ] || exit 3
