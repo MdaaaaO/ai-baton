@@ -12,6 +12,8 @@ Subcommands (each regenerates SESSION_INDEX.md):
   register  create/update this session's entry (upsert; preserves the free-text body — `--note` fills only `## Notes`);
             stamps `session_id` with $CLAUDE_CODE_SESSION_ID when set, so a hook handed that id finds the row, and
             `registered` with the time a NEW or ended lane (re)starts — a re-register of a live one keeps it
+            (`--successor-of <name>` also ends that predecessor's row as `superseded by <name>` when it is `active`,
+            12h+ stale with its owner gone — stats and ledger row included — else leaves it and says why)
   touch     refresh heartbeat + updated only — the <=12h keep-alive
   end       mark the session ended; writes the `## Session stats` block into the body and
             (with --next FILE) the `## Next session` hand-off prompt — omit --next when the session has
@@ -460,27 +462,88 @@ def _predecessor_open_prs(name: str) -> str:
     return f"{head}\nunknown (no {OPEN_PRS_HEADING} heading — check `gh pr list --author @me`)"
 
 
-def _supersede_predecessor(name: str, successor: str) -> None:
+def _owner_alive(name: str) -> bool:
+    """Whether the claude process that owns a live session called `name` is still running: the same read
+    `zombie-sweep.sh` makes — each heartbeat log's last `start name=<name> owner=<pid>` line, the pid's comm
+    claude-shaped. Logs live under `_baton_tmp()`; no log or an unreadable one reads as not alive."""
+    import glob
+    for log in glob.glob(os.path.join(_baton_tmp(), "heartbeat-*.log")):
+        try:
+            with open(log, encoding="utf-8", errors="replace") as f:
+                starts = [ln for ln in f if " start name=" in ln]
+        except OSError:
+            continue
+        m = re.search(r" start name=(\S+) owner=(\d+)", starts[-1]) if starts else None
+        if not m or m.group(1) != name:
+            continue
+        try:
+            with open(f"/proc/{m.group(2)}/comm", encoding="utf-8") as f:
+                comm = f.read().strip()
+        except OSError:
+            comm = ""
+            try:
+                os.kill(int(m.group(2)), 0)
+                comm = "claude"  # no /proc here (not Linux): a live pid counts, as zombie-sweep's `ps` read would
+            except (ProcessLookupError, ValueError):
+                pass
+            except PermissionError:
+                comm = "claude"
+        if comm and (comm in ("claude", "node") or re.match(r"\d+\.\d+\.\d+", comm)):
+            return True
+    return False
+
+
+def _supersede_predecessor(name: str, successor: str, a=None) -> None:
     """A successor registered over a predecessor that died without a handoff: an `active` row with no heartbeat
-    for over `gen_sessions.STALE_HOURS` is marked `ended` (reason `superseded by <successor>`) so the archive rule can
-    take it. A fresh heartbeat means it may still be alive: left alone, with a warning. Rows already ended, or
-    absent, are not touched. No ledger row: a crashed session has no stats to write."""
+    for over `gen_sessions.STALE_HOURS`, whose owner process is gone, is marked `ended` (reason `superseded by
+    <successor>`; `gen_sessions.archive_reason` then takes it at once) and gets the stats block and ledger row
+    `end` would have written, best effort. A live owner (whatever the heartbeat age), a fresh heartbeat, a missing
+    or unreadable one, or a status other than `active` leaves the row alone with one line saying why. Rows already
+    ended, or absent, are not touched."""
     if name == successor:
         return
     path = path_for(name)
     meta, body = read_doc(path) if os.path.exists(path) else (None, "")
-    if meta is None or meta.get("status") != "active":
+    if meta is None or meta.get("status") == "ended":
+        return
+    left = f"predecessor {name} left as is: "
+    if meta.get("status") != "active":
+        print(left + f"its status is `{meta.get('status')}`, only an `active` row is superseded", file=sys.stderr)
+        return
+    if _owner_alive(name):
+        print(f"warning: {left}its owner process is still running — end it with `session.py end` if it is really gone", file=sys.stderr)
         return
     from gen_sessions import STALE_HOURS, age_hours  # lazy: gen_sessions imports this module
     age = age_hours(str(meta.get("heartbeat", "")))
-    if age is not None and age <= STALE_HOURS:
-        print(f"warning: predecessor {name} is still active (heartbeat {age:.1f}h old, under {STALE_HOURS}h): "
-              f"left alone — end it with `session.py end` if it is really gone", file=sys.stderr)
+    if age is None:
+        print(f"warning: {left}no readable heartbeat to judge it by", file=sys.stderr)
+        return
+    if age <= STALE_HOURS:
+        print(f"warning: {left}still active (heartbeat {age:.1f}h old, under {STALE_HOURS}h) — "
+              f"end it with `session.py end` if it is really gone", file=sys.stderr)
         return
     meta["status"] = "ended"
     meta["ended_reason"] = f"superseded by {successor}"
     meta["updated"] = today()
-    write_doc(path, meta, _normalize_body(body))
+    body = _normalize_body(body)
+    st = None
+    sid = str(meta.get("session_id", "") or "")
+    if sid and not getattr(a, "no_stats", False):
+        try:
+            import session_stats
+            st = session_stats.stats_for(sid)
+            if st is not None:
+                _apply_stats(meta, st)
+                body = _replace_section(body, STATS_HEADING, session_stats.fmt_block(st))
+        except Exception as e:  # best effort: the row is ended either way
+            print(f"stats for superseded {name} failed ({e}) — row ended without them", file=sys.stderr)
+            st = None
+    write_doc(path, meta, body)
+    if st is not None:
+        try:
+            _ledger_append(meta, st)
+        except Exception as e:
+            print(f"ledger row for superseded {name} failed ({e}) — row ended without it", file=sys.stderr)
     print(f"ended predecessor {name} (stale, no handoff): superseded by {successor}")
 
 
@@ -492,6 +555,7 @@ def cmd_register(a) -> None:
         check_no_private_value(a.name)
         meta, body = {}, DEFAULT_BODY.format(name=a.name)
     meta["session"] = a.name
+    meta.pop("ended_reason", None)  # a re-registered lane is no longer superseded
     # The harness session id, so a Claude Code hook — handed `session_id` on stdin, never the registry name — can
     # find this row (ctx_adapter.py's heartbeat and compact brief match on it). Only the harness's own variable
     # counts: --session-id / SESSION_ID may name another session's transcript for its stats.
@@ -522,7 +586,7 @@ def cmd_register(a) -> None:
     record_name(a.name)
     print(f"registered {os.path.relpath(path, CTX)}")
     if getattr(a, "successor_of", ""):
-        _supersede_predecessor(check_name(a.successor_of), a.name)
+        _supersede_predecessor(check_name(a.successor_of), a.name, a)
         print(_predecessor_open_prs(check_name(a.successor_of)))
 
 
@@ -785,7 +849,9 @@ def main() -> int:
         sp = sub.add_parser(name)
         if name == "register":
             sp.add_argument("--successor-of", default="", help="the predecessor's session name: print its `## Open PRs` "
-                            "list after registering (step 4 of session-register re-arms or drives each one)")
+                            "list after registering (step 4 of session-register re-arms or drives each one); also ends that "
+                            "row as `superseded by <name>` when it is `active`, its heartbeat is over 12h old and its owner "
+                            "process is gone, else leaves it and says why")
         sp.add_argument("--name", required=(name != "stats"))
         sp.add_argument("--session-id", default="", help="transcript to derive stats from (default $CLAUDE_CODE_SESSION_ID)")
         sp.add_argument("--no-stats", action="store_true", help="do not refresh the stats field")

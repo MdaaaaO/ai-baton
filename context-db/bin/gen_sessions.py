@@ -246,6 +246,9 @@ def archive_reason(m: dict, registered: Mapping[str, datetime] | None = None) ->
     proves nothing — nobody has picked this hand-off up yet — and keeps proving nothing however often it is touched
     afterwards: its `registered` stamp stays where it began. A lane with no stamp is unknown, never a successor."""
     me = m.get("session", "")
+    superseded = str(m.get("ended_reason", "") or "")
+    if superseded.startswith("superseded by "):
+        return superseded  # a successor registered over this crashed row (session.py register --successor-of): consumed
     ended_at = _hb_time(m.get("heartbeat", ""))
     if has_next_prompt(m) and ended_at is not None and registered:
         for succ in named_successors(m):
