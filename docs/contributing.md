@@ -295,11 +295,15 @@ call) under the owner's review. `release` and `main-guard`
 (push to main) and `auto-merge` (`workflow_run`, always the copy on main) check out no pull request.
 `tests/test_ci_hygiene.py` fails when any workflow names a self-hosted runner. Each hosted job is a fresh VM, so
 parallel reviews never race on one shared Claude Code install.
+The `kit-verify`, `macos` and `forced-signing` jobs run `python3 context-db/bin/ctx_adapter.py install` right before
+the unittest suite, so the end-to-end adapter tests that need the pinned ctx-store (`@unittest.skipUnless(REAL_CTX, …)`
+in `test_ctx_adapter.py`, `test_log_rotate.py` and `test_miss_check.py`) run there; `python-floor` installs none (the
+pinned release needs a newer Python than 3.9) and a machine without the pin skips them the same way.
 
 ## Testing
 
 The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C $BATON/context-db test` (no install;
-one module per process, `JOBS=N` at a time, default the CPU count — `JOBS=1` on a busy host) — and CI runs it on every PR. `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
+one module per process, `JOBS=N` at a time, default the CPU count — `JOBS=1` on a busy host) — and CI runs it on every PR (§ Where CI runs says which jobs install the pinned ctx-store, so the end-to-end adapter tests run there and not only on a machine with the pin). `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
 discovery — useful while iterating on one module. The suite always runs on a **throw-away env store**, never this
 machine's `.context/`: `make test` builds a blank one under the temp dir as CI does (`kb.py init --blank`, environment
 `ci`), whatever `CONTEXT` or `CONTEXT_ROOT` says and wherever it runs from — a kit worktree resolves the workspace's

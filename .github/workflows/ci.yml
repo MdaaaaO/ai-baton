@@ -119,6 +119,14 @@ jobs:
           . .claude/.github/versions.env
           python3 -m pip install --quiet "PyYAML==$PYYAML_VERSION"
 
+      # The pinned ctx-store (ctx_adapter.py's CTX_VERSION, its wheel sha256-checked) for the end-to-end adapter
+      # tests: `@unittest.skipUnless(REAL_CTX, …)` in test_ctx_adapter.py, test_log_rotate.py and test_miss_check.py
+      # skip wherever the pin is absent, so until #670 CI ran only their scaffold asserts. The macos and forced-signing
+      # jobs install it the same way; python-floor does not (the pinned release needs a newer Python than 3.9) and
+      # keeps skipping them. A fetch from PyPI on every run; nothing is cached between runs.
+      - name: Install the pinned ctx-store (end-to-end adapter tests)
+        run: python3 .claude/context-db/bin/ctx_adapter.py install
+
       - name: Engine tests
         run: make -C .claude/context-db test
 
@@ -255,6 +263,10 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/pyyaml-venv"
           "$RUNNER_TEMP/pyyaml-venv/bin/pip" install --quiet "PyYAML==$PYYAML_VERSION"
           echo "$RUNNER_TEMP/pyyaml-venv/bin" >> "$GITHUB_PATH"
+      # The pinned ctx-store for the end-to-end adapter tests (the comment on kit-verify's step); the venv above is
+      # on PATH, so `python3` here and inside the ctx shim is the same interpreter.
+      - name: Install the pinned ctx-store (end-to-end adapter tests)
+        run: python3 context-db/bin/ctx_adapter.py install
       - name: Engine tests on macOS
         run: make -C context-db test
       # Picked by shebang, like the Linux "Shell scripts parse" + "POSIX scripts parse under dash" steps
@@ -309,6 +321,9 @@ jobs:
         run: |
           . .github/versions.env
           python3 -m pip install --quiet "PyYAML==$PYYAML_VERSION"
+      # The pinned ctx-store for the end-to-end adapter tests (the comment on kit-verify's step)
+      - name: Install the pinned ctx-store (end-to-end adapter tests)
+        run: python3 context-db/bin/ctx_adapter.py install
       - name: Engine tests under forced signing
         run: make -C context-db test
 
