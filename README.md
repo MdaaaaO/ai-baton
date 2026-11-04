@@ -237,7 +237,7 @@ It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `contex
 | [sync](docs/sync.md) | How the kit moves between machines |
 | [context-sync](docs/context-sync.md) | `.context/` as a private git repo the hooks sync |
 | [authoring](docs/authoring.md) | The checklist for a new skill or agent |
-| [delegation](docs/delegation.md) | When to hand work to a subagent, sized by cost |
+| [delegation](docs/delegation.md) · [swarm](docs/swarm.md) | Subagents sized by cost; the swarm contract |
 | [engine-cli](docs/engine-cli.md) | Every engine command and flag |
 | [decisions](docs/decisions/README.md) | Design choices worth not re-litigating |
 | [commit-style](docs/commit-style.md) · [REVIEW](docs/REVIEW.md) · [glossary](docs/glossary.md) · [CHANGELOG](CHANGELOG.md) · [contributing](docs/contributing.md) | Contributor reference |
