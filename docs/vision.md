@@ -118,13 +118,14 @@ is on `main` today. A status with a version means it shipped in that release. `p
 The layers are not equally thick. Most rows record or gate. Few ask the person to act. The miss check closes the
 last gap in the verifier layer: a fork that grades the work before its author signs it.
 
-Swarm mode (#674) adds to each layer. It is planned, so it has no row above until each piece lands. One orchestrator
-session owns an epic and runs `swarm-run` (#684), one swarm tick at a time. Spec: `epic-discover` and `epic-decompose`,
-with the owner's go before any worker starts (#682, #683). Verifier: a role that never wrote the change and alone
-records a pass, plus verification gates per kind of change (#681, #689). Environment: the task ledger (#677), the
-message grammar (#678), leases (#679), the budget brake (#680), the assignment file and worker brief (#685), liveness
-and failover (#686). Understanding: the inbox and the digest (#688), the weekly report and the plan walkthrough (#690).
-The contract is `docs/swarm.md`. Why the mode needs no server: `docs/decisions/0005-orchestrator-is-a-session.md`.
+Swarm mode (#674) adds to each layer. None of it is built yet, and each piece gets its row when it lands. One
+orchestrator session owns an epic and runs `swarm-run` (#684), one swarm tick at a time. Spec: `epic-discover` and
+`epic-decompose`, with the owner's go before any worker starts (#682, #683). Verifier: a role that never wrote the
+change and alone records a pass, plus verification gates per kind of change (#681, #689). Environment: the task ledger
+(#677), the message grammar (#678), leases (#679), the budget brake (#680), the assignment file and worker brief (#685),
+liveness and failover (#686). Understanding: the inbox and the digest (#688), the weekly report and the plan walkthrough
+(#690). The contract is `docs/swarm.md` (#676). Why the mode needs no server:
+`docs/decisions/0005-orchestrator-is-a-session.md`.
 
 ## Non-goals
 

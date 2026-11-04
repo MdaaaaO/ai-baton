@@ -26,7 +26,7 @@ one worktree each. The kit has no written rule for when a worker is a subagent a
 runs and resumes from disk alone: every swarm tick re-reads the ledger, the tracker and git, never memory. The ledger is
 a file a session writes, `.context/state/swarm/<key>.json`, rendered as a table in the epic's context doc. Nothing runs
 between sessions. There is no control-plane UI and no database. Roles, lifecycle, authority and message grammar are the
-contract, `docs/swarm.md`.
+contract, `docs/swarm.md` (#676).
 
 **A wake-up is not a daemon.**
 
