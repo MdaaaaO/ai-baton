@@ -249,8 +249,12 @@ jobs:
     name: macos (portable.sh, bash/sh/dash parse)
     needs: changed-paths
     if: needs.changed-paths.outputs.portability == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 15
+    # x64, not `macos-latest` (arm64): GitHub's hosted macOS arm64 pool is capacity-constrained (every job gets a
+    # "longer queue times" notice) and twice cancelled this leg unrun on main after the 15-minute timeout, which
+    # counts the queue wait (#673). The BSD tools and the 3.2 system bash the leg exists for are the same on both
+    # architectures. 30 minutes: queued minutes are not billed, so the extra budget only outlasts a slow pool.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # macOS's system python3 is externally managed (PEP 668) — `pip install` straight into it errors
