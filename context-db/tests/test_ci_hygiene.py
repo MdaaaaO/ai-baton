@@ -244,14 +244,20 @@ class PythonFloorLeg(unittest.TestCase):
 
 class MacosLeg(unittest.TestCase):
     """The BSD/macOS fallbacks in skills/_lib/portable.sh (no flock, no setsid, BSD date) were exercised by
-    PATH-manipulation tests on a Linux runner only, never on a real macOS interpreter — a real macos-latest job
+    PATH-manipulation tests on a Linux runner only, never on a real macOS interpreter — a real macOS job
     proves the fallbacks, not just the tests that stand in for them, and must be gated so it doesn't run (and
-    cost) on every unrelated PR."""
+    cost) on every unrelated PR. The runner is an x64 label, never `macos-latest` (arm64): that pool's capacity
+    notice twice cancelled the leg unrun on main (#673), and the BSD surface is the same on both."""
 
     TEXT = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
 
-    def test_declares_a_macos_job(self):
-        self.assertIn("runs-on: macos-latest", self.TEXT)
+    def test_declares_a_macos_job_on_an_x64_runner(self):
+        job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
+        self.assertRegex(job, r"runs-on: macos-\d+-intel\n")
+        self.assertNotIn("runs-on: macos-latest", job)
+        budget = re.search(r"timeout-minutes: (\d+)\n", job)
+        self.assertIsNotNone(budget, "the macos job declares no timeout-minutes")
+        self.assertGreaterEqual(int(budget.group(1)), 30)  # the queue wait counts against it
 
     def test_macos_job_runs_the_engine_suite(self):
         job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
