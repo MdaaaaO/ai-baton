@@ -39,3 +39,4 @@ quoting large blocks.
 | [0002](0002-sign-queue-location.md) | Where the sign-queue lives | Accepted |
 | [0003](0003-bundle-only-review-runner.md) | The pr-review runner works from a bundle only | Proposed |
 | [0004](0004-bodies-state-the-current-rule.md) | A unit body states the current rule only | Accepted |
+| [0005](0005-orchestrator-is-a-session.md) | An orchestrator is a session, not a server | Accepted |
