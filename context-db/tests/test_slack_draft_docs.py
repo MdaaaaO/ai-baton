@@ -44,7 +44,8 @@ class ObservedSlotRule(unittest.TestCase):
         self.assertIn("unconfirmed: never try it on purpose", self.text)
         self.assertIn("treat a second `draft_id` for one conversation as a", self.text)
 
-    def test_the_recreate_records_its_result_and_owns_the_duplicate_risk(self):
+    def test_every_slot_answer_is_recorded_and_the_recreate_owns_the_duplicate_risk(self):
+        self.assertIn("or a new `draft_id` for a conversation that already had one, record that result too", self.text)
         self.assertIn("record the new `draft_id` with the create", self.text)
         self.assertIn("the one place a\n     duplicate can arise", self.text)
         self.assertIn("proves nothing about this draft", self.text)
