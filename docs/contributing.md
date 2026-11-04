@@ -299,7 +299,7 @@ parallel reviews never race on one shared Claude Code install.
 ## Testing
 
 The engine has a stdlib `unittest` suite in `context-db/tests/` — `make -C $BATON/context-db test` (no install;
-one module per process, `JOBS=N` at a time, default the CPU count — `JOBS=1` on a busy host) — and CI runs it on every PR. `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
+one module per process, `JOBS=N` at a time, default the CPU count — `JOBS=1` on a busy host) — and CI runs it on every PR; the `kit-verify`, `macos` and `forced-signing` jobs first run `python3 context-db/bin/ctx_adapter.py install`, so the end-to-end adapter tests that need the pinned ctx-store (`@unittest.skipUnless(REAL_CTX, …)`) run there too, where the `python-floor` job (the pinned release needs a newer Python than 3.9) and a machine without the pin skip them. `make test T=test_kb` runs one file (`tests/test_kb.py`) instead of the full
 discovery — useful while iterating on one module. The suite always runs on a **throw-away env store**, never this
 machine's `.context/`: `make test` builds a blank one under the temp dir as CI does (`kb.py init --blank`, environment
 `ci`), whatever `CONTEXT` or `CONTEXT_ROOT` says and wherever it runs from — a kit worktree resolves the workspace's

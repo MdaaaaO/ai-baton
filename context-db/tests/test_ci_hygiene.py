@@ -342,6 +342,37 @@ class ForcedSigningLeg(unittest.TestCase):
         self.assertIn("needs.changed-paths.outputs.portability", job)
 
 
+class PinnedCtxInCi(unittest.TestCase):
+    """The end-to-end adapter tests (`@unittest.skipUnless(REAL_CTX, …)` in test_ctx_adapter.py, test_log_rotate.py,
+    test_miss_check.py) skip wherever the pinned ctx-store is absent — CI installed none, so only their scaffold
+    asserts ran there (#670). Every job that runs the engine suite installs the pin right before it; python-floor
+    cannot (the pinned release needs a newer Python than 3.9) and keeps skipping them — asserted both ways, so a
+    job added later neither misses the step nor pretends the floor runs them."""
+
+    TEXT = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    INSTALL = "ctx_adapter.py install"
+
+    def job(self, name: str, until: str) -> str:
+        return self.TEXT.split(f"\n  {name}:\n", 1)[1].split(f"\n  {until}:\n", 1)[0]
+
+    def test_each_engine_suite_job_installs_the_pin_right_before_its_suite(self):
+        for name, until, suite in (("kit-verify", "changed-paths", "make -C .claude/context-db test"),
+                                   ("macos", "forced-signing", "make -C context-db test"),
+                                   ("forced-signing", "python-floor", "make -C context-db test")):
+            with self.subTest(job=name):
+                job = self.job(name, until)
+                self.assertEqual(job.count(self.INSTALL), 1, f"{name}: no (or more than one) pinned ctx-store install step")
+                self.assertLess(job.index(self.INSTALL), job.index(suite), f"{name}: the install must precede the suite")
+                # right before: no other step between the install and the suite
+                between = job[job.index(self.INSTALL):job.index(suite)]
+                self.assertEqual(between.count("- name:"), 1, f"{name}: a step sits between the install and the suite")
+
+    def test_the_floor_job_installs_none(self):
+        job = self.job("python-floor", "install-smoke")
+        self.assertIn("make -C context-db test", job)  # it still runs the suite, the pin-gated tests skipping
+        self.assertNotIn(self.INSTALL, job)
+
+
 class MermaidDepsPinned(unittest.TestCase):
     """pr-open's mermaid-check.mjs used to be run after `npm i --no-audit --no-fund mermaid@11 jsdom dompurify` —
     two of the three packages unpinned, no lockfile, so the Mermaid validation result depended on whatever npm
