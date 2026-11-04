@@ -132,6 +132,8 @@ for ((i = 0; i < total; i++)); do
     echo "ZOMBIE $anames owner=$owner comm=$comm row=$rows"
   fi
 done
+# Leases a dead or expired holder left behind are freed in the same pass (lease.py sweep, one line each).
+python3 "$KITDIR/context-db/bin/lease.py" sweep 2>/dev/null || true
 echo "zombie-sweep: $zombies zombie(s), $live live, $unreg unregistered, $stale stale, $reused reused, $dead dead, $unmapped unmapped"
 if [ "$kill_mode" = 1 ]; then [ "$failed" = 0 ] || exit 1; exit 0; fi
 [ "$zombies" = 0 ] || exit 3

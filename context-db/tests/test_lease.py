@@ -1,0 +1,261 @@
+"""lease.py (leases on serial resources, STOP files) and the PreToolUse hook's STOP branch, plus the two shell
+wirings (zombie-sweep.sh, heartbeat.sh). Every store is a temp dir; session ids and lane names are assembled at run
+time. Stdlib unittest. Run: make -C .claude/context-db test T=test_lease."""
+from __future__ import annotations
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+import uuid
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+KIT = HERE.parents[1]
+BIN = HERE.parent / "bin"
+LEASE = BIN / "lease.py"
+ADAPTER = BIN / "ctx_adapter.py"
+ZOMBIE = KIT / "skills" / "session-register" / "zombie-sweep.sh"
+HEARTBEAT = KIT / "skills" / "session-register" / "heartbeat.sh"
+sys.path.insert(0, str(BIN))
+import lease as L  # noqa: E402
+
+
+def dead_pid() -> int:
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait()
+    return p.pid
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.t = Path(self.tmp.name)
+        self.root = self.t / ".context"
+        (self.root / "sessions").mkdir(parents=True)
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith(("WORKSPACE_", "BATON_", "CLAUDE_"))}
+        self.env.update(CONTEXT_ROOT=str(self.root), KIT_SCRATCH=str(self.t / "scratch"))
+        self.addCleanup(self.tmp.cleanup)
+        self.lane = "w-" + uuid.uuid4().hex[:6]
+        self.other = "o-" + uuid.uuid4().hex[:6]
+
+    def run_(self, *args: str, **env: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(LEASE), *args], env={**self.env, **env}, capture_output=True,
+                              text=True, cwd=self.t, timeout=60)
+
+    def ok(self, *args: str) -> str:
+        r = self.run_(*args)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def refused(self, *args: str, rc: int = 1, **env: str) -> str:
+        r = self.run_(*args, **env)
+        self.assertEqual(r.returncode, rc, r.stdout)
+        self.assertNotIn("Traceback", r.stderr)
+        return r.stderr
+
+    def acquire(self, res: str, lane: str, pid: int | None = None, *extra: str) -> subprocess.CompletedProcess:
+        return self.run_("acquire", res, "--lane", lane, "--pid", str(pid or os.getpid()), *extra)
+
+    def lease_file(self, res: str) -> dict:
+        return json.loads((self.root / "state" / "leases" / f"{res}.json").read_text())
+
+
+class Leases(Base):
+    def test_acquire_refuses_a_held_lease_and_names_the_holder(self):  # DW-1
+        self.assertEqual(self.acquire("client", self.lane, None, "--ref", "T1").returncode, 0)
+        r = self.acquire("client", self.other)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(self.lane, r.stderr)
+        h = self.lease_file("client")["holders"][0]
+        self.assertEqual((h["lane"], h["ref"], h["pid"], h["releaser"]), (self.lane, "T1", os.getpid(), "holder"))
+        self.assertTrue(h["acquired"] and h["expires"])
+
+    def test_the_same_lane_renews(self):
+        self.acquire("client", self.lane)
+        r = self.acquire("client", self.lane)
+        self.assertIn("renewed", r.stdout)
+
+    def test_acquire_grants_a_dead_pid_lease(self):  # DW-1
+        self.acquire("client", self.lane, dead_pid())
+        r = self.acquire("client", self.other)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("dead pid", r.stdout)
+        self.assertEqual(self.lease_file("client")["holders"][0]["lane"], self.other)
+
+    def test_acquire_grants_an_expired_lease(self):
+        self.acquire("client", self.lane, None, "--minutes", "0")
+        self.assertEqual(self.acquire("client", self.other).returncode, 0)
+
+    def test_release_honours_the_releaser_rule(self):  # DW-1
+        self.acquire("client", self.lane, None, "--releaser", "orchestrator")
+        self.assertIn("releaser is orchestrator", self.refused("release", "client", "--lane", self.lane, "--as", "holder"))
+        self.refused("release", "client", "--as", "holder", rc=2)  # no lane known to the caller
+        self.assertIn("release", self.run_("release", "client", "--lane", self.lane, "--as", "orchestrator").stdout)
+        self.acquire("client", self.lane, None, "--releaser", "orchestrator")
+        self.ok("release", "client", "--as", "owner")  # the owner may always release
+        self.assertFalse((self.root / "state" / "leases" / "client.json").exists())
+
+    def test_the_holder_releases_its_own_and_not_a_peers(self):
+        self.acquire("client", self.lane)
+        self.assertIn("not", self.refused("release", "client", "--lane", self.lane, "--as", "orchestrator"))
+        self.refused("release", "client", "--lane", self.other, "--as", "holder")
+        self.assertEqual(self.run_("release", "client", "--as", "holder", "--lane", self.lane).returncode, 0)
+
+    def test_resource_must_be_named_when_the_environment_lists_some(self):
+        from unittest import mock
+        with mock.patch.object(L.kit_profile, "get", lambda k, d=None: ["client"] if k == "swarm.resources" else d):
+            L.check_resource("client")
+            with self.assertRaises(L.Usage):
+                L.check_resource("other")
+
+    def test_bad_names_are_usage_errors(self):
+        self.refused("acquire", "../x", "--lane", self.lane, "--pid", "1", rc=2)
+
+
+class Quota(Base):
+    def test_a_quota_lease_refuses_a_reservation_past_the_units(self):  # DW-4
+        self.assertEqual(self.acquire("api", self.lane, None, "--capacity", "10", "--units", "6").returncode, 0)
+        self.assertEqual(self.acquire("api", self.other, None, "--units", "4").returncode, 0)
+        r = self.acquire("api", "third", None, "--units", "1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("quota", r.stderr)
+        self.assertEqual(self.lease_file("api")["capacity"], 10)
+        self.ok("release", "api", "--lane", self.lane, "--as", "owner")
+        self.assertEqual(self.acquire("api", "third", None, "--units", "6").returncode, 0)
+
+    def test_units_without_a_capacity_is_a_usage_error(self):
+        self.assertEqual(self.acquire("api", self.lane, None, "--units", "2").returncode, 2)
+
+
+class Sweep(Base):
+    def test_sweep_frees_expired_and_dead_pid_leases(self):  # DW-2
+        self.acquire("a", self.lane, dead_pid())
+        self.acquire("b", self.lane, None, "--minutes", "0")
+        self.acquire("c", self.lane)
+        out = self.ok("sweep").splitlines()
+        self.assertEqual(sorted(x.split(":")[0] for x in out), ["freed a", "freed b"])
+        self.assertIn("dead pid", out[0] + out[1])
+        self.assertEqual(L.resources(self.root), ["c"])
+
+    def test_expire_frees_only_this_lanes_expired_leases_and_prints_release(self):
+        self.acquire("a", self.lane, None, "--minutes", "0")
+        self.acquire("b", self.other, None, "--minutes", "0")
+        self.assertEqual(self.ok("expire", "--lane", self.lane).strip(), 'RELEASE a reason="lease expired"')
+        self.assertEqual(L.resources(self.root), ["b"])
+
+    def test_zombie_sweep_calls_it(self):  # DW-2
+        self.assertIn("lease.py", ZOMBIE.read_text())
+        self.acquire("a", self.lane, dead_pid())
+        (self.root / "sessions").mkdir(exist_ok=True)
+        r = subprocess.run(["bash", str(ZOMBIE)], env={**self.env, "TMPDIR": str(self.t)}, capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("freed a", r.stdout)
+        self.assertEqual(L.resources(self.root), [])
+
+    def test_heartbeat_frees_its_lanes_expired_lease(self):
+        self.assertIn("lease.py", HEARTBEAT.read_text())
+        self.assertIn("expire --lane", HEARTBEAT.read_text())
+
+
+class Stop(Base):
+    def setUp(self):
+        super().setUp()
+        self.sid = str(uuid.uuid4())
+        (self.root / "sessions" / f"{self.lane}.md").write_text(
+            f"---\nsession: {self.lane}\nsession_id: {self.sid}\nstatus: active\nepic: acme/widgets#674\n---\n# x\n")
+
+    def hook(self, tool: str = "Bash", sid: str | None = None, **inp) -> dict | None:
+        payload = json.dumps({"session_id": self.sid if sid is None else sid, "cwd": str(self.t), "tool_name": tool, "tool_input": inp})
+        r = subprocess.run([sys.executable, str(ADAPTER), "hook", "pre-tool-use"], input=payload, text=True,
+                           env={**self.env, "KIT_CTX": str(self.t / "none")}, capture_output=True, timeout=60)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+    def test_a_stop_blocks_the_holding_lane_with_the_reason_and_go_lifts_it(self):  # DW-3
+        self.acquire("client", self.lane)
+        self.assertIsNone(self.hook(command="make ci"))
+        self.ok("stop", "client", "--reason", "owner needs the client")
+        out = self.hook(command="make ci")
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("owner needs the client", out["permissionDecisionReason"])
+        self.assertEqual(self.hook("Edit", file_path="x")["permissionDecision"], "deny")
+        self.assertIsNone(self.hook(sid=str(uuid.uuid4()), command="make ci"))  # another session: untouched
+        self.ok("go", "client")
+        self.assertIsNone(self.hook(command="make ci"))
+
+    def test_an_epic_stop_blocks_the_lane_working_that_epic(self):  # DW-3
+        self.ok("stop", "674", "--reason", "budget hard stop")
+        self.assertIn("budget hard stop", self.hook(command="ls")["permissionDecisionReason"])
+        self.ok("stop", "other", "--reason", "x")
+        self.ok("go", "674")
+        self.assertIsNone(self.hook(command="ls"))  # STOP-other names a scope this lane neither holds nor works
+
+    def test_a_stop_for_a_lease_the_lane_does_not_hold_leaves_it_alone(self):
+        self.acquire("client", self.other)
+        self.ok("stop", "client", "--reason", "x")
+        self.assertIsNone(self.hook(command="ls"))
+
+    def test_the_calls_the_contract_requires_pass_a_stop(self):  # DW-5
+        self.ok("stop", "674", "--reason", "x")
+        for cmd in ("python3 context-db/bin/swarm_msg.py send --worker w --line 'BLOCKED 1 stop owner ran=\"a; b\"'",
+                    "python3 context-db/bin/swarm_msg.py drain w", "python3 swarm_msg.py ack w",
+                    "python3 context-db/bin/lease.py release client --as holder",
+                    "python3 context-db/bin/lease.py go 674"):
+            self.assertIsNone(self.hook(command=cmd), cmd)
+        self.assertIsNone(self.hook("TaskStop", task_id="t1"))
+        for cmd in ("make ci", "python3 swarm_msg.py send w x; rm -rf y", "python3 swarm_msg.py send w x && ls",
+                    "python3 swarm_msg.py drain w > out", "python3 swarm_msg.py drain $(ls)", "swarm_msg.py drain w\nls",
+                    "python3 swarm_msg.py bogus", "python3 evil.py send"):
+            self.assertEqual(self.hook(command=cmd)["permissionDecision"], "deny", cmd)
+        self.assertEqual(self.hook("Write", file_path="a")["permissionDecision"], "deny")
+
+    def test_only_the_next_work_call_is_blocked_not_every_tool_of_other_lanes(self):  # DW-6
+        self.ok("stop", "674", "--reason", "x")
+        self.assertIsNone(self.hook(sid="", command="ls"))  # no session id: no lane, no block
+
+    def test_stop_prints_the_in_flight_rule_and_the_owner_keeps_its_stop(self):  # DW-4
+        out = self.ok("stop", "674", "--reason", "x", "--as", "owner")
+        self.assertIn("cannot beat a call already in flight", out)
+        self.assertIn("kills a peer's pid", out.replace("nobody kills", "kills"))
+        self.refused("go", "674", "--as", "orchestrator")
+        self.refused("stop", "674", "--reason", "y", "--as", "orchestrator")
+        self.ok("go", "674", "--as", "owner")
+        self.refused("go", "674")  # already lifted
+
+    def test_an_orchestrator_stop_lifts_by_the_orchestrator(self):
+        self.ok("stop", "674", "--reason", "x")
+        self.ok("go", "674", "--as", "orchestrator")
+
+    def test_status_lists_leases_and_stops(self):
+        self.acquire("client", self.lane)
+        self.ok("stop", "client", "--reason", "r")
+        out = self.ok("status")
+        self.assertIn("client:", out)
+        self.assertIn("STOP-client", out)
+
+
+class Resume(Base):
+    def test_a_hold_keeps_the_terms_and_acquire_serves_the_resume(self):  # DW-6
+        self.acquire("api", self.lane, None, "--capacity", "5", "--units", "3", "--ref", "T9", "--releaser", "orchestrator")
+        self.ok("release", "api", "--lane", self.lane, "--as", "orchestrator", "--hold")
+        self.assertEqual(self.lease_file("api")["holders"], [])
+        r = self.acquire("api", self.lane)  # no new assignment: the terms come back
+        self.assertEqual(r.returncode, 0, r.stderr)
+        h = self.lease_file("api")["holders"][0]
+        self.assertEqual((h["ref"], h["units"], h["releaser"]), ("T9", 3, "orchestrator"))
+        self.assertEqual(self.lease_file("api")["parked"], [])
+
+    def test_a_resume_finds_the_lease_taken_and_names_the_holder(self):  # DW-6
+        self.acquire("client", self.lane, None, "--ref", "T9")
+        self.ok("release", "client", "--as", "holder", "--hold", "--lane", self.lane)
+        self.assertEqual(self.acquire("client", self.other).returncode, 0)
+        r = self.acquire("client", self.lane)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f"BLOCKED T9 lease {self.other}", r.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

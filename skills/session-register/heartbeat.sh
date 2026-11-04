@@ -20,6 +20,7 @@
 # page follows the registry — a local file, zero model turns, never a publish. A failed build never stops the
 # beat (`|| true`). Everything it prints lands in the log: one `mission:` line on a good tick; on a leak hit one
 # line per hit, a summary line and make's Error line, all of them again on every tick until the source doc is fixed.
+# Every minute it also frees its own lane's expired leases (lease.py expire) and logs the RELEASE line owed.
 # Log/pidfile: $TMPDIR/ai-baton-<uid>/heartbeat-<key>.{log,pid} where <key> is $CLAUDE_CODE_SESSION_ID
 # when the harness set one, else the session NAME. Keying on the session id — not the name alone —
 # means two live sessions that end up registered under the same NAME (a naming accident, not something
@@ -93,7 +94,12 @@ while kill -0 "$CLAUDE_PID" 2>/dev/null; do
   mk mission-build || true
   first=0
   slept=0
-  while [ "$slept" -lt "$INTERVAL" ] && kill -0 "$CLAUDE_PID" 2>/dev/null; do sleep 60; slept=$((slept+60)); done
+  while [ "$slept" -lt "$INTERVAL" ] && kill -0 "$CLAUDE_PID" 2>/dev/null; do
+    sleep 60; slept=$((slept+60))
+    # The holder enforces its own lease expiry (docs/swarm.md § Leases and holds): free this lane's expired
+    # leases and log the RELEASE line it owes, with no model turn and no message to wait on.
+    python3 "$KITDIR/context-db/bin/lease.py" expire --lane "$NAME" 2>/dev/null | sed 's/^/lease: /' || true
+  done
 done
 echo "$(TZ="$TZ_DEFAULT" date +'%Y-%m-%d %I:%M %p %Z') owner $CLAUDE_PID gone — ending $NAME"
 mk session-end NAME="$NAME"
