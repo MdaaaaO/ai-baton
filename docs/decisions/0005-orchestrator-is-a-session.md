@@ -54,8 +54,8 @@ runtimes each need the reason named here.
 defaults in the Decisions block of #674. The owner may override any of them there, and an override changes this note.
 
 **The fan-out guard.** A swarm is used only when the work is parallel, independent by file area and larger than a
-handful of tool calls per ticket. Otherwise one session does it, which is where the reference deployment ended. The
-guard bars parallel workers on one serial resource; one lease holder working that resource serially stays allowed.
+handful of tool calls per ticket. Otherwise one session does it. The guard bars parallel workers on one serial
+resource; one lease holder working that resource serially stays allowed.
 
 ## Consequences
 

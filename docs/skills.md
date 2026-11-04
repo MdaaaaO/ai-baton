@@ -51,6 +51,12 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 - **repo-docs** — writes or restructures a README and CONTRIBUTING in the house style, measured by
   `readme-check.py`.
 
+## Swarm mode
+
+One orchestrator session owns an epic, workers build its tickets and a verifier records each pass. The roles, the
+lifecycle, the authority matrix, the message grammar and the swarm tick are one contract, [`docs/swarm.md`](swarm.md),
+which every swarm skill and agent cites instead of restating it. Those skills and agents are not built yet.
+
 ## Capability tier — needs a system
 
 - **sign-queue** — commits the host must sign and push: the discipline before a job and the queue that carries it. Needs `signed_commits`.
