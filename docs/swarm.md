@@ -12,6 +12,14 @@ skills, agents and engine scripts cite instead of restating it. It has four part
 itself. Why an orchestrator is a session and not a server, and when a worker is a subagent, a peer session or a
 headless process: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
+**Where it plugs in.** On top of the one-ticket loop in `README.md` § The loop, for an epic that one orchestrator runs.
+A session outside swarm mode changes nothing.
+
+**What breaks if it is ignored.** A skill that restates a rule here drifts from it. A line outside the grammar table is
+refused, so a worker's status never reaches the ledger. A peer message taken as consent merges, spends or signs what the
+owner never approved. State taken from memory or a quoted table assigns work against a stale plan. A second holder on a
+serial resource collides with the first.
+
 ## Roles
 
 | Role | What it is | May | Never |
