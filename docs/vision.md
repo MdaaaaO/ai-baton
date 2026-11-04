@@ -118,9 +118,20 @@ is on `main` today. A status with a version means it shipped in that release. `p
 The layers are not equally thick. Most rows record or gate. Few ask the person to act. The miss check closes the
 last gap in the verifier layer: a fork that grades the work before its author signs it.
 
+Swarm mode (#674) adds to each layer. It is planned, so it has no row above until each piece lands. One orchestrator
+session owns an epic and runs `swarm-run` (#684), one swarm tick at a time. Spec: `epic-discover` and `epic-decompose`,
+with the owner's go before any worker starts (#682, #683). Verifier: a role that never wrote the change and alone
+records a pass, plus epic gates and their profiles (#681, #689). Environment: the task ledger (#677), the message
+grammar (#678), leases (#679), the budget brake (#680), the assignment file and worker brief (#685), liveness and
+failover (#686). Understanding: the inbox and the digest (#688), the weekly report and the plan walkthrough (#690). The
+contract is `docs/swarm.md`. Why the mode needs no server: `docs/decisions/0005-orchestrator-is-a-session.md`.
+
 ## Non-goals
 
-- **No orchestration server or daemon.** Nothing runs between sessions. A session does the work, then stops.
+- **No orchestration server or daemon.** Nothing runs between sessions. A session does the work, then stops. A wake-up
+  that a session schedules for itself is not a daemon: the harness holds the timer, the session re-reads its state from
+  disk, and the wake-up stops when the session exits. Swarm mode keeps this rule: its orchestrator is a session and its
+  ledger is a file (`docs/decisions/0005-orchestrator-is-a-session.md`).
 - **No database as the source of truth.** An index or search layer may sit over the markdown. It never replaces it.
 - **No automation writing into the store.** Only sessions write `.context/`. No cron job, webhook or ingest
   tool posts facts into it.
@@ -137,7 +148,7 @@ last gap in the verifier layer: a fork that grades the work before its author si
 These are open, and none is scheduled. Each waits for evidence.
 
 - **A harness-neutral core.** A second harness comes only after a real tester reports what breaks.
-- **Temporal facts and ownership expiry.** Wanted only if overlapping sessions on several machines show the need.
+- **Temporal facts.** Wanted only if overlapping sessions on several machines show the need.
 - **Repo-scoped sessions.** Sessions run at the workspace root today. This is a known gap.
 
 ## Landscape
