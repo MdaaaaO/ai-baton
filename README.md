@@ -112,7 +112,7 @@ Not known: whether the other environment has updated yet
 
 The kit exists to run this loop: an issue is sized once, picked up by a worker matched
 to that size, reviewed and merged without a human once the routine gates hold, and a session's own retro turns
-what went wrong back into an issue. The expensive model reviews and decides; cheaper models do the reading and the mechanical work.
+what went wrong back into an issue. The expensive model decides; cheaper models read and do the mechanical work.
 
 ```mermaid
 flowchart LR
@@ -127,13 +127,14 @@ flowchart LR
 ```
 
 - **`ticket-open`** writes the Sizing line once: which model, main session or a worker (`docs/delegation.md`).
-- **`ticket-pickup`** re-checks that call against the current default branch, then claims the ticket.
-- A worker sized to the ticket does the fix: in the main session for a judgment call, in the background for one
+- **`ticket-pickup`** re-checks that call against the default branch, then claims the ticket.
+- A worker sized to the ticket does the fix: the main session for a judgment call, the background for one
   of a queue.
 - **`pr-open`** opens the PR with diagrams, labels and reviewers; **`pr-watch`** surfaces only what needs a decision.
 - Claude reviews the diff against one rule file ([`docs/REVIEW.md`](docs/REVIEW.md)); an approved, green PR merges
   itself. A human gates only `.github/` and the review's own rule and gate files.
 - **`session-handoff`** flushes what the session learned; **`session-retro`** offers a kit gap back as an issue.
+- A whole epic at once: [the swarm contract](docs/swarm.md).
 
 ## Why a kit
 

@@ -286,8 +286,9 @@ out; the order is fixed here.
 | 10 | Flush | Writes the ledger, renders the `## Swarm` table and `prs.tsv`, updates the context doc and the registry row. |
 
 The order has reasons. The inbox comes first because a `STOP` or a `HOLD` changes what may be assigned. Decisions come
-before assignment because an answer can change the plan. Budget comes after assignment and stalls so that a breach stops
-new spawns but never a merge already due. The digest comes last so that it reports this tick.
+before assignment because an answer can change the plan. Assignment reads the epic cap itself before
+it spawns; the budget step then reads the spend this tick's returns and spawns added, so a breach stops the next spawn
+and never a merge already due. The digest comes last so that it reports this tick.
 
 **Three things stop for the owner, and none of them stops the tick:** an open decision (step 3), a merge only the owner
 may make (step 7) and a budget cap (step 6). The work behind each one waits, and everything else goes on.
