@@ -2,9 +2,9 @@
 name: memory-prune
 description: "Audits the harness auto-memory against the always-on prefix, skills and `.context/`, then rewrites notes and `MEMORY.md` to their residue after one carousel, archiving originals first. Use when kit-health warns the auto-memory is over budget, or after a session that added notes. Not for session-retro or session-handoff."
 metadata:
-  version: "1"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "2"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
 user-invocable: true
 argument-hint: "[--check]"
 ---
@@ -24,6 +24,7 @@ Run `python3 $BATON/skills/memory-prune/memory_check.py` (read-only; `--dir <pat
 - `$ARGUMENTS` is `--check` → show the output and stop.
 - Exit 0 with no finding and the user asked for no prune → show the summary line and stop.
 - Otherwise go on. Findings: `INDEX_BUDGET`/`LONG_LINE` (exit 1, past `MEMORY_INDEX_WARN`/`MEMORY_LINE_WARN`),
+  `NEAR_BUDGET` (exit 0, the index within 10 % of its budget: prune now, before the next session's notes push it over),
   `NO_FILE`, `NO_INDEX`, `DANGLING`, `FRONTMATTER`, `RULES_QUOTE`, `SECRET` (exit 1 as well; kind and line, never
   the value), `LARGE` (> 10 KB: judged per section).
 

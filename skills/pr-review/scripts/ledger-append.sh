@@ -14,10 +14,12 @@
 #
 # Locking: `--lock <path>` (default: `.ledger.lock` next to <ledger-path>, the name every caller already
 # uses) via `with_lock` (skills/_lib/portable.sh — flock where the host has it, the portable mkdir-based
-# lock dir otherwise). `with_lock` itself is non-blocking; this script polls it once a second for at
-# least LEDGER_APPEND_TIMEOUT seconds (default 10, whole seconds only) so a writer racing another one
+# lock dir otherwise). `with_lock` itself is non-blocking; this script polls it five times a second for
+# at least LEDGER_APPEND_TIMEOUT seconds (default 10, whole seconds only) so a writer racing another one
 # retries instead of failing on the first busy tick — the lock is typically held only for the length of one
-# append. All validated rows are written in ONE `>>` under the held lock, so a concurrent appender can
+# append, and a burst of writers that started together must not all poll on the same whole-second tick
+# (#695: once a second, the lock-dir backend let one writer through per tick, and 20 writers starved past
+# the timeout on a slow host). All validated rows are written in ONE `>>` under the held lock, so a concurrent appender can
 # never interleave into the middle of this call's rows.
 #
 # Exit codes (distinct, never a bare non-zero — a caller branches on these, per pr-review/reference/runner.md):
@@ -60,16 +62,17 @@ done <<<"$rows"
 
 timeout=${LEDGER_APPEND_TIMEOUT:-10}
 acquired=""
-waited=0
-# Count the one-second sleeps rather than subtracting `date +%s` stamps: those are whole seconds, so a
-# start late in a wall-clock second made the wait end up to a second early (#520 — the macOS leg's
-# mkdir-lock overhead tripped it about one run in three). This way the real wait is never shorter than
-# the timeout: `timeout` polls a second apart, then one last try.
+polls=0
+# Count the sleeps rather than subtracting `date +%s` stamps: those are whole seconds, so a start late
+# in a wall-clock second made the wait end up to a second early (#520 — the macOS leg's mkdir-lock
+# overhead tripped it about one run in three). Five 0.2 s polls per timeout second (BSD and GNU `sleep`
+# both take a fraction), so the real wait is never shorter than the timeout, and a lock released
+# mid-second is taken within the next 0.2 s instead of at the next whole second (#695).
 while :; do
   if with_lock "$LOCK"; then acquired=1; break; fi
-  [ "$waited" -ge "$timeout" ] && break
-  sleep 1
-  waited=$((waited + 1))
+  [ "$polls" -ge $((timeout * 5)) ] && break
+  sleep 0.2
+  polls=$((polls + 1))
 done
 [ -n "$acquired" ] || { echo "ledger-append: could not acquire $LOCK within ${timeout}s — another writer held it" >&2; exit 3; }
 

@@ -3,8 +3,8 @@ caller that uses it (`pr-scan.sh --mark-only --run <dir>`, and the main session 
 `pr-review/reference/runner.md`) instead of hand-rolling its own `flock` + `jq` append — `submit-review.sh`
 and `reply-threads.sh` still append their own rows inline, not through this script. Covers: a basic append,
 that concurrent callers never interleave or lose a row, that one bad line on stdin writes nothing and
-exits 1, that an empty stdin is a no-op (exit 0), usage errors (exit 2), and that a caller who cannot get
-the lock within its timeout gets exit 3 with nothing written. No network. Stdlib unittest, no `jq`-less
+exits 1, that an empty stdin is a no-op (exit 0), usage errors (exit 2), that a caller who cannot get
+the lock within its timeout gets exit 3 with nothing written, and that the poll is sub-second (#695). No network. Stdlib unittest, no `jq`-less
 hosts assumed (the repo already requires `jq` for every other shell script test). Run: make -C
 .claude/context-db test."""
 from __future__ import annotations
@@ -142,6 +142,39 @@ class LedgerAppend(unittest.TestCase):
             self.assertFalse(self.ledger.exists())
         finally:
             holder.wait(timeout=10)
+
+    def test_a_lock_released_mid_second_is_taken_before_the_next_whole_second(self):
+        # #695: the poll is sub-second, so a writer that found the lock busy does not sit out a whole
+        # second (20 writers starting together starved past the timeout on the flock-less macOS leg).
+        # The bound is the uncontended cost measured here plus 0.9 s: a whole-second poll cannot meet it.
+        row = {"repo": "junkorg/widget", "pr": 1, "head": "f" * 40, "status": "surfaced"}
+        t0 = time.time()
+        r = run(self.tmp / "warmup.jsonl", json.dumps(row) + "\n")
+        uncontended = time.time() - t0
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+        lock = self.tmp / ".ledger.lock"
+        started = self.tmp / "holder.started"
+        holder_script = (
+            f'. "{PORTABLE}"\n'
+            f'with_lock "{lock}" || exit 9\n'
+            f'touch "{started}"\n'
+            f'sleep 0.3\n'
+        )
+        holder = subprocess.Popen(["bash", "-c", holder_script])
+        try:
+            deadline = time.time() + 10
+            while not started.exists() and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(started.exists(), "lock holder never started")
+            t0 = time.time()
+            r = run(self.ledger, json.dumps(row) + "\n", env={"LEDGER_APPEND_TIMEOUT": "3"}, args=["--lock", str(lock)])
+            elapsed = time.time() - t0
+        finally:
+            holder.wait(timeout=10)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertLess(elapsed, uncontended + 0.9, f"took {elapsed:.2f}s, uncontended {uncontended:.2f}s")
+        self.assertEqual(self.rows(), [row])
 
     def test_lock_defaults_next_to_the_ledger_path(self):
         row = {"repo": "junkorg/widget", "pr": 1, "head": "e" * 40, "status": "surfaced"}
