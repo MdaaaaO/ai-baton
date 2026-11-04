@@ -264,3 +264,33 @@ rate-limited resource. The orchestrator grants with `ASSIGN … lease=<resource>
 the owner pre-empts with `HOLD` or `STOP`. A dead pid means free. The holder enforces its own expiry and sends `RELEASE`
 itself. A hold names one releaser; only that releaser or the owner ends it, and the `RELEASE` goes in the ledger, so the
 other authority sees it at the next tick.
+
+## The swarm tick
+
+One pass of the orchestrator's loop. A tick runs only inside the orchestrator's session: a worker's return or the
+session's own scheduled wake-up starts the next one, and nothing runs between sessions. Each tick starts from what is on
+disk and on the tracker, never from memory, so a compaction or a successor loses nothing. `swarm-run` carries the steps
+out; the order is fixed here.
+
+| # | Step | What the orchestrator does |
+|---|---|---|
+| 1 | Read | Re-reads the ledger (`swarm.py tick`), the tracker (the epic, its children, their PRs) and git (branches and heads). Where the ledger and the branches disagree, `swarm.py resume` prints the difference and the orchestrator decides or asks. |
+| 2 | Inbox | Drains every worker's return and outbox, peer messages, tracker comments, PR events, chat items where the machine has chat, and watches due. Applies the status lines (`swarm.py apply`) and acks. A `STOP` or `HOLD` takes effect first. |
+| 3 | Decisions | Handles `BLOCKED`, `NEEDS` and `DECISION` lines. A comment that adds scope becomes a dated delta. Every open decision goes in one batch: the carousel, or the digest's `Decisions` block (§ Never block on a human). |
+| 4 | Assignment | Assigns the next ready tickets of the current wave, up to `swarm.max_workers` (default 4), each with an assignment file and its own worktree, all spawned in one message with the model the Sizing line names. Never before the plan is approved, past the epic budget or under a `STOP`. Before any assignment to a peer it probes liveness (`ListAgents`, by ref, never heartbeat age). |
+| 5 | Stalls | A worker with no new commit, status or comment past `swarm.stall_minutes` (default 90) has stalled. At two stalls it gets one re-brief, then the ticket is reassigned or parked, with a ledger entry. An assignment whose worker is `unreachable`, ended without `DONE` or lost its background task returns here: `swarm.py resume` shows whether to drive its PR to merge, respawn it in place or reassign it. |
+| 6 | Budget | Reads spend per worker and per epic against the caps (`swarm_budget.py`). Past the epic cap it spawns nothing and the digest says so. A hard stop writes the STOP file. |
+| 7 | Integration | For each return: a draft PR from the worker's body file, the `review-runner` overview, fix requests back to the owning worker as `ASSIGN`, then ready and `pr-watch`. Owners per touched path come from the live code-owner rules; a path whose only reachable owner is the author is reported as `needs owner of <path>`. The merge is one standalone `pr-merge.sh` call for the head the `READY` line carried, checked just before the call. Protected paths wait for the owner. |
+| 8 | Verify | Hands the verifier each `READY` head before its merge and each merged PR after it. The verifier's `PASS` opens step 7 for that head at the next tick; its `FAIL` sends the ticket back. |
+| 9 | Digest | Once per `swarm.digest_hours` (default 4) and at every wave end: shipped, blocked with who must act, decisions open, spend against caps, stalls, next. |
+| 10 | Flush | Writes the ledger, renders the `## Swarm` table and `prs.tsv`, updates the context doc and the registry row. |
+
+The order has reasons. The inbox comes first because a `STOP` or a `HOLD` changes what may be assigned. Decisions come
+before assignment because an answer can change the plan. Budget comes after assignment and stalls so that a breach stops
+new spawns but never a merge already due. The digest comes last so that it reports this tick.
+
+**Three things stop for the owner, and none of them stops the tick:** an open decision (step 3), a merge only the owner
+may make (step 7) and a budget cap (step 6). The work behind each one waits, and everything else goes on.
+
+**One scope per session.** The orchestrator ends its session at a wave boundary with a next-session prompt. Its successor
+registers with `SUCCESSOR_OF=`, starts at step 1 and re-briefs every worker that has an open assignment.
