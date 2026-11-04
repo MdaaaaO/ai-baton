@@ -5,6 +5,8 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Always-on** — the files in every session's prefix from the first turn: the root `CLAUDE.md` and its two
   imports (`WORKSPACE.md`, `.context/reference/environment.md`), every unit's `name` + `description`, the memory
   index. Budgeted by `kit_verify.py` (`ALWAYS_ON_BUDGET`, `DESC_TOTAL_BYTES`); `docs/loading.md`.
+- **Assignment** — in swarm mode, the file that hands one ticket to one worker: the ticket, worktree, branch, `DW-n`
+  checks, budget and the evidence that counts. The worker reads it first; a message never replaces it (planned, #685).
 - **BATON** — the environment variable naming the kit root, so a skill body's engine calls (`$BATON/context-db/bin/<tool>`)
   work unchanged whether the kit is a `.claude/` clone or a plugin install: a clone's `settings.json` sets it to
   `.claude`, a plugin's SessionStart hook exports it from `CLAUDE_PLUGIN_ROOT` (`kit_profile.py session-env`).
@@ -65,6 +67,11 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Lane** — a continuing thread of work under one session registry `NAME`, spanning a chain of sessions: a
   predecessor ends leaving a next-session prompt (`session-handoff`), a successor registers under the same name and
   starts from it (`session-register`). Not one session's lifetime — the name's.
+- **Lease** — in swarm mode, a time-limited claim on a serial resource, one file per resource: the holder, an expiry and
+  who may release it. A dead holder or a passed expiry frees it, so nobody has to kill a peer (planned, `lease.py`, #679).
+- **Ledger** — in swarm mode, the epic's task ledger: `.context/state/swarm/<key>.json`, one row per ticket, written by
+  sessions and rendered as a table in the epic's context doc (planned, `swarm.py`, #677). The decision ledger is a
+  different thing: one line per answered decision (`docs/carousel.md` § After the answer).
 - **Miss check** — a fork (`docs/miss-check.md`) that asks "what did you miss?" of the artefact, the ticket's `## Done when`
   and a diff summary, before a PR is marked ready, a ticket is closed or a handoff is written. It returns `MISSED`
   lines or `CLEAN`. The model that did the work never grades it.
@@ -75,6 +82,9 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Operator brief** — the four plain lines that end every landed change, for the person who runs the result:
   `Can now`, `Do differently`, `Check with`, `Not covered`. Each line is at most 20 words. It is `## For the
   operator` in the PR body, copied into the close comment and the next-session prompt; `docs/operator-brief.md`.
+- **Orchestrator** — in swarm mode, the session that owns an epic: it assigns tickets to workers, drives the merge gate
+  and resumes from the ledger, the tracker and git alone. It is a session in a lane, never a server
+  (`docs/decisions/0005-orchestrator-is-a-session.md`).
 - **`/plugin configure ai-baton`** — the Claude Code command that opens the plugin's `userConfig` dialog on a
   plugin install (`user_name`, `github_login`, `tz`, `slack_self_dm`, `slack_lattice_dm`); `/config` is Claude
   Code's own settings command (theme, model, …), a different command — never write that spelling for identity.
@@ -92,6 +102,8 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   (`docs/vision.md` § The four layers).
 - **Stamp** — `.context/kit-health/HEALTH-<env>.md`, written by `kit-health --stamp` after a run with no errors:
   the kit commit and version this environment was last green at.
+- **Swarm tick** — one pass of the orchestrator's loop: re-read the ledger, the tracker and git, never memory; act on
+  what changed; stop until the next wake-up. `docs/swarm.md` fixes the order (planned, `swarm-run`, #684).
 - **Ticket** — one tracker item (a Jira issue or a GitHub issue, per `tracker.kind`), always cited by its key as a
   link. `ticket-open` / `ticket-update` / `ticket-close` act on it; `tracker.key_regex` recognises it.
 - **Understanding** — the fourth layer and the kit's keystone: the person knows what changed and why. A person cannot
@@ -100,7 +112,8 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   validates and `review_gate.py` bumps by version.
 - **Verifier** — the second layer: the checks that say whether the result is right, set before the work and read
   after it. The kit's mechanisms are the `## Done when` criteria with their `DW-n` ids, `evidence_check.py`,
-  `## Verified` and the review gates (`docs/vision.md` § The four layers).
+  `## Verified` and the review gates (`docs/vision.md` § The four layers). In swarm mode it is also a role: the one
+  that never wrote the change and alone records a pass in the ledger (planned, #681).
 - **Walkthrough** — the `walkthrough` skill: it leads the operator through a PR, a repo area or an epic in three
   steps (purpose, how it runs, where it breaks), then asks three questions in one carousel. A wrong answer
   re-opens the step. Only what the operator confirms is kept, as `## In plain words` in the context doc.
@@ -108,5 +121,8 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   `[skip-bump]` in the title or body (`review_gate.py --skip-bump`); the reviewer may question the claim. `ci.yml`
   grants the same `--skip-bump` a third way, computed rather than declared: a Dependabot npm PR whose diff touches
   only a unit's `package.json` / `package-lock.json`.
+- **Worker** — in swarm mode, the role that builds one assignment: by default a background subagent in its own worktree;
+  a peer session or a headless `claude -p` only under `docs/decisions/0005-orchestrator-is-a-session.md`. It pushes a
+  branch and returns status lines; it never opens or merges a PR, posts to the tracker or records a pass.
 - **Workspace root** — the directory Claude Code sessions run in: the repos, the root `CLAUDE.md` and `Makefile`,
   `.claude/` (the kit) and `.context/` (the DB). Every kit path is relative to it.
