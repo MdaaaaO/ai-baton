@@ -172,6 +172,18 @@ class CrossOrgShapes(unittest.TestCase):
         self.assertEqual([h for _n, _w, h in hits], ["other.org/pub#1"])
 
 
+class DoneWhenIdShape(unittest.TestCase):
+    def test_a_two_digit_dw_id_is_not_a_ticket_key(self):
+        two = str(1) + str(0)  # assembled: a Done-when id, not a ticket key
+        hits = leak_shapes.scan(f"Line with DW-{two} here.\n")
+        self.assertEqual([w for _n, w, _h in hits if w == "ticket key"], [])
+
+    def test_a_prefix_that_only_starts_with_dw_is_still_a_ticket_key(self):
+        two = str(1) + str(0)  # assembled, as above
+        hits = leak_shapes.scan(f"Line with DWARF-{two} here.\n")
+        self.assertEqual([h for _n, w, h in hits if w == "ticket key"], [f"DWARF-{two}"])
+
+
 class CommonWordKinds(unittest.TestCase):
     def test_reads_common_word_flag_from_manifests(self):
         manifests = {"github": {"facts": [{"key": "person name", "common_word": True, "target": "row"},
