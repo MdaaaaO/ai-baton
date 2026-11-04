@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.14.0 (2026-11-04)
+
+
+### Features
+
+* **pr-review:** opt-in auto-COMMENT on the user's own PRs ([#660](https://github.com/MdaaaaO/ai-baton/issues/660)) ([68dfbdd](https://github.com/MdaaaaO/ai-baton/commit/68dfbdd45b4cb91cef96b4716300f5af1e3e3434))
+* **engine:** ticket-keyed DW lines for a PR that closes two tickets ([#664](https://github.com/MdaaaaO/ai-baton/issues/664)) ([4fd815f](https://github.com/MdaaaaO/ai-baton/commit/4fd815fe6997f7e6fb0627815e9ba147a9f4ad0a))
+* **session-register:** zombie-sweep for ended sessions still running ([#665](https://github.com/MdaaaaO/ai-baton/issues/665)) ([094902a](https://github.com/MdaaaaO/ai-baton/commit/094902a93b1be3cfd1ad1b53195541577536ee1c))
+
+
+### Bug Fixes
+
+* **sign-queue:** skip commits already on origin in the %G? check ([#661](https://github.com/MdaaaaO/ai-baton/issues/661)) ([8cb0bec](https://github.com/MdaaaaO/ai-baton/commit/8cb0bec2d86745eda66c0e82e4e9c9afa3e0b741))
+* **engine:** kit-verify freshness lets the reviewed day end everywhere ([#668](https://github.com/MdaaaaO/ai-baton/issues/668)) ([a705d74](https://github.com/MdaaaaO/ai-baton/commit/a705d74c535d1f0551420bc8c02755961a7d19f4))
+* **engine:** log template names its section for ctx log ([#669](https://github.com/MdaaaaO/ai-baton/issues/669)) ([77fe61a](https://github.com/MdaaaaO/ai-baton/commit/77fe61a8b408ca4d83525df89f1a05bb6c86c786))
+
+
+### Documentation
+
+* **skills:** descriptions name lint, goal interview, Done-when probe ([#663](https://github.com/MdaaaaO/ai-baton/issues/663)) ([7751107](https://github.com/MdaaaaO/ai-baton/commit/77511079be3a95975cb0b7475a13e56657b97e64))
+
+
+### CI
+
+* **deps:** bump anthropics/claude-code-action from 1.0.250 to 1.0.264 ([#659](https://github.com/MdaaaaO/ai-baton/issues/659)) ([91d3a01](https://github.com/MdaaaaO/ai-baton/commit/91d3a01e7f51273ca2b34dc786be0435b4b6ea48))
+* **deps:** bump astral-sh/setup-uv from 10.3.0 to 10.3.3 ([#658](https://github.com/MdaaaaO/ai-baton/issues/658)) ([70860a2](https://github.com/MdaaaaO/ai-baton/commit/70860a22c2498c4156edf93e684fc9287efc7892))
+* **deps:** bump actions/setup-python from 7.0.0 to 7.1.0 ([#652](https://github.com/MdaaaaO/ai-baton/issues/652)) ([937d7de](https://github.com/MdaaaaO/ai-baton/commit/937d7de841261b6af3744ef29396df9c42dcae2e))
+* **engine:** install the pinned ctx-store before the engine tests ([#671](https://github.com/MdaaaaO/ai-baton/issues/671)) ([899ab07](https://github.com/MdaaaaO/ai-baton/commit/899ab0747837c36c79cc50fa81c60cd7b2f8db7f))
+
 ## 0.13.0 (2026-10-23)
 
 
