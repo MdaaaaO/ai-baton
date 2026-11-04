@@ -15,10 +15,9 @@ Designs in the field keep a coordination record, and not always one a later run 
 backend. The task list of Agent Teams stays on disk, but the team ends with its session. Swarm mode's record is a file
 the next session reads. A process that watches the queue while no session runs would break the rule.
 
-The reference deployment ran a de-facto swarm for two months: a driver session assigned tickets to peer sessions. The
-work contended for one serial resource, the split was mostly coordination overhead, and the owner wound the peers down
-to one session. Fan-out came back only for parallel work, disjoint on files: one session ran twelve background workers,
-one worktree each. The kit has no written rule for when a worker is a subagent and when it is a peer.
+Peer sessions contending for one serial resource spend most of the split on coordination, so that work belongs to one
+session. Fan-out pays off for parallel work that is disjoint on files, one worktree per background worker. The kit has
+no written rule for when a worker is a subagent and when it is a peer.
 
 ## Decision
 
