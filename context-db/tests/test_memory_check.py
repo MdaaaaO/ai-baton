@@ -98,6 +98,12 @@ class ExitCodes(Fixture):
         rc, out = self.run_check(MEMORY_INDEX_WARN=str(size * 2))
         self.assertNotIn("NEAR_BUDGET", self.kinds(out))
 
+    def test_a_zero_budget_with_an_empty_index_is_not_a_crash(self):
+        (self.mem / "MEMORY.md").write_text("", encoding="utf-8")
+        rc, out = self.run_check(MEMORY_INDEX_WARN="0")
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("NEAR_BUDGET", self.kinds(out))
+
     def test_long_index_line_exits_1_and_the_limit_is_an_env_knob(self):
         self.index("- [A](a.md) — " + "x" * 160, "- [B](b.md) — short")
         rc, out = self.run_check()

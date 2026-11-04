@@ -199,7 +199,7 @@ def check(mem: Path, workspace: Path, index_warn: int = INDEX_WARN, line_warn: i
     if index_bytes > index_warn:
         over = True
         findings.append(f"INDEX_BUDGET {INDEX} {index_bytes} B > {index_warn} B")
-    elif index_bytes * 10 >= index_warn * 9:  # the overflow that founded this check was found only after the fact
+    elif index_warn > 0 and index_bytes * 10 >= index_warn * 9:  # the overflow that founded this check was found after the fact
         findings.append(f"NEAR_BUDGET {INDEX} {index_bytes} B is {index_bytes * 100 // index_warn} % of {index_warn} B "
                         "— prune before the next session's notes push it over")
     long_lines = 0
