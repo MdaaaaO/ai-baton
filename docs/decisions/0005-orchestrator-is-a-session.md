@@ -47,9 +47,9 @@ runtimes each need the reason named here.
 
 | Worker runtime | Use it | Bound by | What it costs |
 |---|---|---|---|
-| Background subagent in its own worktree | by default | `swarm.max_workers` (default 4); a budget per assignment | A restart stops it and only pushed work survives. It cannot ask the owner. Spend is counted at returns and ticks, so a cap can be overshot by one step (#680). |
+| Background subagent in its own worktree | by default | `swarm.max_workers` (default 4); a budget per assignment | A restart ends the run and its scratch; the worktree, the pushed branch and the saved transcript survive. Uncommitted work is safe only if the worktree is intact and the worker is resumed (#686). It cannot ask the owner. Spend is counted at returns and ticks, so a cap can be overshot by one step (#680). |
 | Peer session | for a separate repo or lane; it holds a lease only when its work touches a serial resource | its own lane; a lease with a holder, an expiry and a named releaser when it holds one | A full session's prefix. A message to it can be delivered and not read. It can vanish with no notice. |
-| Headless process: `claude -p` with `--max-budget-usd` | when a hard dollar cap is required | the flag; the run reports `total_cost_usd` | The reported cost is a client-side estimate, not the bill. With `--bare` it discovers no kit hook, so a hook-based stop does not reach it. Without `--bare` it loads the project's hooks and MCP servers, also in an untrusted folder. |
+| Headless process: `claude -p` with `--max-budget-usd` | when a dollar cap is required | the flag; the run reports `total_cost_usd` | The cap reads a client-side estimate, not the bill, and spend can pass it, so leave headroom. With `--bare` no hook runs, so a hook-based stop does not reach it, and it needs an API key, not the subscription login. Without `--bare` it loads the project's hooks and MCP servers, also in an untrusted folder. `--bare` is announced as the future `-p` default, which would drop a hook-based stop from a plain `claude -p` worker, so a worker's command picks the flag explicitly. |
 
 **The defaults.** The mode is not built yet (#674). The worker runtime, the ledger home and `swarm.max_workers` are
 defaults in the Decisions block of #674. The owner may override any of them there, and an override changes this note.
@@ -64,7 +64,7 @@ guard bars parallel workers on one serial resource; one lease holder working tha
 |---|---|
 | No server | Nothing to install, secure or keep alive on either install path. State is files a person can read, diff and fix by hand. |
 | No session, no progress | A finished CI run, a stalled worker or a lost orchestrator waits for the next session, and the kit sends no alert in that gap. Accepted: a successor registers with `SUCCESSOR_OF=` and resumes from the ledger (#686). |
-| Restarts | A restart stops the background workers, so each worker pushes at every checkpoint and `swarm.py resume` (#677) compares the ledger with the pushed branches. |
+| Restarts | A restart stops the background workers, so each worker pushes at every checkpoint and `swarm.py resume` (#677) compares the ledger with the pushed branches. A stopped worker resumes in place, on its worktree and saved transcript (#686). |
 | Markdown as source of truth | The ledger is JSON under `.context/state/`, beside the kit's other state, and only sessions write it. The context doc's table is rendered from it, never the reverse. |
 | Not Agent Teams | It is experimental, a team is scoped to its session, `/resume` does not restore in-process teammates, the lead is fixed and no teammate spawns under `-p`. A successor cannot take a team over. |
 | If reversed | A daemon needs an install on both paths, credentials and a supervisor. `docs/vision.md` § Non-goals changes, and a new note supersedes this one. |
@@ -75,6 +75,6 @@ guard bars parallel workers on one serial resource; one lease holder working tha
 - #674 (the mode, the defaults), #676 (contract), #677 (ledger), #679 (lease), #680 (budget), #686 (failover); related #41, #62, #103, #355
 - [Magentic-One](https://arxiv.org/html/2411.04468v1): task ledger as short-term memory, progress ledger, stall counter
 - [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence): checkpoints per thread, lost on restart with an in-memory saver
-- Claude Code: [agent teams](https://code.claude.com/docs/en/agent-teams), [subagents](https://code.claude.com/docs/en/sub-agents), [headless](https://code.claude.com/docs/en/headless), [scheduled tasks](https://code.claude.com/docs/en/scheduled-tasks)
+- Claude Code: [agent teams](https://code.claude.com/docs/en/agent-teams), [subagents](https://code.claude.com/docs/en/sub-agents), [headless](https://code.claude.com/docs/en/headless), [CLI reference](https://code.claude.com/docs/en/cli-reference), [scheduled tasks](https://code.claude.com/docs/en/scheduled-tasks)
 - [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system): about 15 times the tokens of a chat; a poor fit where agents share context
 - [Don't build multi-agents](https://cognition.com/blog/dont-build-multi-agents): conflicting assumptions between parallel subagents
