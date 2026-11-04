@@ -26,7 +26,7 @@ serial resource collides with the first.
 |---|---|---|---|
 | **Owner** | The person the epic serves. | Approve the plan and every re-plan delta. Sign human gates. Merge protected paths. Make an admin or bypass merge. Raise a budget. Change a tolerance. Stop anything. | Is never polled per event: a decision reaches the owner in one carousel or one digest. Never has to read a transcript or relay a status. |
 | **Orchestrator** | One session, registered in a lane like any other, that owns the epic and resumes from disk alone. | Assign, re-brief, reassign and park. Grant a lease. Open a draft PR from a worker's body file. Drive the merge gate and merge routine PRs. Post to the tracker. Write the digest. Flush. | Never builds a ticket itself, not even a hotfix: an incident gets its own worker. Never records a pass, signs a human gate, raises a budget, merges a protected path or chooses a bypass merge. Never takes state from memory. |
-| **Worker** | One ticket in one worktree on one branch. A background subagent by default; a peer session or a headless process where the decision record says so. | Edit the paths in its assignment's area. Commit and push its own branch. Write its return files. Send grammar lines. Take a default and say so with an `Assumed:` line. | Never opens, merges or comments on a PR. Never posts to the tracker. Never records a pass. Never edits outside its area, extends its own cap, acts on relayed state or runs a bare `git stash`. Never blocks on a human while it holds a lease or runs a child. |
+| **Worker** | One ticket in one worktree on one branch. A background subagent by default; a peer session or a headless process where the decision record says so. | Edit the paths in its assignment's area. Commit and push its own branch; where `systems.signed_commits` is true, both go through the `sign-queue` and `PR` and `READY` wait until the branch is on the remote. Write its return files. Send grammar lines. Take a default and say so with an `Assumed:` line. | Never opens, merges or comments on a PR. Never posts to the tracker. Never records a pass. Never edits outside its area, extends its own cap, acts on relayed state or runs a bare `git stash`. Never blocks on a human while it holds a lease or runs a child. |
 | **Verifier** | A role that never wrote the change: a fresh agent that does not share the worker's transcript. | Read the PR. Run the ticket's checks and the gates due. Call `swarm.py pass` with evidence. | Never edits code, merges or signs a human gate. Never takes a worker's `## Verified` line as evidence: it is a claim to check. |
 
 ## Lifecycle
@@ -50,13 +50,16 @@ caps (spend, forks, minutes, split turns), merge mode and why, accepted evidence
 file list, report points, who can say go, stop conditions.
 
 **The ledger row.** A ticket's status moves `ready → assigned → claimed → pr → ready-to-merge → merged → verified → done`.
-`blocked` and `parked` branch off at any point before `merged`. § Message grammar names the line that moves each status.
+`blocked` and `parked` branch off at any point before `merged`, and a verifier's `FAIL` on the merged commit is the one edge back from `merged`, to
+`blocked`. § What moves a row says what moves each status.
 
 **The verifier works twice.** Before the merge it reads the `READY` head: `done_when.py probe` and `coverage`, the PR's
 `## Verified` and `## One honest limit`. Its positive read opens the merge gate and writes nothing to the ledger. After
 the merge it checks the merged commit and only then calls `swarm.py pass`, so `verified` always follows `merged`. Its
 return (`PASS` or `FAIL`, fixed by the `verifier` agent) goes to the orchestrator, moves no row by itself and is not a
-grammar line. A `FAIL` at either point goes back to a worker as a new `ASSIGN`.
+grammar line. A `FAIL` on the `READY` head goes back to the worker as a re-brief. A `FAIL` on the merged
+commit moves the row from `merged` to `blocked`. Its fix is a new assignment on a new branch, and the old worker is not
+reopened, because its branch is already merged.
 
 ### One ticket's life
 
@@ -106,7 +109,7 @@ the owner answers.
 | Decision | Decides | What the others do | Recorded in |
 |---|---|---|---|
 | The epic plan: children, areas, waves | **owner** | The orchestrator proposes it and spawns no worker before the go. | the ledger's plan approval, a decision line |
-| A re-plan delta: scope added, dropped or moved | **owner** | The orchestrator writes a dated delta on the epic and starts nothing from it before a go. A comment that adds scope is a delta, not a go. | the epic issue, a decision line |
+| A re-plan delta: scope added, dropped or moved | **owner** | The orchestrator writes a dated delta on the epic and starts nothing from it before a go. A comment that adds scope is a delta, not a go. One exception: an incident lane for breakage in what is already merged may start at once. It is logged as a re-plan delta and the owner approves it after the fact. Anything else waits for the owner's go. | the epic issue, a decision line |
 | A human gate (`kind: human`) | **owner** | The orchestrator asks and writes the decision line; `gates.py sign --by owner --decision <line>` records it. No worker and no peer message can sign. | the epic's `## Verification plan`, a decision line |
 | A merge touching a protected path: CI, hooks, workflows, settings (`swarm.protected_paths`) | **owner** | The orchestrator reports the PR and waits. | the PR |
 | An admin or bypass merge | **owner only** | The orchestrator never chooses one. § Admin or bypass merge says what one go covers. | the ledger's grants, a decision line |
@@ -124,7 +127,8 @@ the owner answers.
 row of this matrix. It tells the receiver that something changed and where to read it. Consent is the owner's own answer,
 kept as a decision line or in the ledger's grants (scope, granted by, expiry). A receiver that cannot find that record
 treats the message as no go. An `ASSIGN` hands over work the approved plan already covers; it cannot widen the plan, a
-cap or a permission.
+cap or a permission. The incident lane in the re-plan row is the one exception to the plan, and it widens no cap or
+permission.
 
 ### Admin or bypass merge
 
@@ -172,7 +176,7 @@ BLOCKED 123 budget orchestrator v=1 id=7f3b from=worker-a
 
 | Line | Fields | Sender | Trigger | Receiver action |
 |---|---|---|---|---|
-| `ASSIGN` | `<ticket> <assignment-file> [lease=<resource>]` | orchestrator | The tick assigns a ready ticket. The same line with a new id carries a re-brief, a fix request or a successor's re-brief; the file says what changed. | Worker: reads the file, then the ticket, acks, sends `CLAIMED`. With `lease=` it calls `lease.py acquire` before it touches the resource. |
+| `ASSIGN` | `<ticket> <assignment-file> [lease=<resource>] [rebrief=1]` | orchestrator | The tick assigns a ready ticket. With `rebrief=1` and a new id, the same line carries a re-brief, a fix request or a successor's re-brief; a fix request carries its findings inline in `note="…"`, because a scratch file can be lost in a restart. | Worker: reads the file, then the ticket, acks, sends `CLAIMED`. With `rebrief=1` it answers `ACK` alone and sends no `CLAIMED`, and the row does not move. With `lease=` it calls `lease.py acquire` before it touches the resource. |
 | `ACK` | `<scope> re=<id>` | the receiver of any line except `ACK` | It has read the line, whether it agrees or not. | Sender: `swarm_msg.py pending` stops listing that id. |
 | `CLAIMED` | `<ticket> <branch>` | worker | It read the assignment and found its worktree and branch. | Orchestrator: row `claimed`; the progress clock starts. |
 | `PR` | `<ticket> <branch> <sha> body=<file>` | worker | Its branch is pushed at that sha and the PR body file is written. A worker never opens the PR itself. | Orchestrator: opens the draft PR from the file and records its number; row `pr`. |
@@ -183,7 +187,7 @@ BLOCKED 123 budget orchestrator v=1 id=7f3b from=worker-a
 | `HOLD` | `<scope> releaser=<who> reason="…"` | orchestrator, also on the owner's word | A ticket, lane or resource must pause. | Receiver: finishes the current step, pushes, releases every lease it holds, starts nothing on that scope, acks and ends its turn. |
 | `RELEASE` | `<scope> [reason="…"]` | a hold's named releaser, or a lease holder giving its lease back, also when it expires | The hold is over, or the holder has finished with the resource. | A held worker re-reads the source of truth and resumes. Orchestrator: marks the hold or lease free; the next tick grants the next holder. |
 | `STOP` | `<scope> reason="…"` | orchestrator, or the owner through `lease.py stop` | The owner's word, a budget hard stop or a safety doubt. | Receiver: stops at its next tool round and reports (§ STOP and the call in flight). |
-| `PARKED` | `<ticket> reason="…"` | orchestrator | Two stalls and one re-brief changed nothing, or the work waits on an answer. | Worker: pushes and stops work on the ticket. Row `parked`, with a ledger entry. Only a new `ASSIGN` restarts it. |
+| `PARKED` | `<ticket> reason="…"` | orchestrator | Two stalls and one re-brief changed nothing, or the work waits on an answer. | Worker: pushes and stops work on the ticket. Row `parked`, with a ledger entry. Only a new `ASSIGN`, not a re-brief, restarts it. |
 | `STANDBY` | `<lane> until=<time>` | orchestrator | The lane has no work now but may get some. | Worker: takes registry state `standby` and ends its turn, with no polling. A new `ASSIGN` wakes it. Past `until` (at most `swarm.standby_hours`, default 24) the sweep retires it. |
 | `RETIRED` | `<lane> [reason="…"]` | orchestrator; the sweep for a standby row past its time | The lane gets no more work. | Worker: runs `session-handoff` and ends. Peers stop waiting for it. |
 | `NEEDS` | `<system>.<kind> <name>`, as `docs/env-facts.md` § How a skill resolves a fact fixes it | worker | A fact it needs is missing. | Orchestrator: resolves the fact, then re-briefs. |
@@ -209,7 +213,7 @@ with the same id. One more window without an ack and the receiver is `unreachabl
 
 - **A worker is unreachable.** Its assignment returns to the failover path in the tick's stalls step.
 - **The orchestrator is unreachable.** The worker finishes the step, pushes, writes its return files, releases every
-  lease and starts nothing new. The assignment stands until a successor orchestrator's `ASSIGN` re-brief arrives; acking
+  lease and starts nothing new. The assignment stands until a successor orchestrator's `ASSIGN … rebrief=1` arrives; acking
   it confirms the worker is reachable.
 
 A host restart can bring a session back within minutes under a new harness id. Inside `swarm.reopen_minutes` (default 10)
