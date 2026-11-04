@@ -2,8 +2,7 @@
 
 ## Status
 
-Accepted — the design is fixed; the mode is not built yet (#674). The worker runtime, the ledger home and
-`swarm.max_workers` are defaults in the Decisions block of #674; an owner override there changes this note.
+Accepted
 
 ## Context
 
@@ -11,9 +10,10 @@ Accepted — the design is fixed; the mode is not built yet (#674). The worker r
 has one orchestrator own an epic for days: it assigns tickets to workers, watches the repo and the tracker, and has
 each result verified by a role that never wrote it. A reader will ask whether that breaks the non-goal.
 
-Designs in the field keep a durable coordination record: Magentic-One's task and progress ledgers, LangGraph's
-checkpoints, the shared task list of Agent Teams. Swarm mode needs that record. A process that watches the queue while
-no session runs would break the rule.
+Designs in the field keep a coordination record, and not always one a later run can read. Magentic-One's task ledger is
+"short-term memory for the duration of the task". LangGraph's checkpoints outlive a restart only on a persistent
+backend. The task list of Agent Teams stays on disk, but the team ends with its session. Swarm mode's record is a file
+the next session reads. A process that watches the queue while no session runs would break the rule.
 
 The reference deployment ran a de-facto swarm for two months: a driver session assigned tickets to peer sessions. The
 work contended for one serial resource, the split was mostly coordination overhead, and the owner wound the peers down
@@ -36,6 +36,7 @@ contract, `docs/swarm.md`.
 | Who holds the timer | the harness; the kit ships no process | the kit |
 | Where state lives | ledger, tracker and git, re-read every tick | memory or a private store |
 | When the session exits | the wake-up stops firing; the next session resumes from disk | it keeps watching the queue |
+| How long it lasts | a recurring task expires 7 days after creation: one final fire, then it deletes itself. A multi-day orchestrator re-arms it before then, or it stops ticking with no alert. | until someone stops it |
 
 A helper that stops with its session belongs to that session (`skills/session-register/heartbeat.sh`). A timer the
 person sets outside the kit (a cloud or desktop scheduled task) starts a new session, and the same rule applies to that
@@ -47,12 +48,15 @@ runtimes each need the reason named here.
 | Worker runtime | Use it | Bound by | What it costs |
 |---|---|---|---|
 | Background subagent in its own worktree | by default | `swarm.max_workers` (default 4); a budget per assignment | A restart stops it and only pushed work survives. It cannot ask the owner. Spend is counted at returns and ticks, so a cap can be overshot by one step (#680). |
-| Peer session | only for a separate repo or lane, and only behind a lease | a lease with a holder, an expiry and a named releaser | A full session's prefix. A message to it can be delivered and not read. It can vanish with no notice. |
+| Peer session | for a separate repo or lane; it holds a lease only when its work touches a serial resource | its own lane; a lease with a holder, an expiry and a named releaser when it holds one | A full session's prefix. A message to it can be delivered and not read. It can vanish with no notice. |
 | Headless process: `claude -p` with `--max-budget-usd` | when a hard dollar cap is required | the flag; the run reports `total_cost_usd` | The reported cost is a client-side estimate, not the bill. With `--bare` it discovers no kit hook, so a hook-based stop does not reach it. Without `--bare` it loads the project's hooks and MCP servers, also in an untrusted folder. |
 
+**The defaults.** The mode is not built yet (#674). The worker runtime, the ledger home and `swarm.max_workers` are
+defaults in the Decisions block of #674. The owner may override any of them there, and an override changes this note.
+
 **The fan-out guard.** A swarm is used only when the work is parallel, independent by file area and larger than a
-handful of tool calls per ticket. Work that waits on one serial resource is not parallel. Otherwise one session does it,
-which is where the reference deployment ended.
+handful of tool calls per ticket. Otherwise one session does it, which is where the reference deployment ended. The
+guard bars parallel workers on one serial resource; one lease holder working that resource serially stays allowed.
 
 ## Consequences
 
@@ -69,8 +73,8 @@ which is where the reference deployment ended.
 
 - `docs/vision.md` § Non-goals, `docs/delegation.md` § When, `skills/session-register/heartbeat.sh`
 - #674 (the mode, the defaults), #676 (contract), #677 (ledger), #679 (lease), #680 (budget), #686 (failover); related #41, #62, #103, #355
-- [Magentic-One](https://arxiv.org/html/2411.04468v1): task ledger, progress ledger, stall counter
-- [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence): checkpoints per thread
+- [Magentic-One](https://arxiv.org/html/2411.04468v1): task ledger as short-term memory, progress ledger, stall counter
+- [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence): checkpoints per thread, lost on restart with an in-memory saver
 - Claude Code: [agent teams](https://code.claude.com/docs/en/agent-teams), [subagents](https://code.claude.com/docs/en/sub-agents), [headless](https://code.claude.com/docs/en/headless), [scheduled tasks](https://code.claude.com/docs/en/scheduled-tasks)
 - [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system): about 15 times the tokens of a chat; a poor fit where agents share context
 - [Don't build multi-agents](https://cognition.com/blog/dont-build-multi-agents): conflicting assumptions between parallel subagents
