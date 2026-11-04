@@ -55,8 +55,8 @@ The file is `<content root>/state/swarm/<key>.json`. Times are UTC, `YYYY-MM-DDT
       "lines": {<sender>: {<WORD>: {"id", "at", …the line's fields}}}, "restored": true when `resume --apply` wrote it}}}
 
 Another script reads the file as plain JSON or imports this module: `load(key)`, `edit(key)` (a locked read-modify-write),
-`ledger_path(key)`, `tick_report(led)`, `budget_state(led)`, `next_status(act, status)`, `parse_status_line(line)`,
-`STATUSES`, `MOVES`. Unknown keys in a row or in the file are kept. `edit` writes only when something changed.
+`ledger_path(key)`, `tick_report(led)`, `budget_state(led)`, `worker_limit(led)` (the last two resolve ledger, then config,
+then default), `next_status(act, status)`, `parse_status_line(line)`, `STATUSES`, `MOVES`. Unknown keys in a row or in the file are kept. `edit` writes only when something changed.
 
 Config, defaults here: `swarm.stall_minutes` 90, `swarm.max_workers` 4, `swarm.budget.epic_usd` and
 `swarm.budget.worker_usd` none (no cap until `init` or `budget` sets one).
@@ -287,7 +287,7 @@ def config(key: str):
 def read_stops() -> list[str]:
     """The scopes of the STOP files in force (`.context/state/swarm/STOP-<scope>`, written by `lease.py stop`)."""
     d = state_dir()
-    return sorted(p.name[len("STOP-"):] for p in d.glob("STOP-*")) if d.is_dir() else []
+    return sorted(p.name[len("STOP-"):] for p in d.glob("STOP-*") if p.suffix != ".lock") if d.is_dir() else []
 
 
 def live_holds(led: dict) -> list[dict]:
@@ -417,8 +417,8 @@ def tick_report(led: dict, now: datetime | None = None) -> dict:
             if minutes > limit:
                 stalled.append({"ticket": t, "worker": r["worker"]["name"], "minutes": int(minutes), "stalls": r["stalls"],
                                 "next": stall_step(r)})
-        if r["status"] in (*STALL_STATUSES, "pr") and r["pr"] is None and (r["ready_head"] or r["status"] == "pr"):
-            integrate.append({"ticket": t, "status": r["status"], "head": r["head"], "body": r["body"]})
+        if (r["status"] in STALL_STATUSES and r["ready_head"]) or (r["status"] == "pr" and r["pr"] is None):
+            integrate.append({"ticket": t, "status": r["status"], "head": r["head"], "body": r["body"], "pr": r["pr"]})
         if r["status"] in ("pr", "ready-to-merge") and r["ready_head"] and not same_sha(r["head"], r["ready_head"]):
             needs_ready.append({"ticket": t, "head": r["head"], "ready_head": r["ready_head"]})
     return {"key": led["key"], "now": moment.astimezone(timezone.utc).strftime(LEDGER_TIME), "plan_approved": approved,

@@ -727,6 +727,9 @@ class Tick(CliCase):
         self.assertIn("worker budget", self.refused("assign", EPIC, "7", "--kind", "subagent", "--name", "lane-7"))
 
     def test_assignable_stops_at_the_worker_cap(self):
+        self.plan("1", "2", "3", "4", "5")
+        self.assertEqual((self.tick()["max_workers"], self.tick()["assignable"]), (4, ["1", "2", "3", "4"]))
+        self.ledger_file().unlink()
         self.plan("5", "6", "7", max_workers=2)
         self.assertEqual(self.tick()["assignable"], ["5", "6"])
         self.assign("5", "lane-5", "feat/5-x")
@@ -767,6 +770,8 @@ class Tick(CliCase):
         self.ok("approve", EPIC, "--decision", "go")
         self.assertEqual(self.tick()["assignable"], ["7"])
         stop = self.root / "state" / "swarm" / f"STOP-{EPIC}"
+        (stop.parent / f"{stop.name}.lock").write_text("", encoding="utf-8")
+        self.assertEqual(self.tick()["assignable"], ["7"], "another writer's lock file is not a STOP")
         stop.write_text("{}", encoding="utf-8")
         t = self.tick()
         self.assertEqual((t["assignable"], t["stops"]), ([], [EPIC]))
@@ -793,6 +798,15 @@ class Tick(CliCase):
         self.assertEqual(self.tick()["integrate"], [])
         self.ok("progress", EPIC, "7", "--head", SHA_B)
         self.assertEqual(self.tick()["needs_ready"], [{"ticket": "7", "head": SHA_B, "ready_head": SHA_A}])
+
+    def test_a_ready_on_a_row_reassigned_with_its_pr_open_is_the_orchestrators_next_act(self):
+        self.plan("7")
+        self.to_pr()
+        self.apply("BLOCKED", sender="lane-7", line_id="m1")
+        self.assign("7", "lane-new", "feat/7-x")
+        self.apply("CLAIMED", sender="lane-new", line_id="m2")
+        self.apply("READY", sender="lane-new", line_id="m3")
+        self.assertEqual([(i["ticket"], i["pr"]) for i in self.tick()["integrate"]], [("7", 107)])
 
     def test_a_pr_line_with_no_number_yet_is_the_orchestrators_next_act(self):
         self.plan("7")
