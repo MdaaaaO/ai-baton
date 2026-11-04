@@ -30,6 +30,7 @@ The lane is `--lane`, else the registered session name. Exit 0 ok · 1 refused o
 2 usage or I/O error (one stderr line). Stdlib only."""
 from __future__ import annotations
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -41,7 +42,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import kit_profile  # noqa: E402  — same dir
-from fsutil import atomic_write, locked  # noqa: E402  — same dir
+from fsutil import atomic_write  # noqa: E402  — same dir
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover — non-POSIX host
+    fcntl = None  # type: ignore[assignment]
 
 RELEASERS = ("holder", "orchestrator", "owner")
 STOP_SETTERS = ("orchestrator", "owner")
@@ -70,6 +76,32 @@ class Usage(Exception):
 
 
 # ── paths and time ───────────────────────────────────────────────────────────────────────────────────────────
+
+LOCK_WAIT = 5.0  # seconds a verb waits for a resource's lock before it refuses; heartbeat and sweep never hang
+
+
+@contextlib.contextmanager
+def locked(path: str):
+    """An exclusive `flock` on `<path>.lock` around a read-decide-write, taken without blocking and retried up to
+    LOCK_WAIT seconds; a lock that stays busy refuses with a line (exit 1) instead of hanging."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(f"{path}.lock", "a", encoding="utf-8") as lk:
+        if fcntl is not None:
+            end = time.monotonic() + LOCK_WAIT
+            while True:
+                try:
+                    fcntl.flock(lk.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= end:
+                        raise Refused(f"{Path(path).stem}: lock busy after {LOCK_WAIT:g}s, try again") from None
+                    time.sleep(0.02)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(lk.fileno(), fcntl.LOCK_UN)
+
 
 def lease_dir(root: Path) -> Path:
     return root / "state" / "leases"
@@ -293,11 +325,15 @@ def release(root: Path, a: argparse.Namespace) -> list[str]:
 def sweep(root: Path) -> list[str]:
     out = []
     for resource in resources(root):
-        with locked(str(_path(root, resource))):
-            d = load(root, resource)
-            gone = _free_stale(d)
-            if gone:
-                save(root, d)
+        try:
+            with locked(str(_path(root, resource))):
+                d = load(root, resource)
+                gone = _free_stale(d)
+                if gone:
+                    save(root, d)
+        except Refused as e:
+            out.append(f"skipped {e}")
+            continue
         out += [f"freed {resource}: {h.get('lane')} ({why})" for h, why in gone]
     return out
 
@@ -306,13 +342,16 @@ def expire(root: Path, lane: str) -> list[str]:
     """The holder's own expiry (heartbeat.sh): free this lane's expired leases, one RELEASE line each."""
     out = []
     for resource in resources(root):
-        with locked(str(_path(root, resource))):
-            d = load(root, resource)
-            mine = [h for h in d["holders"] if h.get("lane") == lane and expired(h)]
-            if mine:
-                d["holders"] = [h for h in d["holders"] if h not in mine]
-                save(root, d)
-                out.append(f'RELEASE {resource} reason="lease expired"')
+        try:
+            with locked(str(_path(root, resource))):
+                d = load(root, resource)
+                mine = [h for h in d["holders"] if h.get("lane") == lane and expired(h)]
+                if mine:
+                    d["holders"] = [h for h in d["holders"] if h not in mine]
+                    save(root, d)
+                    out.append(f'RELEASE {resource} reason="lease expired"')
+        except Refused as e:
+            out.append(f"skipped {e}")
     return out
 
 
@@ -348,11 +387,12 @@ def stops(root: Path) -> dict[str, dict]:
 def stop(root: Path, scope: str, reason: str, who: str) -> list[str]:
     scope = _name("scope", scope)
     p = stop_dir(root) / f"STOP-{scope}"
-    if p.exists():
-        cur = stops(root).get(scope, {})
-        if cur.get("by") == "owner" and who != "owner":
-            raise Refused(f"STOP-{scope} is the owner's; only the owner may rewrite it")
-    atomic_write(str(p), json.dumps({"scope": scope, "reason": reason, "by": who, "at": fmt(now())}, indent=2) + "\n")
+    with locked(str(stop_dir(root) / "stops")):  # `stops.lock` never matches the STOP-* glob
+        if p.exists():
+            cur = stops(root).get(scope, {})
+            if cur.get("by") == "owner" and who != "owner":
+                raise Refused(f"STOP-{scope} is the owner's; only the owner may rewrite it")
+        atomic_write(str(p), json.dumps({"scope": scope, "reason": reason, "by": who, "at": fmt(now())}, indent=2) + "\n")
     return [f"STOP-{scope} written by {who}: {reason}", IN_FLIGHT_RULE]
 
 
@@ -366,7 +406,7 @@ def go(root: Path, scope: str, who: str) -> list[str]:
         raise Refused(f"STOP-{scope} was set by the {by}; only the {by} or the owner lifts it")
     if by == "owner" and who != "owner":
         raise Refused(f"STOP-{scope} is the owner's; only the owner lifts it")
-    p.unlink()
+    p.unlink(missing_ok=True)
     return [f"STOP-{scope} lifted by {who}"]
 
 

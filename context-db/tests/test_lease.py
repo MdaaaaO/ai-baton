@@ -2,13 +2,18 @@
 wirings (zombie-sweep.sh, heartbeat.sh). Every store is a temp dir; session ids and lane names are assembled at run
 time. Stdlib unittest. Run: make -C .claude/context-db test T=test_lease."""
 from __future__ import annotations
+import contextlib
+import fcntl
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import uuid
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -112,6 +117,85 @@ class Leases(Base):
 
     def test_bad_names_are_usage_errors(self):
         self.refused("acquire", "../x", "--lane", self.lane, "--pid", "1", rc=2)
+
+
+RACER = (
+    "import os, sys, time\n"
+    f"sys.path.insert(0, {str(BIN)!r})\n"
+    "import lease as L\n"
+    "t = float(sys.argv[1])\n"
+    "while time.time() < t:\n"
+    "    pass\n"
+    "sys.exit(L.main(sys.argv[2:]))\n"
+)
+
+
+class Race(Base):
+    """N processes released by one deadline; each must fail without the per-resource lock, so a pass is not luck."""
+    N = 8
+
+    def race(self, argv_for) -> list[int]:
+        at = time.time() + 1.5
+        procs = [subprocess.Popen([sys.executable, "-c", RACER, str(at), *argv_for(i)], env=self.env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for i in range(self.N)]
+        rcs = []
+        for p in procs:
+            p.communicate(timeout=60)
+            rcs.append(p.returncode)
+        return rcs
+
+    def test_racing_acquires_on_a_free_resource_grant_exactly_one(self):
+        for rnd in range(3):
+            res = f"free{rnd}"
+            rcs = self.race(lambda i: ["acquire", res, "--lane", f"r{i}", "--pid", str(os.getpid())])
+            self.assertEqual(rcs.count(0), 1, rcs)
+            self.assertEqual(rcs.count(1), self.N - 1, rcs)
+            self.assertEqual(len(self.lease_file(res)["holders"]), 1)
+
+    def test_racing_quota_acquires_never_pass_the_units(self):
+        for rnd in range(3):
+            res = f"quota{rnd}"
+            rcs = self.race(lambda i: ["acquire", res, "--lane", f"r{i}", "--pid", str(os.getpid()),
+                                       "--capacity", "5", "--units", "2"])
+            d = self.lease_file(res)
+            self.assertEqual(rcs.count(0), 2, rcs)
+            self.assertLessEqual(sum(h["units"] for h in d["holders"]), 5)
+            self.assertEqual(len(d["holders"]), 2)
+
+    def test_racing_takeovers_of_a_dead_pid_lease_give_one_winner(self):
+        for rnd in range(3):
+            res = f"dead{rnd}"
+            self.assertEqual(self.acquire(res, "old", dead_pid()).returncode, 0)
+            rcs = self.race(lambda i: ["acquire", res, "--lane", f"r{i}", "--pid", str(os.getpid())])
+            self.assertEqual(rcs.count(0), 1, rcs)
+            self.assertEqual(len(self.lease_file(res)["holders"]), 1)
+
+
+class Locking(Base):
+    def call(self, *argv: str) -> tuple[int, str]:
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, self.env, clear=True), mock.patch.object(L, "LOCK_WAIT", 0.3), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = L.main(list(argv))
+        return rc, err.getvalue()
+
+    def test_a_busy_lock_refuses_with_a_line_instead_of_hanging(self):
+        self.assertEqual(self.acquire("db", self.lane).returncode, 0)
+        lk = open(self.root / "state" / "leases" / "db.json.lock", "a")
+        self.addCleanup(lk.close)
+        fcntl.flock(lk.fileno(), fcntl.LOCK_EX)
+        t0 = time.monotonic()
+        rc, err = self.call("acquire", "db", "--lane", self.other, "--pid", str(os.getpid()))
+        self.assertEqual(rc, 1)
+        self.assertIn("lock busy", err)
+        self.assertLess(time.monotonic() - t0, 5)
+        rc, _ = self.call("sweep")  # the sweep skips the busy resource and still exits 0
+        self.assertEqual(rc, 0)
+
+    def test_a_stop_write_leaves_no_phantom_stop_behind(self):
+        self.ok("stop", "epic-9", "--reason", "pause", "--as", "orchestrator")
+        self.assertEqual([p.name for p in (self.root / "state" / "swarm").glob("STOP-*")], ["STOP-epic-9"])
+        self.assertEqual(list(L.stops(self.root)), ["epic-9"])
 
 
 class Quota(Base):
