@@ -118,6 +118,26 @@ kept as a decision line or in the ledger's grants (scope, granted by, expiry). A
 treats the message as no go. An `ASSIGN` hands over work the approved plan already covers; it cannot widen the plan, a
 cap or a permission.
 
+### Admin or bypass merge
+
+Owner-only. The owner makes this merge, or gives one **bypass go** for a session to carry it out for them. No session
+chooses one, no standing go covers one and no peer message can carry one. `pr-merge.sh` never makes one.
+
+A bypass go names one PR, one head sha and the protections it skips. It covers those and nothing else. A go that names
+none covers reviews only:
+
+| Protection | One bypass go that names nothing else | To skip it too |
+|---|---|---|
+| Required reviews, code-owner review included | covered | nothing more |
+| The strict up-to-date rule | not covered | the go must name it |
+| Required checks | not covered | the go must name it |
+
+An admin flag skips every protection at once, whatever the go said. So just before the call the session reads the PR's
+head sha, merge state and required checks. If the call would skip anything the go does not name, the session stops and
+asks. A base branch that moved after the go, a new head sha and a failed check are each a second skip, and a second skip
+needs a second go. A go is used once and ends with the merge. The ledger's grants record it with its PR, sha and
+protections, granted by the owner, and a decision line records the answer.
+
 ## Message grammar
 
 Every message between swarm roles is one line of one shape. `swarm_msg.py format` writes a line; `swarm_msg.py parse`
@@ -193,6 +213,33 @@ nothing and owes no ack; the orchestrator resumes it only for a line that needs 
 `v=<n>` is on every line, so a grammar change is versioned. The table above is `v=1`. A change to a word, a field or a
 meaning raises `n`, in one PR that changes this table and `swarm_msg.py` together. A parser accepts the current and the
 previous version and refuses any other, naming what it accepts. A sender always writes the current one.
+
+### Inbox drain and outbox return
+
+`SendMessage` is only the wake-up. The record is on disk, one append-only pair per worker:
+`.context/state/swarm/<key>/<worker>/in.ndjson` (the inbox) and `.context/state/swarm/<key>/<worker>/out.ndjson` (the
+outbox). A line to a busy or finished worker waits in its inbox file and is never invisible.
+
+- **The inbox drain.** At every tool round the worker runs `swarm_msg.py drain <worker>`, which prints its unread lines
+  and marks them read. It acks each line and acts on it before its next step.
+- **The outbox return.** The worker writes its lines to its outbox with `swarm_msg.py send`, and ends its run with the
+  same lines as its final message. Return lines only: `CLAIMED`, `PR`, `READY`, `BLOCKED`, `NEEDS`, `DECISION`,
+  `Assumed:` and `DONE`, plus any `ACK` and `RELEASE` it owes. No free-text progress, and nothing when nothing changed.
+  Detail goes in the scratch files the assignment names; the return points at them.
+- **The orchestrator** reads every outbox at each tick and writes to a worker's inbox before it wakes that worker.
+
+### STOP and the call in flight
+
+A `STOP` cannot beat a call already in flight. A message reaches a busy worker only after its current tool call returns,
+and the `PreToolUse` hook that reads the file `.context/state/swarm/STOP-<scope>` can block only the next call. So:
+
+- The stop takes effect at the next tool round, and nobody kills a peer's process to get it.
+- The worker reports what ran before the stop landed: `BLOCKED <ticket> stop <who> ran="…"`, naming every call with an
+  outside effect since its last line. That line is its final message, because the hook blocks its tools.
+- The sender reads `ran=` and never assumes the stop was instant.
+- A long call on a serial resource runs in the background, so the holder's turn stays free. On `STOP` the holder ends that
+  task by its own id. Nobody stops work by a process-name pattern or a peer's pid.
+- `lease.py go <scope>` lifts the file. Whoever set the stop lifts it, or the owner; a stop the owner set, only the owner.
 
 ### No relayed state
 
