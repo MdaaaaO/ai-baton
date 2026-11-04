@@ -4,7 +4,7 @@ description: "Low-noise PR watch: one Monitor per repo/session surfaces only act
 metadata:
   version: "32"
   updated: "2026-11-04"
-  reviewed: "2026-10-15"
+  reviewed: "2026-11-04"
 ---
 
 # pr-watch — stay on top of your PRs without the noise
