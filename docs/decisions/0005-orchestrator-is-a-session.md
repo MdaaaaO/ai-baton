@@ -1,0 +1,84 @@
+# 0005 — An orchestrator is a session, not a server
+
+## Status
+
+Accepted — the design is fixed; the mode is not built yet (#674). The worker runtime, the ledger home and
+`swarm.max_workers` are the defaults in the Decisions block of #674. The owner may override them on review, and this
+note then changes with them.
+
+## Context
+
+`docs/vision.md` § Non-goals says "No orchestration server or daemon. Nothing runs between sessions." Swarm mode (#674)
+has one orchestrator own an epic for days: it assigns tickets to workers, watches the repo and the tracker, and has
+each result verified by a role that never wrote it. A reader will ask whether that breaks the non-goal.
+
+Designs in the field keep a durable coordination record: Magentic-One's task and progress ledgers, LangGraph's
+checkpoints, the shared task list of Agent Teams. That record is the part swarm mode needs. A process that watches the
+queue while no session runs is the part that would break the rule.
+
+The reference deployment ran a de-facto swarm for two months: a driver session assigned tickets to peer sessions over
+messages. It shipped, then shrank. The work contended for one serial resource, so the split was mostly coordination
+overhead, and the owner wound the peers down to one session. Fan-out came back only for work that was parallel and
+disjoint on files: one session ran twelve background workers, one worktree each, over one tracking issue. The kit has
+no written rule for when a worker is a subagent and when it is a peer; the lanes named that gap.
+
+## Decision
+
+**The orchestrator.** An orchestrator is a session in a lane, registered like any other. It runs only while its session
+runs and resumes from disk alone: every swarm tick re-reads the ledger, the tracker and git, never memory. The ledger is
+a file a session writes, `.context/state/swarm/<key>.json`, rendered as a table in the epic's context doc. Nothing runs
+between sessions. There is no control-plane UI and no database. The contract (roles, lifecycle, authority matrix,
+message grammar) is `docs/swarm.md`, not this note.
+
+**A wake-up is not a daemon.**
+
+| | A session's scheduled wake-up: allowed | A daemon: out of scope |
+|---|---|---|
+| What acts | the session, one swarm tick | a process with no session |
+| Who holds the timer | the harness; the kit ships no process | the kit |
+| Where state lives | ledger, tracker and git, re-read every tick | memory or a private store |
+| When the session exits | the wake-up stops firing; the next session resumes from disk | it keeps watching the queue |
+
+A helper that stops with its session belongs to that session (`skills/session-register/heartbeat.sh`). A timer the
+person sets outside the kit (a cloud or desktop scheduled task) starts a new session, and the same rule applies to that
+session; the kit ships no such timer.
+
+**The worker rule (subagent versus peer).** A worker holds one assignment. The subagent is the default; the other two
+runtimes each need the reason named here.
+
+| Worker runtime | Use it | Bound by | What it costs |
+|---|---|---|---|
+| Background subagent in its own worktree | by default | `swarm.max_workers` (default 4); a budget per assignment | A restart stops it and only pushed work survives. It cannot ask the owner. Spend is counted at returns and ticks, so it has no hard dollar cap. |
+| Peer session | only for a separate repo or lane, and only behind a lease | a lease with a holder, an expiry and a named releaser | A full session's prefix. A message to it can be delivered and not read. It can vanish with no notice. |
+| Headless `claude -p` with `--max-budget-usd` | when a hard dollar cap is required | the flag; the run reports `total_cost_usd` | The cap acts on a client-side estimate. With `--bare` it loads no kit hook, so a hook-based stop does not reach it. Without `--bare` it loads the project's hooks and MCP servers, also in an untrusted folder. |
+
+**The fan-out guard.** A swarm is used only when the work is parallel, independent by file area and larger than a
+handful of tool calls per ticket. Work that waits on one serial resource is not parallel. Otherwise one session does it,
+which is where the reference run ended.
+
+## Consequences
+
+| Effect | Detail |
+|---|---|
+| No server | Nothing to install, secure or keep alive on either install path. State is files a person can read, diff and fix by hand. |
+| No session, no progress | A finished CI run, a stalled worker or a lost orchestrator waits for the next session, and the kit sends no alert in that gap. Accepted: a successor registers with `SUCCESSOR_OF=` and resumes from the ledger (#686). |
+| Restarts | A restart stops the background workers, so each worker pushes at every checkpoint and `swarm.py resume` (#677) compares the ledger with the pushed branches. |
+| Spend | An in-session cap can be overshot by one step (#680). Where that is not acceptable, use the headless runtime. |
+| Markdown as source of truth | The ledger is JSON under `.context/state/`, beside the kit's other state, and only sessions write it. The context doc's table is rendered from it, never the reverse. |
+| Not Agent Teams | It is experimental, `/resume` does not restore its in-process teammates, the lead is fixed and it spawns no teammate under `-p`. It cannot resume from disk or hand over to a successor. |
+| If reversed | A daemon needs an install on both paths, credentials and a supervisor. `docs/vision.md` § Non-goals changes, and a new note supersedes this one. |
+
+## Sources
+
+- `docs/vision.md` § Non-goals, `docs/delegation.md` § When, `docs/glossary.md`, `skills/session-register/heartbeat.sh`
+- #674 (the mode and its defaults), #676 (the contract), #677 (ledger), #679 (lease), #680 (budget), #686 (failover);
+  related #41, #62, #103, #355
+- [Magentic-One](https://arxiv.org/html/2411.04468v1): task ledger, progress ledger, stall counter
+- [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence): checkpoints per thread
+- Claude Code docs: [agent teams](https://code.claude.com/docs/en/agent-teams),
+  [subagents](https://code.claude.com/docs/en/sub-agents), [headless runs](https://code.claude.com/docs/en/headless),
+  [scheduled tasks](https://code.claude.com/docs/en/scheduled-tasks)
+- [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system):
+  about 15 times the tokens of a chat; a poor fit where agents share context or depend on each other
+- [Don't build multi-agents](https://cognition.com/blog/dont-build-multi-agents): conflicting assumptions between
+  parallel subagents
