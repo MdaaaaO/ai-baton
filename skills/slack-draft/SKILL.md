@@ -3,9 +3,9 @@ name: slack-draft
 description: "Every Slack draft a session makes for the user: create it (never paste text), record it, and read the channel/thread before any follow-up or status claim, since the user may edit drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
-  version: "11"
-  updated: "2026-10-20"
-  reviewed: "2026-10-20"
+  version: "12"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   requires: "slack"
 ---
 
@@ -29,8 +29,11 @@ the draft text as a prose question. The session only ever creates the draft; sen
   beside this file (`**bold**`, `<url|label>`, ≤55-char code-block lines).
 - **One attached draft per conversation** — a channel's top level, or one thread. If the tool returns
   `attached_draft_exists`, that pending draft is the one to update — do not create a second. Drafts in
-  different threads of one channel coexist (seen once, not yet reproduced — #609), so a thread draft
-  does not use the channel's slot, and a draft elsewhere in the channel says nothing about this one.
+  different threads of one channel coexist (observed: three thread drafts in one channel at once), so a
+  thread draft does not use the channel's slot, and a draft elsewhere in the channel says nothing about
+  this one. Whether a second create in the *same* thread is refused or adds a draft is
+  unconfirmed: never try it on purpose, and treat a second `draft_id` for one conversation as a
+  duplicate (§ 4).
 - Tell the user in one line where it is. **Thread drafts hide in the thread's reply box and under
   "Drafts & Sent", not in the channel composer** — say so when the draft is a thread reply.
 
@@ -38,7 +41,9 @@ the draft text as a prose question. The session only ever creates the draft; sen
 
 Write into the context doc's Session log (and the session file's pending list):
 channel id + name, `thread_ts` if any, the `draft_id`, and a one-line gist of what it says.
-The gist is what §3 diffs against once it goes out.
+The gist is what §3 diffs against once it goes out. When the create returned `attached_draft_exists`,
+or a new `draft_id` for a conversation that already had one, record that result too: those lines are
+the evidence that settles the slot rule, which no environment has checked on purpose yet.
 
 ## 3. Before you touch it again — read first
 
@@ -62,8 +67,10 @@ follow-up to the same people, or acting on "no reply yet".
      channel, same `thread_ts` or none — returns `attached_draft_exists`) →
      leave it; do not nudge.
    - **Gone, not sent** (no matching message and a recreate in the same conversation succeeds) → only
-     now is "the draft vanished" a true statement; say so and record the new `draft_id`. A create that
-     succeeds in another thread, or at the channel's top level, proves nothing about this draft.
+     now is "the draft vanished" a true statement; say so and record the new `draft_id` with the create
+     result (§ 2). Until the same-conversation rule is confirmed, this recreate is the one place a
+     duplicate can arise: if the user later reports two drafts, the recorded line says which. A create
+     that succeeds in another thread, or at the channel's top level, proves nothing about this draft.
 3. Never infer "sent" or "vanished" from the draft tool alone — the tool cannot list or delete
    drafts, and a successful re-create proves only that no draft is attached to that conversation *now*.
 
