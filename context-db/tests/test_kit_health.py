@@ -431,6 +431,16 @@ class MemoryWiring(unittest.TestCase):
         self.assertIn("/memory-prune", text)
         self.assertNotIn("within budget", text)
 
+    def test_near_budget_warns_before_the_overflow(self):
+        with tempfile.TemporaryDirectory() as td:
+            mem = self.fixture(td, "short")
+            size = len((mem / "MEMORY.md").read_bytes())
+            kh, r = self.run_check(mem, MEMORY_LINE_WARN="150", MEMORY_INDEX_WARN=str(size + 2))
+        text = "\n".join(r.lines)
+        self.assertEqual((r.counts[kh.WARN], r.counts[kh.OK]), (1, 0), text)
+        self.assertIn("near its index budget", text)
+        self.assertIn("/memory-prune", text)
+
     def test_within_budget_is_ok(self):
         with tempfile.TemporaryDirectory() as td:
             kh, r = self.run_check(self.fixture(td, "short"), MEMORY_LINE_WARN="150")

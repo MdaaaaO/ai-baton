@@ -10,6 +10,7 @@ every other `*.md` in the dir is a note.
 
 Prints one summary line, then one line per finding, `<KIND> <file>[:<line>] <detail>`:
   INDEX_BUDGET   the index is over `MEMORY_INDEX_WARN` bytes (default 12288)
+  NEAR_BUDGET    the index is within 10 % of that budget (still exit 0): prune before the next session's notes push it over
   LONG_LINE      an index line is over `MEMORY_LINE_WARN` characters (default 150)
   NO_FILE        an index line links a note that does not exist
   NO_INDEX       a note no index line links
@@ -198,6 +199,9 @@ def check(mem: Path, workspace: Path, index_warn: int = INDEX_WARN, line_warn: i
     if index_bytes > index_warn:
         over = True
         findings.append(f"INDEX_BUDGET {INDEX} {index_bytes} B > {index_warn} B")
+    elif index_bytes * 10 >= index_warn * 9:  # the overflow that founded this check was found only after the fact
+        findings.append(f"NEAR_BUDGET {INDEX} {index_bytes} B is {index_bytes * 100 // index_warn} % of {index_warn} B "
+                        "— prune before the next session's notes push it over")
     long_lines = 0
     linked: set[str] = set()
     for no, line in enumerate(index_lines, 1):
