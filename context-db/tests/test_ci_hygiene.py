@@ -255,7 +255,9 @@ class MacosLeg(unittest.TestCase):
         job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
         self.assertRegex(job, r"runs-on: macos-\d+-intel\n")
         self.assertNotIn("runs-on: macos-latest", job)
-        self.assertRegex(job, r"timeout-minutes: (30|[4-9]\d)\n")  # the queue wait counts against it
+        budget = re.search(r"timeout-minutes: (\d+)\n", job)
+        self.assertIsNotNone(budget, "the macos job declares no timeout-minutes")
+        self.assertGreaterEqual(int(budget.group(1)), 30)  # the queue wait counts against it
 
     def test_macos_job_runs_the_engine_suite(self):
         job = self.TEXT.split("\n  macos:\n", 1)[1].split("\n  forced-signing:\n", 1)[0]
