@@ -33,5 +33,26 @@ class OneDraftModel(unittest.TestCase):
         self.assertNotIn("counts against the same channel slot", self.text)
 
 
+class ObservedSlotRule(unittest.TestCase):
+    """The slot rule is stated as observed, with its open case named and every create result recorded."""
+
+    def setUp(self):
+        self.text = SKILL.read_text(encoding="utf-8")
+
+    def test_threads_coexist_and_the_same_thread_case_is_named_open(self):
+        self.assertIn("different threads of one channel coexist", self.text)
+        self.assertIn("unconfirmed: never try it on purpose", self.text)
+        self.assertIn("treat a second `draft_id` for one conversation as a", self.text)
+
+    def test_the_recreate_records_its_result_and_owns_the_duplicate_risk(self):
+        self.assertIn("record the new `draft_id` with the create", self.text)
+        self.assertIn("the one place a\n     duplicate can arise", self.text)
+        self.assertIn("proves nothing about this draft", self.text)
+
+    def test_no_open_issue_pointer_remains(self):
+        self.assertNotIn("#609", self.text)
+        self.assertNotIn("not yet reproduced", self.text)
+
+
 if __name__ == "__main__":
     unittest.main()
