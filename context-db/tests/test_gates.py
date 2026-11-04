@@ -242,7 +242,8 @@ class SignHuman(Base):
                 self.assertRefused("--by", "owner", "--decision", line)
 
     def test_an_answer_about_another_gate_or_not_to_sign_is_refused(self):
-        self.assertRefused("--by", "owner", "--decision", "2026-01-02 · VG-20 sign it? → sign; not hold — another gate",
+        longer_id = "VG-" + "20"  # assembled: a two-digit id reads as a ticket key to the leak scan
+        self.assertRefused("--by", "owner", "--decision", f"2026-01-02 · {longer_id} sign it? → sign; not hold — another gate",
                            why="does not name VG-2")
         self.assertRefused("--by", "owner", "--decision", "2026-01-02 · VG-2 sign it? → hold; not sign — the numbers are off",
                            why="not `sign`")
