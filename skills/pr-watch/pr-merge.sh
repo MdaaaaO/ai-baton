@@ -18,7 +18,7 @@
 #   success (verify by hand — never read exit 0 elsewhere as "merged", only this script's own exit 0).
 # Exit 3 = gave up: CLEAN + APPROVED never held within the deadline (a bot verdict wait or the final poll loop).
 set -u
-R=$1; PR=$2; PIN=${3:-}
+R=$1; PR=$2; PIN=${3:-}; PINNED=0; [ $# -ge 3 ] && PINNED=1   # a present but empty third argument is a pin that failed to expand
 KIT="$(cd "$(dirname "$0")/../.." && pwd)"
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 # Every non-zero exit (the many `exit 1`/`exit 3` paths) ends this run, and with it the PR's watch: say so once, from the
@@ -107,6 +107,7 @@ wait_verdict(){
   echo "TIMEOUT: no bot verdict on $h after 40 min"; return 3
 }
 
+[ "$PINNED" = 0 ] || [ -n "$PIN" ] || { echo "ERROR $R#$PR the expected head argument is empty (an unset variable?) — refusing rather than running unpinned; nothing was changed"; exit 1; }
 H=$(head_of); [ -n "$H" ] || { err_line; exit 1; }
 PINFULL=""
 if [ -n "$PIN" ]; then

@@ -36,4 +36,9 @@ round trip later (a stale base can make a bot's regenerated tree show deletions 
 - Consequences you own: a merge commit lands on the branch, invisibly to the session until its next push —
   the SKILL.md standing rule (`git fetch origin <branch>`, rebase onto it if ahead, `sign-queue --rebase`
   where commits are signed) is what catches this, not an event; CI re-runs on the PR.
-  The sync never fires on an approved PR — on approval, `pr-merge.sh` / `update-branch` by hand is the path.
+  The sync fires on an approved PR only where a push keeps the approval: it reads `rules/branches/<base>` (a
+  `pull_request` rule with `dismiss_stale_reviews_on_push` true means a push dismisses), then, if the rules do not
+  say so, classic protection (`Branch not protected` or `Required pull request reviews not enabled` means nothing
+  dismisses). Where a push would dismiss, or the read failed (`LOOKUP FAILED: branch protection`, no sync), the
+  watcher prints the `BEHIND` line instead and `pr-merge.sh` / `update-branch` by hand is the path. The answer is
+  read once per head.

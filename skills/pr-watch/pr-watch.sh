@@ -284,48 +284,63 @@ while true; do
                   lookup_failed "$pr" "approval count" "the approvals in the reviews listing could not be counted"
                 elif [ "$appr" -gt 0 ] 2>/dev/null; then
                   lookup_ok "approval count"
-                  # A human approval exists. A push dismisses it only where the base branch's protection has
-                  # dismiss_stale_reviews on, and GitHub counts it as approval only when reviewDecision says
-                  # APPROVED (other touched paths may still wait on code owners). Read both; a read that
-                  # fails is a line and no sync — never a silent default either way.
-                  # Rulesets first (200 and a list, empty when none applies): any pull_request rule with
-                  # dismiss_stale_reviews_on_push true means a push dismisses. Only when the rules do not say
-                  # true is classic protection read; its 404 "Branch not protected" is an answer (dismiss off),
-                  # every other failure on either read is a failed read.
-                  dismiss=""; disrc=0
-                  gh_retry gh api "repos/$repo/rules/branches/$base" --jq '[.[] | select(.type=="pull_request") | .parameters.dismiss_stale_reviews_on_push] | any'; disrc=$?; dismiss=$ghr_out
-                  if [ $disrc -eq 0 ] && [ "$dismiss" != true ] && [ "$dismiss" != false ]; then disrc=1; ghr_err="the rules read for $base came back as '$dismiss'"; fi
-                  if [ $disrc -eq 0 ] && [ "$dismiss" = false ]; then
-                    gh_retry gh api "repos/$repo/branches/$base/protection/required_pull_request_reviews" --jq '.dismiss_stale_reviews'; disrc=$?; dismiss=$ghr_out
-                    if [ $disrc -ne 0 ]; then
-                      case "$ghr_err" in
-                        *"Branch not protected"*) disrc=0; dismiss=false;;   # no classic protection: nothing dismisses
+                  # A human approval exists. A push dismisses it only where the base branch dismisses stale
+                  # reviews, and GitHub counts it as approval only when reviewDecision says APPROVED. The
+                  # dismiss answer is read once per head (a definite answer is kept in dismiss_for); a read that
+                  # fails is a LOOKUP FAILED line and no sync — never a silent default either way — and the
+                  # line below is then worded without the dismiss claim, so it never depends on that read.
+                  dismiss=""; dfor=$(getv dismiss_for)
+                  case "$dfor" in "$cur="*) dismiss=${dfor#*=};; esac
+                  if [ -z "$dismiss" ]; then
+                    # Rulesets first (200 and a list, empty when none applies; paginated): any pull_request rule
+                    # with dismiss_stale_reviews_on_push true means a push dismisses. Only when the rules do not
+                    # say true is classic protection read; "Branch not protected" and "Required pull request
+                    # reviews not enabled" are answers (nothing dismisses), every other failure is a failed read.
+                    disrc=0
+                    gh_retry gh api --paginate "repos/$repo/rules/branches/$base?per_page=100" --jq '[.[] | select(.type=="pull_request") | .parameters.dismiss_stale_reviews_on_push] | any'; disrc=$?
+                    if [ $disrc -eq 0 ]; then
+                      case "$ghr_out" in
+                        *true*) dismiss=true;;
+                        *false*) dismiss=false;;
+                        *) disrc=1; ghr_err="the rules read for $base came back as '$ghr_out'";;
                       esac
-                    elif [ "$dismiss" != true ] && [ "$dismiss" != false ]; then disrc=1; ghr_err="the protection read for $base came back as '$dismiss'"
+                    fi
+                    if [ $disrc -eq 0 ] && [ "$dismiss" = false ]; then
+                      gh_retry gh api "repos/$repo/branches/$base/protection/required_pull_request_reviews" --jq '.dismiss_stale_reviews'; disrc=$?; dismiss=$ghr_out
+                      if [ $disrc -ne 0 ]; then
+                        case "$ghr_err" in
+                          *"Branch not protected"*|*"Required pull request reviews not enabled"*) disrc=0; dismiss=false;;
+                        esac
+                      elif [ "$dismiss" != true ] && [ "$dismiss" != false ]; then disrc=1; ghr_err="the protection read for $base came back as '$dismiss'"
+                      fi
+                    fi
+                    if [ $disrc -ne 0 ]; then
+                      dismiss=unknown
+                      lookup_failed "$pr" "branch protection" "${ghr_err:-no error text}; not auto-syncing an approved PR without knowing whether a push would dismiss the approval"
+                    else
+                      lookup_ok "branch protection"; putv dismiss_for "$cur=$dismiss"
                     fi
                   fi
-                  if [ $disrc -ne 0 ]; then
-                    lookup_failed "$pr" "branch protection" "${ghr_err:-no error text}; not auto-syncing an approved PR without knowing whether a push would dismiss the approval"
-                  else
-                    lookup_ok "branch protection"
-                    if [ "$dismiss" = false ]; then
-                      do_sync=1   # a push keeps the approval here: sync as for an unapproved PR
+                  if [ "$dismiss" = false ]; then
+                    do_sync=1   # a push keeps the approval here: sync as for an unapproved PR
+                  elif [ "$(getv appr_seen)" != "$cur" ]; then
+                    gh_retry gh pr view "$pr" --repo "$repo" --json reviewDecision --jq '.reviewDecision'; rdrc=$?; rdec=$ghr_out
+                    if [ $rdrc -ne 0 ]; then
+                      lookup_failed "$pr" "review decision" "$ghr_err"
                     else
-                      gh_retry gh pr view "$pr" --repo "$repo" --json reviewDecision --jq '.reviewDecision'; rdrc=$?; rdec=$ghr_out
-                      if [ $rdrc -ne 0 ]; then
-                        lookup_failed "$pr" "review decision" "$ghr_err"
+                      lookup_ok "review decision"
+                      if [ "$dismiss" = true ]; then why="dismiss_stale_reviews is on, so a push would dismiss the approval"
+                      else why="the branch's dismiss setting could not be read, so a push might dismiss the approval"; fi
+                      who=$(printf '%s' "$revs" | jq -r --arg bot "$bot" --argjson bots "$bots" '[.[] | select(.state=="APPROVED" and .user.login!=$bot and ((.user.login as $l | ($bots | index($l))) == null)) | .user.login] | unique | join(", ")' 2>/dev/null)
+                      if [ "$rdec" = APPROVED ]; then
+                        echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing ($why): merge now, or update-branch and ask for re-approval"
+                      elif [ -z "$rdec" ]; then
+                        # no review is required of the base branch (pr-merge.sh reads the reviews themselves then)
+                        echo "PR $pr BEHIND $base by $behind, approved by ${who:-a reviewer} (the base branch requires no review) — not auto-syncing ($why): merge now, or update-branch and ask for re-approval"
                       else
-                        lookup_ok "review decision"
-                        if [ "$(getv appr_seen)" != "$cur" ]; then
-                          if [ "$rdec" = APPROVED ]; then
-                            echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing (dismiss_stale_reviews is on, so a push would dismiss the approval): merge now, or update-branch and ask for re-approval"
-                          else
-                            who=$(printf '%s' "$revs" | jq -r --arg bot "$bot" --argjson bots "$bots" '[.[] | select(.state=="APPROVED" and .user.login!=$bot and ((.user.login as $l | ($bots | index($l))) == null)) | .user.login] | unique | join(", ")' 2>/dev/null)
-                            echo "PR $pr BEHIND $base by $behind, approved by ${who:-a reviewer}, still ${rdec:-undecided} — not auto-syncing (dismiss_stale_reviews is on); the missing review has to come first"
-                          fi
-                          putv appr_seen "$cur"
-                        fi
+                        echo "PR $pr BEHIND $base by $behind, approved by ${who:-a reviewer}, still $rdec — not auto-syncing ($why); the missing review has to come first"
                       fi
+                      putv appr_seen "$cur"
                     fi
                   fi
                 else

@@ -575,6 +575,38 @@ class PrWatchStub(unittest.TestCase):
         self.assertNotIn("update-branch", self.calls())
         self.assertNotIn("SYNCED", r.stdout + r.stderr)
 
+    def test_a_protected_branch_without_a_required_reviews_rule_is_dismiss_off_and_synced(self):
+        r = self.behind_approved(STUB_PROTECTION_ERR="gh: Required pull request reviews not enabled (HTTP 404)")
+        self.assertIn(f"PR {PR} SYNCED with main", r.stderr)
+        self.assertNotIn("LOOKUP FAILED", r.stdout)
+
+    def test_the_decision_line_does_not_depend_on_the_protection_read(self):
+        r = self.behind_approved(STUB_PROTECTION_ERR="gh: Not Found (HTTP 404)")
+        self.assertIn(f"PR {PR} LOOKUP FAILED: branch protection", r.stdout)
+        self.assertIn(f"PR {PR} BEHIND main by 3 but APPROVED", r.stdout)
+        self.assertIn("dismiss setting could not be read", r.stdout)
+        self.assertNotIn("dismiss_stale_reviews is on", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+
+    def test_an_empty_review_decision_says_no_review_is_required(self):
+        r = self.behind_approved(STUB_DECISION="")
+        self.assertIn("approved by carol (the base branch requires no review)", r.stdout)
+        self.assertNotIn("undecided", r.stdout)
+        self.assertNotIn("missing review", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+
+    def test_the_rules_read_is_paginated(self):
+        self.behind_approved()
+        self.assertIn("api --paginate repos/o/r/rules/branches/main", self.calls())
+
+    def test_a_head_already_answered_is_not_read_again(self):
+        self.seed_state(head=FULL, appr_seen=FULL, dismiss_for=f"{FULL}=true")
+        r = self.behind_approved()
+        self.assertNotIn("rules/branches", self.calls())
+        self.assertNotIn("protection", self.calls())
+        self.assertNotIn("reviewDecision", self.calls())
+        self.assertNotIn("BEHIND", r.stdout)
+
     def test_dw3_a_failed_decision_read_says_so_and_does_not_sync(self):
         r = self.behind_approved(STUB_DECISION_FAIL="1")
         self.assertIn(f"PR {PR} LOOKUP FAILED: review decision", r.stdout)

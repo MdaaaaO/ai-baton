@@ -2,7 +2,7 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo/session surfaces only actionable events, triages via `pr-event-brief`, keeps branches synced, merges via `pr-merge.sh` once gates hold. Parks on sign-off, idle windows or a human-only gate. Use when your session owns an open PR."
 metadata:
-  version: "32"
+  version: "33"
   updated: "2026-11-04"
   reviewed: "2026-11-04"
 ---
@@ -50,7 +50,7 @@ green**: it prints `PR N LOOKUP FAILED: <what> — <error>` after 3 attempts, an
 ## Auto-sync with the base branch
 
 While a PR waits for review the watcher keeps it merged with its base: when behind and **no human `APPROVED`
-review exists** (or a human approval exists but the base branch keeps it on a push: `dismiss_stale_reviews` off),
+review exists** (or a human approval exists but the base branch keeps it on a push: rulesets and classic protection both dismiss nothing),
 it runs `update-branch` itself (once per head, `PR_WATCH_SYNC=0` turns it off) and logs `SYNCED`
 to stderr. **Standing rule: before any further push from the worktree**, `git fetch origin <branch>` and, when the
 remote is ahead, rebase onto it first (`sign-queue --rebase` where commits are signed). Detail:

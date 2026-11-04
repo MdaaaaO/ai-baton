@@ -251,6 +251,13 @@ class HeadPin(unittest.TestCase):
         self.assertNotIn("update-branch", self.calls())
         self.assertNotIn("pr merge", self.calls())
 
+    def test_an_empty_pin_refuses_before_any_write(self):
+        r = self.run_merge(GH_STUB_BEHIND, "")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("expected head argument is empty", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("pr merge", self.calls())
+
     def test_dw4_a_malformed_pin_refuses_too(self):
         r = self.run_merge(GH_STUB, "not-a-sha")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
