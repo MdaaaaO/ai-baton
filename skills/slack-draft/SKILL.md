@@ -31,9 +31,9 @@ the draft text as a prose question. The session only ever creates the draft; sen
   `attached_draft_exists`, that pending draft is the one to update — do not create a second. Drafts in
   different threads of one channel coexist (observed: three thread drafts in one channel at once), so a
   thread draft does not use the channel's slot, and a draft elsewhere in the channel says nothing about
-  this one. Whether a second create in the *same* thread is refused or adds a draft is
-  unconfirmed: never try it on purpose, and treat a second `draft_id` for one conversation as a
-  duplicate (§ 4).
+  this one. Whether a second create in the *same* conversation is refused or adds a draft is
+  unconfirmed: the only create into a conversation that already holds one is the § 3 recreate, and a
+  second `draft_id` for one conversation is a duplicate (§ 4) until the user says otherwise.
 - Tell the user in one line where it is. **Thread drafts hide in the thread's reply box and under
   "Drafts & Sent", not in the channel composer** — say so when the draft is a thread reply.
 
@@ -43,7 +43,7 @@ Write into the context doc's Session log (and the session file's pending list):
 channel id + name, `thread_ts` if any, the `draft_id`, and a one-line gist of what it says.
 The gist is what §3 diffs against once it goes out. When the create returned `attached_draft_exists`,
 or a new `draft_id` for a conversation that already had one, record that result too: those lines are
-the evidence that settles the slot rule, which no environment has checked on purpose yet.
+the evidence that settles the slot rule.
 
 ## 3. Before you touch it again — read first
 
@@ -66,13 +66,13 @@ follow-up to the same people, or acting on "no reply yet".
    - **Still pending** (no matching message; a recreate attempt **in the same conversation** — same
      channel, same `thread_ts` or none — returns `attached_draft_exists`) →
      leave it; do not nudge.
-   - **Gone, not sent** (no matching message and a recreate in the same conversation succeeds) → only
-     now is "the draft vanished" a true statement; say so and record the new `draft_id` with the create
-     result (§ 2). Until the same-conversation rule is confirmed, this recreate is the one place a
-     duplicate can arise: if the user later reports two drafts, the recorded line says which. A create
-     that succeeds in another thread, or at the channel's top level, proves nothing about this draft.
+   - **Gone or doubled** (no matching message and a recreate in the same conversation succeeds) → the
+     first draft is gone, or the new one now sits beside it; which is unconfirmed, so say both and
+     record the new `draft_id` with the create result (§ 2). This recreate is the one place a duplicate
+     can arise: if the user later reports two drafts, the recorded line says which. A create that
+     succeeds in another thread, or at the channel's top level, proves nothing about this draft.
 3. Never infer "sent" or "vanished" from the draft tool alone — the tool cannot list or delete
-   drafts, and a successful re-create proves only that no draft is attached to that conversation *now*.
+   drafts, and a successful re-create proves only that the connector accepted a new one.
 
 ## 4. Duplicates
 

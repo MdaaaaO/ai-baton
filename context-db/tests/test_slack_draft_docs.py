@@ -41,13 +41,14 @@ class ObservedSlotRule(unittest.TestCase):
 
     def test_threads_coexist_and_the_same_thread_case_is_named_open(self):
         self.assertIn("different threads of one channel coexist", self.text)
-        self.assertIn("unconfirmed: never try it on purpose", self.text)
-        self.assertIn("treat a second `draft_id` for one conversation as a", self.text)
+        self.assertIn("is the § 3 recreate", self.text)
+        self.assertIn("second `draft_id` for one conversation is a duplicate", self.text)
 
     def test_every_slot_answer_is_recorded_and_the_recreate_owns_the_duplicate_risk(self):
         self.assertIn("or a new `draft_id` for a conversation that already had one, record that result too", self.text)
-        self.assertIn("record the new `draft_id` with the create", self.text)
-        self.assertIn("the one place a\n     duplicate can arise", self.text)
+        self.assertIn("record the new `draft_id` with the create result", self.text)
+        self.assertIn("**Gone or doubled**", self.text)
+        self.assertNotIn("**Gone, not sent**", self.text)
         self.assertIn("proves nothing about this draft", self.text)
 
     def test_no_open_issue_pointer_remains(self):
