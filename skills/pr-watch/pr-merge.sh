@@ -1,10 +1,14 @@
 #!/bin/bash
-# pr-merge.sh <owner/repo> <pr> — run the merge gates (bot review + approval + 0 open threads) and squash-merge when they hold.
+# pr-merge.sh <owner/repo> <pr> [<expected_head_sha>] — run the merge gates (bot review + approval + 0 open threads) and squash-merge when they hold.
 #   phase 1: wait for the review bot's Assessment on the CURRENT head (review object, via bot-verdict.sh) — skipped
 #     entirely when github.review_bot is empty (no-bot mode gates on CI + human review only; one line at start says which)
 #   phase 2: if BEHIND, update-branch (with expected_head_sha), force a full bot review on the merge head by
 #     removing and re-adding the bot as a requested reviewer when in bot mode, wait again
 #   phase 3: squash-merge once state is CLEAN, reviewDecision APPROVED, 0 unresolved threads
+# With the optional expected head (a full sha or a prefix of at least 7 hex digits) the run is pinned to that head: it
+#   refuses at start when the PR's head differs, stops (exit 1) on a BEHIND PR instead of running update-branch — a
+#   moved head needs a new READY — and merges with `--match-head-commit <full sha>`. Without the pin nothing changes:
+#   a BEHIND PR is updated (phase 2) and the squash-merge carries no head match.
 # Every gh listing is paginated (per_page=100 + --paginate, reviewThreads cursor-looped): a PR with >30 reviews
 # or >100 threads otherwise hides the newest verdict / an open thread and the wait never ends.
 # Every gh/graphql call below checks its own exit status: a failed query is an ERROR line (to stdout — the
@@ -14,7 +18,7 @@
 #   success (verify by hand — never read exit 0 elsewhere as "merged", only this script's own exit 0).
 # Exit 3 = gave up: CLEAN + APPROVED never held within the deadline (a bot verdict wait or the final poll loop).
 set -u
-R=$1; PR=$2
+R=$1; PR=$2; PIN=${3:-}
 KIT="$(cd "$(dirname "$0")/../.." && pwd)"
 eval "$(python3 "$KIT/context-db/bin/kit_profile.py" gh-env)"  # github.sandbox_token_prefix, if any
 # Every non-zero exit (the many `exit 1`/`exit 3` paths) ends this run, and with it the PR's watch: say so once, from the
@@ -104,6 +108,16 @@ wait_verdict(){
 }
 
 H=$(head_of); [ -n "$H" ] || { err_line; exit 1; }
+PINFULL=""
+if [ -n "$PIN" ]; then
+  # Checked before anything else touches the PR: no update-branch, no review re-request, no merge on another head.
+  case "$PIN" in *[!0-9a-fA-F]*) echo "ERROR $R#$PR expected head '$PIN' is not a hex sha"; exit 1;; esac
+  [ ${#PIN} -ge 7 ] && [ ${#PIN} -le 40 ] || { echo "ERROR $R#$PR expected head '$PIN' must be 7 to 40 hex digits"; exit 1; }
+  PINFULL=$(head_full); [ -n "$PINFULL" ] || { err_line; exit 1; }
+  pin_l=$(printf '%s' "$PIN" | tr 'A-F' 'a-f')
+  case "$PINFULL" in "$pin_l"*) ;; *) echo "HEAD differs from the pinned $PIN: the PR is at $H — a moved head needs a new READY; nothing was changed"; exit 1;; esac
+  echo "pr-merge: pinned to head $H — no update-branch, merge with --match-head-commit"
+fi
 if [ -n "$bot" ]; then echo "pr-merge: bot mode — gating on $bot Assessment + CI + human review"
 else echo "pr-merge: no-bot mode (github.review_bot empty) — gating on CI + human review only"; fi
 echo "pr-merge: watching $R#$PR until merge — no separate pr-watch needed"  # this run IS the PR's watch (session-register step 4)
@@ -112,6 +126,9 @@ if [ -n "$bot" ]; then wait_verdict "$H"; wvrc=$?; [ $wvrc -eq 0 ] || { [ $wvrc 
 ot=$(open_threads); [ $? -eq 0 ] || { err_line; exit 1; }
 [ "$ot" = "0" ] || { echo "open threads after verdict — resolve them, then rerun"; exit 1; }
 st=$(merge_state); [ -n "$st" ] || { err_line; exit 1; }
+if [ "$st" = "BEHIND" ] && [ -n "$PIN" ]; then
+  echo "BEHIND with the head pinned to $PIN — not updating the branch (that moves the head); a moved head needs a new READY"; exit 1
+fi
 if [ "$st" = "BEHIND" ]; then
   full=$(head_full); [ -n "$full" ] || { err_line; exit 1; }
   update_branch "$full"; [ $? -eq 0 ] || { err_line; exit 1; }
@@ -142,7 +159,8 @@ EOF_RESP
     "CLEAN APPROVED")
       # `gh pr merge`'s own exit status, not the exit status of the `tail` that used to trail it in a pipe —
       # that piped form reported "MERGE ATTEMPTED" (and exit 0) whether or not the merge actually went through.
-      merr=$(gh pr merge "$PR" --repo "$R" --squash 2>&1); mrc=$?
+      if [ -n "$PINFULL" ]; then merr=$(gh pr merge "$PR" --repo "$R" --squash --match-head-commit "$PINFULL" 2>&1); mrc=$?
+      else merr=$(gh pr merge "$PR" --repo "$R" --squash 2>&1); mrc=$?; fi
       if [ $mrc -ne 0 ]; then echo "MERGE FAILED on $H: $(printf '%s' "$merr" | tail -1)"; exit 1; fi
       ma=$(gh api "repos/$R/pulls/$PR" --jq '.merged_at' 2>"$ERRF")
       if [ -n "$ma" ] && [ "$ma" != "null" ]; then echo "MERGED on $H"; exit 0

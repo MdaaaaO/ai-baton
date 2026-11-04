@@ -85,6 +85,9 @@ if [ "$1" = api ]; then
         if [ "$n" -le "$STUB_COMPARE_FAIL_COUNT" ]; then echo "stub gh: simulated transient compare failure" >&2; exit 1; fi
       fi
       body=$STUB_COMPARE_JSON ;;
+    */branches/*/protection/required_pull_request_reviews)
+      [ -n "${STUB_PROTECTION_FAIL:-}" ] && { echo "stub gh: simulated protection failure" >&2; exit 1; }
+      body="{\"dismiss_stale_reviews\": ${STUB_DISMISS:-true}}" ;;
     */commits/*/check-runs\?per_page=100) body=$STUB_CHECKRUNS_JSON ;;
     */check-runs/*/annotations\?per_page=100) body=$STUB_ANNOTATIONS_JSON ;;
     */commits/*) body=$STUB_COMMIT_JSON ;;
@@ -119,6 +122,9 @@ if [ "$1" = pr ] && [ "$2" = view ]; then
       fi
       body="{\"statusCheckRollup\": $STUB_ROLLUP_JSON}" ;;
     state) body="{\"state\": \"$STUB_STATE\"}" ;;
+    reviewDecision)
+      [ -n "${STUB_DECISION_FAIL:-}" ] && { echo "stub gh: simulated decision failure" >&2; exit 1; }
+      body="{\"reviewDecision\": \"${STUB_DECISION-APPROVED}\"}" ;;
     *) echo "stub gh: unhandled pr view --json $json" >&2; exit 9 ;;
   esac
   printf '%s' "$body" | jq -r "$jqf"
@@ -495,6 +501,88 @@ class PrWatchStub(unittest.TestCase):
         self.assertIn("but APPROVED", r.stdout)
         self.assertNotIn("SYNCED", r.stdout)
         self.assertNotIn("SYNCED", r.stderr)
+
+    # --- #697: the BEHIND line follows GitHub's reviewDecision and the branch's dismiss_stale_reviews ---
+
+    HUMAN_APPROVAL = [{"user": {"login": "carol"}, "state": "APPROVED", "commit_id": FULL}]
+
+    def behind_approved(self, **extra):
+        return self.run_watch(reviews=json.dumps(self.HUMAN_APPROVAL), compare_behind=3,
+                              identity_env={"PR_WATCH_SELF": "tester"}, extra_env=extra)
+
+    def test_dw1_the_line_says_approved_only_when_the_review_decision_is_approved(self):
+        r = self.behind_approved(STUB_DECISION="APPROVED")
+        self.assertIn("but APPROVED", r.stdout)
+        self.assertNotIn("SYNCED", r.stdout + r.stderr)
+
+    def test_dw1_one_approval_with_review_required_is_not_called_approved(self):
+        r = self.behind_approved(STUB_DECISION="REVIEW_REQUIRED")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("approved by carol, still REVIEW_REQUIRED", r.stdout)
+        self.assertNotIn("but APPROVED", r.stdout)
+        self.assertNotIn("merge now", r.stdout)
+        self.assertNotIn("update-branch", self.calls().replace("compare", ""))  # no sync either
+
+    def test_dw2_a_behind_approved_pr_is_synced_where_dismiss_stale_reviews_is_false(self):
+        r = self.behind_approved(STUB_DISMISS="false")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} SYNCED with main", r.stderr)
+        self.assertNotIn("but APPROVED", r.stdout)
+        self.assertIn("-X PUT repos/o/r/pulls/7/update-branch", self.calls())
+
+    def test_dw3_a_failed_protection_read_says_so_and_does_not_sync(self):
+        r = self.behind_approved(STUB_PROTECTION_FAIL="1")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"PR {PR} LOOKUP FAILED: branch protection", r.stdout)
+        self.assertIn("simulated protection failure", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("SYNCED", r.stdout + r.stderr)
+
+    def test_dw3_a_failed_decision_read_says_so_and_does_not_sync(self):
+        r = self.behind_approved(STUB_DECISION_FAIL="1")
+        self.assertIn(f"PR {PR} LOOKUP FAILED: review decision", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+
+    def test_an_unapproved_behind_pr_reads_neither_protection_nor_decision(self):
+        r = self.run_watch(compare_behind=3, identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertIn(f"PR {PR} SYNCED with main", r.stderr)
+        self.assertNotIn("protection", self.calls())
+        self.assertNotIn("reviewDecision", self.calls())
+
+    # --- #697 DW-6: a cancelled run with a newer run of the same workflow on the head is settled ---
+
+    @staticmethod
+    def run_node(workflow: str, name: str, conclusion: str, started: str) -> dict:
+        return {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": conclusion, "name": name,
+                "workflowName": workflow, "startedAt": started}
+
+    def test_dw6_a_cancelled_run_with_a_newer_run_of_the_same_workflow_is_not_red(self):
+        rollup = [self.run_node("pr-title", "title", "CANCELLED", "2026-01-01T10:00:00Z"),
+                  self.run_node("pr-title", "title", "SUCCESS", "2026-01-01T10:05:00Z"),
+                  self.run_node("pr-issue", "issue", "CANCELLED", "2026-01-01T10:00:00Z"),
+                  self.run_node("pr-issue", "issue", "SUCCESS", "2026-01-01T10:05:00Z")]
+        r = self.run_watch(rollup=json.dumps(rollup), identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("CHECK NOT GREEN", r.stdout)
+
+    def test_dw6_a_cancelled_run_with_no_newer_run_is_still_red(self):
+        rollup = [self.run_node("pr-title", "title", "CANCELLED", "2026-01-01T10:00:00Z"),
+                  self.run_node("pr-issue", "issue", "SUCCESS", "2026-01-01T10:05:00Z")]
+        r = self.run_watch(rollup=json.dumps(rollup), identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertIn("CHECK NOT GREEN: title: CANCELLED", r.stdout)
+
+    def test_dw6_a_newer_run_of_another_workflow_does_not_settle_it(self):
+        rollup = [self.run_node("pr-title", "title", "CANCELLED", "2026-01-01T10:00:00Z"),
+                  self.run_node("pr-issue", "title", "SUCCESS", "2026-01-01T10:05:00Z")]
+        r = self.run_watch(rollup=json.dumps(rollup), identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertIn("CHECK NOT GREEN: title: CANCELLED", r.stdout)
+
+    def test_dw6_a_newer_run_that_failed_is_the_red_not_the_cancelled_one(self):
+        rollup = [self.run_node("pr-title", "title", "CANCELLED", "2026-01-01T10:00:00Z"),
+                  self.run_node("pr-title", "title", "FAILURE", "2026-01-01T10:05:00Z")]
+        r = self.run_watch(rollup=json.dumps(rollup), identity_env={"PR_WATCH_SELF": "tester"})
+        self.assertIn("CHECK NOT GREEN: title: FAILURE", r.stdout)
+        self.assertNotIn("CANCELLED", r.stdout)
 
     # --- the auto-merge identity must come from the configured `github.bots` list, never a hardcoded login ---
 

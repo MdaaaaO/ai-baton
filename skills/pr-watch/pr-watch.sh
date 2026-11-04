@@ -278,14 +278,46 @@ while true; do
                 # only by one of those never gets synced while it sits BEHIND, and auto-merge — which requires a
                 # clean, non-BEHIND head — never runs.
                 appr=$(printf '%s' "$revs" | jq --arg bot "$bot" --argjson bots "$bots" '[.[] | select(.state=="APPROVED" and .user.login!=$bot and ((.user.login as $l | ($bots | index($l))) == null))] | length' 2>/dev/null) || appr=""  # gh api --jq has no --arg (gh-cli skill)
+                do_sync=0
                 if [ -z "$appr" ]; then
                   # a count that could not be computed is not "0 approvals" either
                   lookup_failed "$pr" "approval count" "the approvals in the reviews listing could not be counted"
                 elif [ "$appr" -gt 0 ] 2>/dev/null; then
                   lookup_ok "approval count"
-                  if [ "$(getv appr_seen)" != "$cur" ]; then echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing (a push would dismiss the approval where dismiss_stale_reviews is on): merge now, or update-branch and ask for re-approval"; putv appr_seen "$cur"; fi
+                  # A human approval exists. A push dismisses it only where the base branch's protection has
+                  # dismiss_stale_reviews on, and GitHub counts it as approval only when reviewDecision says
+                  # APPROVED (other touched paths may still wait on code owners). Read both; a read that
+                  # fails is a line and no sync — never a silent default either way.
+                  gh_retry gh api "repos/$repo/branches/$base/protection/required_pull_request_reviews" --jq '.dismiss_stale_reviews'; disrc=$?; dismiss=$ghr_out
+                  if [ $disrc -ne 0 ] || { [ "$dismiss" != true ] && [ "$dismiss" != false ]; }; then
+                    lookup_failed "$pr" "branch protection" "${ghr_err:-dismiss_stale_reviews came back as $dismiss}; not auto-syncing an approved PR without knowing whether a push would dismiss the approval"
+                  else
+                    lookup_ok "branch protection"
+                    if [ "$dismiss" = false ]; then
+                      do_sync=1   # a push keeps the approval here: sync as for an unapproved PR
+                    else
+                      gh_retry gh pr view "$pr" --repo "$repo" --json reviewDecision --jq '.reviewDecision'; rdrc=$?; rdec=$ghr_out
+                      if [ $rdrc -ne 0 ]; then
+                        lookup_failed "$pr" "review decision" "$ghr_err"
+                      else
+                        lookup_ok "review decision"
+                        if [ "$(getv appr_seen)" != "$cur" ]; then
+                          if [ "$rdec" = APPROVED ]; then
+                            echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing (dismiss_stale_reviews is on, so a push would dismiss the approval): merge now, or update-branch and ask for re-approval"
+                          else
+                            who=$(printf '%s' "$revs" | jq -r --arg bot "$bot" --argjson bots "$bots" '[.[] | select(.state=="APPROVED" and .user.login!=$bot and ((.user.login as $l | ($bots | index($l))) == null)) | .user.login] | unique | join(", ")' 2>/dev/null)
+                            echo "PR $pr BEHIND $base by $behind, approved by ${who:-a reviewer}, still ${rdec:-undecided} — not auto-syncing (dismiss_stale_reviews is on); the missing review has to come first"
+                          fi
+                          putv appr_seen "$cur"
+                        fi
+                      fi
+                    fi
+                  fi
                 else
                   lookup_ok "approval count"
+                  do_sync=1
+                fi
+                if [ "$do_sync" = 1 ]; then
                   out=$(gh api -X PUT "repos/$repo/pulls/$pr/update-branch" -f expected_head_sha="$cur" 2>&1); rc=$?
                   if [ "$rc" = 0 ]; then
                     if [ -n "$bot" ]; then rr="the watcher re-requests $bot itself once it lands"; else rr="nothing to re-request"; fi
@@ -348,7 +380,14 @@ while true; do
     if [ "$ng" != "$cur" ] || { [ -n "$ng_bad" ] && backoff_due notgreen; }; then due=1; fi
     if [ -n "$cur" ] && { [ "$due" = 1 ] || [ "$muted_live" = 1 ]; }; then
       gh_retry gh pr view "$pr" --repo "$repo" --json statusCheckRollup --jq '
-        .statusCheckRollup[] |
+        .statusCheckRollup as $all | $all[] |
+        select(
+          # A run CANCELLED while a newer run of the same workflow and check exists on this head (a PR body edit
+          # cancels the in-flight title/issue runs and starts fresh ones) is settled by that run, not a red.
+          (.__typename != "StatusContext" and .conclusion == "CANCELLED" and ((.workflowName // "") != "")) as $c |
+          if $c then
+            (. as $n | [$all[] | select(.__typename != "StatusContext" and .workflowName == $n.workflowName and .name == $n.name and ((.startedAt // "") > ($n.startedAt // "")))] | length) == 0
+          else true end) |
         if .__typename == "StatusContext" then
           (if (.state=="PENDING" or .state=="EXPECTED") then "IN_PROGRESS" else "COMPLETED" end) as $status |
           (if .state=="SUCCESS" then "SUCCESS" elif (.state=="PENDING" or .state=="EXPECTED") then "" else "FAILURE" end) as $concl |

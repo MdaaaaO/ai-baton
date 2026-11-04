@@ -214,5 +214,68 @@ class ForceReviewOnBehind(unittest.TestCase):
         self.assertNotIn("-X POST repos/o/r/pulls/7/requested_reviewers", calls)  # DELETE failed — POST never attempted
 
 
+@unittest.skipUnless(shutil.which("jq") and shutil.which("bash"), "jq and bash needed")
+class HeadPin(unittest.TestCase):
+    """The optional third argument pins the run to the head a READY line named: a different head refuses before
+    anything is changed, a BEHIND PR stops instead of running update-branch, and the merge carries
+    `--match-head-commit`. Without the pin the run is what it always was."""
+
+    OTHER = "b" * 40
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="kit-prmerge-pin-test."))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "bin").mkdir()
+        self.log = self.tmp / "gh.log"
+        env_dir = self.tmp / "ws" / ".context" / "reference" / "env"
+        env_dir.mkdir(parents=True)
+        (env_dir / "config.json").write_text(json.dumps({"github": {"review_bot": "", "sandbox_token_prefix": ""}}))
+
+    def run_merge(self, stub: str, *pin: str) -> subprocess.CompletedProcess:
+        gh = self.tmp / "bin" / "gh"
+        gh.write_text(stub)
+        gh.chmod(0o755)
+        env = {k: v for k, v in os.environ.items() if k not in ("PR_WATCH_BOT_LOGIN", "GH_TOKEN")}
+        env.update(PATH=f"{self.tmp / 'bin'}{os.pathsep}{os.environ['PATH']}", CONTEXT_ROOT=str(self.tmp / "ws" / ".context"),
+                   STUB_LOG=str(self.log), STUB_RD="APPROVED", STUB_REVIEWS="[]", FULL=FULL,
+                   STUB_MERGED_AT="2026-01-01T12:00:00Z")
+        return subprocess.run(["bash", str(SCRIPT), "o/r", "7", *pin], env=env, capture_output=True, text=True, timeout=60)
+
+    def calls(self) -> str:
+        return self.log.read_text() if self.log.exists() else ""
+
+    def test_dw4_a_different_head_refuses_before_any_update_branch_or_merge(self):
+        r = self.run_merge(GH_STUB_BEHIND, self.OTHER)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("HEAD differs from the pinned", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_dw4_a_malformed_pin_refuses_too(self):
+        r = self.run_merge(GH_STUB, "not-a-sha")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("is not a hex sha", r.stdout)
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_dw5_a_pinned_behind_pr_stops_without_update_branch(self):
+        r = self.run_merge(GH_STUB_BEHIND, FULL[:12])
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("BEHIND with the head pinned", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("pr merge", self.calls())
+
+    def test_dw5_a_pinned_clean_pr_merges_with_match_head_commit(self):
+        r = self.run_merge(GH_STUB, FULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("MERGED on", r.stdout)
+        self.assertIn(f"pr merge 7 --repo o/r --squash --match-head-commit {FULL}", self.calls())
+
+    def test_a_plain_call_without_the_pin_merges_without_a_head_match(self):
+        r = self.run_merge(GH_STUB)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("match-head-commit", self.calls())
+        self.assertNotIn("pinned", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
