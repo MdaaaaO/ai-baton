@@ -115,6 +115,16 @@ ends a crashed session the same way, without a prompt). A session whose prompt n
 that name already live by then never counts, however often it touches): the starter's `sessions/<name>.md` path
 then resolves under `sessions/archive/`, age aside.
 
+A predecessor that died without a handoff (host restart: no `session-end`, so its row stays `active ⚠ STALE`) is
+ended by its successor: `session.py register --successor-of <name>` marks an `active` row with no heartbeat for over
+12 hours, whose owner process (the one its heartbeat log names, as `zombie-sweep.sh` reads it) is gone, `ended` with
+`ended_reason: superseded by <successor>`, writes the stats block and ledger row `session-end` would have (when the row
+has a `session_id` and a transcript), and prints one line saying so. The archive rule takes such a row at once, with
+or without a `## Next session` prompt: the successor that superseded it consumed the hand-off. A row whose owner
+process still runs (whatever the heartbeat age), a fresh heartbeat, a missing heartbeat, or a status other than
+`active` stays as it is: the register prints a line saying why, and `session.py end` is the way out. `ended_reason`
+is cleared if that lane registers again.
+
 `session-register` / `session-touch` / `session-end` move an archived file back from `sessions/archive/` before
 writing (a re-register reactivates it), so a resumed session can still add a hand-off later — a lane that continues
 with follow-on work always leaves a prompt.
