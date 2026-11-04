@@ -460,6 +460,30 @@ def _predecessor_open_prs(name: str) -> str:
     return f"{head}\nunknown (no {OPEN_PRS_HEADING} heading — check `gh pr list --author @me`)"
 
 
+def _supersede_predecessor(name: str, successor: str) -> None:
+    """A successor registered over a predecessor that died without a handoff: an `active` row with no heartbeat
+    for over `gen_sessions.STALE_HOURS` is marked `ended` (reason `superseded by <successor>`) so the archive rule can
+    take it. A fresh heartbeat means it may still be alive: left alone, with a warning. Rows already ended, or
+    absent, are not touched. No ledger row: a crashed session has no stats to write."""
+    if name == successor:
+        return
+    path = path_for(name)
+    meta, body = read_doc(path) if os.path.exists(path) else (None, "")
+    if meta is None or meta.get("status") != "active":
+        return
+    from gen_sessions import STALE_HOURS, age_hours  # lazy: gen_sessions imports this module
+    age = age_hours(str(meta.get("heartbeat", "")))
+    if age is not None and age <= STALE_HOURS:
+        print(f"warning: predecessor {name} is still active (heartbeat {age:.1f}h old, under {STALE_HOURS}h): "
+              f"left alone — end it with `session.py end` if it is really gone", file=sys.stderr)
+        return
+    meta["status"] = "ended"
+    meta["ended_reason"] = f"superseded by {successor}"
+    meta["updated"] = today()
+    write_doc(path, meta, _normalize_body(body))
+    print(f"ended predecessor {name} (stale, no handoff): superseded by {successor}")
+
+
 def cmd_register(a) -> None:
     path = restore_from_archive(a.name)  # a successor re-registering a swept name continues that doc, not a new one
     meta, body = read_doc(path)
@@ -498,6 +522,7 @@ def cmd_register(a) -> None:
     record_name(a.name)
     print(f"registered {os.path.relpath(path, CTX)}")
     if getattr(a, "successor_of", ""):
+        _supersede_predecessor(check_name(a.successor_of), a.name)
         print(_predecessor_open_prs(check_name(a.successor_of)))
 
 

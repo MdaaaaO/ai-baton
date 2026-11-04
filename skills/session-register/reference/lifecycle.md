@@ -115,6 +115,12 @@ ends a crashed session the same way, without a prompt). A session whose prompt n
 that name already live by then never counts, however often it touches): the starter's `sessions/<name>.md` path
 then resolves under `sessions/archive/`, age aside.
 
+A predecessor that died without a handoff (host restart: no `session-end`, so its row stays `active ⚠ STALE`) is
+ended by its successor: `session.py register --successor-of <name>` marks an `active` row with no heartbeat for over
+12 hours `ended` with `ended_reason: superseded by <successor>` and prints one line saying so, and the archive rule
+then takes it like any ended row. A row with a fresh heartbeat may still be alive: it stays `active` and the register
+prints a warning instead.
+
 `session-register` / `session-touch` / `session-end` move an archived file back from `sessions/archive/` before
 writing (a re-register reactivates it), so a resumed session can still add a hand-off later — a lane that continues
 with follow-on work always leaves a prompt.

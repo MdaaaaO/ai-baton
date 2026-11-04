@@ -925,6 +925,30 @@ class SuccessorSeesPredecessorOpenPRs(unittest.TestCase):
         r = run("session.py", "register", "--name", "kit-02", "--no-stats", root=self.root)
         self.assertNotIn("predecessor", r.stdout)  # a plain registration prints nothing extra
 
+    def _active(self, name: str, heartbeat: str) -> None:
+        (self.root / "sessions" / f"{name}.md").write_text(
+            f"---\nsession: {name}\nstatus: active\nheartbeat: {heartbeat}\n---\n\n## Open PRs\n\nnone\n", encoding="utf-8")
+
+    def test_a_stale_active_predecessor_is_ended_as_superseded(self):
+        self._active("kit-07", "2020-01-01T00:00:00Z")
+        r = run("session.py", "register", "--name", "kit-07-2", "--no-stats", "--successor-of", "kit-07", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ended predecessor kit-07", r.stdout)
+        # the register's own index sweep archives an ended row whose successor has registered
+        files = list((self.root / "sessions").rglob("kit-07.md")) + list((self.root / "sessions").rglob("kit-07-2026*.md"))
+        self.assertEqual(len(files), 1)
+        doc = files[0].read_text(encoding="utf-8")
+        self.assertIn("status: ended", doc)
+        self.assertIn("superseded by kit-07-2", doc)
+
+    def test_a_fresh_active_predecessor_stays_active_with_a_warning(self):
+        from datetime import datetime, timezone
+        self._active("kit-08", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        r = run("session.py", "register", "--name", "kit-08-2", "--no-stats", "--successor-of", "kit-08", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("warning: predecessor kit-08 is still active", r.stderr)
+        self.assertIn("status: active", (self.root / "sessions" / "kit-08.md").read_text(encoding="utf-8"))
+
     def _archived(self, fn: str, session: str, heartbeat: str, body: str) -> None:
         adir = self.root / "sessions" / "archive"
         adir.mkdir(parents=True, exist_ok=True)
