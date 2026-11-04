@@ -56,8 +56,9 @@ file list, report points, who can say go, stop conditions.
 **The verifier works twice.** Before the merge it reads the `READY` head: `done_when.py probe` and `coverage`, the PR's
 `## Verified` and `## One honest limit`. Its positive read opens the merge gate and writes nothing to the ledger. After
 the merge it checks the merged commit and only then calls `swarm.py pass`, so `verified` always follows `merged`. Its
-return (`PASS` or `FAIL`, fixed by the `verifier` agent) goes to the orchestrator, moves no row by itself and is not a
-grammar line. A `FAIL` on the `READY` head goes back to the worker as a re-brief. A `FAIL` on the merged
+return (`PASS` or `FAIL`, fixed by the `verifier` agent) names the head and the phase: `phase=read` before the merge,
+`phase=merged` after, so a stale `PASS` cannot open the gate for a newer head. It goes to the orchestrator, moves no row by
+itself and is not a grammar line. A `FAIL` on the `READY` head goes back to the worker as a re-brief. A `FAIL` on the merged
 commit moves the row from `merged` to `blocked`. Its fix is a new assignment on a new branch, and the old worker is not
 reopened, because its branch is already merged.
 
@@ -152,7 +153,7 @@ protections, granted by the owner, and a decision line records the answer.
 
 ## Message grammar
 
-Every message between swarm roles is one line of one shape. `swarm_msg.py format` writes a line; `swarm_msg.py parse`
+Every message between swarm roles, except the verifier's return (§ Lifecycle), is one line of one shape. `swarm_msg.py format` writes a line; `swarm_msg.py parse`
 reads it and refuses free text.
 
 ```
@@ -180,10 +181,10 @@ BLOCKED 123 budget orchestrator v=1 id=7f3b from=worker-a
 | `ACK` | `<scope> re=<id>` | the receiver of any line except `ACK` | It has read the line, whether it agrees or not. | Sender: `swarm_msg.py pending` stops listing that id. |
 | `CLAIMED` | `<ticket> <branch>` | worker | It read the assignment and found its worktree and branch. | Orchestrator: row `claimed`; the progress clock starts. |
 | `PR` | `<ticket> <branch> <sha> body=<file>` | worker | Its branch is pushed at that sha and the PR body file is written. A worker never opens the PR itself. | Orchestrator: opens the draft PR from the file and records its number; row `pr`. |
-| `READY` | `<ticket> <sha>` | worker | That head is pushed, its checks pass, `done_when.py coverage` prints covered and every review finding is answered. | Orchestrator: row `ready-to-merge`; runs the gates for exactly that sha. A head that moved needs a new `READY`, unless the merge gate's own update from the base moved it. |
-| `MERGED` | `<ticket> <pr> <sha>` | orchestrator | The merge is confirmed on the default branch, by its own call or the owner's. | Worker: stops pushing to the branch and sends `DONE`. Orchestrator: row `merged`; hands the PR to the verifier. |
+| `READY` | `<ticket> <sha>` | worker | That head is on the remote, its checks pass and `done_when.py coverage` prints covered. After a fix request, every finding is also answered. | Orchestrator: records the head and runs the gates for exactly that sha. A `READY` names one head: a moved head needs a new `READY`, and the verifier's read, the gates and the merge all pin that head. |
+| `MERGED` | `<ticket> <pr> <sha>` | orchestrator | The merge is confirmed on the default branch: its own call, the owner's, or an auto-merge it observes. | Worker: stops pushing to the branch and sends `DONE`. Orchestrator: row `merged`; hands the PR to the verifier. |
 | `BLOCKED` | `<ticket> <reason> <who> [sha=<sha>] [ran="…"]` | worker | It cannot go on. `<reason>` is `budget`, `stop`, `lease`, `scope` (a change outside its area) or `input` (a fact, file or grant it lacks). `<who>` is `orchestrator`, `owner` or a lane: who must act. | `<who>` acts. The orchestrator re-briefs, reassigns, parks or asks the owner; row `blocked`. |
-| `DONE` | `<ticket>` | worker; the orchestrator writes it for a background worker whose run has ended | Its assignment has nothing left to do: `MERGED` read, leases released, nothing of its own still running. | Orchestrator: closes the assignment and frees the lane. It ends the assignment, not the ticket: the row reaches `done` only from `verified`. |
+| `DONE` | `<ticket>` | worker; the orchestrator writes it for a background worker whose run has ended | Its assignment has nothing left to do: `MERGED` read, leases released, nothing of its own still running. | Orchestrator: closes the assignment and frees the lane. It ends the assignment and never moves a row. |
 | `HOLD` | `<scope> releaser=<who> reason="…"` | orchestrator, also on the owner's word | A ticket, lane or resource must pause. | Receiver: finishes the current step, pushes, releases every lease it holds, starts nothing on that scope, acks and ends its turn. |
 | `RELEASE` | `<scope> [reason="…"]` | a hold's named releaser, or a lease holder giving its lease back, also when it expires | The hold is over, or the holder has finished with the resource. | A held worker re-reads the source of truth and resumes. Orchestrator: marks the hold or lease free; the next tick grants the next holder. |
 | `STOP` | `<scope> reason="…"` | orchestrator, or the owner through `lease.py stop` | The owner's word, a budget hard stop or a safety doubt. | Receiver: stops at its next tool round and reports (§ STOP and the call in flight). |
@@ -200,10 +201,38 @@ fields of the outbox record, not inside the text.
 ### What every line obeys
 
 - **Idempotent.** A re-send keeps its id, and a second copy of an id changes nothing.
-- **Latest per ticket wins.** For one sender and one scope, the line latest in the file counts. `READY` at a new sha
-  replaces the old one; `BLOCKED` after `READY` takes the ticket out of the merge gate. From `merged` on, only `DONE`, the
-  verifier's pass and a new `ASSIGN` move a row.
+- **Latest wins, among status lines.** The four status lines are `CLAIMED`, `PR`, `READY` and `BLOCKED`, the ones
+  `swarm.py apply` takes. For one sender, one scope and one line kind, the line latest in the file counts, so `READY` at a
+  new sha replaces the old one. Kinds do not replace each other, and an `ACK` or any other line never replaces a status
+  line. § What moves a row says what each one does; a `BLOCKED` newer than the `READY` takes the ticket out of the merge
+  gate until a newer `READY` comes.
 - **Delivered is not read.** A `SendMessage` that succeeded says only that the message arrived. Only an `ACK` means read.
+
+### What moves a row
+
+A row moves by these and nothing else. A line not listed here, `DONE` among them, moves no row.
+
+| Line or act | From | To |
+|---|---|---|
+| A first `ASSIGN`, or one after `parked` or a `FAIL` on the merged commit | `ready`, `parked`, `blocked` | `assigned` |
+| `ASSIGN … rebrief=1` | any | no move |
+| `CLAIMED` | `assigned` | `claimed` |
+| `PR`, or the orchestrator opening the draft PR from the body file | `claimed` | `pr` |
+| `READY` | `ready-to-merge`, at a new head | `pr` |
+| `READY` | `blocked` | `pr` if a PR is open, else `claimed` |
+| `READY` | any other | no move; records the head |
+| The orchestrator: the gates hold at the `READY` head | `pr` | `ready-to-merge` |
+| `BLOCKED` | any before `merged` | `blocked` |
+| `PARKED` | any before `merged` | `parked` |
+| `MERGED` | `ready-to-merge` | `merged` |
+| `swarm.py pass`, the last `DW-<n>` | `merged` | `verified` |
+| The orchestrator: a `FAIL` on the merged commit | `merged` | `blocked` |
+| The orchestrator: it closes the ticket | `verified` | `done` |
+
+`swarm.py apply` handles the four status lines. The orchestrator writes every other move with `swarm.py assign` or
+`swarm.py status`, and `swarm.py pass` writes its own. A `MERGED` the owner's merge or an auto-merge caused can reach a row
+at `pr`, and it moves that row too. The tick releases a dependent ticket only on `done`, so the close comes at the ticket's
+own close, not the epic's.
 
 ### The ack rule
 
