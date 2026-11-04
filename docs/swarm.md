@@ -21,6 +21,75 @@ headless process: `docs/decisions/0005-orchestrator-is-a-session.md`.
 | **Worker** | One ticket in one worktree on one branch. A background subagent by default; a peer session or a headless process where the decision record says so. | Edit the paths in its assignment's area. Commit and push its own branch. Write its return files. Send grammar lines. Take a default and say so with an `Assumed:` line. | Never opens, merges or comments on a PR. Never posts to the tracker. Never records a pass. Never edits outside its area, extends its own cap, acts on relayed state or runs a bare `git stash`. Never blocks on a human while it holds a lease or runs a child. |
 | **Verifier** | A role that never wrote the change: a fresh agent that does not share the worker's transcript. | Read the PR. Run the ticket's checks and the gates due. Call `swarm.py pass` with evidence. | Never edits code, merges or signs a human gate. Never takes a worker's `## Verified` line as evidence: it is a claim to check. |
 
+## Lifecycle
+
+Seven steps, each leaving one artefact a cold session can resume from. Run, verify and integrate repeat for every
+ticket of every wave.
+
+| Step | Who acts | What happens | Artefact it leaves |
+|---|---|---|---|
+| Discover | orchestrator, owner | The epic interview: goal, constraints, gates, grants, budget. | **Epic issue**, with its `## Verification plan` of `VG-<n>` gates |
+| Decompose | orchestrator | Sized child tickets with `## Done when` ids, disjoint areas and waves. | **Context doc** with the plan, and the child tickets |
+| Owner go | owner | Approves the plan. No worker spawns before it. | **Ledger**, `.context/state/swarm/<key>.json`, with the plan marked approved, rendered as a `## Swarm` table in the context doc |
+| Run | orchestrator, workers | The swarm tick assigns the ready tickets of the current wave. Each worker builds, pushes and returns. | **Assignment file** per worker, and a pushed branch |
+| Verify | orchestrator, verifier | A draft PR from the worker's body file, review, CI, code-owner coverage, and the verifier's read of the `READY` head. | **PR**, with the head sha the gates held on |
+| Integrate | orchestrator or owner, verifier | The merge, as § Authority matrix says, then the verifier checks the merged commit and calls `swarm.py pass` per `DW-<n>`. | **Pass**: `DW-<n> → evidence` in the ledger |
+| Close | orchestrator, owner | Every `VG-<n>` gate is closed (`gates.py status` exits 0), the human ones signed by the owner, and the last digest goes out. | **Digest** on the epic, with the measured turns and spend |
+
+**The assignment.** The orchestrator's order to one worker for one ticket, as a file the worker reads first:
+`.context/state/swarm/<key>/<worker>/assignment.md`. Its fields: ticket, worktree, branch, `DW` list with checks, budget
+caps (spend, forks, minutes, split turns), merge mode and why, accepted evidence, sibling areas, decision links, scratch
+file list, report points, who can say go, stop conditions.
+
+**The ledger row.** A ticket's status moves `ready → assigned → claimed → pr → ready-to-merge → merged → verified → done`.
+`blocked` and `parked` branch off at any point before `merged`. § Message grammar names the line that moves each status.
+
+**The verifier works twice.** Before the merge it reads the `READY` head: `done_when.py probe` and `coverage`, the PR's
+`## Verified` and `## One honest limit`. Its positive read opens the merge gate and writes nothing to the ledger. After
+the merge it checks the merged commit and only then calls `swarm.py pass`, so `verified` always follows `merged`. Its
+return (`PASS` or `FAIL`, fixed by the `verifier` agent) goes to the orchestrator, moves no row by itself and is not a
+grammar line. A `FAIL` at either point goes back to a worker as a new `ASSIGN`.
+
+### One ticket's life
+
+Participants carry a name and a type; the Status paragraph above says what is built. Solid arrows are instructions and calls,
+dashed arrows are returns. The shaded blocks are the human gates: nothing a session sends can pass them.
+
+```mermaid
+sequenceDiagram
+  participant Own as owner [person]
+  participant Orc as orchestrator [session]
+  participant Wrk as worker [agent or peer]
+  participant Ver as verifier [agent]
+  participant Led as ledger [file]
+
+  rect rgba(255, 193, 7, 0.25)
+    Note over Own,Orc: HUMAN GATE - the plan
+    Own->>Orc: owner go on the plan
+  end
+  Orc->>Led: assign, row assigned
+  Orc->>Wrk: ASSIGN ticket and assignment file
+  Wrk-->>Orc: ACK, then CLAIMED, row claimed
+  Wrk-->>Orc: PR - branch pushed, body file written, row pr
+  Orc->>Orc: open the draft PR, run review and CI
+  Wrk-->>Orc: READY ticket and head sha, row ready-to-merge
+  Orc->>Ver: read the READY head
+  Ver-->>Orc: PASS, or FAIL back to a worker
+  alt routine PR
+    Orc->>Orc: one standalone pr-merge.sh call
+  else protected path or bypass merge
+    rect rgba(255, 193, 7, 0.25)
+      Note over Own,Orc: HUMAN GATE - the owner's merge
+      Own->>Orc: merges, and the orchestrator sees it
+    end
+  end
+  Orc->>Wrk: MERGED ticket, PR and sha, row merged
+  Wrk-->>Orc: DONE - the assignment ends, not the ticket
+  Orc->>Ver: the merged PR
+  Ver->>Led: swarm.py pass DW-n with evidence, by verifier
+  Note over Led: every DW-n passed - row verified, then done
+```
+
 ## Authority matrix
 
 Who decides what. A *decision line* is one line in the grammar of `docs/carousel.md` § After the answer, written when
