@@ -11,7 +11,10 @@ Layout (all under `.context/reference/env/`, created by `kb.py init`):
                        environment name), tracker.kind / key_regex / url_template / mcp_tools,
                        github.org / review_bot / bots / owner_teams, slack.domain, systems.*,
                        tz_default, domains, labels, self_assessment, diagrams, verify, length,
-                       swarm.lease_minutes (120) / swarm.resources ([]) / swarm.units ({}), kit.install_mode
+                       swarm.ack_minutes (20) / swarm.stall_minutes (90) / swarm.max_workers (4) /
+                       swarm.lease_minutes (120) / swarm.resources ([]) / swarm.units ({}) /
+                       swarm.budget.{epic_usd,worker_usd,worker_minutes (none), worker_forks (4), split_turns (10),
+                       hard_stop (false)}, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
   _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
   <system>.md          one doc per system (slack, tracker, github, aws, notion, …); one `## <kind>`
