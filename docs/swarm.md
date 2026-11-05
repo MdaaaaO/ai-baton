@@ -306,9 +306,11 @@ the harness passes to the hook, read from a real `PreToolUse` input: a subagent'
 `agent_type` beside the same `session_id` as its parent; the parent's own call carries neither; no field names the
 lane. So a `STOP` tells a background subagent from its parent, and:
 
-- An epic `STOP` denies a subagent's calls under the session that works the epic, and leaves the main session's own
-  calls (its flush, its ledger updates) running. It does not stop a peer session's own main-session calls; a lease
-  `STOP` does, whatever the call.
+- An epic `STOP` denies a subagent's calls under the session that works the epic. It leaves the main session's own
+  calls (its flush, its ledger updates) running when its registry row says `role: orchestrator` or no role, and denies
+  them when the row says `role: worker`, a peer worker session. The main row, among rows that share a `session_id`,
+  is the first with `role: orchestrator`, else the first whose role is not `worker`. A lease `STOP` denies the holder's
+  calls whatever the role. What remains open: a peer worker registered with no role passes an epic `STOP`.
 - A subagent worker's own `--lane` reaches the hook through the registry row that stamped the shared `session_id`: a
   `STOP-<resource>` on a lease held under that lane denies the subagent. A lane with no such row is out of reach, and
   a harness that sends no `agent_id` has every call read as the main session's.

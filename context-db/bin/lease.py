@@ -475,8 +475,8 @@ def _frontmatter(text: str) -> dict[str, str]:
     return out
 
 
-def session_rows(root: Path, session_id: str) -> list[tuple[str, str, str]]:
-    """(lane, epic, repos) of every live registry row that stamped `session_id`, by lane name. A subagent shares its
+def session_rows(root: Path, session_id: str) -> list[tuple[str, str, str, str]]:
+    """(lane, epic, repos, role) of every live registry row that stamped `session_id`, by lane name. A subagent shares its
     parent's session id, so a session with background workers has one row per lane."""
     if not session_id:
         return []
@@ -484,7 +484,7 @@ def session_rows(root: Path, session_id: str) -> list[tuple[str, str, str]]:
         rows = sorted((root / "sessions").glob("*.md"))
     except OSError:
         return []
-    out: list[tuple[str, str, str]] = []
+    out: list[tuple[str, str, str, str]] = []
     for p in rows:
         if p.name.startswith("_"):
             continue
@@ -493,14 +493,20 @@ def session_rows(root: Path, session_id: str) -> list[tuple[str, str, str]]:
         except OSError:
             continue
         if fm.get("session_id") == session_id and fm.get("status") != "ended":
-            out.append((p.stem, fm.get("epic", ""), fm.get("repos", "")))
+            out.append((p.stem, fm.get("epic", ""), fm.get("repos", ""), fm.get("role", "")))
     return out
 
 
 def session_row(root: Path, session_id: str) -> tuple[str, str, str]:
     """(lane, epic, repos) of the first registry row that stamped `session_id`, or ('', '', '')."""
     rows = session_rows(root, session_id)
-    return rows[0] if rows else ("", "", "")
+    return rows[0][:3] if rows else ("", "", "")
+
+
+def main_row(rows: list[tuple[str, str, str, str]]) -> tuple[str, str, str, str]:
+    """The main session's row among those sharing one session id: the first with `role: orchestrator`, else the first
+    whose role is not `worker`, else the first."""
+    return next((r for r in rows if r[3] == "orchestrator"), None) or next((r for r in rows if r[3] != "worker"), rows[0])
 
 
 REF_RE = re.compile(r"^(?:([^\s#]+)#|#)?(\d+)$")
@@ -550,18 +556,22 @@ def stop_for(root: Path, session_id: str, agent_id: str = "") -> str:
     """The reason a STOP file blocks this call, or ''. `STOP-<scope>` blocks a lane that holds the lease `<scope>`,
     and a subagent of a session whose registry row's epic is `<scope>` (a full ref `Owner/repo#N`, the file
     `STOP-Owner+repo=N`, or an issue number). `agent_id` is what the hook input names for a subagent's call and is
-    absent for the main session's own: the main session keeps its epic's calls (its flush, its ledger) and is blocked
-    only through the lease it holds. The hook input names no lane, so a subagent is matched through every registry
+    absent for the main session's own. The main session is the row with `role: orchestrator`, else the first row whose
+    role is not `worker`: it keeps its epic's calls (its flush, its ledger) and is blocked only through the lease it
+    holds, unless its row's role is `worker` (a peer worker session), which an epic STOP blocks too. The hook input names no lane, so a subagent is matched through every registry
     row that shares its session id; a lane with no such row is out of reach."""
     found = stops(root)
     if not found:
         return ""
     rows = session_rows(root, session_id)
+    if not rows:
+        return ""
     if not agent_id:
-        rows = rows[:1]
+        rows = [main_row(rows)]
     for scope, v in found.items():
-        for lane, epic, repos in rows:
-            if lane_holds(root, lane, scope) or (agent_id and epic and epic_matches(scope, epic, repos)):
+        for lane, epic, repos, role in rows:
+            by_epic = bool(epic) and epic_matches(scope, epic, repos) and (bool(agent_id) or role == "worker")
+            if lane_holds(root, lane, scope) or by_epic:
                 why = v.get("reason") or "no reason given"
                 return (f"STOP-{scope} ({v.get('by', 'orchestrator')}): {why}. Work calls are blocked until it is "
                         f"lifted: send the outbox line, run the inbox drain, ack, release your lease and end the task, "

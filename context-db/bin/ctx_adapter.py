@@ -85,7 +85,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        handoff memory state), dot dirs, the generated catalogs and what the kit's store settings
                        ignore. Anything else, or any error: no decision. Also, with no ctx needed: a call from a
                        work call (any tool the hook's matcher names: Bash, the file writes, Agent, MCP) of a session
-                       whose lane holds the lease `<scope>`, or of a subagent of one that works the epic `<scope>`,
+                       whose lane holds the lease `<scope>`, or of a subagent (or a `role: worker` session) that works the epic `<scope>`,
                        while `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox
                        send, inbox drain, ack, lease release and ending a task stay allowed. With no STOP file a
                        call that is not a file write exits before any store read
@@ -181,16 +181,61 @@ when more than one would apply: 3 over 7 over 6 over 5 over 0. `ctx` and `mcp` e
 A hook always exits 0. Stdlib only.
 """
 from __future__ import annotations
+import os
+import sys
+
+_RAW_STDIN: str | None = None  # the hook input the fast path below already read, for `_payload` to reuse
+
+
+def _fast_pre_tool_use() -> None:
+    """The PreToolUse hook runs on every work call, so its no-STOP path must cost little more than the interpreter's
+    start. Before any heavy import: when the tool writes no file and no `state/swarm/STOP-*` file exists, exit 0 with
+    no output. Anything it cannot settle from the environment (an unusual content-root layout, bad input) falls
+    through to the full hook, which decides the same way. The root rule below is the cheap cases of
+    `kit_profile.context_root()`: `CONTEXT_ROOT`, the `.context/` beside the kit, `CLAUDE_PROJECT_DIR`."""
+    global _RAW_STDIN
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return
+        _RAW_STDIN = sys.stdin.read()
+        import json
+        data = json.loads(_RAW_STDIN or "{}")
+        if not isinstance(data, dict) or data.get("tool_name") in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+            return
+        root = os.environ.get("CONTEXT_ROOT", "").strip()
+        if not root:
+            kit = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+            for base in (os.path.dirname(kit), os.path.dirname(os.path.dirname(kit))):
+                if os.path.isdir(os.path.join(base, ".context")):
+                    root = os.path.join(base, ".context")
+                    break
+            else:
+                proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+                if not (proj and os.path.isdir(os.path.join(proj, ".context"))):
+                    return
+                root = os.path.join(proj, ".context")
+        try:
+            with os.scandir(os.path.join(root, "state", "swarm")) as it:
+                if any(e.name.startswith("STOP-") for e in it):
+                    return
+        except FileNotFoundError:
+            pass
+    except Exception:  # noqa: BLE001 — a hook never fails the session; the full hook decides
+        return
+    sys.exit(0)
+
+
+if __name__ == "__main__" and sys.argv[1:3] == ["hook", "pre-tool-use"]:
+    _fast_pre_tool_use()
+
 import argparse
 import contextlib
 import fnmatch
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path, PurePosixPath
@@ -1021,10 +1066,10 @@ def mcp_json(path: Path) -> int:
 
 # ── hooks ─────────────────────────────────────────────────────────────────────────────────────────────────────
 def _payload() -> dict:
-    if sys.stdin is None or sys.stdin.isatty():
+    if _RAW_STDIN is None and (sys.stdin is None or sys.stdin.isatty()):
         return {}
     try:
-        data = json.loads(sys.stdin.read() or "{}")
+        data = json.loads((sys.stdin.read() if _RAW_STDIN is None else _RAW_STDIN) or "{}")
     except ValueError:
         return {}
     return data if isinstance(data, dict) else {}

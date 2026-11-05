@@ -482,7 +482,7 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        handoff memory state), dot dirs, the generated catalogs and what the kit's store settings
                        ignore. Anything else, or any error: no decision. Also, with no ctx needed: a call from a
                        work call (any tool the hook's matcher names: Bash, the file writes, Agent, MCP) of a session
-                       whose lane holds the lease `<scope>`, or of a subagent of one that works the epic `<scope>`,
+                       whose lane holds the lease `<scope>`, or of a subagent (or a `role: worker` session) that works the epic `<scope>`,
                        while `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox
                        send, inbox drain, ack, lease release and ending a task stay allowed. With no STOP file a
                        call that is not a file write exits before any store read

@@ -521,6 +521,43 @@ class Stop(Base):
             self.assertEqual(self.hook(agent="a1", command=cmd)["permissionDecision"], "deny", cmd)
         self.assertIsNone(self.hook(agent="a1", command="python3 context-db/bin/swarm_msg.py drain w"))
 
+    def test_the_hook_without_a_stop_file_imports_none_of_the_heavy_modules(self):  # DW-2
+        (self.root / "state" / "swarm").mkdir(parents=True)
+        payload = json.dumps({"session_id": self.sid, "cwd": str(self.t), "tool_name": "Bash",
+                              "tool_input": {"command": "ls"}})
+        r = subprocess.run([sys.executable, "-X", "importtime", str(ADAPTER), "hook", "pre-tool-use"], input=payload,
+                           text=True, env=self.env, capture_output=True, timeout=60)
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        mods = {ln.split("|")[-1].strip() for ln in r.stderr.splitlines() if ln.startswith("import time:")}
+        self.assertIn("json", mods)  # the probe sees imports at all
+        for heavy in ("argparse", "subprocess", "shutil", "tempfile", "hashlib", "kit_profile", "lease"):
+            self.assertNotIn(heavy, mods)
+
+    def add_row(self, name: str, role: str, epic: str = "acme/widgets#674") -> None:
+        extra = f"role: {role}\n" if role else ""
+        (self.root / "sessions" / f"{name}.md").write_text(
+            f"---\nsession: {name}\nsession_id: {self.sid}\nstatus: active\nepic: {epic}\n{extra}---\n# x\n")
+
+    def test_the_main_row_is_not_picked_by_file_name(self):  # DW-6
+        worker = "a-" + uuid.uuid4().hex[:6]  # sorts before the main session's row
+        self.add_row(worker, "worker", "acme/widgets#9")
+        self.assertLess(worker, self.lane)
+        self.acquire("wres", worker)
+        self.ok("stop", "wres", "--reason", "x")
+        self.assertIsNone(self.hook(command="ls"))  # main call: not judged by the worker's lease
+        self.assertEqual(self.hook(agent="a1", command="ls")["permissionDecision"], "deny")  # its subagent is
+        self.acquire("mres", self.lane)
+        self.ok("stop", "mres", "--reason", "y")
+        self.assertEqual(self.hook(command="ls")["permissionDecision"], "deny")  # judged by its own
+
+    def test_an_epic_stop_denies_a_peer_worker_main_call_and_spares_the_others(self):  # DW-5
+        self.ok("stop", "674", "--reason", "x")
+        for role, denied in (("worker", True), ("orchestrator", False), ("", False)):
+            self.add_row(self.lane, role)
+            out = self.hook(command="ls")
+            self.assertEqual(out is not None and out["permissionDecision"] == "deny", denied, role)
+            self.assertEqual(self.hook("Write", file_path="a") is not None, denied, role)
+
     def test_a_lease_stop_denies_the_holder_main_session_and_subagent_alike(self):  # DW-5
         self.acquire("client", self.lane)
         self.ok("stop", "client", "--reason", "x")
