@@ -35,6 +35,12 @@ Rules that are this script's own call, not docs/swarm.md's: an id is 3 to 16 let
 names; a required field is not empty; a value holds no newline or carriage return; a STOP or HOLD scope is a name or a
 full ref `Owner/repo#N`.
 
+Which lane is the orchestrator: an address you type (`send`, `drain`, `ack --as`) resolves against live registry rows only
+(not `status: ended`, not `state: retired`), so an ended orchestrator's name is an ordinary lane. A sender read from a
+stored line resolves against every row, so after a handoff the predecessor's ACK and DONE still count as the
+orchestrator's. Known leftover: a lane that was once an orchestrator and later acks as a worker in the same key reads as
+the orchestrator in `pending`, so it shows a false `resend`, never a misroute.
+
 Exit codes: 0 ok; 1 absent (`ack`: no such id); 2 bad usage, a refused line or an I/O error. Stdlib only.
 """
 from __future__ import annotations
@@ -334,9 +340,9 @@ def swarm_dir(key: str) -> Path:
     return profile.context_root() / "state" / "swarm" / _name(key)
 
 
-def orchestrator_names() -> set[str]:
+def orchestrator_names(live: bool = False) -> set[str]:
     """Every lane name the registry says is an orchestrator: the `lane` field of a row with `role: orchestrator`, and its
-    file stem (the session name)."""
+    file stem (the session name). `live` skips a row that is `status: ended` or `state: retired`."""
     names: set[str] = set()
     sessions = profile.context_root() / "sessions"
     try:
@@ -349,19 +355,24 @@ def orchestrator_names() -> set[str]:
             meta = frontmatter.parse_flat(parts[0]) if parts else {}
         except (OSError, ValueError):
             continue
+        if live and (frontmatter.unquote(meta.get("status", "")) == "ended"
+                     or frontmatter.unquote(meta.get("state", "")) == "retired"):
+            continue
         if frontmatter.unquote(meta.get("role", "")) == ORCHESTRATOR:
             names.update({row.stem, frontmatter.unquote(meta.get("lane", ""))} - {""})
     return names
 
 
-def lane_dir(lane: str, names: set[str] | None = None) -> str:
+def lane_dir(lane: str, names: set[str] | None = None, live: bool = True) -> str:
     """The directory a lane's files live in: `orchestrator` for the orchestrator, else the lane. The registry says which
-    lane is the orchestrator (a row with `role: orchestrator`, by its `lane` field or its name), so a sender is resolved
-    without asking."""
+    lane is the orchestrator (a row with `role: orchestrator`, by its `lane` field or its name). An address the caller
+    types (`send`, `drain`, `ack --as`) resolves against live rows only, so an ended orchestrator's name is an ordinary
+    lane with its own box; a sender read from a stored record passes `live=False` and resolves against every row, so a
+    predecessor's ACK and DONE still count as the orchestrator's after a handoff."""
     _name(lane)
     if lane == ORCHESTRATOR:
         return lane
-    return ORCHESTRATOR if lane in (orchestrator_names() if names is None else names) else lane
+    return ORCHESTRATOR if lane in (orchestrator_names(live) if names is None else names) else lane
 
 
 def box(key: str, worker: str, which: str) -> Path:
@@ -481,8 +492,12 @@ def cmd_drain(a) -> int:
     with locked(str(mark)):
         try:
             seen = int(mark.read_text(encoding="utf-8").strip() or 0)
-        except (OSError, ValueError):
+        except FileNotFoundError:
             seen = 0
+        except (OSError, ValueError) as err:
+            raise MsgError(f"{mark} is not a readable line count ({err}): fix or delete it") from err
+        if seen < 0:
+            raise MsgError(f"{mark} holds a negative count ({seen}): fix or delete it")
         recs = read_records(path)
         for rec in recs[seen:]:
             print(show(rec, a.json))
@@ -509,9 +524,9 @@ def cmd_ack(a) -> int:
             continue
         scope = hit.get("ticket") or hit.get("scope") or hit["from"]
         rec = build("ACK", [scope], {"re": target}, a.sender, taken=taken_ids(a.key))
-        append(a.key, lane_dir(hit["from"]), "in", rec, lane_dir(hit["from"]))
+        append(a.key, lane_dir(hit["from"], live=False), "in", rec, lane_dir(hit["from"], live=False))
         acked.add((a.sender, target))
-        print(f"acked {target} -> {lane_dir(hit['from'])}/in")
+        print(f"acked {target} -> {lane_dir(hit['from'], live=False)}/in")
     return status
 
 
@@ -531,7 +546,7 @@ def pending(key: str, minutes: int, now: datetime) -> list[dict]:
     """Ids sent and not acked by their receiver. A line is listed `resend` once a window has passed since it was sent; once
     it was re-sent (a second copy of the id in the box) it is listed `unreachable` a window after the copy, never before."""
     boxes = all_boxes(key)
-    names = orchestrator_names()
+    names = orchestrator_names()  # every row, ended too: a stored sender
     acked = {(lane_dir(r.get("from") or "orchestrator", names), r.get("re"))
              for _, _, recs in boxes for r in recs if r.get("word") == "ACK"}
     out = []

@@ -377,6 +377,55 @@ class Findings(BoxCase):
         with self.assertRaises(sm.MsgError):
             sm.build("READY", ["a/b#1", SHA], {}, "w")
 
+    def row(self, name: str, **meta: str) -> None:
+        d = self.root / "sessions"
+        d.mkdir(exist_ok=True)
+        (d / f"{name}.md").write_text("---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + "---\n", encoding="utf-8")
+
+    def test_an_address_typed_by_the_caller_skips_an_ended_orchestrator(self):  # R2-1
+        self.row("old", role="orchestrator", status="ended")
+        self.send("old", self.fmt("ASSIGN", "1", "b.md", "--from", "orchestrator", "--id", "end001"), "--inbox")
+        self.assertEqual(self.box("old", "in")[0]["id"], "end001")
+        self.assertEqual(self.box("orchestrator", "in"), [])
+        self.row("gone", role="orchestrator", state="retired")
+        self.send("gone", self.fmt("ASSIGN", "1", "b.md", "--from", "orchestrator", "--id", "end002"), "--inbox")
+        self.assertEqual(self.box("gone", "in")[0]["id"], "end002")
+        self.assertEqual(run(self.root, "drain", "--key", "e1", "old").stdout.count("end001"), 1)
+
+    def test_a_predecessors_ack_and_done_still_count_after_it_ended(self):  # R2-2
+        self.row("old", role="orchestrator", status="active")
+        self.send("wa", self.fmt("READY", "1", SHA, "--from", "wa", "--id", "rdy001"))
+        self.assertEqual(self.ack("old", "rdy001").returncode, 0)
+        self.send("wa", self.fmt("ASSIGN", "7", "b.md", "--from", "old", "--id", "asg007"), "--inbox")
+        self.send("wa", self.fmt("DONE", "7", "--from", "old", "--id", "don007"), "--inbox")
+        self.row("old", role="orchestrator", status="ended")
+        self.row("new", role="orchestrator", status="active")
+        self.age(25)
+        self.assertEqual(self.ids(), [])
+        self.assertEqual(self.box("wa", "in")[0]["from"], "old")
+
+    def test_an_ack_of_a_line_from_an_ended_predecessor_reaches_the_orchestrator_box(self):  # R2-3
+        self.row("old", role="orchestrator", status="active")
+        self.send("wa", self.fmt("ASSIGN", "1", "b.md", "--from", "old", "--id", "asg001"), "--inbox")
+        self.row("old", role="orchestrator", status="ended")
+        self.row("new", role="orchestrator", status="active")
+        self.assertEqual(self.ack("wa", "asg001").returncode, 0)
+        self.assertEqual(self.box("orchestrator", "in")[0]["re"], "asg001")
+        self.assertFalse((self.root / "state" / "swarm" / "e1" / "old").exists())
+
+    def test_a_junk_or_negative_read_mark_refuses_and_prints_nothing(self):  # R2-4
+        self.send("wa", self.fmt("STOP", "e1", "--from", "orchestrator", "--id", "stp001", "--reason", "budget"), "--inbox")
+        mark = self.root / "state" / "swarm" / "e1" / "wa" / "in.read"
+        for bad in ("junk\n", "-3\n", "1.5\n"):
+            mark.write_text(bad)
+            r = run(self.root, "drain", "--key", "e1", "wa")
+            self.assertEqual(r.returncode, 2, bad)
+            self.assertEqual(r.stdout, "")
+            self.assertIn("in.read", r.stderr)
+            self.assertEqual(mark.read_text(), bad)
+        mark.unlink()
+        self.assertIn("stp001", run(self.root, "drain", "--key", "e1", "wa").stdout)
+
     def test_acking_one_id_twice_in_a_call_writes_one_ack(self):  # 15
         self.send("wa", self.fmt("READY", "1", SHA, "--from", "wa", "--id", "aaa123"))
         self.ack("orchestrator", "aaa123", "aaa123")
