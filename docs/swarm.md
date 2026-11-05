@@ -8,9 +8,9 @@ skills, agents and engine scripts cite instead of restating it. It has four part
 **Status.** This page states the rules. The ledger here is always the task ledger, one row per ticket; the decision
 ledger (`docs/carousel.md` § After the answer) is a different thing. Built so far: `swarm.py` (the task ledger),
 `lease.py` (leases and STOP files), `gates.py` (the verification gates), `swarm_msg.py` (the grammar and the inbox and
-outbox), `swarm_budget.py` (the budget brake), the `verifier` agent and the `builder` agent. Still to be built:
-`epic-discover`, `epic-decompose`, `swarm-run`, `swarm-inbox` and `swarm-status`. No skill calls what is built yet, so
-nothing here runs by itself.
+outbox), `swarm_budget.py` (the budget brake), the `verifier` agent, the `builder` agent and the `swarm-run` skill
+(the orchestrator's tick, with the assignment file). Still to be built: `epic-discover`, `epic-decompose`,
+`swarm-inbox` and `swarm-status`. `swarm-run` runs only when an orchestrator session calls it on an approved epic.
 Why an orchestrator is a session and not a server, and when a worker is a subagent, a peer session or a headless
 process: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
@@ -341,7 +341,7 @@ lane. So a `STOP` tells a background subagent from its parent, and:
 - An epic `STOP` denies a subagent's calls under the session that works the epic, and the main session's own calls
   too, unless its registry row says `role: orchestrator`: a row with no role, or a peer worker's, is denied, so a
   `STOP` that cannot tell who is calling fails closed. The role is set at registration:
-  `make session-register NAME=<name> EPIC=<epic> ROLE=orchestrator` (`swarm-run` will do it, #684). A session without
+  `make session-register NAME=<name> EPIC=<epic> ROLE=orchestrator` (`swarm-run` does it). A session without
   it that stops its own epic is locked until the owner runs `lease.py go <scope>` from their own terminal, where no
   hook runs; the same lockout applies to a lease the session itself holds, whatever its role. `lease.py stop` prints
   that warning when it sees either case and still writes the file. `go` is deliberately not exempt: a stopped lane
