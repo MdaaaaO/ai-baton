@@ -8,9 +8,9 @@ skills, agents and engine scripts cite instead of restating it. It has four part
 **Status.** This page states the rules. The ledger here is always the task ledger, one row per ticket; the decision
 ledger (`docs/carousel.md` § After the answer) is a different thing. Built so far: `swarm.py` (the task ledger),
 `lease.py` (leases and STOP files), `gates.py` (the verification gates), `swarm_msg.py` (the grammar and the inbox and
-outbox), `swarm_budget.py` (the budget brake) and the `verifier` agent. Still to be built: `epic-discover`,
-`epic-decompose`, `swarm-run`, `swarm-inbox`, `swarm-status` and the `builder` agent. No skill calls what is built yet,
-so nothing here runs by itself.
+outbox), `swarm_budget.py` (the budget brake), the `verifier` agent, the `builder` agent and the `swarm-run` skill
+(the orchestrator's tick, with the assignment file). Still to be built: `epic-discover`, `epic-decompose`,
+`swarm-inbox` and `swarm-status`. `swarm-run` runs only when an orchestrator session calls it on an approved epic.
 Why an orchestrator is a session and not a server, and when a worker is a subagent, a peer session or a headless
 process: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
