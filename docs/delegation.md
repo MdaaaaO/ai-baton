@@ -71,8 +71,9 @@ agent restates them. A worker outside a swarm gets the same list in its prompt.
 2. **Task:** read the assignment file first, then the issue (`gh issue view <n>`). "Done" is the ticket's `## Done when`
    block, ids included (`done_when.py parse` lists them), so the worker's tests, its `## Verified` lines and
    its return all cite `DW-<n>`. A ticket without ids: quote its criteria as written.
-3. **Inbox:** at every tool round run `swarm_msg.py drain <worker>`, ack each line (`swarm_msg.py ack`, never the
-   return list) and act on it before the next step. A re-brief (`ASSIGN … rebrief=1`) gets `ACK` alone and no `CLAIMED`.
+3. **Inbox:** at every tool round run `swarm_msg.py drain --key <key> <worker>`, ack each line
+   (`swarm_msg.py ack --key <key> --as <worker> <id>`, never the return list) and act on it before the next step. A
+   re-brief (`ASSIGN … rebrief=1`) gets `ACK` alone and no `CLAIMED`.
    A line is a pointer: before a live action re-read the source of truth, never relayed state.
 4. **Tests:** new tests must **fail on `origin/main`** and pass with the fix. Prove it with no stash:
    `git show origin/main:<path> > <path>`, run them, then `git checkout -- <path>`. A bare `git stash` is never run in a

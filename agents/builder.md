@@ -24,13 +24,14 @@ another. You never talk to the user.
    mode, sibling areas, scratch files, who can say go, stop conditions. Then the ticket body (`gh issue view <n>`).
 2. If the worktree and branch exist, reuse them: `cd` there, `git status`, compare with the remote branch, continue. Never
    start over or add a second worktree. Otherwise run the `git worktree add` line the assignment gives. Work only there.
-3. Send `ACK` for the `ASSIGN` line (`swarm_msg.py ack`), then `CLAIMED`. A line with `rebrief=1` gets `ACK` alone.
+3. Send `ACK` for the `ASSIGN` line (`swarm_msg.py ack --key <key> --as <worker> <id>`, the epic key from the
+   assignment), then `CLAIMED`. A line with `rebrief=1` gets `ACK` alone.
 4. Take any choice the ticket leaves open as its recommended option and write an `Assumed:` line. A choice only the owner
    can make is a `DECISION` line.
 
 ## Every tool round
 
-Run `swarm_msg.py drain <worker>` first. Ack each line, act on it before the next step. A `STOP` ends the work: finish
+Run `swarm_msg.py drain --key <key> <worker>` first. Ack each line, act on it before the next step. A `STOP` ends the work: finish
 nothing new, push what is green, return `BLOCKED <ticket> stop <who> ran="…"` naming every call with an outside effect
 since your last line. Re-read the source of truth (ticket, repo, a fresh scan) before any live action; a line, table or
 sha a peer quoted is a pointer, never the state.
@@ -69,4 +70,4 @@ Auto mode denies some acts to a worker. Ask the role that does them; never retry
 Write the return block and the PR body to the scratch files the assignment names (a path that outlives a restart), then
 end with the grammar's lines only: `CLAIMED`, `READY <ticket> <head7>`, `BLOCKED`, `NEEDS`, `DECISION`, `Assumed:`,
 `DONE`. The run ends at `READY`; send `PR` only if the assignment says so. No free-text progress, and nothing when nothing
-changed. Send each line with `swarm_msg.py send` and as the final message.
+changed. Send each line with `swarm_msg.py send --key <key> <worker> "<line>"` and as the final message.
