@@ -1,10 +1,10 @@
 ---
 name: session-retro
-description: "Sonnet-forked self-check of this session against the kit: corrections, denials, failures and rule slips from the transcript, each judged kit gap or session slip. Use when winding down after session-handoff, or on \"run a retro\". Not for the weekly self-assessment or the handoff."
+description: "Sonnet-forked self-check of this session against the kit: corrections, denials, failures and rule slips, each judged kit gap or session slip. Use when winding down after session-handoff, or on \"run a retro\". Not for self-assessment or the handoff."
 metadata:
-  version: "3"
-  updated: "2026-10-23"
-  reviewed: "2026-10-23"
+  version: "4"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
 user-invocable: true
 argument-hint: "[<session-id> | <transcript.jsonl>]"
 context: fork

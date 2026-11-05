@@ -1,8 +1,8 @@
 ---
 name: verifier
-description: "Independent check of swarm work: a ticket's READY head (phase=read), its merged commit (phase=merged), alone calling swarm.py pass, and an epic's agent gates (phase=gates). Use when swarm-run hands over a head, a merged PR or gates due. Not a PR review; never for the change's author."
+description: "Independent check of swarm work by phase: read (a ticket's READY head), merged (its merged commit, alone calling swarm.py pass), gates (an epic's agent gates). Use when swarm-run hands over a head, a merged PR or gates due. Not a PR review; never for the change's author."
 metadata:
-  version: "1"
+  version: "2"
   updated: "2026-11-04"
   reviewed: "2026-11-04"
 model: opus

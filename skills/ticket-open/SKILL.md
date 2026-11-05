@@ -1,10 +1,10 @@
 ---
 name: ticket-open
-description: "Checklist for CREATING a ticket (Jira or GitHub issues): the goal interview gate, placement, labels, epic/parent link, a lean opening block (Goal/Out of scope/Plan/Links/Sizing-gated Sketch) plus the required `## Done when` ids, the cold-reader gate, public/length checks, and the matching .context/ doc. Use when creating a ticket, right before/after posting it."
+description: "Checklist for CREATING a ticket (Jira or GitHub issues): goal interview gate, placement, labels, epic/parent link, a lean opening block plus the required `## Done when` ids, cold-reader and length gates, the .context/ doc. Use when creating a ticket, right before/after posting it."
 metadata:
-  version: "22"
-  updated: "2026-11-02"
-  reviewed: "2026-11-02"
+  version: "23"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   facts: "tracker.kind"
 user-invocable: true
 ---
