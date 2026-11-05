@@ -1,8 +1,8 @@
 ---
 name: ticket-pickup
-description: "Verifies a ticket's Sizing line against the default branch, probes its Done-when ids and Sketch, decides main session vs sub-agent, claims the ticket. Use when picking up, starting or resuming a ticket. Not for creating (`ticket-open`) or updating (`ticket-update`)."
+description: "Verifies a ticket's Sizing line against the default branch, probes its Done-when ids and Sketch, decides main session vs sub-agent, sizes a missing line, claims the ticket. Use when picking up, starting or resuming a ticket. Not for creating (`ticket-open`) or updating (`ticket-update`)."
 metadata:
-  version: "9"
+  version: "10"
   updated: "2026-11-04"
   reviewed: "2026-11-04"
   facts: "tracker.kind"

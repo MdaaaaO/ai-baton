@@ -1,8 +1,8 @@
 ---
 name: pr-scan
-description: "Forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts and seen heads. Returns a <=8-row brief or NO-OP. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
+description: "Forked sweep for the review queue: direct and CODEOWNERS team requests, then open PRs minus bots, drafts and seen heads. Returns a <=8-row brief or NO-OP; hand a row to `pr-review`. Use when sweeping the review queue, often armed with `/loop 2h /pr-scan`."
 metadata:
-  version: "25"
+  version: "26"
   updated: "2026-11-04"
   reviewed: "2026-11-04"
   facts: "github.display_names"

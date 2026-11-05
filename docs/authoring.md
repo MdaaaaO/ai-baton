@@ -12,7 +12,7 @@ bookkeeping goes under `metadata:` as **double-quoted strings** (`migrate_frontm
 | key | who | rule (`kit_verify.py`) |
 |---|---|---|
 | `name` | required | equals the skill's directory name / the agent's file stem |
-| `description` | required | the trigger: `<what>. Use when <situations>. Not for <near misses>.` — ≤ 60 whitespace tokens (`DESC_MAX_WORDS`), ≤ 400 B (`DESC_MAX_BYTES`), all units ≤ 9,850 B together (`DESC_TOTAL_BYTES`, warns past 90%); no `(<env>) ` prefix. Warns (an error from the next release) when it names no trigger (`when`) or reads in the first person |
+| `description` | required | the trigger: `<what>. Use when <situations>. Not for <near misses>.` — ≤ 60 whitespace tokens (`DESC_MAX_WORDS`), ≤ 400 B (`DESC_MAX_BYTES`), all units ≤ 9,900 B together (`DESC_TOTAL_BYTES`, warns past 90%); no `(<env>) ` prefix. Warns (an error from the next release) when it names no trigger (`when`) or reads in the first person |
 | `metadata.version` | required | an integer string, bumped on every behaviour change |
 | `metadata.updated` | required | `YYYY-MM-DD` of that change (`review_gate.py`: on or after the base's when a file of the unit changed) |
 | `metadata.reviewed` | required | `YYYY-MM-DD` the unit was last re-read; `kit-verify --stale N` warns past N days; warns when the file's last commit is stamped after that day ended anywhere on Earth (`reviewed` + 1 day, 12:00 UTC — a same-day evening squash merge stamped in UTC is not a later edit; `--no-git` skips) |
