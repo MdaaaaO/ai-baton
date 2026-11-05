@@ -36,6 +36,11 @@ Source of truth for the scripts: this directory — whichever session improves t
    PR's `merged_at`** — a `gh pr merge` call that reports success but leaves `merged_at` unset is not read as
    merged.
 
+Optional third argument `<expected_head_sha>` (7 to 40 hex digits) pins the run to the head a READY line named:
+it refuses at start (exit 1, nothing changed) when the PR's head differs or the argument is present but empty,
+stops with exit 1 on a BEHIND PR instead of running phase 2, and merges with `--match-head-commit <full sha>`.
+Without it (two arguments) nothing changes: a BEHIND PR is updated and the merge carries no head match.
+
 Exit 0 = confirmed merged; exit 1 = a gate failed, the merge call failed, or `merged_at` came back unset (one-line
 reason: head moved, open threads, not green, approval missing — read it and rerun after acting); exit 3 = gave up
 (CLEAN + APPROVED never held within the deadline). The script squashes with the repository's default message; a
