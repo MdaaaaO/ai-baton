@@ -194,7 +194,7 @@ class CliCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.env = hermetic_env(self.tmp)
         self.root = Path(self.env["CONTEXT_ROOT"])
         self.root.mkdir()
