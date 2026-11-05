@@ -284,7 +284,8 @@ while true; do
                   lookup_failed "$pr" "approval count" "the approvals in the reviews listing could not be counted"
                 elif [ "$appr" -gt 0 ] 2>/dev/null; then
                   lookup_ok "approval count"
-                  # A human approval exists. A push dismisses it only where the base branch dismisses stale
+                  # A human approval exists. A push costs it only where the base branch dismisses stale reviews on a push or
+                  # requires approval of the last push (the watcher's own update-branch is then the last push), and
                   # reviews, and GitHub counts it as approval only when reviewDecision says APPROVED. The
                   # dismiss answer is read once per head (a definite answer is kept in dismiss_for); a read that
                   # fails is a LOOKUP FAILED line and no sync — never a silent default either way — and the
@@ -293,11 +294,11 @@ while true; do
                   case "$dfor" in "$cur="*) dismiss=${dfor#*=};; esac
                   if [ -z "$dismiss" ]; then
                     # Rulesets first (200 and a list, empty when none applies; paginated): any pull_request rule
-                    # with dismiss_stale_reviews_on_push true means a push dismisses. Only when the rules do not
+                    # with dismiss_stale_reviews_on_push or require_last_push_approval true means a push costs the approval (classic: the same two fields). Only when the rules do not
                     # say true is classic protection read; "Branch not protected" and "Required pull request
                     # reviews not enabled" are answers (nothing dismisses), every other failure is a failed read.
                     disrc=0
-                    gh_retry gh api --paginate "repos/$repo/rules/branches/$base?per_page=100" --jq '[.[] | select(.type=="pull_request") | .parameters.dismiss_stale_reviews_on_push] | any'; disrc=$?
+                    gh_retry gh api --paginate "repos/$repo/rules/branches/$base?per_page=100" --jq '[.[] | select(.type=="pull_request") | (.parameters // {}) | (.dismiss_stale_reviews_on_push == true or .require_last_push_approval == true)] | any'; disrc=$?
                     if [ $disrc -eq 0 ]; then
                       case "$ghr_out" in
                         *true*) dismiss=true;;
@@ -306,7 +307,7 @@ while true; do
                       esac
                     fi
                     if [ $disrc -eq 0 ] && [ "$dismiss" = false ]; then
-                      gh_retry gh api "repos/$repo/branches/$base/protection/required_pull_request_reviews" --jq '.dismiss_stale_reviews'; disrc=$?; dismiss=$ghr_out
+                      gh_retry gh api "repos/$repo/branches/$base/protection/required_pull_request_reviews" --jq '(.dismiss_stale_reviews == true) or (.require_last_push_approval == true)'; disrc=$?; dismiss=$ghr_out
                       if [ $disrc -ne 0 ]; then
                         case "$ghr_err" in
                           *"Branch not protected"*|*"Required pull request reviews not enabled"*) disrc=0; dismiss=false;;
@@ -316,7 +317,7 @@ while true; do
                     fi
                     if [ $disrc -ne 0 ]; then
                       dismiss=unknown
-                      lookup_failed "$pr" "branch protection" "${ghr_err:-no error text}; not auto-syncing an approved PR without knowing whether a push would dismiss the approval"
+                      lookup_failed "$pr" "branch protection" "${ghr_err:-no error text}; not auto-syncing an approved PR without knowing whether a push would drop the approval"
                     else
                       lookup_ok "branch protection"; putv dismiss_for "$cur=$dismiss"
                     fi
@@ -329,8 +330,8 @@ while true; do
                       lookup_failed "$pr" "review decision" "$ghr_err"
                     else
                       lookup_ok "review decision"
-                      if [ "$dismiss" = true ]; then why="dismiss_stale_reviews is on, so a push would dismiss the approval"
-                      else why="the branch's dismiss setting could not be read, so a push might dismiss the approval"; fi
+                      if [ "$dismiss" = true ]; then why="the base branch would drop the approval on a push (dismiss stale reviews or require approval of the last push)"
+                      else why="the base branch's push settings could not be read, so a push might drop the approval"; fi
                       who=$(printf '%s' "$revs" | jq -r --arg bot "$bot" --argjson bots "$bots" '[.[] | select(.state=="APPROVED" and .user.login!=$bot and ((.user.login as $l | ($bots | index($l))) == null)) | .user.login] | unique | join(", ")' 2>/dev/null)
                       if [ "$rdec" = APPROVED ]; then
                         echo "PR $pr BEHIND $base by $behind but APPROVED — not auto-syncing ($why): merge now, or update-branch and ask for re-approval"

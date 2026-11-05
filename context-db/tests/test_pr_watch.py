@@ -91,7 +91,7 @@ if [ "$1" = api ]; then
     */branches/*/protection/required_pull_request_reviews)
       [ -n "${STUB_PROTECTION_FAIL:-}" ] && { echo "stub gh: simulated protection failure" >&2; exit 1; }
       [ -n "${STUB_PROTECTION_ERR:-}" ] && { echo "${STUB_PROTECTION_ERR}" >&2; exit 1; }
-      body="{\"dismiss_stale_reviews\": ${STUB_DISMISS:-true}}" ;;
+      body="{\"dismiss_stale_reviews\": ${STUB_DISMISS:-true}, \"require_last_push_approval\": ${STUB_LAST_PUSH:-false}}" ;;
     */commits/*/check-runs\?per_page=100) body=$STUB_CHECKRUNS_JSON ;;
     */check-runs/*/annotations\?per_page=100) body=$STUB_ANNOTATIONS_JSON ;;
     */commits/*) body=$STUB_COMMIT_JSON ;;
@@ -575,6 +575,21 @@ class PrWatchStub(unittest.TestCase):
         self.assertNotIn("update-branch", self.calls())
         self.assertNotIn("SYNCED", r.stdout + r.stderr)
 
+    LAST_PUSH_RULE = '[{"type":"pull_request","parameters":{"dismiss_stale_reviews_on_push":false,"require_last_push_approval":true}}]'
+
+    def test_a_ruleset_requiring_last_push_approval_does_not_sync(self):
+        r = self.behind_approved(STUB_RULES_JSON=self.LAST_PUSH_RULE)
+        self.assertIn(f"PR {PR} BEHIND main by 3 but APPROVED", r.stdout)
+        self.assertIn("would drop the approval on a push", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("SYNCED", r.stdout + r.stderr)
+
+    def test_classic_protection_requiring_last_push_approval_does_not_sync(self):
+        r = self.behind_approved(STUB_DISMISS="false", STUB_LAST_PUSH="true")
+        self.assertIn(f"PR {PR} BEHIND main by 3 but APPROVED", r.stdout)
+        self.assertNotIn("update-branch", self.calls())
+        self.assertNotIn("SYNCED", r.stdout + r.stderr)
+
     def test_a_protected_branch_without_a_required_reviews_rule_is_dismiss_off_and_synced(self):
         r = self.behind_approved(STUB_PROTECTION_ERR="gh: Required pull request reviews not enabled (HTTP 404)")
         self.assertIn(f"PR {PR} SYNCED with main", r.stderr)
@@ -584,8 +599,8 @@ class PrWatchStub(unittest.TestCase):
         r = self.behind_approved(STUB_PROTECTION_ERR="gh: Not Found (HTTP 404)")
         self.assertIn(f"PR {PR} LOOKUP FAILED: branch protection", r.stdout)
         self.assertIn(f"PR {PR} BEHIND main by 3 but APPROVED", r.stdout)
-        self.assertIn("dismiss setting could not be read", r.stdout)
-        self.assertNotIn("dismiss_stale_reviews is on", r.stdout)
+        self.assertIn("push settings could not be read", r.stdout)
+        self.assertNotIn("would drop the approval on a push", r.stdout)
         self.assertNotIn("update-branch", self.calls())
 
     def test_an_empty_review_decision_says_no_review_is_required(self):
