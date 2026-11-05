@@ -24,7 +24,7 @@ cannot drift the way a hand-kept flag list does:
   collect-private      local transcripts (+ optional CSV) → daily JSON, estimated at list price
   work-prs             GitHub search: PRs opened/merged by the user → a TSV
   work-tickets         tracker.kind == github only: tickets closed by the user → a TSV
-  report               daily (+ control, prs, tickets) → the Basis-first Markdown/JSON report
+  report               daily (+ control, prs, tickets, swarm ledgers) → the Basis-first Markdown/JSON report
   run                  private mode, one call: collect-private → work-prs → work-tickets → report (`make cost-report`)
 
 Rules baked in: per-day rates use WEEKDAYS only (ISO 1–5);
@@ -57,6 +57,8 @@ sys.path.insert(0, str(KIT / "context-db" / "bin"))
 import fsutil  # noqa: E402  (atomic_write — the engine's torn-write-free JSON writer)
 import kit_profile as profile  # noqa: E402
 import session_stats  # noqa: E402  (price_for, prices, priced_at — the table is the env config's `cost.prices`, else built in)
+import swarm  # noqa: E402  (the task ledger's one spend rule, for the swarm section)
+import swarm_budget  # noqa: E402  (the four caps an assignment runs under)
 import transcripts  # noqa: E402  (the shared transcript reader)
 
 FIXED = session_stats.prices()[:4]  # (in, cache_write, cache_read, out) $/Mtok — the habit basis; honours
@@ -871,9 +873,46 @@ def num(x, nd=0) -> str:
     return f"{x:,.{nd}f}"
 
 
+def swarm_epic(path: str) -> dict:
+    """One task ledger as the report's rows: the epic's spend against its cap, then one line per worker. A ledger holds
+    only what `swarm_budget.py sweep` or `swarm.py progress --spent` wrote, so these figures are estimates. Raises on a
+    file that is not a ledger."""
+    led = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(led, dict) or led.get("schema") != swarm.SCHEMA or not isinstance(led.get("tickets"), dict):
+        raise ValueError(f"not a schema {swarm.SCHEMA} ledger")
+    budget, workers = swarm.budget_state(led), []
+    for ticket, row in led["tickets"].items():
+        caps = swarm_budget.row_caps(led, row)
+        readings = list((row.get("spend") or {}).values())
+        if not readings and (row["worker"].get("name") or row.get("spent")):
+            readings = [{"worker": row["worker"].get("name"), "kind": row["worker"].get("kind"), "spent": row.get("spent") or 0}]
+        workers += [{"ticket": ticket, "worker": r.get("worker"), "kind": r.get("kind"), "status": row["status"],
+                     "spent": r.get("spent") or 0, "cap": caps["spend_usd"], "forks": r.get("forks"), "fork_cap": caps["forks"]}
+                    for r in readings]
+    return {"epic": led.get("key") or Path(path).stem, "spent": budget["spent"], "cap": budget["epic_usd"], "state": budget["state"],
+            "over": len(budget["over"]), "workers": workers}
+
+
+def swarm_ledgers(explicit: list[str] | None) -> tuple[list[dict], str]:
+    """The swarm section's epics and its Basis line. A file the user named must read, or the run exits 2 naming it. One found
+    under the content root (`state/swarm/*.json`) that does not read is skipped, and the Basis says so."""
+    epics, skipped = [], []
+    paths = explicit or sorted(glob.glob(os.path.join(glob.escape(str(profile.context_root() / "state" / "swarm")), "*.json")))
+    for path in paths:
+        try:
+            epics.append(swarm_epic(path))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            if explicit:
+                raise StrictParseError(f"--swarm-ledger {path}: {e}") from None
+            skipped.append(Path(path).name)
+    basis = (f"{len(epics)} task ledger(s), list-price estimate, counted at each return and tick" if epics else "no task ledger")
+    return epics, basis + (f"; skipped, not a ledger: {', '.join(skipped)}" if skipped else "")
+
+
 def cmd_report(a) -> int:
     if (rc := _check_since_until(a)) is not None:
         return rc
+    swarm_epics, swarm_basis = swarm_ledgers(getattr(a, "swarm_ledger", None))
     rows, source = load_daily(a.daily)
     if not rows:
         raise SystemExit("daily file has no rows")
@@ -967,13 +1006,14 @@ def cmd_report(a) -> int:
         "control": (f"{len(control)} weeks, anonymous aggregate per user-day" if control else "none"),
         "prs": (f"{len(prs)} PRs from GitHub search (author:{mode['github_login'] or '?'}), capped at {first}..{last}" if prs else "not supplied"),
         "tickets": (f"{len(tks)} tickets ({mode['tracker']}), closed by resolution date, capped at {first}..{last}" if tks else "not supplied"),
+        "swarm": swarm_basis,
         "phases": [{"name": n, "start": s, "end": e} for n, s, e in phases] or "none (rolling 7 days vs the prior 7)",
         "skipped": ["lines changed as a denominator (never)", "per-epic billed cost (not attributable from billing)"]
                    + ([] if control else ["control (private mode has no peer table)"]),
         "names": "none — self-analysis; the control is an aggregate",
     }
     out = {"basis": basis, "buckets": [metrics[b.name] for b in buckets], "weeks": [metrics[k] for k in sorted(weeks)],
-           "control": control, "decomposition": decomps}
+           "control": control, "decomposition": decomps, "swarm": swarm_epics}
     if a.json:
         fsutil.atomic_write(a.json, json.dumps(out, indent=1))
     md = render_md(out)
@@ -993,7 +1033,7 @@ def render_md(o: dict) -> str:
           f"| Rates | {b['rates']} |",
           f"| Fixed price | in {b['fixed_prices_usd_per_mtok']['input']} · cache-write {b['fixed_prices_usd_per_mtok']['cache_write']} · cache-read {b['fixed_prices_usd_per_mtok']['cache_read']} · out {b['fixed_prices_usd_per_mtok']['output']} $/Mtok"
           + (f" (priced {b['priced_at']})" if b.get("priced_at") else "") + " |",
-          f"| Control | {b['control']} |", f"| PRs | {b['prs']} |", f"| Tickets | {b['tickets']} |",
+          f"| Control | {b['control']} |", f"| PRs | {b['prs']} |", f"| Tickets | {b['tickets']} |", f"| Swarm | {b['swarm']} |",
           f"| Phases | {b['phases'] if isinstance(b['phases'], str) else ', '.join(p['name'] + ' ' + p['start'] + '..' + p['end'] for p in b['phases'])} |",
           f"| Skipped | {'; '.join(b['skipped'])} |", f"| Names | {b['names']} |", ""]
     hdr = "| Bucket | window | wdays | $ | $/wday | Mout/wday | in/out | $/Mout | fixed $/Mout | cheap% | haiku% | PRs open | merged | tk closed | $/PR | $/tk | basis |"
@@ -1019,6 +1059,16 @@ def render_md(o: dict) -> str:
         L += ["## Control (everyone else, weekdays, anonymous aggregate)", "", "| Week | peak daily users | $/user-day | in/out | $/Mout | fixed $/Mout | cheap% |", "|---|---|---|---|---|---|---|"]
         L += [f"| {c['wk']} | {c['users'] or '–'} | {num(c['usd_per_user_day'])} | {num(c['in_out'])} | {num(c['usd_per_mout'])} | {num(c['fixed_usd_per_mout'])} | {pct(c['cheap_share']).lstrip('+')} |"
               for c in o["control"]] + [""]
+    if o["swarm"]:
+        L += ["## Swarm (spend per epic and per worker, a list-price estimate, never a bill)", "",
+              "| Epic | spent $ | cap $ | workers | over cap |", "|---|---|---|---|---|"]
+        L += [f"| {e['epic']} | {num(e['spent'], 2)} | {num(e['cap'], 2)} | {len(e['workers'])} | {e['over'] + (e['state'] == 'over')} |" for e in o["swarm"]] + [""]
+        lines = [(e["epic"], w) for e in o["swarm"] for w in e["workers"]]
+        if lines:
+            L += ["| Epic | ticket | worker | kind | status | spent $ | cap $ | forks |", "|---|---|---|---|---|---|---|---|"]
+            L += [f"| {epic} | {w['ticket']} | {w['worker'] or '–'} | {w['kind'] or '–'} | {w['status']} | {num(w['spent'], 2)} | {num(w['cap'], 2)} | "
+                  f"{'–' if w['forks'] is None else w['forks']} / {'–' if w['fork_cap'] is None else w['fork_cap']} |" for epic, w in lines] + [""]
+        L += ["_The epic's figure holds each orchestrator session, whose total already includes its subagent workers, so the worker lines do not sum to it._", ""]
     L += ["## Reading the metrics", "",
           "- **in/out** = (input + cache-write + cache-read) / output — prefix dragged per output token; the habit metric, lower is better.",
           "- **fixed $/Mout** reprices every token at one list price, so it moves only with habit, never with model routing.",
@@ -1084,6 +1134,7 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("report"); p.add_argument("--daily", required=True); p.add_argument("--control"); p.add_argument("--prs"); p.add_argument("--tickets")
     p.add_argument("--phase", action="append", help="NAME=YYYY-MM-DD..YYYY-MM-DD (repeatable; default from cost.phases)")
     p.add_argument("--view", choices=["rolling7", "weekly", "phases", "all"], default="all"); p.add_argument("--until")
+    p.add_argument("--swarm-ledger", action="append", help="a swarm's task ledger for the swarm section (repeatable; default: every ledger under the content root's state/swarm)")
     p.add_argument("--out"); p.add_argument("--json")
     p = sub.add_parser("run", help="private mode: collect-private, work-prs, work-tickets, report — the default run in one call")
     p.add_argument("--since", help="default: 10 weeks back"); p.add_argument("--until"); p.add_argument("--csv")

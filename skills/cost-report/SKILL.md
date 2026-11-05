@@ -2,9 +2,9 @@
 name: cost-report
 description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7, or named phases. Org mode reports billed cost (aggregate control); private mode estimates from local transcripts. Never names anyone. Invoke when asked for a \"cost report\" or \"how efficient was last week\"."
 metadata:
-  version: "17"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "18"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
 user-invocable: true
 ---
@@ -48,6 +48,8 @@ Private mode in one call: `make -C $BATON/context-db cost-report` (steps 1–5 b
      Basis says "tickets: not supplied" and `$/ticket` stays `–`. No substitute source.
 4. `cost_report.py report --daily daily.json [--control control.json] [--prs prs.tsv] [--tickets tickets.tsv] --view all --out report.md --json report.json`
    — `--view rolling7|weekly|phases` narrows; `--phase NAME=START..END` (repeatable) overrides `cost.phases`.
+   A swarm's task ledger adds a `## Swarm` section, spend per epic and per worker: every ledger in the store, or
+   `--swarm-ledger <file>` (repeatable).
 5. Deliver **the Basis block first**, then the table(s). Terminal reply: the Basis rows that matter
    (mode, cost basis, what was skipped) + the rolling-7 line + one sentence on the decomposition. The
    full markdown goes to a `.context/reference/` doc (`make -C $BATON/context-db new TYPE=reference …`)

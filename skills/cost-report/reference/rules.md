@@ -13,8 +13,9 @@
 - **A phase name is never `prior-7d`/`rolling-7d` or a week label (`YYYY-Wnn`)** — the rolling pair `report`
   always builds and the keys of its week buckets; reusing one exits 2.
 - **Cheap models are Sonnet/Haiku by name**; an org table's `model_family` column is not needed.
-- **Per-epic billed cost does not exist.** The bill has no ticket dimension; the only per-epic view is the
-  session ledger estimate (`.context/sessions/_ledger.md`), labelled as such, with its unlabelled share.
+- **Per-epic billed cost does not exist.** The bill has no ticket dimension; the per-epic views are the session
+  ledger estimate (`.context/sessions/_ledger.md`), labelled as such, with its unlabelled share, and for a swarm the
+  `## Swarm` section's task-ledger estimate. A swarm's worker is a lane, never a person.
 - **No naming, no ranking.** The report names no peer, no team member, no manager; the control is an
   aggregate. Self-analysis is the only purpose. This holds for the report, the doc and the chat reply.
 - **Say what was skipped.** The Basis lists every factor that could not be computed (no control in private

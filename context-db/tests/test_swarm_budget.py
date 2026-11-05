@@ -543,6 +543,68 @@ class WorkerBrief(unittest.TestCase):
             self.assertIn(f"`{field}`", line)
 
 
+class CostReportSection(BudgetCase):
+    """DW-4: `cost-report` prints a swarm section from a fixture ledger."""
+
+    SKILL = KIT / "skills" / "cost-report"
+    SCRIPT = SKILL / "cost_report.py"
+    DAILY = SKILL / "fixtures" / "daily.sample.json"
+    SAMPLE = SKILL / "fixtures" / "swarm-ledger.sample.json"
+
+    def report(self, *args: str) -> subprocess.CompletedProcess:
+        return self.run_script(self.SCRIPT, "report", "--daily", str(self.DAILY), *args)
+
+    def test_a_fixture_ledger_prints_the_epic_and_each_worker(self):
+        p = self.report("--swarm-ledger", str(self.SAMPLE))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("## Swarm (spend per epic and per worker, a list-price estimate, never a bill)", p.stdout)
+        self.assertIn("| Swarm | 1 task ledger(s), list-price estimate", p.stdout)
+        self.assertIn("| sample-epic | 26.00 | 40.00 | 3 | 1 |", p.stdout)
+        self.assertIn("| sample-epic | 101 | lane-101 | subagent | merged | 7.50 | 10.00 | 2 / 4 |", p.stdout)
+        self.assertIn("| sample-epic | 102 | lane-102 | peer | claimed | 11.00 | 10.00 | 1 / 4 |", p.stdout)
+        self.assertIn("| sample-epic | 103 | lane-103 | headless | claimed | 3.00 | 5.00 | 0 / 4 |", p.stdout)
+
+    def test_the_fixture_is_the_ledgers_real_shape(self):
+        led = json.loads(self.SAMPLE.read_text(encoding="utf-8"))
+        self.assertEqual(led["schema"], swarm.SCHEMA)
+        for row in led["tickets"].values():
+            self.assertEqual(set(swarm.new_row("x")) - set(row), set())
+
+    def test_with_no_flag_it_reads_the_stores_ledgers(self):
+        self.write_session("peer-sid", [turn("p1", usd=2.0)])
+        self.plan("7")
+        self.assign("7", "peer-sid", "peer")
+        self.sweep()
+        p = self.report()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn(f"| {EPIC} | 7 | lane-7 | peer | assigned | 2.00 |", p.stdout)
+
+    def test_a_store_file_that_is_no_ledger_is_skipped_and_said(self):
+        self.plan("7")
+        (self.root / "state" / "swarm" / "stray.json").write_text("{not json", encoding="utf-8")
+        p = self.report()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("skipped, not a ledger: stray.json", p.stdout)
+        self.assertIn(f"| {EPIC} |", p.stdout)
+
+    def test_a_named_file_that_is_no_ledger_exits_2_naming_it(self):
+        p = self.report("--swarm-ledger", str(self.DAILY))
+        self.assertEqual(p.returncode, 2)
+        self.assertIn(str(self.DAILY), p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+
+    def test_with_no_ledger_the_basis_says_so_and_there_is_no_section(self):
+        p = self.report()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("| Swarm | no task ledger |", p.stdout)
+        self.assertNotIn("## Swarm", p.stdout)
+
+    def test_the_skill_keeps_its_description_and_names_the_section(self):
+        text = (self.SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("`--swarm-ledger <file>`", text)
+        self.assertNotIn("swarm", re.search(r"^description: (.*)$", text, re.M).group(1).lower())
+
+
 class ConfigKeys(unittest.TestCase):
     """The `swarm.budget` block sits in the template, `kb.blank_config()` and `docs/env-facts.md` with one set of defaults."""
 
