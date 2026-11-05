@@ -332,14 +332,14 @@ view:
 # Free text (WORKING="…", RESP="…") reaches session.py verbatim (#132): `$(call sq,VAR)` is the variable's
 # UNEXPANDED value as one single-quoted sh word, and `unexport` keeps make from expanding it into the recipe
 # environment (a `$(shell …)` inside the text would otherwise run). So quotes, `$(…)` and backticks are data.
-SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING WORKING_IF_EMPTY RESP NOTE ROLE STATE LANE NEXT SESSION_ID NOSTATS FROM TO
+SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING WORKING_IF_EMPTY RESP NOTE ROLE STATE LANE NEXT SESSION_ID NOSTATS FROM TO REF_GONE
 unexport $(SESSION_VARS)
 override sq = '$(subst ','\'',$(value $(1)))'
 SESSION_ARGS = --ref $(call sq,REF) --status $(call sq,STATUS) --epic $(call sq,EPIC) --repos $(call sq,REPOS) \
                --resp $(call sq,RESP) --note $(call sq,NOTE)
 session-register:
-	@test -n $(call sq,NAME) || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=] [ROLE=] [STATE=] [LANE=] [SUCCESSOR_OF=<predecessor>]"; exit 2; }
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) $(if $(filter command line,$(origin ROLE)),--role $(call sq,ROLE)) $(if $(filter command line,$(origin STATE)),--state $(call sq,STATE)) $(if $(filter command line,$(origin LANE)),--lane $(call sq,LANE)) --successor-of $(call sq,SUCCESSOR_OF) $(STATSFLAGS)
+	@test -n $(call sq,NAME) || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=] [ROLE=] [STATE=] [LANE=] [SUCCESSOR_OF=<predecessor>] [REF_GONE=1]"; exit 2; }
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) $(if $(filter command line,$(origin ROLE)),--role $(call sq,ROLE)) $(if $(filter command line,$(origin STATE)),--state $(call sq,STATE)) $(if $(filter command line,$(origin LANE)),--lane $(call sq,LANE)) --successor-of $(call sq,SUCCESSOR_OF) $(if $(filter command line environment,$(origin REF_GONE)),$(if $(strip $(REF_GONE)),--ref-gone)) $(STATSFLAGS)
 	@sh $(ENGINE)../sync-check.sh || true
 
 session-touch:
