@@ -80,7 +80,7 @@ agent restates them. A worker outside a swarm gets the same list in its prompt.
 5. **Hard rules:** never write the live env store or workspace — every manual probe of a script that writes runs
    with `CONTEXT_ROOT` on a `mktemp -d` dir; no environment-specific literal in code or tests (assemble fact-shaped
    test strings at run time); code comments cite no issue number the kit cannot resolve yet (`kit-verify`'s ceiling).
-6. **Checkpoint:** commit and push after each green Plan step and after every few fixes of a review round, so nothing
+6. **Checkpoint:** a checkpoint commit is pushed after each green Plan step and after every few fixes of a review round, so nothing
    lives only in a worktree. The PR is squash-merged, so several commits are fine and the old one-commit rule yields.
    Every title passes `commit_style.py title` (Conventional Commits, lower-case after the colon, ≤ 72 characters);
    `review_gate.py --base origin/main` is OK after the last commit. Where `systems.signed_commits` is true, commit and
