@@ -1,6 +1,6 @@
 ---
 name: session-retro
-description: "Sonnet-forked self-check of this session against the kit: corrections, denials, failures and rule slips, each judged kit gap or session slip. Use when winding down after session-handoff, or on \"run a retro\". Not for self-assessment or the handoff."
+description: "Sonnet-forked self-check of this session against the kit: corrections, denials, failures and rule slips. Use when winding down after session-handoff, or on \"run a retro\". Not for self-assessment or the handoff."
 metadata:
   version: "4"
   updated: "2026-11-04"

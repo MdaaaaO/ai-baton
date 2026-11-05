@@ -1,6 +1,6 @@
 ---
 name: mission-control
-description: "Builds the private mission-control page as one local HTML file and prints its path. Use when asked to open, show or rebuild the mission page, or for an overview of sessions, spend and the store. Not for session-register, cost-report, kit-health or self-assessment."
+description: "Builds the private mission-control page as one local HTML file and prints its path. Use when asked to open, show or rebuild the mission page, where it is, or for an overview of sessions, spend and the store. Not for session-register, cost-report, kit-health, session-handoff or self-assessment."
 metadata:
   version: "4"
   updated: "2026-11-04"
