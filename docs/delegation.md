@@ -123,12 +123,12 @@ same brief goes in as the prompt, with the assignment file path in it:
 
 ```
 claude -p --bare --max-budget-usd <spend_usd> --output-format json "<the brief and the assignment path>" \
-  > state/swarm/<key>/<worker>/result.json
+  > .context/state/swarm/<key>/<worker>/result.json
 ```
 
 - `--max-budget-usd` takes the assignment's `spend_usd`; the cap reads a client-side estimate, so leave headroom.
 - `--output-format json` makes the run report `total_cost_usd`; the result is written to
-  `state/swarm/<key>/<worker>/result.json`, where the budget's reconcile reads it.
+  `.context/state/swarm/<key>/<worker>/result.json`, where the budget's reconcile reads it.
 - `--bare` is passed explicitly: it is announced as the future `-p` default, and a plain `claude -p` would then stop
   loading hooks. It needs an API key, not the subscription login.
 - `--bare` discovers no kit hook, so the STOP file's hook does not reach this worker. It is stopped by its inbox
