@@ -38,8 +38,10 @@ full ref `Owner/repo#N`.
 Which lane is the orchestrator: an address you type (`send`, `drain`, `ack --as`) resolves against live registry rows only
 (not `status: ended`, not `state: retired`), so an ended orchestrator's name is an ordinary lane. A sender read from a
 stored line resolves against every row, so after a handoff the predecessor's ACK and DONE still count as the
-orchestrator's. Known leftover: a lane that was once an orchestrator and later acks as a worker in the same key reads as
-the orchestrator in `pending`, so it shows a false `resend`, never a misroute.
+orchestrator's. An ACK goes to the sender of the line: a line found in `<lane>/out` was sent by `<lane>`, so its ACK lands
+in `<lane>/in`; a line in `<lane>/in` uses its stored `from`. Known leftover, in `pending` only: an ACK from a lane that
+was once an orchestrator and later acts as a worker in the same key still reads as the orchestrator's, so it can show a
+false `resend`.
 
 Exit codes: 0 ok; 1 absent (`ack`: no such id); 2 bad usage, a refused line or an I/O error. Stdlib only.
 """
@@ -512,11 +514,12 @@ def cmd_ack(a) -> int:
     acked = {(r.get("from"), r.get("re")) for _, _, recs in boxes for r in recs if r.get("word") == "ACK"}
     status = 0
     for target in a.ids:
-        hit = next((r for _, _, recs in boxes for r in recs if r.get("id") == target and r.get("to") == me), None)
-        if hit is None:
+        found = next(((d, w, r) for d, w, recs in boxes for r in recs if r.get("id") == target and r.get("to") == me), None)
+        if found is None:
             print(f"no line {target} sent to {me}", file=sys.stderr)
             status = 1
             continue
+        home, which, hit = found
         if hit["word"] == "ACK":
             raise MsgError(f"{target} is an ACK: nothing acks an ACK")
         if (a.sender, target) in acked:
@@ -524,9 +527,11 @@ def cmd_ack(a) -> int:
             continue
         scope = hit.get("ticket") or hit.get("scope") or hit["from"]
         rec = build("ACK", [scope], {"re": target}, a.sender, taken=taken_ids(a.key))
-        append(a.key, lane_dir(hit["from"], live=False), "in", rec, lane_dir(hit["from"], live=False))
+        # the ACK goes to the line's sender: the box says who (`<lane>/out` was sent by <lane>), else the stored `from`
+        dest = home if which == "out" else lane_dir(hit["from"], live=False)
+        append(a.key, dest, "in", rec, dest)
         acked.add((a.sender, target))
-        print(f"acked {target} -> {lane_dir(hit['from'], live=False)}/in")
+        print(f"acked {target} -> {dest}/in")
     return status
 
 

@@ -413,6 +413,14 @@ class Findings(BoxCase):
         self.assertEqual(self.box("orchestrator", "in")[0]["re"], "asg001")
         self.assertFalse((self.root / "state" / "swarm" / "e1" / "old").exists())
 
+    def test_an_ack_of_a_line_from_an_ended_orchestrator_working_as_a_worker_reaches_its_own_inbox(self):  # R3-1
+        self.row("old", role="orchestrator", status="ended")
+        self.row("new", role="orchestrator", status="active")
+        self.send("old", self.fmt("READY", "1", SHA, "--from", "old", "--id", "rdy001"))
+        self.assertEqual(self.ack("new", "rdy001").returncode, 0)
+        self.assertEqual(self.box("old", "in")[0]["re"], "rdy001")
+        self.assertEqual(self.box("orchestrator", "in"), [])
+
     def test_a_junk_or_negative_read_mark_refuses_and_prints_nothing(self):  # R2-4
         self.send("wa", self.fmt("STOP", "e1", "--from", "orchestrator", "--id", "stp001", "--reason", "budget"), "--inbox")
         mark = self.root / "state" / "swarm" / "e1" / "wa" / "in.read"
