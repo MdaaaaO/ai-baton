@@ -724,6 +724,10 @@ class AutoMergeGatedLegs(unittest.TestCase):
         out = self.decide(self.legs(fsign=("completed", "failure")))
         self.assertIn("concluded failure", out)
 
+    def test_a_red_macos_waits(self):
+        out = self.decide(self.legs(macos=("completed", "failure")))
+        self.assertIn("concluded failure", out)
+
     def test_a_cancelled_macos_waits(self):
         out = self.decide(self.legs(macos=("completed", "cancelled")))
         self.assertIn("concluded cancelled", out)
