@@ -20,8 +20,9 @@ computes them over all days; the fixture smoke run below is the reference a read
 ## Fixture smoke run
 
 `fixtures/` holds `daily.sample.json`, `control.sample.json`, `prs.sample.tsv`, `tickets.sample.tsv` (synthetic,
-three weeks, two models). `cost_report.py` imports `kit_profile` and `session_stats` from `context-db/bin`.
+three weeks, two models) and `swarm-ledger.sample.json` (one epic, three workers). `cost_report.py` imports
+`kit_profile`, `session_stats`, `swarm` and `swarm_budget` from `context-db/bin`.
 
 ```
-python3 cost_report.py report --daily fixtures/daily.sample.json --control fixtures/control.sample.json --prs fixtures/prs.sample.tsv --tickets fixtures/tickets.sample.tsv --phase before=2026-01-05..2026-01-16 --phase after=2026-01-19..2026-01-23
+python3 cost_report.py report --daily fixtures/daily.sample.json --control fixtures/control.sample.json --prs fixtures/prs.sample.tsv --tickets fixtures/tickets.sample.tsv --phase before=2026-01-05..2026-01-16 --phase after=2026-01-19..2026-01-23 --swarm-ledger fixtures/swarm-ledger.sample.json
 ```

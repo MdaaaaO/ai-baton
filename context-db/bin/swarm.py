@@ -27,9 +27,13 @@ Every subcommand takes the epic key first:
             progress; --stall counts a stall
   pass      `DW-<n> --evidence "…" --by verifier`, on a merged row with no FAIL recorded. The last DW moves the row to
             verified
-  tick      the orchestrator's input, never a write: ready and assignable tickets, stalled workers (assigned and claimed
-            only), READY lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions,
-            STOPs and HOLDs (--json)
+  tick      the orchestrator's input: ready and assignable tickets, stalled workers (assigned and claimed only), READY
+            lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions, STOPs and HOLDs
+            (--json). It writes what `swarm_budget.py sweep` writes: `spent`, each row's `spend` reading, the
+            epic's `spend` map and, when `swarm.budget.hard_stop` is armed, a STOP and its log line. A breach of a fork, minute or split cap, a cap that does not parse, a stop not
+            written, an epic cap with no orchestrator reading or a sweep that raises goes in `no_assign` and empties
+            `assignable`. --session-id names the orchestrator's session; without it this session counts only if its registry
+            row says `role: orchestrator` on this epic
   render    prints the `## Swarm` section and writes `sessions/<name>/prs.tsv` (repo, pr, head7, state, ticket; the state
             is the row's status; the header line alone means no open PR)
   resume    compares the ledger with `git ls-remote` and `gh pr list`, prints the difference and what to do with a lost
@@ -1038,6 +1042,8 @@ def print_tick(rep: dict) -> None:
         print(f"failed {f['ticket']} status={f['status']} branch={f['branch']}")
     for o in b["over"]:
         print(f"over-budget {o['ticket']} spent={o['spent']:.2f} cap={o['cap']:.2f}")
+    for line in rep.get("budget_sweep", {}).get("lines", []):
+        print(line)
     for w in rep["watches_due"]:
         print(f"watch-due {w['id']} due={w['due']} owner={w['owner']} what={w['what']}")
     for d in rep["decisions_open"]:
@@ -1052,8 +1058,31 @@ def print_tick(rep: dict) -> None:
         print(f"no-assign {r}")
 
 
+def budget_step(key: str, moment: datetime | None, session_id: str | None = None) -> dict:
+    """The tick's one write, and what it found. `swarm_budget` imports this module, so it is imported here. Any raise closes
+    the pool, and `SwarmError` could not catch it: run as a script this module is `__main__`, and `swarm_budget` holds a
+    second copy whose classes are not this one's. `SystemExit` is how the config reader reports an invalid file."""
+    try:
+        import swarm_budget
+        return swarm_budget.tick_findings(swarm_budget.sweep(key, session_id, now=moment))
+    except (Exception, SystemExit) as e:
+        return {"no_assign": [f"budget sweep failed: {str(e) or type(e).__name__}"], "lines": []}
+
+
+def merge_sweep(rep: dict, found: dict) -> dict:
+    """A tick's report with the sweep's findings. Past `tick_report`, so that function stays a pure read of the ledger."""
+    rep["budget_sweep"] = found
+    if found["no_assign"]:
+        rep["no_assign"] = rep["no_assign"] + found["no_assign"]
+        rep["assignable"] = []
+    return rep
+
+
 def cmd_tick(a) -> int:
-    rep = tick_report(load(a.key), parse_time(a.now) if a.now else None)
+    moment = parse_time(a.now) if a.now else None
+    load(a.key)  # a missing or a broken ledger is the tick's own error, before any sweep
+    found = budget_step(a.key, moment, a.session_id)
+    rep = merge_sweep(tick_report(load(a.key), moment), found)
     if a.json:
         print(json.dumps(rep, indent=2, ensure_ascii=False))
     else:
@@ -1297,9 +1326,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = command("apply", cmd_apply, "apply one CLAIMED, PR, READY or BLOCKED line")
     p.add_argument("line", help="the grammar line, as one argument")
 
-    p = command("tick", cmd_tick, "the orchestrator's input; writes nothing")
+    p = command("tick", cmd_tick, "the orchestrator's input; writes only spent, and a STOP when the hard stop is armed")
     p.add_argument("--json", action="store_true")
     p.add_argument("--now", help="the time to compare against (default: the wall clock)")
+    p.add_argument("--session-id", help="the orchestrator's session (default: this session, if its registry row says role: orchestrator)")
 
     p = command("render", cmd_render, "print the `## Swarm` section and write sessions/<name>/prs.tsv")
     p.add_argument("--session", help="saved to the ledger; default: the ledger's, then the running session's registered name")

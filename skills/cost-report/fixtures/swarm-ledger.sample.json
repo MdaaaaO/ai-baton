@@ -1,0 +1,247 @@
+{
+  "schema": 1,
+  "key": "sample-epic",
+  "title": "Synthetic swarm epic",
+  "repo": "acme/repo",
+  "session": "orch-1",
+  "doc": null,
+  "created": "2026-01-19T09:00:00Z",
+  "updated": "2026-01-23T17:00:00Z",
+  "plan_approved": true,
+  "plan_decision": "go on the plan",
+  "max_workers": 4,
+  "budget": {
+    "epic_usd": 40.0,
+    "worker_usd": 10.0
+  },
+  "spent": 26.0,
+  "waves": [],
+  "grants": [],
+  "watches": [],
+  "decisions": [],
+  "holds": [],
+  "seen": {},
+  "log": [
+    {
+      "at": "2026-01-19T09:05:00Z",
+      "act": "assign",
+      "ticket": "101"
+    },
+    {
+      "at": "2026-01-19T09:06:00Z",
+      "act": "assign",
+      "ticket": "102"
+    },
+    {
+      "at": "2026-01-19T09:07:00Z",
+      "act": "assign",
+      "ticket": "103"
+    }
+  ],
+  "spend": {
+    "orchestrators": {
+      "orch-sid": {
+        "total": 12.0,
+        "split_streak": 0
+      }
+    },
+    "current": "orch-sid"
+  },
+  "tickets": {
+    "101": {
+      "ticket": "101",
+      "title": null,
+      "repo": null,
+      "area": [],
+      "deps": [],
+      "sizing": null,
+      "wave": null,
+      "incident": false,
+      "status": "merged",
+      "worker": {
+        "kind": "subagent",
+        "name": "lane-101",
+        "ref": "agent-101",
+        "worktree": null,
+        "branch": "feat/101-x"
+      },
+      "head": null,
+      "ready_head": null,
+      "body": null,
+      "pr": null,
+      "pr_state": null,
+      "merged_sha": null,
+      "merged_by": null,
+      "budget_cap": null,
+      "cap_decision": null,
+      "spent": 7.5,
+      "last_progress": null,
+      "stalls": 0,
+      "stall_counted_at": null,
+      "rebriefs": 0,
+      "rebrief_open": null,
+      "fail": null,
+      "dws": [],
+      "passes": {},
+      "blocked": null,
+      "parked_reason": null,
+      "lines": {},
+      "spend": {
+        "agent-101": {
+          "worker": "lane-101",
+          "kind": "subagent",
+          "usage": 7.5,
+          "reported": 0,
+          "spent": 7.5,
+          "forks": 2,
+          "split_streak": 0,
+          "under": "orch-sid",
+          "at": "2026-01-23T17:00:00Z"
+        }
+      }
+    },
+    "102": {
+      "ticket": "102",
+      "title": null,
+      "repo": null,
+      "area": [],
+      "deps": [],
+      "sizing": null,
+      "wave": null,
+      "incident": false,
+      "status": "claimed",
+      "worker": {
+        "kind": "peer",
+        "name": "lane-102",
+        "ref": "peer-sid",
+        "worktree": null,
+        "branch": "feat/102-x"
+      },
+      "head": null,
+      "ready_head": null,
+      "body": null,
+      "pr": null,
+      "pr_state": null,
+      "merged_sha": null,
+      "merged_by": null,
+      "budget_cap": null,
+      "cap_decision": null,
+      "spent": 11.0,
+      "last_progress": null,
+      "stalls": 0,
+      "stall_counted_at": null,
+      "rebriefs": 0,
+      "rebrief_open": null,
+      "fail": null,
+      "dws": [],
+      "passes": {},
+      "blocked": null,
+      "parked_reason": null,
+      "lines": {},
+      "spend": {
+        "peer-sid": {
+          "worker": "lane-102",
+          "kind": "peer",
+          "usage": 11.0,
+          "reported": 0,
+          "spent": 11.0,
+          "forks": 1,
+          "split_streak": 0,
+          "under": null,
+          "at": "2026-01-23T17:00:00Z"
+        }
+      }
+    },
+    "103": {
+      "ticket": "103",
+      "title": null,
+      "repo": null,
+      "area": [],
+      "deps": [],
+      "sizing": null,
+      "wave": null,
+      "incident": false,
+      "status": "claimed",
+      "worker": {
+        "kind": "headless",
+        "name": "lane-103",
+        "ref": "head-sid",
+        "worktree": null,
+        "branch": "feat/103-x"
+      },
+      "head": null,
+      "ready_head": null,
+      "body": null,
+      "pr": null,
+      "pr_state": null,
+      "merged_sha": null,
+      "merged_by": null,
+      "budget_cap": 5.0,
+      "cap_decision": null,
+      "spent": 3.0,
+      "last_progress": null,
+      "stalls": 0,
+      "stall_counted_at": null,
+      "rebriefs": 0,
+      "rebrief_open": null,
+      "fail": null,
+      "dws": [],
+      "passes": {},
+      "blocked": null,
+      "parked_reason": null,
+      "lines": {},
+      "spend": {
+        "head-sid": {
+          "worker": "lane-103",
+          "kind": "headless",
+          "usage": 2.5,
+          "reported": 3.0,
+          "spent": 3.0,
+          "forks": 0,
+          "split_streak": 0,
+          "under": null,
+          "at": "2026-01-23T17:00:00Z"
+        }
+      }
+    },
+    "104": {
+      "ticket": "104",
+      "title": null,
+      "repo": null,
+      "area": [],
+      "deps": [],
+      "sizing": null,
+      "wave": null,
+      "incident": false,
+      "status": "ready",
+      "worker": {
+        "kind": null,
+        "name": null,
+        "ref": null,
+        "worktree": null,
+        "branch": "feat/104-x"
+      },
+      "head": null,
+      "ready_head": null,
+      "body": null,
+      "pr": null,
+      "pr_state": null,
+      "merged_sha": null,
+      "merged_by": null,
+      "budget_cap": null,
+      "cap_decision": null,
+      "spent": 0,
+      "last_progress": null,
+      "stalls": 0,
+      "stall_counted_at": null,
+      "rebriefs": 0,
+      "rebrief_open": null,
+      "fail": null,
+      "dws": [],
+      "passes": {},
+      "blocked": null,
+      "parked_reason": null,
+      "lines": {}
+    }
+  }
+}
