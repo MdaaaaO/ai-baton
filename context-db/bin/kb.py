@@ -1162,7 +1162,9 @@ def blank_config() -> dict:
         "length": {"repos": {}},
         "commits": {"default": "conventional", "repos": {}},
         "context": {"sync": "auto"},
-        "swarm": {"lease_minutes": 120, "resources": [], "units": {}},
+        "swarm": {"lease_minutes": 120, "resources": [], "units": {},
+                  "budget": {"epic_usd": None, "worker_usd": None, "worker_forks": 4, "worker_minutes": None,
+                             "split_turns": 10, "hard_stop": False}},
     }
 
 

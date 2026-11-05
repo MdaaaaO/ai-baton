@@ -80,6 +80,11 @@ A worker starts cold. The brief carries everything it needs, and the rules the m
    the `DW-<n>` ids each test covers), anything uncertain — plus a ready PR body in a named scratch file whose
    `## Verified` carries a `DW-<n> · <evidence>` line per id and whose `## One honest limit` answers any id it cannot
    prove (`done_when.py coverage --ticket <file> --body <file>` prints `DONE WHEN: covered` before the worker returns).
+8. **Budget (a swarm worker):** the assignment carries four caps: `spend_usd`, `forks`, `minutes` and `split_turns`
+   (`swarm_budget.py caps`). On a breach, finish the current step, push, send `BLOCKED <ticket> budget orchestrator`,
+   run `session-handoff` if you are a session, and start nothing new. A split hint on the stats line for `split_turns`
+   turns is a breach like a dollar cap. A worker never extends its own cap: only the owner raises a budget
+   (`docs/swarm.md` § Authority matrix). A headless worker takes `spend_usd` as `--max-budget-usd`.
 
 ## The main session's loop
 

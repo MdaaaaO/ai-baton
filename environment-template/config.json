@@ -184,7 +184,15 @@
   "swarm": {
     "lease_minutes": 120,
     "resources": [],
-    "units": {}
+    "units": {},
+    "budget": {
+      "epic_usd": null,
+      "worker_usd": null,
+      "worker_forks": 4,
+      "worker_minutes": null,
+      "split_turns": 10,
+      "hard_stop": false
+    }
   },
   "tz_default": "UTC",
   "kit": {
