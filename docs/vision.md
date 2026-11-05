@@ -120,13 +120,13 @@ last gap in the verifier layer: a fork that grades the work before its author si
 
 Swarm mode (#674) adds to each layer. The engine is built; the skills are not, so nothing runs by itself yet. One
 orchestrator session owns an epic and runs `swarm-run` (#684), one swarm tick at a time. Built, in the engine: the task
-ledger `swarm.py` (#677), the message grammar and inboxes `swarm_msg.py` (#678), leases and STOP files `lease.py` (#679),
-the budget brake `swarm_budget.py` (#680), the verification gates `gates.py` (#689) and the `verifier` agent, a role that
-never wrote the change and alone records a pass (#681). Not built yet: the spec skills `epic-discover` and
-`epic-decompose`, with the owner's go before any worker starts (#682, #683), `swarm-run`, the `builder` agent with the
-assignment file and worker brief (#685), liveness and failover (#686), and the inbox, the digest, the weekly report and
-the plan walkthrough (#688, #690). The contract is `docs/swarm.md` (#676), and it says what is built.
-Why the mode needs no server: `docs/decisions/0005-orchestrator-is-a-session.md`.
+ledger `swarm.py` (#677), the message grammar and inboxes `swarm_msg.py` (#678), leases and STOP files `lease.py`
+(#679), the budget brake `swarm_budget.py` (#680), the verification gates `gates.py` and the `verifier` agent, a role
+that never wrote the change and alone records a pass (#681). Not built yet: the data-migration gate profile (#689), the
+spec skills `epic-discover` and `epic-decompose`, with the owner's go before any worker starts (#682, #683),
+`swarm-run`, the `builder` agent with the assignment file and worker brief (#685), liveness and failover (#686), and the
+inbox, the digest, the weekly report and the plan walkthrough (#688, #690). The contract is `docs/swarm.md` (#676), and
+it says what is built. Why the mode needs no server: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
 ## Non-goals
 
