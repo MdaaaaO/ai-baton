@@ -31,7 +31,9 @@ Every subcommand takes the epic key first:
             lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions, STOPs and HOLDs
             (--json). It writes what `swarm_budget.py sweep` writes and nothing else: `spent`, and a STOP when
             `swarm.budget.hard_stop` is armed. A breach of a fork, minute or split cap, a cap that does not parse, a stop not
-            written or a sweep that raises goes in `no_assign` and empties `assignable`
+            written, an epic cap with no orchestrator reading or a sweep that raises goes in `no_assign` and empties
+            `assignable`. --session-id names the orchestrator's session; without it this session counts only if its registry
+            row says `role: orchestrator` on this epic
   render    prints the `## Swarm` section and writes `sessions/<name>/prs.tsv` (repo, pr, head7, state, ticket; the state
             is the row's status; the header line alone means no open PR)
   resume    compares the ledger with `git ls-remote` and `gh pr list`, prints the difference and what to do with a lost
@@ -1056,13 +1058,13 @@ def print_tick(rep: dict) -> None:
         print(f"no-assign {r}")
 
 
-def budget_step(key: str, moment: datetime | None) -> dict:
+def budget_step(key: str, moment: datetime | None, session_id: str | None = None) -> dict:
     """The tick's one write, and what it found. `swarm_budget` imports this module, so it is imported here. Any raise closes
     the pool, and `SwarmError` could not catch it: run as a script this module is `__main__`, and `swarm_budget` holds a
     second copy whose classes are not this one's. `SystemExit` is how the config reader reports an invalid file."""
     try:
         import swarm_budget
-        return swarm_budget.tick_findings(swarm_budget.sweep(key, now=moment))
+        return swarm_budget.tick_findings(swarm_budget.sweep(key, session_id, now=moment))
     except (Exception, SystemExit) as e:
         return {"no_assign": [f"budget sweep failed: {str(e) or type(e).__name__}"], "lines": []}
 
@@ -1079,7 +1081,7 @@ def merge_sweep(rep: dict, found: dict) -> dict:
 def cmd_tick(a) -> int:
     moment = parse_time(a.now) if a.now else None
     load(a.key)  # a missing or a broken ledger is the tick's own error, before any sweep
-    found = budget_step(a.key, moment)
+    found = budget_step(a.key, moment, a.session_id)
     rep = merge_sweep(tick_report(load(a.key), moment), found)
     if a.json:
         print(json.dumps(rep, indent=2, ensure_ascii=False))
@@ -1327,6 +1329,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = command("tick", cmd_tick, "the orchestrator's input; writes only spent, and a STOP when the hard stop is armed")
     p.add_argument("--json", action="store_true")
     p.add_argument("--now", help="the time to compare against (default: the wall clock)")
+    p.add_argument("--session-id", help="the orchestrator's session (default: this session, if its registry row says role: orchestrator)")
 
     p = command("render", cmd_render, "print the `## Swarm` section and write sessions/<name>/prs.tsv")
     p.add_argument("--session", help="saved to the ledger; default: the ledger's, then the running session's registered name")

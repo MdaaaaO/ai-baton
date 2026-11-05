@@ -26,6 +26,7 @@ LEASE = HERE.parent / "bin" / "lease.py"
 KIT = HERE.parents[1]
 EPIC = "epic-1"
 ORCH = "orch-sid"
+AGENT = "a3f09c17d2b84e6a1"  # the shape of a real agent id, which is also its background task's id
 OUTPUT_USD_PER_TOKEN = 15 / 1_000_000  # the built-in sonnet row
 FAT = 200_000  # a prefix past the default split threshold
 
@@ -80,6 +81,10 @@ class BudgetCase(unittest.TestCase):
         path.write_text("".join(json.dumps(t) + "\n" for t in turns), encoding="utf-8")
         return path
 
+    def grow(self, session_id: str, *turns: dict) -> None:
+        with (self.projects / f"{session_id}.jsonl").open("a", encoding="utf-8") as f:
+            f.write("".join(json.dumps(t) + "\n" for t in turns))
+
     def write_subagent(self, session_id: str, agent_id: str, turns: list[dict], call: str | None = None) -> Path:
         directory = self.projects / session_id / "subagents"
         directory.mkdir(parents=True, exist_ok=True)
@@ -107,6 +112,23 @@ class BudgetCase(unittest.TestCase):
         args = ["assign", EPIC, ticket, "--kind", kind, "--name", f"lane-{ticket}", "--branch", f"feat/{ticket}-x", *extra]
         self.ok(SWARM, *args, *(["--ref", ref] if ref else []))
 
+    def running_peer(self, ticket: str = "7", session_id: str = "peer-sid") -> None:
+        """A peer assigned and swept once, so its meter runs: what the session writes next is what counts."""
+        if not (self.projects / f"{session_id}.jsonl").exists():
+            self.write_session(session_id, [turn(f"{session_id}-start")])
+        self.assign(ticket, session_id, "peer")
+        self.sweep()
+
+    def registry_row(self, session_id: str, epic: str = EPIC, role: str = "orchestrator") -> None:
+        sessions = self.root / "sessions"
+        sessions.mkdir(exist_ok=True)
+        extra = f"role: {role}\n" if role else ""
+        (sessions / f"lane-{session_id}.md").write_text(
+            f"---\nsession: lane-{session_id}\nsession_id: {session_id}\nstatus: active\nepic: {epic}\n{extra}---\n# x\n", encoding="utf-8")
+
+    def tick(self, *args: str) -> dict:
+        return json.loads(self.ok(SWARM, "tick", EPIC, "--json", *args))
+
     def ledger(self) -> dict:
         return json.loads((self.root / "state" / "swarm" / f"{EPIC}.json").read_text(encoding="utf-8"))
 
@@ -127,12 +149,12 @@ class SpendReading(BudgetCase):
         self.write_session(ORCH, [turn("o1", usd=1.0)])
         self.write_subagent(ORCH, "w7", [turn("w7-1", usd=2.0, tools=("toolu_f1",))])
         self.write_subagent(ORCH, "f1", [turn("f1-1", usd=0.5)], call="toolu_f1")
-        self.write_session("peer-sid", [turn("p1", usd=4.0)])
-        self.write_subagent("peer-sid", "ps", [turn("ps-1", usd=1.0)])
         headless = self.write_session("head-sid", [turn("h1", usd=2.5)])
         self.plan("7", "8", "9")
         self.assign("7", "w7")
-        self.assign("8", "peer-sid", "peer")
+        self.running_peer("8")
+        self.grow("peer-sid", turn("p1", usd=4.0))
+        self.write_subagent("peer-sid", "ps", [turn("ps-1", usd=1.0)])
         self.assign("9", str(headless), "headless")
         self.write_result("lane-9", json.dumps({"type": "result", "total_cost_usd": 3.0}))
 
@@ -140,7 +162,7 @@ class SpendReading(BudgetCase):
         self.full_epic()
         self.sweep("--session-id", ORCH)
         self.assertEqual(self.row("7")["spent"], 2.5, "a subagent worker: its own transcript and the fork it made")
-        self.assertEqual(self.row("8")["spent"], 5.0, "a peer: the session's TOTAL")
+        self.assertEqual(self.row("8")["spent"], 5.0, "a peer: what the session's TOTAL grew by")
         self.assertEqual(self.row("9")["spent"], 3.0, "a headless worker: the higher of the two readings")
         self.assertEqual(self.ledger()["spent"], 11.5, "the orchestrator's TOTAL holds its subagent worker and its fork once")
 
@@ -172,9 +194,9 @@ class SpendReading(BudgetCase):
         self.assertEqual(self.row("7")["spent"], 3.0)
 
     def test_a_smaller_reading_never_lowers_spent(self):
-        path = self.write_session("peer-sid", [turn("p1", usd=4.0)])
+        path = self.write_subagent(ORCH, "w7", [turn("p1", usd=4.0)])
         self.plan("7")
-        self.assign("7", "peer-sid", "peer")
+        self.assign("7", "w7")
         self.sweep()
         path.write_text(json.dumps(turn("p1", usd=1.0)) + "\n", encoding="utf-8")
         self.sweep()
@@ -216,7 +238,7 @@ class SpendReading(BudgetCase):
                 self.assertNotIn("spend", self.row())
 
     def test_a_missing_transcript_is_a_reported_line_that_refuses_nothing(self):
-        self.plan("7", epic_usd=10)
+        self.plan("7")
         self.assign("7", "nobody")
         out = self.sweep("--session-id", "nobody-either")
         self.assertIn("spend-unread 7", out)
@@ -278,23 +300,124 @@ class SpendReading(BudgetCase):
         self.assertIn("spend-unread 7", status)
 
     def test_a_second_worker_on_the_row_adds_to_the_first(self):
-        self.write_session("peer-1", [turn("a1", usd=2.0)])
-        self.write_session("peer-2", [turn("b1", usd=1.5)])
+        self.write_session("peer-2", [turn("b0", usd=9.0)])
         self.plan("7")
-        self.assign("7", "peer-1", "peer")
+        self.running_peer("7", "peer-1")
+        self.grow("peer-1", turn("a1", usd=2.0))
         self.sweep()
         self.ok(SWARM, "assign", EPIC, "7", "--kind", "peer", "--name", "lane-7b", "--ref", "peer-2", "--branch", "feat/7-x")
+        self.sweep()
+        self.grow("peer-2", turn("b1", usd=1.5))
         self.sweep()
         self.assertEqual(self.row()["spent"], 3.5)
 
     def test_a_sweep_with_nothing_changed_leaves_the_ledger_alone(self):
         self.write_session("peer-sid", [turn("p1", usd=2.0)])
         self.plan("7")
-        self.assign("7", "peer-sid", "peer")
+        self.running_peer()
+        self.grow("peer-sid", turn("p2", usd=1.0))
         self.sweep()
         before = self.ledger()
         self.sweep()
         self.assertEqual(self.ledger(), before)
+
+
+class PeerMeter(BudgetCase):
+    """A peer's session holds work from before its assignment, and a ref can sit on two rows: each dollar lands on one row."""
+
+    @staticmethod
+    def forks(count: int, prefix: str = "p") -> tuple[str, ...]:
+        return tuple(f"toolu_{prefix}{i}" for i in range(count))
+
+    def test_a_peers_earlier_work_closes_nothing_on_its_first_tick(self):
+        self.write_session("peer-sid", [turn("p1", usd=20.0, tools=self.forks(5))])
+        self.plan("7", "8")
+        self.assign("7", "peer-sid", "peer", "--cap-usd", "10")
+        t = self.tick()
+        self.assertEqual((t["assignable"], t["no_assign"]), (["8"], []))
+        self.assertEqual(self.row()["spent"], 0)
+        self.assertEqual(self.ledger()["spend"]["meters"]["peer-sid"]["usage"], 20.0)
+
+    def test_it_counts_usage_and_forks_from_there(self):
+        self.write_session("peer-sid", [turn("p1", usd=20.0, tools=self.forks(5))])
+        self.plan("7", "8")
+        self.running_peer()
+        self.grow("peer-sid", turn("p2", usd=1.5, tools=self.forks(2, "q")))
+        self.sweep()
+        reading = self.row()["spend"]["peer-sid"]
+        self.assertEqual((reading["usage"], reading["forks"], self.row()["spent"]), (1.5, 2, 1.5))
+
+    def test_the_cap_holds_from_there(self):
+        self.write_session("peer-sid", [turn("p1", usd=20.0, tools=self.forks(5))])
+        self.plan("7", "8")
+        self.running_peer()
+        self.grow("peer-sid", turn("p2", tools=self.forks(5, "q")))
+        self.assertIn("over budget: 7 made 5 forks, cap 4", self.tick()["no_assign"])
+
+    def test_a_smaller_reading_never_lowers_it(self):
+        self.plan("7")
+        self.running_peer()
+        self.grow("peer-sid", turn("p1", usd=4.0))
+        self.sweep()
+        self.write_session("peer-sid", [turn("p1", usd=1.0)])
+        self.sweep()
+        self.assertEqual(self.row()["spent"], 4.0)
+        self.grow("peer-sid", turn("p2", usd=4.0))
+        self.sweep()
+        self.assertEqual(self.row()["spent"], 5.0, "only what passes the last figure seen is new")
+
+    def test_a_subagents_and_a_headless_workers_transcript_take_no_baseline(self):
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=3.0, tools=self.forks(2))])
+        headless = self.write_session("head-sid", [turn("h1", usd=2.0)])
+        self.plan("7", "8")
+        self.assign("7", "w7")
+        self.assign("8", str(headless), "headless")
+        self.sweep()
+        self.assertEqual((self.row("7")["spent"], self.row("7")["spend"]["w7"]["forks"], self.row("8")["spent"]), (3.0, 2, 2.0))
+
+    def test_a_ref_on_two_rows_counts_once_on_every_figure(self):
+        self.plan("7", "8")
+        self.write_session("peer-sid", [turn("p0")])
+        self.assign("7", "peer-sid", "peer")
+        self.assign("8", "peer-sid", "peer")
+        self.sweep()
+        self.grow("peer-sid", turn("p1", usd=3.0))
+        self.sweep()
+        self.assertEqual(self.row("7")["spent"] + self.row("8")["spent"], 3.0)
+        self.assertEqual(self.ledger()["spent"], 3.0)
+        self.assertEqual(self.tick()["budget"]["spent"], 3.0, "swarm.py sums the rows")
+
+    def test_a_ref_new_to_a_row_takes_the_meter_and_the_row_before_keeps_its_share(self):
+        self.plan("7", "8")
+        self.running_peer("7")
+        self.grow("peer-sid", turn("p1", usd=2.0))
+        self.sweep()
+        self.grow("peer-sid", turn("p2", usd=0.5))
+        self.assign("8", "peer-sid", "peer")
+        self.sweep()
+        self.grow("peer-sid", turn("p3", usd=1.0))
+        self.sweep()
+        self.assertEqual((self.row("7")["spent"], self.row("8")["spent"], self.ledger()["spent"]), (2.5, 1.0, 3.5))
+
+    def test_a_ref_on_two_rows_breaches_a_cap_once(self):
+        self.plan("7", "8", "9")
+        self.write_session("peer-sid", [turn("p0")])
+        self.assign("7", "peer-sid", "peer")
+        self.assign("8", "peer-sid", "peer")
+        self.sweep()
+        self.grow("peer-sid", turn("p1", tools=self.forks(5)), *fat_turns(29))
+        out = self.sweep()
+        self.assertEqual(len(re.findall(r"(?m)^over-budget \d+ kind=forks", out)), 1, out)
+        self.assertEqual(len(re.findall(r"(?m)^over-budget \d+ kind=split", out)), 1, out)
+
+    def test_a_row_that_held_the_meter_and_ended_is_paid_and_the_new_row_starts_clean(self):
+        grown = {"worker": "lane-8", "kind": "peer", "usage": 7.0, "reported": None, "forks": 3, "split_streak": 0, "under": None}
+        ended = {"worker": "lane-7", "kind": "peer", "usage": 2.0, "reported": 0, "spent": 2.0, "forks": 1, "split_streak": 0, "under": None}
+        led = {"tickets": {"7": {"status": "done", "spent": 2.0, "spend": {"ref": ended}}, "8": {"status": "assigned", "spent": 0}},
+               "spend": {"orchestrators": {}, "current": None, "meters": {"ref": {"holder": "7", "usage": 5.0, "forks": 2, "reported": 0}}}}
+        swarm_budget.meter_reading(led, "ref", {"8": grown}, "now")
+        self.assertEqual((led["tickets"]["7"]["spent"], led["tickets"]["8"]["spent"]), (4.0, 0))
+        self.assertEqual(led["spend"]["meters"]["ref"], {"holder": "8", "usage": 7.0, "forks": 3, "reported": 0})
 
 
 class OtherCaps(BudgetCase):
@@ -390,6 +513,33 @@ class OtherCaps(BudgetCase):
         self.assertIn("no-spawn budget config: swarm.budget.worker_usd is not a number", out)
         self.assertIn("no-spawn budget config: swarm.budget.split_turns is not a number", out)
 
+    def test_null_is_no_cap_for_every_key(self):
+        self.config(epic_usd=None, worker_usd=None, worker_forks=None, worker_minutes=None, split_turns=None)
+        self.write_subagent(ORCH, "w7", [*fat_turns(29), turn("f", tools=tuple(f"toolu_{i}" for i in range(9)))])
+        self.plan("7", "8")
+        self.assign("7", "w7")
+        at = self.assign_time() + timedelta(days=30)
+        out = self.sweep("--now", at.strftime(swarm.LEDGER_TIME))
+        self.assertNotIn("over-budget", out)
+        self.assertNotIn("no-spawn", out)
+        self.assertEqual(self.ok(BUDGET, "caps", EPIC, "7").splitlines(),
+                         ["spend_usd: none", "forks: none", "minutes: none", "split_turns: none"])
+        self.assertEqual(self.tick("--now", at.strftime(swarm.LEDGER_TIME))["assignable"], ["8"])
+
+    def test_a_null_split_cap_spares_the_orchestrators_own_hint(self):
+        self.config(split_turns=None)
+        self.write_session(ORCH, fat_turns(29))
+        self.plan("7")
+        out = self.sweep("--session-id", ORCH)
+        self.assertNotIn("over-budget", out)
+
+    def test_a_key_left_out_keeps_its_default(self):
+        self.config(worker_usd=5)
+        self.plan("7")
+        self.assign("7", None)
+        caps = json.loads(self.ok(BUDGET, "caps", EPIC, "7", "--json"))
+        self.assertEqual((caps["spend_usd"], caps["forks"], caps["split_turns"]), (5, 4, 10))
+
     def test_an_unknown_ledger_or_ticket_exits_with_swarms_codes(self):
         self.assertEqual(self.run_script(BUDGET, "status", "nothing").returncode, 1)
         self.plan("7")
@@ -453,7 +603,63 @@ class HardStop(BudgetCase):
         out = self.sweep()
         self.assertIn("task-stop 7 task=w7", out)
         self.assertNotIn("task-stop 8", out)
-        self.assertNotRegex(out, r"\bpid\b|\bkill\b")
+        self.assertNotIn("task-stop-unknown", out)
+        self.assertNotRegex("\n".join(x for x in out.splitlines() if x.startswith("task-stop")), r"\bpid\b|\bkill\b")
+
+    def task_stop(self, ref: str | None) -> str:
+        """A breach on the agent's own row, the stop armed, `ref` on a second running subagent: what it is told."""
+        self.config(hard_stop=True)
+        self.write_subagent(ORCH, AGENT, [turn("w7-1", usd=3.0)])
+        self.plan("7", "8")
+        self.assign("7", AGENT, "subagent", "--cap-usd", "2")
+        self.assign("8", ref)
+        return self.ok(SWARM, "tick", EPIC)
+
+    def test_a_bare_agent_id_is_the_task_id(self):
+        self.assertRegex(self.task_stop(None), rf"(?m)^task-stop 7 task={AGENT}$")
+
+    def test_a_path_named_for_the_agent_gives_the_task_id(self):
+        path = self.write_subagent(ORCH, "b1c2d3e4f5a6b7c8d", [turn("w8-1")])
+        self.assertRegex(self.task_stop(str(path)), r"(?m)^task-stop 8 task=b1c2d3e4f5a6b7c8d$")
+
+    def test_a_path_with_no_agent_in_its_name_is_unknown(self):
+        path = self.write_session("head-sid", [turn("h1")])
+        out = self.task_stop(str(path))
+        self.assertRegex(out, r"(?m)^task-stop-unknown 8$")
+        self.assertNotRegex(out, r"(?m)^task-stop 8 ")
+
+    def test_no_ref_is_unknown_never_the_lane_name(self):
+        out = self.task_stop(None)
+        self.assertRegex(out, r"(?m)^task-stop-unknown 8$")
+        self.assertNotIn("task=lane-8", out)
+
+    def numbered_breach(self, *row: str) -> str:
+        """A real stop written from a session with a registry row: only a numeric key matches a row's epic in `lease.py`."""
+        self.config(hard_stop=True)
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=3.0)])
+        self.env["CLAUDE_CODE_SESSION_ID"] = "stopping-sid"
+        self.registry_row("stopping-sid", *row)
+        self.ok(SWARM, "init", "674", "--repo", "owner/repo", "--session", "orch-1")
+        self.ok(SWARM, "add", "674", "7")
+        self.ok(SWARM, "approve", "674", "--decision", "go on the plan")
+        self.ok(SWARM, "assign", "674", "7", "--kind", "subagent", "--name", "lane-7", "--ref", "w7", "--branch", "feat/7-x", "--cap-usd", "2")
+        return self.ok(SWARM, "tick", "674")
+
+    def test_what_the_stop_says_reaches_the_tick(self):
+        out = self.numbered_breach("674", "")
+        self.assertRegex(out, r"(?m)^hard-stop 674 written reason=")
+        self.assertIn("this session has no role: orchestrator, so this STOP denies its own next call", out)
+        self.assertIn("A STOP cannot beat a call already in flight", out)
+
+    def test_an_orchestrators_stop_does_not_warn_it_off_its_own_next_call(self):
+        out = self.numbered_breach("674", "orchestrator")
+        self.assertRegex(out, r"(?m)^hard-stop 674 written reason=")
+        self.assertNotIn("this session has no role", out)
+
+    def test_a_stop_that_was_already_there_says_nothing_new(self):
+        self.breach(hard_stop=True)
+        self.sweep()
+        self.assertNotIn("A STOP cannot beat", self.sweep())
 
     def test_a_stop_that_cannot_be_written_fails_loudly_and_refuses_spawn(self):
         self.breach(hard_stop=True)
@@ -571,9 +777,6 @@ class SplitBreach(BudgetCase):
 class TickHook(BudgetCase):
     """DW-1 and DW-3 through the tick itself: `swarm.py tick` sweeps, and what the sweep finds reaches its report."""
 
-    def tick(self, *args: str) -> dict:
-        return json.loads(self.ok(SWARM, "tick", EPIC, "--json", *args))
-
     def forks_over(self) -> None:
         self.write_subagent(ORCH, "w7", [turn("w7-1", tools=tuple(f"toolu_{i}" for i in range(5)))])
         self.plan("7", "8")
@@ -623,8 +826,7 @@ class TickHook(BudgetCase):
         self.setUp()
         self.write_session(ORCH, fat_turns(29))
         self.plan("7")
-        self.env["CLAUDE_CODE_SESSION_ID"] = ORCH
-        t = self.tick()
+        t = self.tick("--session-id", ORCH)
         self.assertIn("over budget: the orchestrator carried the split hint for 10 turns, cap 10", t["no_assign"])
         self.assertEqual(t["assignable"], [])
 
@@ -666,12 +868,16 @@ class TickHook(BudgetCase):
         self.assertTrue(any(r.startswith("budget config: swarm.budget.worker_forks") for r in t["no_assign"]), t["no_assign"])
 
     def test_an_unreadable_transcript_is_a_line_and_the_pool_stays_open(self):
-        self.plan("7", "8", epic_usd=10)
-        self.assign("7", "nobody")
-        t = self.tick()
-        self.assertEqual(t["assignable"], ["8"])
-        self.assertEqual(t["no_assign"], [])
-        self.assertRegex(self.ok(SWARM, "tick", EPIC), r"(?m)^spend-unread 7 why=")
+        for init in ({}, {"epic_usd": 10}):
+            with self.subTest(init=init):
+                self.setUp()
+                self.write_session(ORCH, [turn("o1", usd=1.0)])
+                self.plan("7", "8", **init)
+                self.assign("7", "nobody")
+                t = self.tick("--session-id", ORCH)
+                self.assertEqual(t["assignable"], ["8"])
+                self.assertEqual(t["no_assign"], [])
+                self.assertRegex(self.ok(SWARM, "tick", EPIC, "--session-id", ORCH), r"(?m)^spend-unread 7 why=")
 
     def test_a_sweep_that_raises_closes_the_pool_and_the_tick_still_prints(self):
         self.plan("7")
@@ -736,6 +942,179 @@ class TickHook(BudgetCase):
         self.assertIn("`spent`, and a STOP when", " ".join(doc.split()))
 
 
+class OrchestratorReading(BudgetCase):
+    """An epic cap needs the orchestrator's reading this sweep, and only an orchestrator gets on the epic's figure."""
+
+    def closed_for(self, t: dict, why: str) -> None:
+        self.assertEqual(t["assignable"], [])
+        self.assertTrue(any(r.startswith(f"no orchestrator reading under the epic cap: {why}") for r in t["no_assign"]), t["no_assign"])
+
+    def test_an_epic_cap_with_no_session_id_closes_the_pool(self):
+        self.write_session(ORCH, [turn("o1", usd=50.0)])
+        self.plan("7", epic_usd=5)
+        self.closed_for(self.tick(), "no session id")
+        self.assertRegex(self.ok(SWARM, "tick", EPIC), r"(?m)^spend-unread orchestrator why=")
+
+    def test_an_epic_cap_with_the_transcript_gone_closes_the_pool(self):
+        self.plan("7", epic_usd=5)
+        self.closed_for(self.tick("--session-id", "gone"), "no transcript for session gone")
+
+    def test_an_earlier_reading_does_not_stand_in_for_this_sweep(self):
+        path = self.write_session(ORCH, [turn("o1", usd=1.0)])
+        self.plan("7", epic_usd=5)
+        self.assertEqual(self.tick("--session-id", ORCH)["assignable"], ["7"])
+        path.unlink()
+        self.closed_for(self.tick("--session-id", ORCH), "no transcript")
+        self.assertEqual(self.ledger()["spent"], 1.0)
+
+    def test_tick_session_id_reads_the_figure_the_cap_is_held_to(self):
+        self.write_session(ORCH, [turn("o1", usd=50.0)])
+        self.plan("7", epic_usd=5)
+        t = self.tick("--session-id", ORCH)
+        self.assertEqual((t["budget"]["state"], t["budget"]["spent"]), ("over", 50.0))
+        self.assertEqual(t["assignable"], [])
+        self.assertTrue(any("epic budget at its cap" in r for r in t["no_assign"]), t["no_assign"])
+
+    def test_under_the_cap_with_the_reading_the_pool_stays_open(self):
+        self.write_session(ORCH, [turn("o1", usd=1.0)])
+        self.plan("7", epic_usd=5)
+        t = self.tick("--session-id", ORCH)
+        self.assertEqual((t["assignable"], t["no_assign"]), (["7"], []))
+
+    def test_with_no_epic_cap_no_reading_is_a_line_only(self):
+        self.plan("7")
+        self.assertEqual(self.tick()["assignable"], ["7"])
+        self.assertRegex(self.ok(SWARM, "tick", EPIC), r"(?m)^spend-unread orchestrator why=")
+
+    def stray_session(self) -> None:
+        self.write_session("reader", [turn("r1", usd=30.0)])
+        self.env["CLAUDE_CODE_SESSION_ID"] = "reader"
+        self.plan("7")
+
+    def test_a_session_with_no_registry_row_is_not_recorded(self):
+        self.stray_session()
+        out = self.ok(SWARM, "tick", EPIC)
+        self.assertRegex(out, r"(?m)^spend-unread orchestrator why=.*session reader has no registry row with role: orchestrator")
+        self.assertEqual((self.ledger().get("spend"), self.ledger()["spent"]), (None, 0))
+
+    def test_a_row_with_no_role_or_on_another_epic_is_not_recorded(self):
+        for row in (("", ""), (EPIC, "peer"), ("other-epic", "orchestrator")):
+            with self.subTest(row=row):
+                self.setUp()
+                self.stray_session()
+                self.registry_row("reader", row[0] or EPIC, row[1])
+                self.ok(SWARM, "tick", EPIC)
+                self.assertEqual(self.ledger()["spent"], 0)
+
+    def test_a_row_with_the_role_on_this_epic_is_recorded(self):
+        self.stray_session()
+        self.registry_row("reader")
+        self.ok(SWARM, "tick", EPIC)
+        self.assertEqual((self.ledger()["spent"], self.ledger()["spend"]["current"]), (30.0, "reader"))
+
+    def test_a_row_naming_the_epic_by_its_full_reference_matches_a_numeric_key(self):
+        self.write_session("reader", [turn("r1", usd=2.0)])
+        self.env["CLAUDE_CODE_SESSION_ID"] = "reader"
+        self.registry_row("reader", "owner/repo#674")
+        self.ok(SWARM, "init", "674", "--repo", "owner/repo")
+        self.ok(SWARM, "tick", "674")
+        self.assertEqual(json.loads((self.root / "state" / "swarm" / "674.json").read_text(encoding="utf-8"))["spent"], 2.0)
+
+    def test_an_id_named_on_the_command_needs_no_row(self):
+        self.stray_session()
+        self.ok(SWARM, "tick", EPIC, "--session-id", "reader")
+        self.assertEqual(self.ledger()["spent"], 30.0)
+
+    def test_forget_repairs_a_session_recorded_by_mistake_and_the_next_tick_keeps_it(self):
+        self.config(hard_stop=True)
+        self.write_session(ORCH, [turn("o1", usd=1.0)])
+        self.write_session("reader", [turn("r1", usd=30.0)])
+        self.plan("7", epic_usd=10)
+        self.tick("--session-id", ORCH)
+        self.tick("--session-id", "reader")
+        self.assertTrue(self.stop_file().exists())
+        self.ok(SWARM, "budget", EPIC, "--spent", "0")
+        self.assertEqual(self.tick("--session-id", ORCH)["budget"]["spent"], 31.0, "the map still holds it")
+        out = self.ok(BUDGET, "forget", EPIC, "reader")
+        self.assertIn("dropped=30.00 spent=31.00 to 1.00", out)
+        self.assertIn(f"STOP-{EPIC} stands: `lease.py go {EPIC}` lifts it", out)
+        led = self.ledger()
+        self.assertNotIn("reader", led["spend"]["orchestrators"])
+        self.assertEqual(led["spent"], 1.0)
+        self.assertEqual((led["log"][-1]["act"], "reader" in led["log"][-1]["note"]), ("forget", True))
+        self.assertEqual(self.tick("--session-id", ORCH)["budget"]["spent"], 1.0, "never-lower does not undo it")
+        self.assertEqual(self.ledger()["spent"], 1.0)
+
+    def test_forget_keeps_a_figure_set_by_hand(self):
+        self.write_session("reader", [turn("r1", usd=30.0)])
+        self.plan("7")
+        self.tick("--session-id", "reader")
+        self.ok(SWARM, "budget", EPIC, "--spent", "50")
+        self.ok(BUDGET, "forget", EPIC, "reader")
+        self.assertEqual(self.ledger()["spent"], 20.0)
+
+    def test_forget_leaves_a_subagent_under_that_session_counted(self):
+        self.write_session("reader", [turn("r1", usd=30.0)])
+        self.write_subagent("reader", "w7", [turn("w7-1", usd=2.0)])
+        self.plan("7")
+        self.assign("7", "w7")
+        self.tick("--session-id", "reader")
+        self.assertEqual(self.ledger()["spent"], 32.0)
+        self.ok(BUDGET, "forget", EPIC, "reader")
+        self.assertEqual(self.ledger()["spent"], 2.0)
+
+    def test_forget_of_the_current_session_clears_its_split_breach(self):
+        self.write_session("reader", fat_turns(29))
+        self.plan("7")
+        self.assertIn("over budget: the orchestrator", " ".join(self.tick("--session-id", "reader")["no_assign"]))
+        self.ok(BUDGET, "forget", EPIC, "reader")
+        self.assertNotIn("kind=split", self.ok(BUDGET, "status", EPIC))
+
+    def test_forget_of_a_session_not_on_the_map_exits_1_and_writes_nothing(self):
+        self.plan("7")
+        before = self.ledger()
+        p = self.run_script(BUDGET, "forget", EPIC, "nobody")
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertEqual(self.ledger(), before)
+
+
+class Digest(BudgetCase):
+    """A row with no reading is not $0, and the digest names what it could not read."""
+
+    def test_a_missing_transcript_prints_a_question_mark_and_names_the_worker(self):
+        self.plan("7")
+        self.assign("7", "nobody", "subagent", "--cap-usd", "2")
+        self.sweep()
+        digest = self.ok(BUDGET, "digest", EPIC)
+        self.assertIn("- #7 lane-7: ? / $2.00, forks ? / 4", digest)
+        self.assertIn("Spend unread: #7.", digest)
+
+    def test_a_figure_by_hand_prints_and_the_reading_is_still_unread(self):
+        self.plan("7")
+        self.assign("7", "nobody")
+        self.ok(SWARM, "progress", EPIC, "7", "--spent", "2.5")
+        digest = self.ok(BUDGET, "digest", EPIC)
+        self.assertIn("- #7 lane-7: $2.50 / no cap, forks ? / 4", digest)
+        self.assertIn("Spend unread: #7.", digest)
+
+    def test_a_row_with_a_reading_prints_its_figure_and_no_unread_line(self):
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=1.0)])
+        self.plan("7")
+        self.assign("7", "w7")
+        self.sweep()
+        digest = self.ok(BUDGET, "digest", EPIC)
+        self.assertIn("- #7 lane-7: $1.00 / no cap, forks 0 / 4", digest)
+        self.assertNotIn("Spend unread", digest)
+
+    def test_an_epic_cap_with_no_orchestrator_reading_names_it(self):
+        self.plan("7", epic_usd=10)
+        self.assign("7", "nobody")
+        self.assertIn("Spend unread: #7, the orchestrator.", self.ok(BUDGET, "digest", EPIC))
+        self.write_session(ORCH, [turn("o1", usd=1.0)])
+        self.sweep("--session-id", ORCH)
+        self.assertIn("Spend unread: #7.", self.ok(BUDGET, "digest", EPIC))
+
+
 class WorkerBrief(unittest.TestCase):
     """DW-2: the brief states the breach behaviour and the rule that a worker never extends its own cap."""
 
@@ -780,9 +1159,9 @@ class CostReportSection(BudgetCase):
             self.assertEqual(set(swarm.new_row("x")) - set(row), set())
 
     def test_with_no_flag_it_reads_the_stores_ledgers(self):
-        self.write_session("peer-sid", [turn("p1", usd=2.0)])
         self.plan("7")
-        self.assign("7", "peer-sid", "peer")
+        self.running_peer()
+        self.grow("peer-sid", turn("p1", usd=2.0))
         self.sweep()
         p = self.report()
         self.assertEqual(p.returncode, 0, p.stderr)

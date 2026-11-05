@@ -8,20 +8,24 @@ counted at each return and each tick, so a cap can be overshot by one step. `swa
 
 Every subcommand takes the epic key first:
   sweep    read every worker and the orchestrator, write `spent`, report the breaches. With `swarm.budget.hard_stop` on, a
-           breach writes `STOP-<key>` through `lease.py stop` and prints one `task-stop` line per running background worker,
-           for the orchestrator's `TaskStop` by task id. It never touches a pid. --session-id names the orchestrator's
-           session (default: this session). Exit 2 when the stop could not be written.
+           breach writes `STOP-<key>` through `lease.py stop`, prints what that says, and prints one line per running subagent:
+           `task-stop <ticket> task=<agent id>` for the orchestrator's `TaskStop`, or `task-stop-unknown <ticket>` when its ref
+           gives no id and that worker was not reached. It never touches a pid. --session-id names the orchestrator's session;
+           without it this session is the orchestrator only if its registry row says `role: orchestrator` on this epic. Exit 2
+           when the stop could not be written.
   status   the same report from what the ledger holds now. Writes nothing and reads no transcript
   digest   the digest's budget lines, a stop's line among them. Writes nothing
   caps     the four cap fields an assignment file carries, resolved for one ticket. --forks, --minutes and --split-turns set
            that assignment's own; a raise needs the owner's --decision line, a first or a lower cap needs none. The dollar
            cap is set by `swarm.py assign --cap-usd`
+  forget   the owner's repair for a session recorded as an orchestrator by mistake: drop it from the map, log it, recompute the
+           epic's `spent`. A STOP it caused stays until `lease.py go`
 
 **The caps.** `spend_usd`, `forks`, `minutes` and `split_turns` are the field names an assignment file and the worker brief
 use. Each resolves assignment, then config, then default (the dollar cap has the ledger's `swarm.py budget` value between
 them): `swarm.budget.worker_usd` none, `swarm.budget.worker_forks` 4, `swarm.budget.worker_minutes` none,
 `swarm.budget.split_turns` 10. `swarm.budget.epic_usd` (none) is the epic's and `swarm.budget.hard_stop` (false) arms the
-stop. A headless worker takes `spend_usd` as `--max-budget-usd`.
+stop. A key set to null is no cap, whichever key it is. A headless worker takes `spend_usd` as `--max-budget-usd`.
 
 **A breach.** `spend` at or past the cap, `forks` or `minutes` past it, and `split`: the stats line's split hint on for
 `split_turns` consecutive turns, for a worker or for the orchestrator. Forks, minutes and split count only a worker that
@@ -35,9 +39,19 @@ agent id or a transcript's absolute path): `usage` is `session_stats.py`'s TOTAL
 figure cannot free budget. The row's `spent` is the sum of its readings. The epic's `spent` is each orchestrator session's
 TOTAL, which already holds that session's subagent workers, plus everything spent outside those sessions.
 
-**Failing closed.** A cap that does not parse and a stop not written refuse the next spawn (`refuse`). A `hard_stop` that is
-neither true, false nor null reads as true. A transcript that cannot be read is a reported line (`spend-unread`) and closes
-nothing: that worker keeps its last figure until a reading or `swarm.py progress --spent` gives another.
+**A meter.** One per transcript, `spend.meters[<ref>]`: the totals last seen and the row that holds it. A row counts what the
+meter grew by while it held it, so each dollar and each fork lands on one row. A peer's session holds work from before its
+assignment, so its meter starts at the totals of the first sweep that sees it, and work between the assignment and that sweep
+goes uncounted. A subagent's or a headless worker's transcript starts with the assignment, so its meter starts at zero. A
+second row naming the ref takes the meter at its first sweep; the row before it keeps what it counted and stops counting.
+
+**An orchestrator.** A session is recorded on the epic only when `--session-id` names it or its registry row says
+`role: orchestrator` on this epic, so one tick from another session cannot put that session's total on the figure.
+
+**Failing closed.** A cap that does not parse, a stop not written and an epic cap with no orchestrator reading this sweep refuse
+the next spawn (`refuse`). A `hard_stop` that is neither true, false nor null reads as true. A worker's transcript that cannot
+be read is a reported line (`spend-unread`) and closes nothing: that worker keeps its last figure until a reading or
+`swarm.py progress --spent` gives another.
 
 Another script imports `sweep(key)`, `assess(led)`, `tick_findings(report)`, `digest_lines(led, report)`,
 `row_caps(led, row)` and `CAP_FIELDS`.
@@ -50,6 +64,7 @@ import glob
 import json
 import math
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,6 +79,8 @@ import transcripts  # noqa: E402 — the one transcript reader
 CAP_FIELDS = ("spend_usd", "forks", "minutes", "split_turns")
 CONFIG_DEFAULTS = {"epic_usd": None, "worker_usd": None, "worker_forks": 4, "worker_minutes": None, "split_turns": 10}
 CAP_CONFIG = {"forks": "worker_forks", "minutes": "worker_minutes", "split_turns": "split_turns"}
+METER_FIGURES = ("usage", "forks", "reported")
+AGENT_FILE = re.compile(r"agent-(.+)\.jsonl")
 RESULT_FILE = "result.json"
 COST_FIELD = "total_cost_usd"
 META_SUFFIX = ".meta.json"
@@ -72,13 +89,13 @@ READ_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError)  # a tr
 
 # ── caps ────────────────────────────────────────────────────────────────────────────────────
 def config_caps() -> tuple[dict, list[str]]:
-    """The `swarm.budget` numbers, and a line per one that does not parse. A bad value keeps its default here: the line
-    is what fails closed, because `assess` refuses the next spawn on it."""
+    """The `swarm.budget` numbers, and a line per one that does not parse. Null is no cap, for every key. A bad value keeps
+    its default here: the line is what fails closed, because `assess` refuses the next spawn on it."""
     values, errors = {}, []
     for name, default in CONFIG_DEFAULTS.items():
         raw = profile.get(f"swarm.budget.{name}", default)
         if raw is None:
-            values[name] = default
+            values[name] = None
         elif isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) and raw >= 0:
             values[name] = raw
         else:
@@ -265,21 +282,36 @@ def read_orchestrator(session_id: str) -> tuple[dict | None, str | None]:
         return None, f"{path}: {e!r}"
 
 
+def orchestrator_session(key: str, named: str | None) -> tuple[str | None, str | None]:
+    """The session to record as this epic's orchestrator, or why there is none. Being the one that runs the tick is not
+    enough: a stray session's total would stay on the epic's figure. The registry is `lease.py`'s, the role and epic check
+    its `stop_for` uses."""
+    if named:
+        return named, None
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    if not session_id:
+        return None, "no session id: run this in the orchestrator's session or pass --session-id"
+    rows = lease.session_rows(profile.context_root(), session_id)
+    if any(role == "orchestrator" and (epic == key or lease.epic_matches(key, epic, repos)) for _, epic, repos, role in rows):
+        return session_id, None
+    return None, f"session {session_id} has no registry row with role: orchestrator on {key}: register the role or pass --session-id"
+
+
 # ── the ledger's spend ──────────────────────────────────────────────────────────────────────
 def reading_key(row: dict) -> str | None:
     w = row["worker"]
     return w.get("ref") or w.get("name")
 
 
-def merge_reading(row: dict, key: str, new: dict, now: str) -> None:
-    """One reading onto the row. Spend and forks never go down, and the row's `spent` is the sum of its readings: a second
-    worker on the row starts its own transcript from nothing."""
+def merge_reading(row: dict, key: str, new: dict, grown: dict, now: str) -> None:
+    """A transcript's growth onto the row. Spend and forks only go up, and the row's `spent` is the sum of its readings: a
+    second worker on the row starts its own transcript from nothing."""
     spend = row.setdefault("spend", {})
     old = spend.get(key) or {}
-    usage = max(old.get("usage") or 0, new["usage"] or 0)
-    reported = max(old.get("reported") or 0, new["reported"] or 0)
-    merged = {"worker": new["worker"], "kind": new["kind"], "usage": round(usage, 2), "reported": round(reported, 2),
-              "spent": round(max(usage, reported), 2), "forks": max(old.get("forks") or 0, new["forks"] or 0),
+    usage = (old.get("usage") or 0) + grown["usage"]
+    reported = (old.get("reported") or 0) + grown["reported"]
+    merged = {"worker": new["worker"], "kind": new["kind"], "usage": round(usage, 6), "reported": round(reported, 6),
+              "spent": round(max(usage, reported), 2), "forks": (old.get("forks") or 0) + grown["forks"],
               "split_streak": old.get("split_streak", 0) if new["split_streak"] is None else new["split_streak"],
               "under": new["under"] or old.get("under")}
     if any(old.get(k) != v for k, v in merged.items()):
@@ -287,9 +319,30 @@ def merge_reading(row: dict, key: str, new: dict, now: str) -> None:
     row["spent"] = max(row.get("spent") or 0, round(sum(r["spent"] for r in spend.values()), 2))
 
 
+def meter_reading(led: dict, key: str, named: dict[str, dict], now: str) -> None:
+    """One transcript's totals, onto the rows that name it (`named`: ticket to reading). A first sighting starts the meter, at
+    the totals for a peer and at zero otherwise. The growth goes to the row holding the meter, then a row new to this ref
+    takes it. Only the holder carries the split streak, so a ref on two rows flags once."""
+    rows = led["tickets"]
+    meters = led.setdefault("spend", {"orchestrators": {}, "current": None}).setdefault("meters", {})
+    totals = next(iter(named.values()))
+    meter = meters.get(key)
+    if meter is None:
+        start = totals if totals["kind"] == "peer" else {}
+        meter = meters[key] = {"holder": list(named)[-1], **{f: start.get(f) or 0 for f in METER_FIGURES}}
+    grown = {f: max(0, (totals[f] or 0) - meter[f]) for f in METER_FIGURES}
+    payee = meter["holder"]
+    new_rows = [t for t in named if key not in (rows[t].get("spend") or {})]
+    meter.update({f: max(meter[f], totals[f] or 0) for f in METER_FIGURES}, holder=new_rows[-1] if new_rows else payee)
+    for t in {*named, payee}:
+        reading = named.get(t) or rows[t]["spend"][key]  # the row that held it can have ended: it is not read, it is paid
+        streak = reading["split_streak"] if t == meter["holder"] else 0
+        merge_reading(rows[t], key, {**reading, "split_streak": streak}, grown if t == payee else dict.fromkeys(METER_FIGURES, 0), now)
+
+
 def epic_spend(led: dict) -> float:
     """Each orchestrator session's TOTAL, plus what the rows hold outside those sessions: a subagent worker's readings sit
-    inside its orchestrator's TOTAL and count once."""
+    inside its orchestrator's TOTAL and count once. A ref on two rows counts once too: its meter pays one row at a time."""
     sessions = (led.get("spend") or {}).get("orchestrators") or {}
     total = sum(s.get("total") or 0 for s in sessions.values())
     for row in led["tickets"].values():
@@ -299,8 +352,11 @@ def epic_spend(led: dict) -> float:
 
 
 def write_readings(led: dict, readings: dict, session_id: str | None, orchestrator: dict | None, now: str) -> None:
+    by_ref: dict[str, dict[str, dict]] = {}
     for ticket, (key, reading) in readings.items():
-        merge_reading(led["tickets"][ticket], key, reading, now)
+        by_ref.setdefault(key, {})[ticket] = reading
+    for key, named in by_ref.items():
+        meter_reading(led, key, named, now)
     if orchestrator:
         spend = led.setdefault("spend", {"orchestrators": {}, "current": None})
         old = spend["orchestrators"].get(session_id) or {}
@@ -309,6 +365,26 @@ def write_readings(led: dict, readings: dict, session_id: str | None, orchestrat
         spend["current"] = session_id
     if readings or orchestrator:
         led["spent"] = max(led.get("spent") or 0, epic_spend(led))
+
+
+def forget(key: str, session_id: str) -> dict:
+    """Off the map, and the figure with it. `write_readings` only ever raises `led.spent`, so the lower figure stands. What
+    the owner put on the ledger by hand beyond the map stays: the figure falls by what the session added, no further. A
+    subagent worker under that session stays counted, now as spend outside the map."""
+    with swarm.edit(key) as led:
+        spend = led.get("spend") or {}
+        sessions = spend.get("orchestrators") or {}
+        if session_id not in sessions:
+            raise swarm.Absent(f"{key}: no orchestrator session {session_id} on the ledger")
+        before, was = epic_spend(led), led.get("spent") or 0
+        dropped = sessions.pop(session_id)
+        if spend.get("current") == session_id:
+            spend["current"] = None
+        after = epic_spend(led)
+        led["spent"] = round(max(after, was - (before - after)), 2)
+        swarm.log(led, "forget", note=f"session {session_id}: ${dropped.get('total') or 0:.2f} off the map, "
+                                      f"spent ${was:.2f} to ${led['spent']:.2f}")
+    return {"session": session_id, "dropped": dropped.get("total") or 0, "was": was, "spent": led["spent"]}
 
 
 # ── the report ──────────────────────────────────────────────────────────────────────────────
@@ -330,7 +406,7 @@ def describe(b: dict) -> str:
 
 def assess(led: dict, now: datetime | None = None, unread: list[dict] | None = None) -> dict:
     """Who is past a cap and what may not spawn, from the ledger alone. `unread` is a sweep's failed reads; without one, a
-    running worker with no reading for its transcript counts as unread."""
+    worker with no reading counts as unread, and so does the orchestrator under an epic cap."""
     moment = now or datetime.now(timezone.utc)
     cfg, errors = config_caps()
     hard_on, hard_error = hard_stop_setting()
@@ -344,7 +420,7 @@ def assess(led: dict, now: datetime | None = None, unread: list[dict] | None = N
         breaches.append({"scope": "epic", "kind": "spend", "value": budget["spent"], "cap": budget["epic_usd"]})
     spend = led.get("spend") or {}
     own = (spend.get("orchestrators") or {}).get(spend.get("current")) or {}
-    if own.get("split_streak") and own["split_streak"] >= cfg["split_turns"]:
+    if cfg["split_turns"] is not None and own.get("split_streak") and own["split_streak"] >= cfg["split_turns"]:
         breaches.append({"scope": "orchestrator", "kind": "split", "value": own["split_streak"], "cap": cfg["split_turns"]})
     breaches += [{"scope": "worker", "ticket": o["ticket"], "worker": rows[o["ticket"]]["worker"].get("name"), "kind": "spend",
                   "value": o["spent"], "cap": o["cap"]} for o in budget["over"]]
@@ -358,11 +434,11 @@ def assess(led: dict, now: datetime | None = None, unread: list[dict] | None = N
         forks, streak = (reading or {}).get("forks") or 0, (reading or {}).get("split_streak") or 0
         workers.append({"ticket": t, "worker": r["worker"]["name"], "kind": r["worker"].get("kind"), "ref": r["worker"].get("ref"),
                         "status": r["status"], "running": t in running, "spent": r.get("spent") or 0, "caps": caps,
-                        "forks": forks, "minutes": minutes, "split_streak": streak})
-        if t not in running:
-            continue
+                        "forks": forks, "minutes": minutes, "split_streak": streak, "read": reading is not None})
         if reading is None:
             missing.append({"who": t, "why": "no reading yet: `swarm_budget.py sweep` reads it"})
+        if t not in running:
+            continue
         common = {"scope": "worker", "ticket": t, "worker": r["worker"]["name"]}
         if caps["forks"] is not None and forks > caps["forks"]:
             breaches.append({**common, "kind": "forks", "value": forks, "cap": caps["forks"]})
@@ -370,11 +446,24 @@ def assess(led: dict, now: datetime | None = None, unread: list[dict] | None = N
             breaches.append({**common, "kind": "minutes", "value": minutes, "cap": caps["minutes"]})
         if caps["split_turns"] is not None and streak and streak >= caps["split_turns"]:
             breaches.append({**common, "kind": "split", "value": streak, "cap": caps["split_turns"]})
+    if budget["epic_usd"] is not None and not own:
+        missing.append({"who": "orchestrator", "why": "no reading yet: `swarm_budget.py sweep --session-id` reads it"})
     unread = missing if unread is None else unread
     refuse = [f"budget config: {e}" for e in errors]
     return {"key": led["key"], "now": moment.astimezone(timezone.utc).strftime(swarm.LEDGER_TIME), "budget": budget,
             "workers": workers, "orchestrator": own, "breaches": breaches, "unread": unread, "config_errors": errors,
-            "hard_stop": {"on": hard_on, "state": "none", "reason": None}, "task_stops": [], "refuse": refuse}
+            "hard_stop": {"on": hard_on, "state": "none", "reason": None, "lines": []}, "task_stops": [], "refuse": refuse}
+
+
+def task_id(ref: str | None) -> str | None:
+    """What `TaskStop` takes for a subagent, its agent id: a bare ref, or a path whose file name is `agent-<id>.jsonl`. Any
+    other path, or no ref, gives none."""
+    if not ref:
+        return None
+    if os.path.isabs(ref):
+        named = AGENT_FILE.fullmatch(os.path.basename(ref))
+        return named.group(1) if named else None
+    return ref[len("agent-"):] if ref.startswith("agent-") else ref
 
 
 def apply_hard_stop(key: str, report: dict) -> None:
@@ -389,7 +478,7 @@ def apply_hard_stop(key: str, report: dict) -> None:
         stop["state"] = "already"
     else:
         try:
-            lease.stop(profile.context_root(), key, stop["reason"], "orchestrator")
+            stop["lines"] = lease.stop(profile.context_root(), key, stop["reason"], "orchestrator")
             stop["state"] = "written"
         except lease.Refused:  # the owner's STOP landed between the check and the write: it stands
             stop["state"] = "already"
@@ -398,7 +487,7 @@ def apply_hard_stop(key: str, report: dict) -> None:
     if stop["state"] == "failed":
         report["refuse"].append(f"hard stop not written: {stop['error']}")
         return
-    report["task_stops"] = [{"ticket": w["ticket"], "task": w["ref"] or w["worker"]} for w in report["workers"]
+    report["task_stops"] = [{"ticket": w["ticket"], "task": task_id(w["ref"])} for w in report["workers"]
                             if w["running"] and w["kind"] == "subagent"]
 
 
@@ -406,7 +495,6 @@ def sweep(key: str, session_id: str | None = None, now: datetime | None = None) 
     """One budget step of the tick: read, write `spent`, assess, stop if armed. The transcripts are read outside the
     ledger's lock, because they can be large and the lock is shared with every other writer."""
     moment = now or datetime.now(timezone.utc)
-    session_id = session_id or os.environ.get("CLAUDE_CODE_SESSION_ID") or None
     led = swarm.load(key)
     readings, unread = {}, []
     for t, r in led["tickets"].items():
@@ -419,16 +507,17 @@ def sweep(key: str, session_id: str | None = None, now: datetime | None = None) 
         if why:
             unread.append({"who": t, "why": why})
     orchestrator = None
+    session_id, why = orchestrator_session(key, session_id)
     if session_id:
         orchestrator, why = read_orchestrator(session_id)
-        if why:
-            unread.append({"who": "orchestrator", "why": why})
-    elif swarm.budget_state(led)["epic_usd"] is not None:
-        unread.append({"who": "orchestrator", "why": "no session id: run this in the orchestrator's session or pass --session-id"})
+    if why:
+        unread.append({"who": "orchestrator", "why": why})
     stamp = moment.astimezone(timezone.utc).strftime(swarm.LEDGER_TIME)
     with swarm.edit(key) as locked:
         write_readings(locked, {t: v for t, v in readings.items() if t in locked["tickets"]}, session_id, orchestrator, stamp)
     report = assess(swarm.load(key), moment, unread)
+    if why and report["budget"]["epic_usd"] is not None:
+        report["refuse"].append(f"no orchestrator reading under the epic cap: {why}")
     apply_hard_stop(key, report)
     if report["hard_stop"]["state"] == "written":
         with swarm.edit(key) as locked:
@@ -443,7 +532,8 @@ def report_lines(report: dict, breaches: list[dict]) -> list[str]:
     stop = report["hard_stop"]
     if stop["state"] != "none":
         lines.append(f"hard-stop {report['key']} {stop['state']} reason={json.dumps(stop.get('error') or stop['reason'], ensure_ascii=False)}")
-    lines += [f"task-stop {t['ticket']} task={t['task']}" for t in report["task_stops"]]
+    lines += stop["lines"]
+    lines += [f"task-stop {t['ticket']} task={t['task']}" if t["task"] else f"task-stop-unknown {t['ticket']}" for t in report["task_stops"]]
     return lines
 
 
@@ -465,7 +555,11 @@ def digest_lines(led: dict, report: dict) -> list[str]:
     for w in report["workers"]:
         usd = "no cap" if w["caps"]["spend_usd"] is None else f"${w['caps']['spend_usd']:.2f}"
         forks = "no cap" if w["caps"]["forks"] is None else w["caps"]["forks"]
-        out.append(f"- {swarm.ticket_ref(w['ticket'])} {w['worker']}: ${w['spent']:.2f} / {usd}, forks {w['forks']} / {forks}")
+        spent = f"${w['spent']:.2f}" if w["read"] or w["spent"] else "?"  # a figure by hand is a figure; nothing at all is not $0
+        out.append(f"- {swarm.ticket_ref(w['ticket'])} {w['worker']}: {spent} / {usd}, forks {w['forks'] if w['read'] else '?'} / {forks}")
+    if report["unread"]:
+        who = ["the orchestrator" if u["who"] == "orchestrator" else swarm.ticket_ref(u["who"]) for u in report["unread"]]
+        out.append(f"Spend unread: {', '.join(who)}.")
     if b["state"] == "over":
         out.append("Epic cap reached: nothing spawns until the owner raises the cap or ends the epic.")
     stop = lease.stops(profile.context_root()).get(led["key"])
@@ -543,6 +637,14 @@ def cmd_caps(a) -> int:
     return 0
 
 
+def cmd_forget(a) -> int:
+    done = forget(a.key, a.session_id)
+    print(f"forget {a.key} {done['session']} dropped={done['dropped']:.2f} spent={done['was']:.2f} to {done['spent']:.2f}")
+    if a.key in swarm.read_stops():
+        print(f"STOP-{a.key} stands: `lease.py go {a.key}` lifts it")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="swarm_budget.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                  allow_abbrev=False)
@@ -555,7 +657,7 @@ def build_parser() -> argparse.ArgumentParser:
         return p
 
     p = command("sweep", cmd_sweep, "read every worker, write spent, report the breaches, stop if armed")
-    p.add_argument("--session-id", help="the orchestrator's session (default: this session)")
+    p.add_argument("--session-id", help="the orchestrator's session (default: this session, if its registry row says role: orchestrator)")
     p.add_argument("--now", help="the time to compare against (default: the wall clock)")
     p.add_argument("--json", action="store_true")
 
@@ -573,6 +675,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--split-turns", type=int)
     p.add_argument("--decision", help="the owner's decision line behind a raised cap")
     p.add_argument("--json", action="store_true")
+
+    p = command("forget", cmd_forget, "drop a session from the orchestrators' map, log it, recompute the epic's spent")
+    p.add_argument("session_id")
     return ap
 
 
