@@ -1162,7 +1162,7 @@ def blank_config() -> dict:
         "length": {"repos": {}},
         "commits": {"default": "conventional", "repos": {}},
         "context": {"sync": "auto"},
-        "swarm": {"lease_minutes": 120, "resources": [], "units": {}},
+        "swarm": {"ack_minutes": 20, "lease_minutes": 120, "resources": [], "units": {}},
     }
 
 
