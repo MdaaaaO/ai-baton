@@ -60,7 +60,7 @@ lists the vocabulary.
 real write credential for the tracker's REST API, gating `ticket-update`'s remote-link POST; false or absent
 skips it), `tracker.close_reasons`, `tracker.repos`, `github.org`,
 `github.review_bot`, `github.bots`, `github.sandbox_token_prefix`,
-`github.owner_teams`, `slack.domain`, `systems.*` (one flag per capability — `systems.slack` and
+`github.owner_teams`, `swarm.lease_minutes` (default `120`: minutes until a lease expires), `swarm.resources` (default `[]`: the serial resource names this environment has), `swarm.units` (default `{}`: units per quota resource, e.g. `{"api": 4}`), `slack.domain`, `systems.*` (one flag per capability — `systems.slack` and
 `systems.signed_commits` are what every reader gates on now; `kit_profile.py get slack.enabled` / `get
 github.signed_commits` still answer for one release, from `systems.*`, with a deprecation warning on stderr —
 `kit_profile.DEPRECATED_ALIASES`), `tz_default`, `labels`,
