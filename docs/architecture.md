@@ -63,7 +63,8 @@ flowchart TB
   always-on layer.
 - **Skills and agents**: Claude Code discovers `skills/*/SKILL.md` and `agents/*.md` (clone path) or the plugin's
   copies (`docs/packaging.md`). A skill body loads on invoke; a `context: fork` skill runs under the agent its
-  `agent:` names (`triage`, `review-runner`, `auto-runner`) and returns a brief, never acts.
+  `agent:` names (`triage`, `review-runner`, `auto-runner`) and returns a brief, never acts. The fourth agent, `verifier`,
+  runs under no skill: the swarm's orchestrator starts it by name (`docs/swarm.md`).
 - **Engine**: every script under `context-db/bin/` (reference: `docs/engine-cli.md`) reads the environment through
   `kit_profile.py` and the env store through `kb.py`; `session.py` / `gen_sessions.py` keep the registry,
   `mission.py` builds the mission-control page's data from it and the rest of the store, `gen_index.py` / `verify.py`
