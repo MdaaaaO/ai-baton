@@ -1,9 +1,9 @@
 ---
 name: slack-draft
-description: "Every Slack draft a session makes for the user: create it (never paste text), record it, and read the channel/thread before any follow-up or status claim, since the user may edit drafts before sending. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
+description: "Every Slack draft a session makes for the user: create it (never paste text), record it and read the channel/thread before any follow-up or status claim. Invoke on every `slack_send_message_draft`, before calling a draft \"pending\", and when resuming one."
 compatibility: "Designed for Claude Code; needs slack (systems.*)"
 metadata:
-  version: "12"
+  version: "13"
   updated: "2026-11-04"
   reviewed: "2026-11-04"
   requires: "slack"

@@ -1,10 +1,10 @@
 ---
 name: ticket-close
-description: "Checklist for closing a ticket (Jira or GitHub issues): a final outcome comment, the right transition/close reason, delivering PRs linked, the context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
+description: "Checklist for closing a ticket (Jira or GitHub issues): outcome comment, close reason, delivering PRs linked, context-doc flush. Invoke when a ticket's work is finished, decided against, or abandoned."
 metadata:
-  version: "19"
-  updated: "2026-11-02"
-  reviewed: "2026-11-02"
+  version: "20"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   facts: "tracker.kind,tracker.close_reasons,tracker.mcp_tools.edit,tracker.mcp_tools.transitions_list"
 user-invocable: true
 ---

@@ -78,7 +78,6 @@ import collections
 import contextlib
 import json
 import re
-import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -86,6 +85,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import done_when  # noqa: E402 — the one `## Done when` parser
+import swarm_msg  # noqa: E402 — the message grammar; swarm_msg never imports this module
 import fsutil  # noqa: E402 — the atomic write, the lock and the `<file | ->` reader
 import kit_profile as profile  # noqa: E402 — the one content-root resolver and config reader
 
@@ -123,9 +123,6 @@ MERGED_BY = ("orchestrator", "owner", "auto")
 
 # docs/swarm.md § The lines: the four lines `apply` takes, each with its positional fields after the ticket.
 STATUS_LINES = {"CLAIMED": ("branch",), "PR": ("branch", "sha"), "READY": ("sha",), "BLOCKED": ("reason", "who")}
-BLOCKED_REASONS = ("budget", "stop", "lease", "scope", "input")
-GRAMMAR_VERSIONS = ("1",)
-LINE_KEYS = ("body", "sha", "ran", "note")
 
 WORKER_KINDS = ("subagent", "peer", "headless")
 PLAN_FIELDS = ("area", "deps", "wave", "sizing", "budget_cap")  # a change here is a re-plan; a title or a new DW id is not
@@ -506,42 +503,15 @@ def prs_tsv(led: dict) -> str:
 # ── apply ───────────────────────────────────────────────────────────────────────────────────
 def parse_status_line(line: str) -> dict:
     """One status line of docs/swarm.md § Message grammar, as a dict: `word`, `ticket`, the line's fields, `v`, `id`, `from`.
-    Takes the four status lines only; anything else raises `SwarmError`."""
-    try:
-        parts = shlex.split(line)
-    except ValueError as e:
-        raise SwarmError(f"not a grammar line ({e}): {line!r}") from e
-    word = parts[0] if parts else ""
+    The grammar is `swarm_msg.parse_line`'s; this takes the four status lines only, and anything else raises `SwarmError`."""
+    word = line.split(None, 1)[0] if line.split() else ""
     if word not in STATUS_LINES:
         raise SwarmError(f"apply takes {', '.join(STATUS_LINES)}, not {word or 'an empty line'!r}: DONE moves no row, and "
                          "the orchestrator writes the other moves with assign and status")
-    positional, keyed = [], {}
-    for part in parts[1:]:
-        m = re.fullmatch(r"([a-z_]+)=(.*)", part, re.S)
-        if m:
-            keyed[m.group(1)] = m.group(2)
-        elif keyed:
-            raise SwarmError(f"a field after a key=value pair: {line!r}")
-        else:
-            positional.append(part)
-    names = ("ticket", *STATUS_LINES[word])
-    if len(positional) != len(names):
-        raise SwarmError(f"{word} takes {' '.join('<' + n + '>' for n in names)}: {line!r}")
-    for need in ("v", "id", "from"):
-        if not keyed.get(need):
-            raise SwarmError(f"no {need}= on the line: {line!r}")
-    if keyed["v"] not in GRAMMAR_VERSIONS:
-        raise SwarmError(f"grammar version {keyed['v']} on the line; this script reads {', '.join(GRAMMAR_VERSIONS)}: {line!r}")
-    rec = {"word": word, **dict(zip(names, positional)), "v": keyed["v"], "id": keyed["id"], "from": keyed["from"]}
-    rec["ticket"] = clean_ticket(rec["ticket"])
-    rec.update({k: keyed[k] for k in LINE_KEYS if k in keyed})
-    if word == "PR" and not rec.get("body"):
-        raise SwarmError(f"no body= on the PR line: {line!r}")
-    if "sha" in rec:
-        check_sha(rec["sha"])
-    if word == "BLOCKED" and rec["reason"] not in BLOCKED_REASONS:
-        raise SwarmError(f"BLOCKED reason must be one of {', '.join(BLOCKED_REASONS)}: {line!r}")
-    return rec
+    try:
+        return swarm_msg.parse_line(line)
+    except swarm_msg.MsgError as e:
+        raise SwarmError(str(e)) from e
 
 
 def apply_line(led: dict, line: str) -> str:

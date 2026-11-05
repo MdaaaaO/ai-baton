@@ -1,10 +1,10 @@
 ---
 name: env-init
-description: "Fill or refresh this machine's env fact store: run the named tool per missing/stale fact, verify, write back with provenance, ask once for the rest. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact."
+description: "Fill or refresh this machine's env fact store: run the named tool per missing/stale fact, verify, write back with provenance. Invoke on a new environment, when a skill stops with `NEEDS <system>.<kind> <name>`, with `--refresh` for stale rows, or with one fact."
 metadata:
-  version: "11"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "12"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
 user-invocable: true
 ---
 

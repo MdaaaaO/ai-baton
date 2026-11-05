@@ -1,8 +1,8 @@
 ---
 name: memory-prune
-description: "Audits the harness auto-memory against the always-on prefix, skills and `.context/`, then rewrites notes and `MEMORY.md` to their residue after one carousel, archiving originals first. Use when kit-health warns the auto-memory is over budget, or after a session that added notes. Not for session-retro or session-handoff."
+description: "Audits the harness auto-memory against the always-on prefix, skills and `.context/`, then rewrites notes and `MEMORY.md` to their residue. Use when kit-health warns the auto-memory is over budget, or after a session that added notes. Not for session-retro or session-handoff."
 metadata:
-  version: "2"
+  version: "3"
   updated: "2026-11-04"
   reviewed: "2026-11-04"
 user-invocable: true

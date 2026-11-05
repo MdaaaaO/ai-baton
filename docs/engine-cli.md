@@ -480,10 +480,12 @@ or found, or when anything in the adapter itself fails, so a machine that has no
   pre-tool-use         a Write/Edit/MultiEdit/NotebookEdit of a `*.md` doc under an adopted content root → deny,
                        naming the ctx tool to use instead; exempt: the index's skip dirs (bin _templates sessions
                        handoff memory state), dot dirs, the generated catalogs and what the kit's store settings
-                       ignore. Anything else, or any error: no decision. Also, with no ctx needed: a call from a
-                       session whose lane holds the lease `<scope>` or works the epic `<scope>` while
-                       `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox send,
-                       inbox drain, ack, lease release and ending a task stay allowed
+                       ignore. Anything else, or any error: no decision. Also, with no ctx needed: a work call
+                       (any tool the hook's matcher names: Bash, the file writes, Agent, MCP) of a session
+                       whose lane holds the lease `<scope>`, or of a session that works the epic `<scope>` unless its row says `role: orchestrator` (a subagent always),
+                       while `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox
+                       send, inbox drain, ack, lease release and ending a task stay allowed. With no STOP file a
+                       call that is not a file write exits before any store read
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
                        comes back as `{"systemMessage": …}`; any exit but 0 or
                        NO_STORE (or a timeout) comes back as `ctx validate did not run: …`. Also run after a write

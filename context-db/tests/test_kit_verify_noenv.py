@@ -756,7 +756,7 @@ class LoadingTable(unittest.TestCase):
     def test_description_budget_warns_past_90_percent(self):
         # decoupled from the kit's live description total (#425 pulled it back under the 90% line on purpose):
         # lower DESC_TOTAL_BYTES in-process so today's real total still crosses the warn ratio, without this
-        # test needing the kit to sit near its real 9,500 B cap — the whole point is a warning before the
+        # test needing the kit to sit near its real 9,900 B cap — the whole point is a warning before the
         # surprise failure, whatever the live total happens to be.
         saved_bytes = kit_verify.DESC_TOTAL_BYTES
         kit_verify.DESC_TOTAL_BYTES = kit_verify.loading_numbers()["desc_bytes"] + 1
