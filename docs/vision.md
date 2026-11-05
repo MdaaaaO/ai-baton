@@ -122,7 +122,7 @@ Swarm mode (#674) adds to each layer. The engine is built; the skills are not, s
 orchestrator session owns an epic and runs `swarm-run` (#684), one swarm tick at a time. Built, in the engine: the task
 ledger `swarm.py` (#677), the message grammar and inboxes `swarm_msg.py` (#678), leases and STOP files `lease.py`
 (#679), the budget brake `swarm_budget.py` (#680), the verification gates `gates.py` and the `verifier` agent, a role
-that never wrote the change and alone records a pass (#681). Not built yet: the data-migration gate profile (#689), the
+that never wrote the change and alone records a pass (#681). Not built yet: the data-migration gates (#689), the
 spec skills `epic-discover` and `epic-decompose`, with the owner's go before any worker starts (#682, #683),
 `swarm-run`, the `builder` agent with the assignment file and worker brief (#685), liveness and failover (#686), and the
 inbox, the digest, the weekly report and the plan walkthrough (#688, #690). The contract is `docs/swarm.md` (#676), and
