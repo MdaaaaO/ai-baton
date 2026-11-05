@@ -6,12 +6,12 @@ skills, agents and engine scripts cite instead of restating it. It has four part
 § Lifecycle, § Authority matrix, § Message grammar and § The swarm tick.
 
 **Status.** This page states the rules. The ledger here is always the task ledger, one row per ticket; the decision
-ledger (`docs/carousel.md` § After the answer) is a different thing. The engine tickets build the scripts it names:
-`swarm.py` (the task ledger), `swarm_msg.py` (the grammar), `lease.py` (leases and STOP files), `swarm_budget.py` (the
-budget brake) and `gates.py` (the verification gates). The skill tickets build `epic-discover`, `epic-decompose`,
-`swarm-run`, `swarm-inbox`, `swarm-status` and the `builder` and `verifier` agents. None of these exists on this head
-yet, so nothing here runs by itself. Why an orchestrator is a session and not a server, and when a worker is a subagent,
-a peer session or a headless process: `docs/decisions/0005-orchestrator-is-a-session.md`.
+ledger (`docs/carousel.md` § After the answer) is a different thing. Built so far: `swarm.py` (the task ledger),
+`lease.py` (leases and STOP files), `gates.py` (the verification gates) and the `verifier` agent. Still to be built:
+`swarm_msg.py` (the grammar), `swarm_budget.py` (the budget brake), `epic-discover`, `epic-decompose`, `swarm-run`,
+`swarm-inbox`, `swarm-status` and the `builder` agent. No skill calls what is built yet, so nothing here runs by itself.
+Why an orchestrator is a session and not a server, and when a worker is a subagent, a peer session or a headless
+process: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
 **Where it plugs in.** On top of the one-ticket loop in `README.md` § The loop, for an epic that one orchestrator runs.
 A session outside swarm mode changes nothing.
