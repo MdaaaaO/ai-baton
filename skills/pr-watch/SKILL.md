@@ -2,9 +2,9 @@
 name: pr-watch
 description: "Low-noise PR watch: one Monitor per repo/session surfaces only actionable events, triages via `pr-event-brief`, keeps branches synced, merges via `pr-merge.sh` once gates hold. Parks on sign-off, idle windows or a human-only gate. Use when your session owns an open PR."
 metadata:
-  version: "31"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "34"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
 ---
 
 # pr-watch — stay on top of your PRs without the noise
@@ -50,7 +50,8 @@ green**: it prints `PR N LOOKUP FAILED: <what> — <error>` after 3 attempts, an
 ## Auto-sync with the base branch
 
 While a PR waits for review the watcher keeps it merged with its base: when behind and **no human `APPROVED`
-review exists**, it runs `update-branch` itself (once per head, `PR_WATCH_SYNC=0` turns it off) and logs `SYNCED`
+review exists** (or a human approval exists but the base branch keeps it on a push: neither dismisses stale reviews nor requires approval of the last push, by rulesets or classic protection),
+it runs `update-branch` itself (once per head, `PR_WATCH_SYNC=0` turns it off) and logs `SYNCED`
 to stderr. **Standing rule: before any further push from the worktree**, `git fetch origin <branch>` and, when the
 remote is ahead, rebase onto it first (`sign-queue --rebase` where commits are signed). Detail:
 `reference/auto-sync.md`.
@@ -110,7 +111,8 @@ It waits for the bot's Assessment on the current head, syncs a BEHIND branch and
 squash-merges on `CLEAN` + `reviewDecision APPROVED` + zero unresolved threads, confirmed by re-reading `merged_at`.
 Exit 0 = merged; 1 = a gate or the merge failed (one-line reason — act, then rerun); 3 = gave up (CLEAN + APPROVED
 never held within the deadline). A body ending in a `BREAKING CHANGE:` footer needs the hand merge with the footer
-lines only. Phases and the footer rule: `reference/rules.md` § pr-merge.sh phases.
+lines only. A third argument, the expected head, pins the run: another head refuses, a BEHIND PR stops without
+`update-branch`, and the merge carries `--match-head-commit`. Phases and the footer rule: `reference/rules.md` § pr-merge.sh phases.
 
 ## Staleness rules
 
