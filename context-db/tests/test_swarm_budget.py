@@ -2,6 +2,7 @@
 under a temp HOME; `swarm.py tick` and `lease.py` read what it wrote. Run: make -C .claude/context-db test T=test_swarm_budget."""
 from __future__ import annotations
 import json
+import os
 import re
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -221,6 +223,26 @@ class SpendReading(BudgetCase):
         self.assertIn("no-spawn spend unread for 7", out)
         self.assertIn("spend-unread orchestrator", out)
 
+    def test_a_transcript_the_readers_choke_on_is_unread_not_a_crash(self):
+        path = self.write_session("peer-sid", [])
+        path.write_text(json.dumps({"type": "assistant", "requestId": "r1", "message": "not an object"}) + "\n", encoding="utf-8")
+        self.plan("7")
+        self.assign("7", "peer-sid", "peer", "--cap-usd", "5")
+        p = self.run_script(BUDGET, "sweep", EPIC)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("spend-unread 7", p.stdout)
+        self.assertIn("no-spawn spend unread for 7", p.stdout)
+        self.assertEqual(self.row()["spent"], 0)
+
+    def test_an_ended_worker_with_a_figure_by_hand_stops_refusing(self):
+        self.plan("7", epic_usd=10)
+        self.assign("7", "gone")
+        self.ok(SWARM, "apply", EPIC, f"READY 7 {'a' * 40} v=1 id=x1 from=lane-7")
+        self.assertIn("no-spawn spend unread for 7", self.sweep("--session-id", "gone-too"))
+        self.ok(SWARM, "progress", EPIC, "7", "--spent", "2.5")
+        self.assertNotIn("no-spawn spend unread for 7", self.sweep("--session-id", "gone-too"))
+
     def test_a_worker_with_no_ref_is_told_how_to_name_it(self):
         self.plan("7")
         self.assign("7", None)
@@ -310,6 +332,21 @@ class OtherCaps(BudgetCase):
         self.assertNotIn("over-budget", self.sweep("--now", at.strftime(swarm.LEDGER_TIME)))
         at = begun + timedelta(minutes=31)
         self.assertIn("over-budget 7 kind=minutes value=31 cap=30", self.sweep("--now", at.strftime(swarm.LEDGER_TIME)))
+
+    def test_a_rebrief_restarts_the_minute_clock(self):
+        self.config(worker_minutes=30)
+        self.write_subagent(ORCH, "w7", [turn("w7-1")])
+        self.plan("7")
+        self.assign("7", "w7")
+        self.ok(SWARM, "assign", EPIC, "7", "--rebrief")
+        rebriefed = swarm.parse_time(self.ledger()["log"][-1]["at"])
+        at = rebriefed + timedelta(minutes=30, seconds=59)
+        self.assertNotIn("over-budget", self.sweep("--now", at.strftime(swarm.LEDGER_TIME)))
+
+    def test_a_cap_cannot_be_negative(self):
+        self.plan("7")
+        self.assign("7", None)
+        self.assertEqual(self.run_script(BUDGET, "caps", EPIC, "7", "--forks", "-1").returncode, 2)
 
     def test_a_worker_that_ended_is_past_no_fork_or_minute_cap(self):
         self.config(worker_minutes=1)
@@ -506,6 +543,20 @@ class SplitBreach(BudgetCase):
     def test_the_stats_lines_threshold_is_the_one_read(self):
         self.env["SESSION_STATS_SPLIT_THRESHOLD"] = str(FAT + 1)
         self.assertNotIn("over-budget", self.worker(fat_turns(40)))
+
+    def test_the_last_turn_agrees_with_the_stats_line(self):
+        cases = {"under a window": fat_turns(19), "a full window": fat_turns(20), "long": fat_turns(40),
+                 "thin": [turn(f"t{i}", ctx=1000) for i in range(30)],
+                 "turned thin": [*fat_turns(40), *[turn(f"t{i}", ctx=1000) for i in range(6)]],
+                 "compacted": [*fat_turns(40), {"type": "user", "isCompactSummary": True}, *fat_turns(20, prefix="after")]}
+        with mock.patch.dict(os.environ):
+            for name in ("SESSION_STATS_SPLIT_WINDOW", "SESSION_STATS_SPLIT_THRESHOLD"):
+                os.environ.pop(name, None)
+            for name, turns in cases.items():
+                with self.subTest(name):
+                    path = self.write_session("parity", turns)
+                    hint = swarm_budget.session_stats.split_hint(swarm_budget.session_stats.collect(str(path)))
+                    self.assertEqual(hint is not None, swarm_budget.split_streak(str(path)) > 0)
 
     def test_the_config_sets_the_turns(self):
         self.config(split_turns=3)

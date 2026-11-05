@@ -35,8 +35,9 @@ agent id or a transcript's absolute path): `usage` is `session_stats.py`'s TOTAL
 figure cannot free budget. The row's `spent` is the sum of its readings. The epic's `spent` is each orchestrator session's
 TOTAL, which already holds that session's subagent workers, plus everything spent outside those sessions.
 
-**Failing closed.** A cap that does not parse, and a running worker with no reading while a dollar cap is in force, refuse
-the next spawn (`refuse`), never read as zero. A `hard_stop` that is neither true, false nor null reads as true.
+**Failing closed.** A cap that does not parse, and a worker with no reading while a dollar cap is in force, refuse the next
+spawn (`refuse`), never read as zero; for a worker whose transcript is gone, `swarm.py progress --spent` records the figure
+by hand. A `hard_stop` that is neither true, false nor null reads as true.
 
 Another script imports `sweep(key)`, `assess(led)`, `digest_lines(led, report)`, `row_caps(led, row)` and `CAP_FIELDS`.
 
@@ -65,6 +66,7 @@ CAP_CONFIG = {"forks": "worker_forks", "minutes": "worker_minutes", "split_turns
 RESULT_FILE = "result.json"
 COST_FIELD = "total_cost_usd"
 META_SUFFIX = ".meta.json"
+READ_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError)  # a transcript the readers choke on is unread, not zero
 
 
 # ── caps ────────────────────────────────────────────────────────────────────────────────────
@@ -143,7 +145,9 @@ def fork_files(path: str) -> list[str]:
     found, todo = [], [path]
     while todo:
         for o in transcripts.records(todo.pop()):
-            for block in (o.get("message") or {}).get("content") or [] if o.get("type") == "assistant" else []:
+            message = o.get("message") if o.get("type") == "assistant" else None
+            content = message.get("content") if isinstance(message, dict) else None
+            for block in content if isinstance(content, list) else []:
                 if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "Agent":
                     child = calls.pop(block.get("id"), None)
                     if child and os.path.isfile(child):
@@ -164,9 +168,10 @@ def split_streak(path: str) -> int:
             start = len(series)
         if o.get("type") != "assistant":
             continue
-        m = o.get("message") or {}
-        rid, usage = o.get("requestId") or m.get("id"), m.get("usage") or {}
-        if not (rid and usage):
+        m = o.get("message")
+        m = m if isinstance(m, dict) else {}
+        rid, usage = o.get("requestId") or m.get("id"), m.get("usage")
+        if not (rid and usage and isinstance(usage, dict)):
             continue
         i, cw, cr, _ = transcripts.tokens(usage)
         if rid in position:
@@ -231,8 +236,8 @@ def read_worker(key: str, row: dict) -> tuple[dict, str | None]:
             forks_spent = sum(session_stats.collect(f)["spend_usd_est"] for f in fork_files(path))
             reading.update(usage=stats["spend_total_usd_est"] + forks_spent, forks=stats["subagents"],
                            split_streak=split_streak(path), under=owning_session(path))
-        except OSError as e:
-            problems.append(f"{path}: {e}")
+        except READ_ERRORS as e:
+            problems.append(f"{path}: {e!r}")
     elif ref:
         problems.append(f"no transcript for ref {ref}")
     elif kind != "headless":
@@ -255,8 +260,8 @@ def read_orchestrator(session_id: str) -> tuple[dict | None, str | None]:
         return None, f"no transcript for session {session_id}"
     try:
         return {"total": session_stats.collect(path)["spend_total_usd_est"], "split_streak": split_streak(path)}, None
-    except OSError as e:
-        return None, f"{path}: {e}"
+    except READ_ERRORS as e:
+        return None, f"{path}: {e!r}"
 
 
 # ── the ledger's spend ──────────────────────────────────────────────────────────────────────
@@ -316,10 +321,10 @@ def run_minutes(led: dict, ticket: str, row: dict, moment: datetime) -> int:
 
 def describe(b: dict) -> str:
     who = {"worker": b.get("ticket"), "orchestrator": "the orchestrator", "epic": "the epic"}[b["scope"]]
-    return {"spend": f"{who} spent ${b['value']:.2f} of ${b['cap']:.2f}" if b["kind"] == "spend" else "",
-            "forks": f"{who} made {b['value']} forks, cap {b['cap']}",
-            "minutes": f"{who} ran {b['value']} minutes, cap {b['cap']}",
-            "split": f"{who} carried the split hint for {b['value']} turns, cap {b['cap']}"}[b["kind"]]
+    if b["kind"] == "spend":
+        return f"{who} spent ${b['value']:.2f} of ${b['cap']:.2f}"
+    did = {"forks": "made {} forks", "minutes": "ran {} minutes", "split": "carried the split hint for {} turns"}[b["kind"]]
+    return f"{who} {did.format(b['value'])}, cap {b['cap']}"
 
 
 def assess(led: dict, now: datetime | None = None, unread: list[dict] | None = None) -> dict:
@@ -417,7 +422,7 @@ def sweep(key: str, session_id: str | None = None, now: datetime | None = None) 
         if reading["usage"] is not None or reading["reported"] is not None:
             readings[t] = (rkey, reading)
         if why:
-            unread.append({"who": t, "why": why, "blocks": t in running or rkey not in (r.get("spend") or {})})
+            unread.append({"who": t, "why": why, "blocks": t in running or not r.get("spent")})
     orchestrator = None
     if session_id:
         orchestrator, why = read_orchestrator(session_id)
@@ -455,7 +460,7 @@ def digest_lines(led: dict, report: dict) -> list[str]:
         act = (f" The owner raises the cap or ends the epic, then `lease.py go {led['key']}` lifts it."
                if reason.startswith("budget") else "")
         out.append(f"STOP {led['key']} by the {stop.get('by', 'orchestrator')}: {reason}. Nothing spawns.{act}")
-    out += [f"Over budget: {describe(x)}." for x in report["breaches"] if x["kind"] != "spend"]
+    out += [f"Over budget: {describe(x)}." for x in report["breaches"] if x["scope"] != "epic"]
     out += [f"No spawn: {r}." for r in report["refuse"]]
     return out
 
@@ -505,6 +510,8 @@ def cmd_digest(a) -> int:
 def cmd_caps(a) -> int:
     ticket = swarm.clean_ticket(a.ticket)
     wanted = {f: v for f, v in (("forks", a.forks), ("minutes", a.minutes), ("split_turns", a.split_turns)) if v is not None}
+    if any(v < 0 for v in wanted.values()):
+        raise swarm.SwarmError("a cap cannot be negative")
     if wanted:
         decision = (a.decision or "").strip()
         with swarm.edit(a.key) as led:
