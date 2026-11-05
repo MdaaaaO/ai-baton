@@ -83,7 +83,10 @@ or found, or when anything in the adapter itself fails, so a machine that has no
   pre-tool-use         a Write/Edit/MultiEdit/NotebookEdit of a `*.md` doc under an adopted content root → deny,
                        naming the ctx tool to use instead; exempt: the index's skip dirs (bin _templates sessions
                        handoff memory state), dot dirs, the generated catalogs and what the kit's store settings
-                       ignore. Anything else, or any error: no decision
+                       ignore. Anything else, or any error: no decision. Also, with no ctx needed: a call from a
+                       session whose lane holds the lease `<scope>` or works the epic `<scope>` while
+                       `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox send,
+                       inbox drain, ack, lease release and ending a task stay allowed
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
                        comes back as `{"systemMessage": …}`; any exit but 0 or
                        NO_STORE (or a timeout) comes back as `ctx validate did not run: …`. Also run after a write
@@ -1097,6 +1100,26 @@ def _deny(payload: dict, ctx: Path, root: Path) -> str:
                                               "permissionDecisionReason": reason}})
 
 
+def _stop_deny(payload: dict) -> str:
+    """A deny with the reason when a swarm STOP file (`lease.py stop`) covers this session: its lane holds the lease
+    `<scope>` or works the epic `<scope>`. The calls docs/swarm.md lets through a STOP (outbox send, inbox drain,
+    ack, lease release, ending the task) are never denied. Any failure: no decision."""
+    try:
+        root = _context_root()
+        if not (root / "state" / "swarm").is_dir():
+            return ""
+        import lease  # same dir (on sys.path via _context_root)
+        if lease.exempt_call(str(payload.get("tool_name", "")), payload.get("tool_input")):
+            return ""
+        reason = lease.stop_for(root, _session_id(payload))
+    except Exception:  # noqa: BLE001 — a hook never fails the session
+        return ""
+    if not reason:
+        return ""
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                              "permissionDecisionReason": reason}})
+
+
 def _log(line: str) -> None:
     """One line to the scratch dir's hooks.log (the SessionStart hook's log); never raises."""
     try:
@@ -1523,6 +1546,10 @@ def hook(name: str) -> str:
         r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
         brief = r.stdout if r.returncode == 0 else ""
         return f"{pending}\n\n{brief}" if pending else brief
+    if name == "pre-tool-use":
+        stop = _stop_deny(payload)  # before the ctx check: a STOP needs no ctx
+        if stop:
+            return stop
     if ctx is None:
         return ""
     root = _context_root()

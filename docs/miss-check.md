@@ -16,7 +16,8 @@ and says so in one line.
 
 Call the `Agent` tool with `subagent_type: general-purpose` and the model below, the same fork as the cold reader
 (`docs/cold-reader.md` § The brief): the harness offers no way to strip a fork's tools, so "use no tool" is by
-instruction, and the worker gets only the pasted text. `model: haiku`; `model: sonnet` when the diff is above
+instruction, with one exception: the call that delivers the worker's final report, which the prompt names. The
+worker gets only the pasted text. `model: haiku`; `model: sonnet` when the diff is above
 `deep_lines` changed lines (`deep_lines` in pr-scan's `$PR_REVIEW_HOME/config.json`, default `.context/state/pr-review/`, 600 by default; `git diff --shortstat`
 insertions plus deletions). Paste the three inputs in place of the marks: `<artefact>` is the PR body, the close
 comment or the next-session prompt; `<done-when>` is the ticket's `## Done when` list (`none` when it has none);
@@ -28,7 +29,7 @@ one line per miss, each `MISSED <class>: <item>`, class one of: CRITERION (a don
 the artefact), UNTESTED (a changed path in the diff that no test in the diff touches), ASSUMPTION (a call the
 work took that the artefact never states), DECISION (a choice only the owner can make that the artefact leaves
 unanswered). If nothing is missing, reply with exactly one line: CLEAN. Answer from this text alone - use no
-tool, read nothing else. No other prose.
+tool, read nothing else, except the one call that delivers your final report. No other prose.
 
 <artefact>
 

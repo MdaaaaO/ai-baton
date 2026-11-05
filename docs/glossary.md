@@ -68,7 +68,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
   predecessor ends leaving a next-session prompt (`session-handoff`), a successor registers under the same name and
   starts from it (`session-register`). Not one session's lifetime — the name's.
 - **Lease** — in swarm mode, a time-limited claim on a serial resource, one file per resource: the holder, an expiry and
-  who may release it. A dead holder or a passed expiry frees it, so nobody has to kill a peer (planned, `lease.py`, #679).
+  who may release it. A dead holder or a passed expiry frees it, so nobody has to kill a peer (`context-db/bin/lease.py`).
 - **Ledger** — in swarm mode, the epic's task ledger: `.context/state/swarm/<key>.json`, one row per ticket, written by
   sessions and rendered as a table in the epic's context doc (planned, `swarm.py`, #677). The decision ledger is a
   different thing: one line per answered decision (`docs/carousel.md` § After the answer).
