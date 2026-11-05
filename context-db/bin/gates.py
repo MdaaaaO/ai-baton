@@ -24,20 +24,21 @@ Usage:
       Closes a `human` gate. Any other `--by` is refused, so no worker, verifier or orchestrator signs one, and neither
       does a peer message: the decision line must be in the grammar of docs/carousel.md § After the answer,
         YYYY-MM-DD · <question> → <chosen>; not <rejected options> — <one clause why>
-      with `VG-<n>` in its question and a `<chosen>` that starts with `sign`, so one answer closes one gate and a
-      `hold` closes none.
+      with this `VG-<n>` and no other in its question and a `<chosen>` of exactly `sign` or `signed`, so one answer
+      closes one gate and a `hold` closes none.
   gates.py sign <plan-file> VG-<n> --by verifier --evidence <item>
       Closes an `agent` gate. `<item>` is one of evidence_check.py's shapes (`` `cmd` → `output` ``, a URL, a #<n> or
-      commit reference) or `run <id>`. Refused while the gate's `when:` flags are all false on this machine.
-      Signing again with the same record changes nothing; a different one is refused.
+      commit reference) or exactly `run <id>`.
+  Either `sign` is refused while the gate's `when:` flags are all false on this machine. Signing again with the same
+  record changes nothing; a different one is refused.
 
 The file is the issue body alone, never its comments, which are anyone's text: a file with more than one
 `## Verification plan` section is refused, so a concatenated comment can neither add a gate nor close one.
 
 Exit codes: 0 ok (`status`: every gate closed; `sign`: recorded); 1 no `VG-<n>` gate in the file, or `sign` names a gate
 the file does not hold; 2 bad usage, an unreadable file, or a malformed plan (a gate line that breaks the grammar, a
-checkbox or `VG-<n>` bullet that is not a gate, a repeated id, a signer the gate's kind does not take, an unknown
-flag, a second section); 3 `status`: a gate is open, or `sign`: the signature is refused, with the file untouched. Any
+checkbox or `VG-<n>` bullet that is not a gate, a code fence left open in the plan, a repeated id, a signer the gate's
+kind does not take, an unknown flag, a second section); 3 `status`: a gate is open, or `sign`: the signature is refused, with the file untouched. Any
 exit but 0 from `status` means the epic may not close. Stdlib only.
 """
 from __future__ import annotations
@@ -48,7 +49,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import done_when as dw  # noqa: E402 — the one section walker and the checkbox and command shapes
+import done_when as dw  # noqa: E402 — the one section walker and the fence and command shapes
 import evidence_check as ec  # noqa: E402 — the one place the evidence-shape rules live
 import fsutil  # noqa: E402 — the `<file | ->` reader, the atomic write and the lock
 import kb  # noqa: E402 — SYSTEMS, the known capability flags
@@ -68,13 +69,15 @@ GATE_RE = re.compile(
     r"(?:\s+·\s+signed:\s*(?P<signed>\S+)\s+·\s+(?P<field>decision|proof):\s*(?P<record>\S.*?))?"
     r"\s*$"
 )
-# What a reader would take for a gate although GATE_RE may refuse it: never skipped, or a typo would drop a gate.
-LOOSE_GATE_RE = re.compile(r"^\s*(?:(?:[-*]|\d+[.)])\s+)?(?:\[[ xX]\]\s*)?VG-\d+\b")
+# What a reader would take for a gate although GATE_RE may refuse it: never skipped, or a typo would drop a gate. A `+`
+# bullet and a quoted one render as list items too, and done_when's checkbox shape reads neither, so these two are ours.
+LOOSE_GATE_RE = re.compile(r"^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s*)?VG-\d+\b")
+BOX_RE = re.compile(r"^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s*\[[ xX]\]")
 FLAG_RE = re.compile(r"^systems\.(?P<flag>\w+)$")
 # docs/carousel.md § After the answer; a test pins this shape to that page's grammar line.
 DECISION_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2}) · (?P<question>\S.*?) → (?P<chosen>\S.*?); not (?P<rejected>\S.*?) — \S.*$")
-CHOSEN_SIGN_RE = re.compile(r"^sign(?:ed)?\b", re.IGNORECASE)
-RUN_ID_RE = re.compile(r"\brun\s+\S*\d")  # a pipeline or CI run, the one evidence shape evidence_check.py has no use for
+CHOSEN_SIGN_RE = re.compile(r"sign(?:ed)?", re.IGNORECASE)  # fullmatch: `sign nothing yet, hold` is not an answer of sign
+RUN_ID_RE = re.compile(r"run\s+\S*\d\S*")  # fullmatch: a pipeline or CI run, the one shape evidence_check.py has no use for
 
 
 class Gate:
@@ -112,6 +115,30 @@ def field_problem(g: Gate) -> str | None:
     return None
 
 
+def unclosed_fence(text: str) -> int | None:
+    """The line of a code fence opened in the plan and still open at the plan's end, the next `## ` line or the end of
+    the file, or None. `dw.sections` skips what a fence holds, so such a fence would hide every gate below it. It follows
+    that walker's fence rule and sits here because a walker that skips a fence cannot report one."""
+    inside = False
+    fence = opened = 0
+    for i, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if fence:
+            if re.fullmatch(rf"`{{{fence},}}", stripped):
+                fence = 0
+            elif inside and line.startswith("## "):
+                return opened
+            continue
+        m = dw.FENCE_RE.match(stripped)
+        if m:
+            fence, opened = len(m.group(1)), i
+        elif stripped == PLAN_HEAD:
+            inside = True
+        elif line.startswith("## "):
+            inside = False
+    return opened if inside and fence else None
+
+
 def parse_plan(text: str) -> tuple[list[Gate], list[str]]:
     """(the gates in file order, the problems). No section, or a section with no gate line, is no gates and no problems."""
     secs = dw.sections(text, PLAN_HEAD)
@@ -120,8 +147,11 @@ def parse_plan(text: str) -> tuple[list[Gate], list[str]]:
     gates: list[Gate] = []
     problems: list[str] = []
     seen: set[str] = set()
+    fence = unclosed_fence(text)
+    if fence:
+        problems.append(f"{fence}: a code fence opens here and stays open at the end of the plan, so it hides the gates below it")
     for lineno, line in secs[0] if secs else []:
-        if not (dw.BOX_RE.match(line) or LOOSE_GATE_RE.match(line)):
+        if not (BOX_RE.match(line) or LOOSE_GATE_RE.match(line)):
             continue
         m = GATE_RE.match(line)
         if m is None:
@@ -149,9 +179,12 @@ def decision_problem(g: Gate, line: str) -> str | None:
         datetime.date.fromisoformat(m["date"])
     except ValueError:
         return f"the decision line's date {m['date']} is not a date"
-    if not re.search(rf"\b{g.id}\b", m["question"]):
+    named = {f"VG-{int(n)}" for n in re.findall(r"\bVG-(\d+)\b", m["question"], re.IGNORECASE)}
+    if g.id not in named:
         return f"the decision line's question does not name {g.id}: one answer closes one gate"
-    if not CHOSEN_SIGN_RE.match(m["chosen"]):
+    if named != {g.id}:
+        return f"the decision line's question also names {', '.join(sorted(named - {g.id}))}: one answer closes one gate"
+    if not CHOSEN_SIGN_RE.fullmatch(m["chosen"]):
         return f"the decision line's answer is `{m['chosen']}`, not `sign`"
     return None
 
@@ -168,11 +201,11 @@ def refusal(g: Gate, by: str, decision: str | None, evidence: str | None) -> str
         return f"a {g.kind} gate takes {want}, not {unwanted}"
     if value is None:
         return f"a {g.kind} gate needs {want}"
-    if "\n" in value or "\r" in value:
+    if len(value.splitlines()) > 1:
         return f"{want} must be one line"
     if g.kind == "human":
         return decision_problem(g, value)
-    if not (ec.has_evidence(f"-{ec.CLAIM_SEP}{value}") or RUN_ID_RE.search(value)):
+    if not (ec.has_evidence(f"-{ec.CLAIM_SEP}{value}") or RUN_ID_RE.fullmatch(value)):
         return "the evidence is bare: `cmd` → `output`, a URL, a #<n> or commit reference, or `run <id>`"
     return None
 
