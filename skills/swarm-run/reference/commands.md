@@ -13,7 +13,7 @@ the orchestrator's registered name, the `from=` on its lines.
 | 4, incident | `python3 $E/swarm.py add <key> <t> --incident --area <path> --dw DW-<n>` |
 | 5 | `python3 $E/swarm.py progress <key> <t> --stall` · `… assign <key> <t> --rebrief` with `format ASSIGN … --rebrief 1 --note "…"` · `… status <key> <t> parked --reason "…"` with `format PARKED <t> --from <lane> --reason "…"` |
 | 6 | `python3 $E/swarm_budget.py status <key>` · `python3 $E/swarm_budget.py digest <key>` |
-| 7 | `gh pr create --draft --body-file <file>` · `python3 $E/swarm.py status <key> <t> pr --pr <n>` · `… status <key> <t> ready-to-merge --head <sha>` · `gh run watch <id> --exit-status` (background) · `bash $BATON/skills/pr-watch/pr-merge.sh <owner/repo> <pr> <sha>` · `… status <key> <t> merged --pr <n> --sha <sha>` |
+| 7 | `python3 $E/kit_profile.py get swarm` (the `merge` map and `protected_paths`; exit 1 = every default) · `gh pr create --draft --body-file <file>` · `python3 $E/swarm.py status <key> <t> pr --pr <n>` · `… status <key> <t> ready-to-merge --head <sha>` · `gh run watch <id> --exit-status` (background) · `bash $BATON/skills/pr-watch/pr-merge.sh <owner/repo> <pr> <sha>` · `… status <key> <t> merged --pr <n> --sha <sha>` |
 | 8 | `python3 $E/gates.py status <plan>` · `python3 $E/gates.py sign <plan> VG-<n> --by owner --decision "<line>"` · `… status <key> <t> blocked --reason "…"` · `… status <key> <t> done` |
 | 10 | `python3 $E/swarm.py render <key>` |
 
