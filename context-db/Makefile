@@ -339,7 +339,7 @@ SESSION_ARGS = --ref $(call sq,REF) --status $(call sq,STATUS) --epic $(call sq,
                --resp $(call sq,RESP) --note $(call sq,NOTE)
 session-register:
 	@test -n $(call sq,NAME) || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=] [ROLE=] [STATE=] [LANE=] [SUCCESSOR_OF=<predecessor>]"; exit 2; }
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) $(if $(value ROLE),--role $(call sq,ROLE)) $(if $(value STATE),--state $(call sq,STATE)) $(if $(value LANE),--lane $(call sq,LANE)) --successor-of $(call sq,SUCCESSOR_OF) $(STATSFLAGS)
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) $(if $(filter command line,$(origin ROLE)),--role $(call sq,ROLE)) $(if $(filter command line,$(origin STATE)),--state $(call sq,STATE)) $(if $(filter command line,$(origin LANE)),--lane $(call sq,LANE)) --successor-of $(call sq,SUCCESSOR_OF) $(STATSFLAGS)
 	@sh $(ENGINE)../sync-check.sh || true
 
 session-touch:

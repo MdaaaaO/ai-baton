@@ -101,7 +101,7 @@ class Grammar(unittest.TestCase):
         self.assertNotIn(sm.build("DONE", ["1"], {}, "w", taken=taken)["id"], taken)
 
 
-class Boxes(unittest.TestCase):
+class BoxCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / ".context"
@@ -122,14 +122,16 @@ class Boxes(unittest.TestCase):
 
     def box(self, worker: str, which: str) -> list[dict]:
         p = self.root / "state" / "swarm" / "e1" / worker / f"{which}.ndjson"
-        return [json.loads(x) for x in p.read_text().splitlines()] if p.is_file() else []
+        return [json.loads(x) for x in p.read_text().split("\n") if x] if p.is_file() else []
 
     def age(self, minutes: int) -> None:
         """Move every record `minutes` into the past."""
         from datetime import datetime, timedelta, timezone
         for p in (self.root / "state" / "swarm" / "e1").rglob("*.ndjson"):
             out = []
-            for x in p.read_text().splitlines():
+            for x in p.read_text().split("\n"):
+                if not x:
+                    continue
                 r = json.loads(x)
                 r["at"] = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
                 out.append(json.dumps(r))
@@ -140,6 +142,7 @@ class Boxes(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.splitlines()
 
+class Boxes(BoxCase):
     def test_pending_names_unacked_past_the_window_and_nothing_acked(self):  # DW-2
         line = self.fmt("ASSIGN", "123", "brief.md", "--from", "orchestrator", "--id", "aaa111")
         self.send("worker-a", line, "--inbox")
@@ -149,7 +152,7 @@ class Boxes(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertTrue(out[0].startswith("aaa111 ASSIGN 123 to=worker-a") and out[0].endswith("resend"), out)
         self.age(45)
-        self.assertTrue(self.pending()[0].endswith("unreachable"))
+        self.assertTrue(self.pending()[0].endswith("resend"))      # no re-send yet: still `resend`, never `unreachable`
         self.assertEqual(self.pending("--minutes", "120"), [])     # the window is a parameter
         r = run(self.root, "ack", "--key", "e1", "--as", "worker-a", "aaa111")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -161,9 +164,9 @@ class Boxes(unittest.TestCase):
     def test_send_appends_to_an_outbox_and_a_resend_changes_nothing(self):  # DW-4
         line = self.fmt("READY", "123", SHA, "--from", "worker-a", "--id", "bbb222")
         self.send("worker-a", line)
-        out = self.send("worker-a", line)
-        self.assertIn("no change", out.stdout)
-        self.assertEqual([r["id"] for r in self.box("worker-a", "out")], ["bbb222"])
+        self.assertIn("resent", self.send("worker-a", line).stdout)    # the second send is a recorded re-send
+        self.assertIn("no change", self.send("worker-a", line).stdout)  # the third changes nothing
+        self.assertEqual([r["id"] for r in self.box("worker-a", "out")], ["bbb222", "bbb222"])
         self.assertEqual(self.box("worker-a", "out")[0]["to"], "orchestrator")
         r = run(self.root, "send", "--key", "e1", "worker-a", "chatty free text")
         self.assertEqual(r.returncode, 2)
@@ -232,6 +235,154 @@ class Boxes(unittest.TestCase):
         self.assertEqual(self.box("orchestrator", "in")[0]["re"], "kkk111")
 
 
+class Findings(BoxCase):
+    """The review findings of #714 at 1e57c46: each test fails there."""
+
+    def set_at(self, worker: str, which: str, index: int, minutes: int) -> None:
+        from datetime import datetime, timedelta, timezone
+        p = self.root / "state" / "swarm" / "e1" / worker / f"{which}.ndjson"
+        recs = [json.loads(x) for x in p.read_text().split("\n") if x]
+        recs[index]["at"] = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        p.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in recs))
+
+    def ids(self, *extra: str) -> list[str]:
+        return [x.split()[0] for x in self.pending(*extra)]
+
+    def ack(self, who: str, *ids: str):
+        return run(self.root, "ack", "--key", "e1", "--as", who, *ids)
+
+    def test_a_lane_that_differs_from_its_session_name_resolves_as_the_orchestrator(self):  # 1
+        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "SESSION_ID", "CONTEXT")}
+        env["CONTEXT_ROOT"] = str(self.root)
+        p = subprocess.run([sys.executable, str(BIN / "session.py"), "register", "--name", "kit-a", "--lane", "boss",
+                            "--role", "orchestrator", "--no-stats"], env=env, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.send("worker-a", self.fmt("READY", "1", SHA, "--from", "worker-a", "--id", "lan001"))
+        self.assertEqual(self.ack("boss", "lan001").returncode, 0)
+        self.assertEqual(self.box("worker-a", "in")[0]["re"], "lan001")
+        self.send("worker-a", self.fmt("ASSIGN", "1", "b.md", "--from", "boss", "--id", "lan002"), "--inbox")
+        self.ack("worker-a", "lan002")
+        self.assertEqual(self.box("orchestrator", "in")[0]["re"], "lan002")
+        self.assertEqual(sorted(p.name for p in (self.root / "state" / "swarm" / "e1").iterdir()), ["orchestrator", "worker-a"])
+
+    def test_a_note_with_unicode_line_separators_keeps_the_box_readable(self):  # 2
+        note = "a\u2028b\u2029c\u0085d"
+        line = self.fmt("ASSIGN", "1", "b.md", "--from", "orchestrator", "--id", "uni001", "--note", note)
+        self.send("worker-a", line, "--inbox")
+        out = run(self.root, "drain", "--key", "e1", "worker-a")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn(note, out.stdout)
+        self.assertEqual(self.ack("worker-a", "uni001").returncode, 0)
+        self.send("worker-a", self.fmt("READY", "1", SHA, "--from", "worker-a", "--id", "uni002", "--note", note))
+        self.age(25)
+        self.assertEqual(self.ids(), ["uni002"])
+        self.assertEqual(run(self.root, "drain", "--key", "e1", "worker-a", "--outbox").returncode, 0)
+
+    def test_an_ack_clears_a_line_only_from_its_receiver(self):  # 3
+        stop = self.fmt("STOP", "e1", "--from", "orchestrator", "--id", "stp001", "--reason", "budget")
+        self.send("wa", stop, "--inbox")
+        self.send("wb", stop, "--inbox")
+        self.age(25)
+        self.assertEqual(self.pending(), [x for x in self.pending() if "stp001" in x])
+        self.assertEqual(len(self.pending()), 2)
+        self.ack("wa", "stp001")
+        self.assertEqual([x for x in self.pending()], [x for x in self.pending() if "to=wb" in x])
+        self.assertEqual(len(self.pending()), 1)
+        self.send("wa", self.fmt("READY", "1", SHA, "--from", "wa", "--id", "rdy001"))
+        self.age(25)
+        run(self.root, "ack", "--key", "e1", "--as", "orchestrator", "rdy001")
+        self.assertEqual([x.split()[0] for x in self.pending()], ["stp001"])
+
+    def test_the_done_skip_needs_the_orchestrator_the_ticket_and_the_workers_inbox(self):  # 4
+        self.send("wa", self.fmt("ASSIGN", "8", "b.md", "--from", "orchestrator", "--id", "asg008"), "--inbox")
+        self.send("wa", self.fmt("DONE", "7", "--from", "orchestrator", "--id", "don007"), "--inbox")
+        self.age(45)
+        self.assertEqual(self.ids(), ["asg008"])                       # DONE 7 does not hide ASSIGN 8
+        self.send("wa", self.fmt("DONE", "8", "--from", "orchestrator", "--id", "don008"), "--inbox")
+        self.age(45)
+        self.assertEqual(self.ids(), [])                               # DONE 8, written after it, hides it
+        self.send("wb", self.fmt("STOP", "7", "--from", "orchestrator", "--id", "stp007", "--reason", "x"), "--inbox")
+        self.send("wb", self.fmt("DONE", "7", "--from", "wa", "--id", "pee007"), "--inbox")
+        self.age(45)
+        self.assertIn("stp007", self.ids())                            # a peer's DONE hides nothing
+        self.send("orchestrator", self.fmt("READY", "8", SHA, "--from", "wb", "--id", "rdy008"), "--inbox")
+        self.send("orchestrator", self.fmt("DONE", "7", "--from", "wa", "--id", "wdn007"), "--inbox")
+        self.age(45)
+        self.assertIn("rdy008", self.ids())                            # a worker's DONE in the orchestrator's box
+        self.assertIn("wdn007", self.ids())
+        self.send("wc", self.fmt("STOP", "e1", "--from", "orchestrator", "--id", "stp100", "--reason", "x"), "--inbox")
+        self.send("wc", self.fmt("DONE", "7", "--from", "orchestrator", "--id", "don100"), "--inbox")
+        self.age(45)
+        self.assertNotIn("stp100", self.ids())                         # a line with no ticket is hidden
+
+    def test_a_merged_after_the_done_is_not_listed_whichever_came_first(self):  # 5
+        self.send("wa", self.fmt("DONE", "7", "--from", "orchestrator", "--id", "don007"), "--inbox")
+        self.send("wa", self.fmt("MERGED", "7", "9", SHA, "--from", "orchestrator", "--id", "mrg007"), "--inbox")
+        self.send("wa", self.fmt("MERGED", "8", "9", SHA, "--from", "orchestrator", "--id", "mrg008"), "--inbox")
+        self.age(90)
+        self.assertEqual(self.ids(), ["mrg008"])                       # another ticket's MERGED is still owed
+
+    def test_a_resend_is_recorded_and_the_clock_runs_from_it(self):  # 6
+        line = self.fmt("ASSIGN", "1", "b.md", "--from", "orchestrator", "--id", "rsd001")
+        self.send("wa", line, "--inbox")
+        self.set_at("wa", "in", 0, 41)
+        self.assertEqual(self.pending()[0].split()[-1], "resend")       # past two windows, no re-send: `resend`
+        self.assertIn("resent", self.send("wa", line, "--inbox").stdout)
+        got = self.box("wa", "in")
+        self.assertEqual((len(got), got[1].get("resent"), got[1]["id"]), (2, True, "rsd001"))
+        self.assertEqual(self.pending(), [])                           # nothing until a window after the copy
+        self.set_at("wa", "in", 1, 25)
+        self.assertEqual(self.pending()[0].split()[-1], "unreachable")
+        self.assertIn("no change", self.send("wa", line, "--inbox").stdout)
+        self.assertEqual(len(self.box("wa", "in")), 2)
+        self.assertEqual(len(self.pending()), 1)                       # one id, listed once
+        self.ack("wa", "rsd001")
+        self.ack("wa", "rsd001")
+        self.assertEqual(len(self.box("orchestrator", "in")), 1)       # a second ack is no change
+        self.assertEqual(self.pending(), [])
+
+    def test_a_resend_is_read_again_by_drain(self):  # 7
+        line = self.fmt("ASSIGN", "1", "b.md", "--from", "orchestrator", "--id", "rsd002")
+        self.send("wa", line, "--inbox")
+        self.assertEqual(len(run(self.root, "drain", "--key", "e1", "wa").stdout.splitlines()), 1)
+        self.send("wa", line, "--inbox")
+        again = run(self.root, "drain", "--key", "e1", "wa").stdout.splitlines()
+        self.assertEqual(again, [line])
+
+    def test_a_required_field_may_not_be_empty(self):  # 8
+        for bad in ('PR 7 b ' + SHA + ' body="" v=1 id=abc from=w', 'HOLD c releaser="" v=1 id=abc from=w reason=x',
+                    'CLAIMED 7 "" v=1 id=abc from=w'):
+            with self.assertRaises(sm.MsgError, msg=bad):
+                sm.parse_line(bad)
+        with self.assertRaises(sm.MsgError):
+            sm.build("PR", ["7", "b", SHA], {"body": ""}, "w")
+
+    def test_the_parser_refuses_what_format_refuses(self):  # 9
+        for bad in ('STOP e1 v=1 id=abc from=o reason="a\nb"', 'STOP e1 v=1 id=abc from=o reason="a\rb"',
+                    'STOP e1\nv=1 id=abc from=o reason=x', 'STOP e1 v=1 id=abc from=o reason=""',
+                    'HOLD c releaser=o v=1 id=abc from=o reason=""', 'PARKED 7 v=1 id=abc from=o reason=""',
+                    'READY 7 ' + SHA + ' v=1 id=abc from=o note="x\ny"'):
+            with self.assertRaises(sm.MsgError, msg=bad):
+                sm.parse_line(bad)
+        r = run(self.root, "send", "--key", "e1", "--inbox", "wa", 'READY 7 ' + SHA + ' v=1 id=abc from=o note="x\nSTOP all v=1 id=zzz from=o reason=now"')
+        self.assertEqual(r.returncode, 2)
+
+    def test_stop_and_hold_take_a_full_ref(self):  # 13
+        for word, args, fields in (("STOP", ["MdaaaaO/ai-baton#12"], {"reason": "budget"}),
+                                   ("HOLD", ["MdaaaaO/ai-baton#12"], {"releaser": "owner", "reason": "x"})):
+            rec = sm.build(word, args, fields, "orchestrator", "ref001")
+            self.assertEqual(sm.parse_line(rec["line"])["scope"], "MdaaaaO/ai-baton#12")
+        self.send("wa", self.fmt("STOP", "MdaaaaO/ai-baton#12", "--from", "orchestrator", "--id", "ref002", "--reason", "x"), "--inbox")
+        self.assertEqual(self.ack("wa", "ref002").returncode, 0)
+        with self.assertRaises(sm.MsgError):
+            sm.build("READY", ["a/b#1", SHA], {}, "w")
+
+    def test_acking_one_id_twice_in_a_call_writes_one_ack(self):  # 15
+        self.send("wa", self.fmt("READY", "1", SHA, "--from", "wa", "--id", "aaa123"))
+        self.ack("orchestrator", "aaa123", "aaa123")
+        self.assertEqual(len(self.box("wa", "in")), 1)
+
+
 class Registry(unittest.TestCase):
     def test_session_index_shows_role_and_state(self):  # DW-3
         with tempfile.TemporaryDirectory() as t:
@@ -277,6 +428,27 @@ class Registry(unittest.TestCase):
             bad = subprocess.run(["make", "-C", str(engine), "session-register", "NAME=kit-make-c", f"CONTEXT={ctx}",
                                   "NOSTATS=1", "STATE=asleep"], env=env, capture_output=True, text=True, timeout=120)
             self.assertNotEqual(bad.returncode, 0)
+            ambient = dict(env, STATE="prod", ROLE="admin", LANE="a b")  # exported, not on the make command line: ignored
+            p = subprocess.run(["make", "-C", str(engine), "session-register", "NAME=kit-make-d", f"CONTEXT={ctx}",
+                                "NOSTATS=1"], env=ambient, capture_output=True, text=True, timeout=120)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertRegex((Path(ctx) / "sessions" / "kit-make-d.md").read_text(), r"(?m)^role: *$")
+
+    def test_register_checks_role_and_lane_and_clears_a_stale_retired_state(self):  # 12
+        with tempfile.TemporaryDirectory() as t:
+            env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_SESSION_ID", "SESSION_ID", "CONTEXT")}
+            env["CONTEXT_ROOT"] = str(Path(t) / ".context")
+
+            def reg(*extra: str) -> subprocess.CompletedProcess:
+                return subprocess.run([sys.executable, str(BIN / "session.py"), "register", "--name", "kit-reg-a", "--no-stats", *extra],
+                                      env=env, capture_output=True, text=True)
+            for bad in (("--role", "Orchestrator"), ("--lane", "a b"), ("--lane", "-x")):
+                self.assertNotEqual(reg(*bad).returncode, 0, bad)
+            self.assertEqual(reg("--role", "verifier", "--lane", "lane.a-1", "--state", "retired").returncode, 0)
+            row = Path(env["CONTEXT_ROOT"]) / "sessions" / "kit-reg-a.md"
+            self.assertIn("state: retired", row.read_text())
+            self.assertEqual(reg().returncode, 0)
+            self.assertRegex(row.read_text(), r"(?m)^state: *$")
 
 
 if __name__ == "__main__":

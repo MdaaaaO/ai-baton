@@ -16,16 +16,24 @@ Usage:
       Prints the line as JSON: `word`, `ticket` (or `scope`), the line's fields, `v`, `id`, `from`. Free text, an unknown
       word, a missing field and a grammar version it does not read are refused (exit 2), naming what is accepted.
   swarm_msg.py send --key <key> <worker> <line | record | -> [--inbox]
-      Appends one validated record to <worker>'s outbox, or with --inbox to its inbox. A second copy of an id changes nothing.
+      Appends one validated record to <worker>'s outbox, or with --inbox to its inbox.
+      A second send of an id that box already holds appends one copy, marked `resent`, with a fresh `at`; a further one
+      changes nothing. The copy sits after the read mark, so `drain` shows the line again.
   swarm_msg.py drain --key <key> <worker> [--outbox] [--json]
       Prints <worker>'s unread inbox lines (the orchestrator drains an outbox with --outbox) and marks them read; the mark
       is `in.read` / `out.read` beside the file, never in it.
   swarm_msg.py ack --key <key> --as <lane> <id>…
       Writes `ACK <scope> re=<id>` into the inbox of the line's sender. A second ack of an id changes nothing.
   swarm_msg.py pending --key <key> [--minutes <n>] [--now <iso>]
-      Lists each id sent and not acked, older than `swarm.ack_minutes` (default 20): `<id> <word> <scope> to=<lane>
-      age=<m> resend` in the first window past, `unreachable` after a second. A line to a background worker whose run
-      ended (a `DONE` the orchestrator wrote into its inbox after the line) is skipped. Prints nothing when none.
+      Lists each id sent and not acked by its receiver, one window (`swarm.ack_minutes`, default 20) after it was sent:
+      `<id> <word> <scope> to=<lane> age=<m> resend`. After a re-send (`send` of the id again) it is listed `unreachable`
+      one window after the copy, and not before. A line to a background worker whose run ended is skipped: a `DONE` the
+      orchestrator wrote into that worker's inbox after it, for the same ticket (or a line with no ticket), and a
+      `MERGED` for the ticket of such a `DONE`, whichever came first. Prints nothing when none.
+
+Rules that are this script's own call, not docs/swarm.md's: an id is 3 to 16 letters and digits; `from=` and `<who>` are
+names; a required field is not empty; a value holds no newline or carriage return; a STOP or HOLD scope is a name or a
+full ref `Owner/repo#N`.
 
 Exit codes: 0 ok; 1 absent (`ack`: no such id); 2 bad usage, a refused line or an I/O error. Stdlib only.
 """
@@ -110,23 +118,37 @@ def _one(v: str) -> str:
 
 
 def _text(v: str) -> str:
+    if not v:
+        raise MsgError("a required field is empty")
     return v
+
+
+def _any(v: str) -> str:
+    return v
+
+
+REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*#[0-9]+")
+
+
+def _scope(v: str) -> str:
+    """A name, or a full ref `Owner/repo#N` (the scope `lease.py stop` takes)."""
+    return v if REF_RE.fullmatch(v) else _name(v)
 
 
 # word -> (positional (name, check), keyed fields written before `v=` as {name: (check, required)}). `reason` and `note`
 # are written after `from=`. `ticket` as the first name marks a ticket-scoped line; `scope` any other.
 LINES: dict[str, tuple[tuple, dict]] = {
     "ASSIGN": ((("ticket", _ticket), ("file", _text)), {"lease": (_name, False), "rebrief": (_one, False)}),
-    "ACK": ((("scope", _name),), {"re": (_name, True)}),
+    "ACK": ((("scope", _scope),), {"re": (_name, True)}),
     "CLAIMED": ((("ticket", _ticket), ("branch", _text)), {}),
     "PR": ((("ticket", _ticket), ("branch", _text), ("sha", _sha)), {"body": (_text, True)}),
     "READY": ((("ticket", _ticket), ("sha", _sha)), {}),
     "MERGED": ((("ticket", _ticket), ("pr", _number), ("sha", _sha)), {}),
-    "BLOCKED": ((("ticket", _ticket), ("reason", _reason), ("who", _name)), {"sha": (_sha, False), "ran": (_text, False)}),
+    "BLOCKED": ((("ticket", _ticket), ("reason", _reason), ("who", _name)), {"sha": (_sha, False), "ran": (_any, False)}),
     "DONE": ((("ticket", _ticket),), {}),
-    "HOLD": ((("scope", _name),), {"releaser": (_name, True)}),
+    "HOLD": ((("scope", _scope),), {"releaser": (_name, True)}),
     "RELEASE": ((("scope", _name),), {}),
-    "STOP": ((("scope", _name),), {}),
+    "STOP": ((("scope", _scope),), {}),
     "PARKED": ((("ticket", _ticket),), {}),
     "STANDBY": ((("scope", _name),), {"until": (_time, True)}),
     "RETIRED": ((("scope", _name),), {}),
@@ -140,7 +162,7 @@ ALL_WORDS = (*LINES, *TEXT_LINES)
 
 def _check_text_line(word: str, text: str) -> str:
     text = text.strip()
-    if not text or "\n" in text:
+    if not text or "\n" in text or "\r" in text:
         raise MsgError(f"{word} takes one non-empty line")
     if word == "NEEDS":
         if not re.fullmatch(r"NEEDS [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+ \S+", text):
@@ -208,6 +230,8 @@ def build(word: str, args: list[str], fields: dict[str, str], sender: str, msg_i
             raise MsgError(f"{word} has no field {k}; it takes {', '.join(sorted(allowed))}")
     for k, (check, required) in keyed.items():
         if k in fields:
+            if required and not fields[k]:
+                raise MsgError(f"{word} needs {k}= and it is empty")
             rec[k] = check(fields[k])
         elif required:
             raise MsgError(f"{word} needs {k}=")
@@ -233,6 +257,8 @@ def parse_line(line: str) -> dict:
     """One grammar line as a dict. For CLAIMED, PR, READY and BLOCKED the same fields `swarm.parse_status_line` returns:
     `word`, `ticket`, the line's own fields, `v`, `id`, `from`, and `body`, `sha`, `ran`, `note` when present."""
     line = line.strip()
+    if "\n" in line or "\r" in line:
+        raise MsgError(f"a line is one line, with no newline or carriage return in it: {line!r}")
     word = _word(line)
     if word in TEXT_LINES:
         raise MsgError(f"{word} carries v, id and from beside its text, as a record: parse the record, not the bare text")
@@ -274,9 +300,9 @@ def parse_line(line: str) -> dict:
             raise MsgError(f"{word} has no field {k}: {line!r}")
         rec[k] = fields[k][0](v) if k in fields else v
     for k, (_, required) in fields.items():
-        if required and k not in rec:
-            raise MsgError(f"{word} needs {k}=: {line!r}")
-    if word in REASON_REQUIRED and "reason" not in rec:
+        if required and not rec.get(k):
+            raise MsgError(f"{word} needs {k}=, not empty: {line!r}")
+    if word in REASON_REQUIRED and not rec.get("reason"):
         raise MsgError(f"{word} needs reason=: {line!r}")
     return rec
 
@@ -308,18 +334,34 @@ def swarm_dir(key: str) -> Path:
     return profile.context_root() / "state" / "swarm" / _name(key)
 
 
-def lane_dir(lane: str) -> str:
-    """The directory a lane's files live in: `orchestrator` for the orchestrator, else the lane. The registry row's `role`
-    says which lane is the orchestrator, so a sender is resolved without asking."""
+def orchestrator_names() -> set[str]:
+    """Every lane name the registry says is an orchestrator: the `lane` field of a row with `role: orchestrator`, and its
+    file stem (the session name)."""
+    names: set[str] = set()
+    sessions = profile.context_root() / "sessions"
+    try:
+        rows = sorted(sessions.glob("*.md"))
+    except OSError:
+        return names
+    for row in rows:
+        try:
+            parts = frontmatter.split(row.read_text(encoding="utf-8"))
+            meta = frontmatter.parse_flat(parts[0]) if parts else {}
+        except (OSError, ValueError):
+            continue
+        if frontmatter.unquote(meta.get("role", "")) == ORCHESTRATOR:
+            names.update({row.stem, frontmatter.unquote(meta.get("lane", ""))} - {""})
+    return names
+
+
+def lane_dir(lane: str, names: set[str] | None = None) -> str:
+    """The directory a lane's files live in: `orchestrator` for the orchestrator, else the lane. The registry says which
+    lane is the orchestrator (a row with `role: orchestrator`, by its `lane` field or its name), so a sender is resolved
+    without asking."""
+    _name(lane)
     if lane == ORCHESTRATOR:
         return lane
-    row = profile.context_root() / "sessions" / f"{_name(lane)}.md"
-    try:
-        parts = frontmatter.split(row.read_text(encoding="utf-8"))
-        role = frontmatter.unquote(frontmatter.parse_flat(parts[0]).get("role", "")) if parts else ""
-    except OSError:
-        return lane
-    return ORCHESTRATOR if role == ORCHESTRATOR else lane
+    return ORCHESTRATOR if lane in (orchestrator_names() if names is None else names) else lane
 
 
 def box(key: str, worker: str, which: str) -> Path:
@@ -330,7 +372,7 @@ def read_records(path: Path) -> list[dict]:
     if not path.is_file():
         return []
     out = []
-    for n, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for n, raw in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
         if not raw.strip():
             continue
         try:
@@ -355,22 +397,26 @@ def taken_ids(key: str) -> set[str]:
     return {r.get("id", "") for _, _, recs in all_boxes(key) for r in recs}
 
 
-def append(key: str, worker: str, which: str, rec: dict, to: str) -> bool:
-    """Append one record; False when its id is already in that file (a re-send changes nothing)."""
+def append(key: str, worker: str, which: str, rec: dict, to: str) -> str:
+    """Append one record. `sent` for a new id; `resent` when that file already holds the id once (a copy with a fresh `at`
+    and `resent` set); `no change` from the third send on."""
     path = box(key, worker, which)
     with locked(str(path)):
-        if any(r.get("id") == rec["id"] for r in read_records(path)):
-            return False
+        held = [r for r in read_records(path) if r.get("id") == rec["id"]]
+        if len(held) > 1:
+            return "no change"
         path.parent.mkdir(parents=True, exist_ok=True)
         stored = {k: v for k, v in rec.items() if k != "text"}
         stored.update({"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "to": to})
+        if held:
+            stored["resent"] = True
         if rec["word"] in TEXT_LINES:
             stored["text"] = rec["line"]
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(stored, ensure_ascii=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
-    return True
+    return "resent" if held else "sent"
 
 
 def show(rec: dict, as_json: bool) -> str:
@@ -422,8 +468,9 @@ def cmd_parse(a) -> int:
 def cmd_send(a) -> int:
     rec = parse_any(literal(a.line))
     which, to = ("in", lane_dir(a.worker)) if a.inbox else ("out", ORCHESTRATOR)
-    fresh = append(a.key, lane_dir(a.worker), which, rec, to)
-    print(f"{'sent' if fresh else 'no change: id ' + rec['id'] + ' is already there'} {rec['id']} -> {lane_dir(a.worker)}/{which}")
+    result = append(a.key, lane_dir(a.worker), which, rec, to)
+    note = f"no change: id {rec['id']} was sent twice already" if result == "no change" else result
+    print(f"{note} {rec['id']} -> {lane_dir(a.worker)}/{which}")
     return 0
 
 
@@ -463,6 +510,7 @@ def cmd_ack(a) -> int:
         scope = hit.get("ticket") or hit.get("scope") or hit["from"]
         rec = build("ACK", [scope], {"re": target}, a.sender, taken=taken_ids(a.key))
         append(a.key, lane_dir(hit["from"]), "in", rec, lane_dir(hit["from"]))
+        acked.add((a.sender, target))
         print(f"acked {target} -> {lane_dir(hit['from'])}/in")
     return status
 
@@ -475,26 +523,50 @@ def _minutes() -> int:
         return DEFAULT_ACK_MINUTES
 
 
+def _when(rec: dict) -> datetime:
+    return datetime.fromisoformat(rec["at"].replace("Z", "+00:00"))
+
+
 def pending(key: str, minutes: int, now: datetime) -> list[dict]:
+    """Ids sent and not acked by their receiver. A line is listed `resend` once a window has passed since it was sent; once
+    it was re-sent (a second copy of the id in the box) it is listed `unreachable` a window after the copy, never before."""
     boxes = all_boxes(key)
-    acked = {r.get("re") for _, _, recs in boxes for r in recs if r.get("word") == "ACK"}
+    names = orchestrator_names()
+    acked = {(lane_dir(r.get("from") or "orchestrator", names), r.get("re"))
+             for _, _, recs in boxes for r in recs if r.get("word") == "ACK"}
     out = []
     for worker, which, recs in boxes:
+        first: dict[str, int] = {}
+        copy: dict[str, dict] = {}
         for i, r in enumerate(recs):
-            if r.get("word") == "ACK" or r.get("id") in acked:
+            if r.get("id") not in first:
+                first[r.get("id")] = i
+            elif r.get("id") not in copy:
+                copy[r.get("id")] = r
+        # a background worker whose run ended reads nothing and owes no ack: the orchestrator's DONE in its inbox says so
+        dones = []
+        if which == "in" and worker != ORCHESTRATOR:
+            dones = [(i, r.get("ticket")) for i, r in enumerate(recs)
+                     if r.get("word") == "DONE" and lane_dir(r.get("from") or "", names) == ORCHESTRATOR]
+        for mid, i in first.items():
+            r = recs[i]
+            if r.get("word") == "ACK" or (r.get("to"), mid) in acked:
                 continue
-            # a background worker whose run ended reads nothing and owes no ack: the orchestrator's DONE, written
-            # into the worker's inbox after the line, says so
-            if which == "in" and any(x.get("word") == "DONE" and x.get("from") != worker for x in recs[i + 1:]):
+            ticket = r.get("ticket")
+            if r.get("word") == "DONE" and any(d == i for d, _ in dones):
                 continue
-            if which == "in" and r.get("word") == "DONE" and r.get("from") != worker:
+            if any(d > i and (ticket is None or t == ticket) for d, t in dones):
                 continue
-            at = datetime.fromisoformat(r["at"].replace("Z", "+00:00"))
-            age = (now - at).total_seconds() / 60
-            if age < minutes:
+            if r.get("word") == "MERGED" and any(t == ticket for _, t in dones):
                 continue
-            out.append({"id": r["id"], "word": r["word"], "scope": r.get("ticket") or r.get("scope") or "-",
-                        "to": r.get("to", "?"), "age": int(age), "state": "unreachable" if age >= 2 * minutes else "resend"})
+            age = (now - _when(r)).total_seconds() / 60
+            if mid in copy:
+                state = "unreachable" if (now - _when(copy[mid])).total_seconds() / 60 >= minutes else None
+            else:
+                state = "resend" if age >= minutes else None
+            if state:
+                out.append({"id": mid, "word": r["word"], "scope": ticket or r.get("scope") or "-",
+                            "to": r.get("to", "?"), "age": int(age), "state": state})
     return out
 
 

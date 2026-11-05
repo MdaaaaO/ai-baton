@@ -60,6 +60,8 @@ SESS_DIR = os.path.join(CTX, "sessions")
 # Frontmatter fields, in emit order.
 FIELDS = ["session", "session_id", "ref", "status", "lane", "role", "state", "epic", "repos",
           "working_on", "responsibilities", "stats", "registered", "heartbeat", "updated"]
+SWARM_ROLES = ("orchestrator", "worker", "verifier")  # docs/swarm.md § Lifecycle
+LANE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 SWARM_STATES = ("running", "blocked-on-human", "blocked-on-peer", "standby", "retired")  # docs/swarm.md § Lifecycle
 STATS_HEADING = "## Session stats"
 ACTIVITY_HEADING = "## What this session did"
@@ -568,12 +570,20 @@ def cmd_register(a) -> None:
     # it, so the row shows under Active and the later session-end writes its stats + ledger row.
     fresh = meta.get("status") in (None, "", "ended")  # a new doc, or an ended/archived lane coming back to life
     meta["status"] = a.status or ("active" if meta.get("status") == "ended" else meta.get("status")) or "active"
-    if getattr(a, "lane", ""):  meta["lane"] = one_line(a.lane)
-    if getattr(a, "role", ""):  meta["role"] = one_line(a.role)
+    if getattr(a, "lane", ""):
+        if not LANE_RE.fullmatch(a.lane):
+            sys.exit(f"session: --lane is a name: letters, digits, `.`, `_` and `-`, starting with a letter or digit, not {a.lane!r}")
+        meta["lane"] = a.lane
+    if getattr(a, "role", ""):
+        if a.role not in SWARM_ROLES:
+            sys.exit(f"session: --role must be one of {', '.join(SWARM_ROLES)}, not {a.role!r}")
+        meta["role"] = a.role
     if getattr(a, "state", ""):
         if a.state not in SWARM_STATES:
             sys.exit(f"session: --state must be one of {', '.join(SWARM_STATES)}, not {a.state!r}")
         meta["state"] = a.state
+    elif meta.get("state") == "retired":  # a lane registering again is not retired any more
+        meta["state"] = ""
     if a.epic:   meta["epic"] = a.epic
     if a.repos:  meta["repos"] = a.repos
     if a.working is not None: meta["working_on"] = a.working
