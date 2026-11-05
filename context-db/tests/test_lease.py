@@ -595,6 +595,25 @@ class Stop(Base):
         self.add_row(self.lane, "", "acme/widgets#9")
         self.assertNotIn(warn, stop(env))  # the row works another epic
 
+    def test_stop_warns_a_session_that_holds_the_lease_it_stops(self):
+        warn = "this session holds the lease res, so this STOP denies its own next call"
+        env = {**self.env, "CLAUDE_CODE_SESSION_ID": self.sid}
+
+        def stop(scope):
+            r = subprocess.run([sys.executable, str(BIN / "lease.py"), "stop", scope, "--reason", "x"], env=env,
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)  # a kill switch always writes
+            return r.stdout
+        self.acquire("res", self.lane)
+        self.acquire("other-res", "no-row-lane")
+        for role in ("", "orchestrator"):  # the lease denial survives the role, so it is the line printed
+            self.add_row(self.lane, role)
+            out = stop("res")
+            self.assertIn(warn, out, role)
+            self.assertIn("lease.py go res from their own terminal", out)
+            self.assertNotIn("no role: orchestrator", out, role)
+            self.assertNotIn(warn, stop("other-res"), role)  # a lease its row does not hold
+
     def test_one_stop_denies_every_subagent_of_the_session_whatever_its_epic(self):  # DW-6
         self.add_row(self.lane, "orchestrator", "acme/widgets#9")
         self.add_row("z-" + uuid.uuid4().hex[:6], "", "acme/widgets#674")

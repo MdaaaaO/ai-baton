@@ -445,10 +445,14 @@ def stop(root: Path, scope: str, reason: str, who: str) -> list[str]:
                 raise Refused(f"STOP-{scope} is the owner's; only the owner may rewrite it")
         atomic_write(str(p), json.dumps({"scope": scope, "reason": reason, "by": who, "at": fmt(now())}, indent=2) + "\n")
     out = [f"STOP-{scope} written by {who} (`--as` is a declared role, not a proof): {reason}", IN_FLIGHT_RULE]
-    rows = session_rows(root, os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()) if os.environ.get("CLAUDE_CODE_SESSION_ID") else []
-    if any(r[1] and epic_matches(scope, r[1], r[2]) for r in rows) and not any(r[3] == "orchestrator" for r in rows):
-        out.append(f"this session has no role: orchestrator, so this STOP denies its own next call; the owner lifts it "
-                   f"with lease.py go {scope} from their own terminal")
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    rows = session_rows(root, sid) if sid else []
+    mine = main_rows(rows) if rows else []  # the rows a main call of this session is judged by (`stop_for`)
+    own = f"the owner lifts it with lease.py go {scope} from their own terminal"
+    if any(lane_holds(root, r[0], scope) for r in mine):  # survives `role: orchestrator`, so it is the one to name
+        out.append(f"this session holds the lease {scope}, so this STOP denies its own next call; {own}")
+    elif any(r[1] and epic_matches(scope, r[1], r[2]) for r in rows) and not any(r[3] == "orchestrator" for r in rows):
+        out.append(f"this session has no role: orchestrator, so this STOP denies its own next call; {own}")
     return out
 
 

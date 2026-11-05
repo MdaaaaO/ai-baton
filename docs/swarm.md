@@ -311,14 +311,13 @@ lane. So a `STOP` tells a background subagent from its parent, and:
   `STOP` that cannot tell who is calling fails closed. The role is set at registration:
   `make session-register NAME=<name> EPIC=<epic> ROLE=orchestrator` (`swarm-run` will do it, #684). A session without
   it that stops its own epic is locked until the owner runs `lease.py go <scope>` from their own terminal, where no
-  hook runs; `lease.py stop` prints that warning when it sees the case and still writes the file. `go` is deliberately
-  not exempt: a stopped lane must not be able to lift its own `STOP`. The orchestrator's flush and ledger updates keep
-  running. The
-  main rows, among rows that share a `session_id`, are every row with `role: orchestrator`, else every row, so the
-  result never depends on file order. A lease `STOP` denies the main session when any of those rows holds the lease,
-  whatever the role; a lease held by a non-main row (a worker lane beside an orchestrator row) denies only its
-  subagents. The hook input names no lane, so one `STOP` denies every subagent of the session, also one working
-  another epic.
+  hook runs; the same lockout applies to a lease the session itself holds, whatever its role. `lease.py stop` prints
+  that warning when it sees either case and still writes the file. `go` is deliberately not exempt: a stopped lane
+  must not be able to lift its own `STOP`. The orchestrator's flush and ledger updates keep running. The main rows,
+  among rows that share a `session_id`, are every row with `role: orchestrator`, else every row, so the result never
+  depends on file order. A lease `STOP` denies the main session when any of those rows holds the lease, whatever the
+  role; a lease held by a non-main row (a worker lane beside an orchestrator row) denies only its subagents. The hook
+  input names no lane, so one `STOP` denies every subagent of the session, also one working another epic.
 - A subagent worker's own `--lane` reaches the hook through the registry row that stamped the shared `session_id`: a
   `STOP-<resource>` on a lease held under that lane denies the subagent. A lane with no such row is out of reach, and
   a harness that sends no `agent_id` has every call read as the main session's.
