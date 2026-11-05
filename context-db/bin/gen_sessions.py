@@ -24,9 +24,10 @@ session that ended with no real prompt — nothing written, blank, or a "no succ
 (session-handoff's wording for a lane that intentionally left nothing to hand over) — does
 not appear in the Ended table at all; `has_next_prompt()` is the one place that decides "real".
 Ended sessions are swept to sessions/archive/<name>.md (listed in sessions/archive/INDEX.md) so the live registry
-stays short under a fold, for one of three reasons (`archive_reason()`): the hand-off was consumed (its § Next session
+stays short under a fold, for one of four reasons (`archive_reason()`): the hand-off was consumed (its § Next session
 names a successor, `Register as <name>`, and a session of that name registered after this one ended, live or already
-archived — age aside), no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
+archived — age aside), a successor superseded the row (`ended_reason: superseded by <successor>`, written by
+`session.py register --successor-of` over a crashed predecessor), no next-session prompt for NOPROMPT_HOURS, or ended more than ARCHIVE_DAYS ago. The full prompt and stats stay in `sessions/<name>.md` (§ Next session,
 § Session stats) and `sessions/_ledger.md`. `make verify` warns when the file passes
 SESSION_INDEX_WARN bytes.
 
@@ -246,6 +247,9 @@ def archive_reason(m: dict, registered: Mapping[str, datetime] | None = None) ->
     proves nothing — nobody has picked this hand-off up yet — and keeps proving nothing however often it is touched
     afterwards: its `registered` stamp stays where it began. A lane with no stamp is unknown, never a successor."""
     me = m.get("session", "")
+    superseded = str(m.get("ended_reason", "") or "")
+    if superseded.startswith("superseded by "):
+        return superseded  # a successor registered over this crashed row (session.py register --successor-of): consumed
     ended_at = _hb_time(m.get("heartbeat", ""))
     if has_next_prompt(m) and ended_at is not None and registered:
         for succ in named_successors(m):
