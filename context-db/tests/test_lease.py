@@ -571,8 +571,28 @@ class Stop(Base):
             self.assertEqual(out is not None and out["permissionDecision"] == "deny", denied, role)
             self.assertEqual(self.hook("Write", file_path="a") is not None, denied, role)
             if denied:
-                self.assertIn("lease.py go 674", out["permissionDecisionReason"])
-                self.assertIn("role: orchestrator", out["permissionDecisionReason"])
+                self.assertIn("The owner lifts it with `lease.py go 674` from their own terminal; an orchestrator "
+                              "registers with `role: orchestrator` before it stops.", out["permissionDecisionReason"])
+
+    def test_stop_warns_a_session_that_would_lock_itself_out(self):
+        warn = "this session has no role: orchestrator, so this STOP denies its own next call"
+        env = {**self.env, "CLAUDE_CODE_SESSION_ID": self.sid}
+        def stop(e):
+            r = subprocess.run([sys.executable, str(BIN / "lease.py"), "stop", "674", "--reason", "x"], env=e,
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)  # a kill switch always writes
+            self.assertTrue((self.root / "state" / "swarm" / "STOP-674").is_file())
+            return r.stdout
+        self.add_row(self.lane, "")
+        out = stop(env)
+        self.assertIn(warn, out)
+        self.assertIn("lease.py go 674 from their own terminal", out)
+        self.assertNotIn(warn, stop(self.env))  # no session id in the env: nothing extra
+        self.assertNotIn(warn, stop({**env, "CLAUDE_CODE_SESSION_ID": str(uuid.uuid4())}))  # no matching row
+        self.add_row(self.lane, "orchestrator")
+        self.assertNotIn(warn, stop(env))
+        self.add_row(self.lane, "", "acme/widgets#9")
+        self.assertNotIn(warn, stop(env))  # the row works another epic
 
     def test_one_stop_denies_every_subagent_of_the_session_whatever_its_epic(self):  # DW-6
         self.add_row(self.lane, "orchestrator", "acme/widgets#9")

@@ -308,7 +308,12 @@ lane. So a `STOP` tells a background subagent from its parent, and:
 
 - An epic `STOP` denies a subagent's calls under the session that works the epic, and the main session's own calls
   too, unless its registry row says `role: orchestrator`: a row with no role, or a peer worker's, is denied, so a
-  `STOP` that cannot tell who is calling fails closed. The orchestrator's flush and ledger updates keep running. The
+  `STOP` that cannot tell who is calling fails closed. The role is set at registration:
+  `make session-register NAME=<name> EPIC=<epic> ROLE=orchestrator` (`swarm-run` will do it, #684). A session without
+  it that stops its own epic is locked until the owner runs `lease.py go <scope>` from their own terminal, where no
+  hook runs; `lease.py stop` prints that warning when it sees the case and still writes the file. `go` is deliberately
+  not exempt: a stopped lane must not be able to lift its own `STOP`. The orchestrator's flush and ledger updates keep
+  running. The
   main rows, among rows that share a `session_id`, are every row with `role: orchestrator`, else every row, so the
   result never depends on file order. A lease `STOP` denies the main session when any of those rows holds the lease,
   whatever the role; a lease held by a non-main row (a worker lane beside an orchestrator row) denies only its

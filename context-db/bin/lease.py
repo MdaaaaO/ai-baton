@@ -444,7 +444,12 @@ def stop(root: Path, scope: str, reason: str, who: str) -> list[str]:
             if cur.get("by") == "owner" and who != "owner":
                 raise Refused(f"STOP-{scope} is the owner's; only the owner may rewrite it")
         atomic_write(str(p), json.dumps({"scope": scope, "reason": reason, "by": who, "at": fmt(now())}, indent=2) + "\n")
-    return [f"STOP-{scope} written by {who} (`--as` is a declared role, not a proof): {reason}", IN_FLIGHT_RULE]
+    out = [f"STOP-{scope} written by {who} (`--as` is a declared role, not a proof): {reason}", IN_FLIGHT_RULE]
+    rows = session_rows(root, os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()) if os.environ.get("CLAUDE_CODE_SESSION_ID") else []
+    if any(r[1] and epic_matches(scope, r[1], r[2]) for r in rows) and not any(r[3] == "orchestrator" for r in rows):
+        out.append(f"this session has no role: orchestrator, so this STOP denies its own next call; the owner lifts it "
+                   f"with lease.py go {scope} from their own terminal")
+    return out
 
 
 def go(root: Path, scope: str, who: str) -> list[str]:
@@ -579,7 +584,8 @@ def stop_for(root: Path, session_id: str, agent_id: str = "") -> str:
                 why = v.get("reason") or "no reason given"
                 return (f"STOP-{scope} ({v.get('by', 'orchestrator')}): {why}. Work calls are blocked. Send the "
                         f"outbox line, drain the inbox, ack, release your lease and end the task. The owner lifts it "
-                        f"with `lease.py go {scope}`; an orchestrator registers with `role: orchestrator`.")
+                        f"with `lease.py go {scope}` from their own terminal; an orchestrator registers with "
+                        f"`role: orchestrator` before it stops.")
     return ""
 
 
