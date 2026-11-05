@@ -286,7 +286,7 @@ while true; do
                   lookup_ok "approval count"
                   # A human approval exists. A push costs it only where the base branch dismisses stale reviews on a push or
                   # requires approval of the last push (the watcher's own update-branch is then the last push), and
-                  # reviews, and GitHub counts it as approval only when reviewDecision says APPROVED. The
+                  # GitHub counts it as approval only when reviewDecision says APPROVED. The
                   # dismiss answer is read once per head (a definite answer is kept in dismiss_for); a read that
                   # fails is a LOOKUP FAILED line and no sync — never a silent default either way — and the
                   # line below is then worded without the dismiss claim, so it never depends on that read.
