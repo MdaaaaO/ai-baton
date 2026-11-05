@@ -113,7 +113,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Verifier** — the second layer: the checks that say whether the result is right, set before the work and read
   after it. The kit's mechanisms are the `## Done when` criteria with their `DW-n` ids, `evidence_check.py`,
   `## Verified` and the review gates (`docs/vision.md` § The four layers). In swarm mode it is also a role: the one
-  that never wrote the change and alone records a pass in the ledger (planned, #681).
+  that never wrote the change and alone records a pass in the ledger.
 - **Walkthrough** — the `walkthrough` skill: it leads the operator through a PR, a repo area or an epic in three
   steps (purpose, how it runs, where it breaks), then asks three questions in one carousel. A wrong answer
   re-opens the step. Only what the operator confirms is kept, as `## In plain words` in the context doc.

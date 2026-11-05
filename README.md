@@ -213,7 +213,7 @@ explains the clone's hooks and guards.
 | Docs | `repo-docs` |
 | Needs a system (`systems.*`) | `sign-queue` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
-It ships three agents (`triage`, `review-runner`, `auto-runner`) and the `context-db/` engine
+It ships four agents (`triage`, `review-runner`, `auto-runner`, `verifier`) and the `context-db/` engine
 (`make -C $BATON/context-db help`). [`docs/skills.md`](docs/skills.md) describes each in one line.
 
 ## Documentation
