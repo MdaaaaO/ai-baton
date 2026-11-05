@@ -1161,6 +1161,7 @@ def blank_config() -> dict:
         "length": {"repos": {}},
         "commits": {"default": "conventional", "repos": {}},
         "context": {"sync": "auto"},
+        "swarm": {"ack_minutes": 20},
     }
 
 
