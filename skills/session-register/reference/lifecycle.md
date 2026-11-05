@@ -135,8 +135,15 @@ after a fresh register it may not exist yet. A duplicate heading is merged on th
 ## Fields
 
 `session` (name) · `session_id` (auto: `$CLAUDE_CODE_SESSION_ID` at register — the key a hook matches on) · `ref`
-(ListAgents ref — the stable id) · `status` (`active`|`idle`|`ended`) · `epic` (the initiative's tracker key) ·
+(ListAgents ref — the stable id) · `status` (`active`|`idle`|`ended`) · `state` (`standby`|`retired`, optional; retired keeps `status: active`) · `expires` (standby only: last heartbeat + `swarm.standby_hours`) · `confirmed` (when `working_on` was last set; older than 12 h at a re-register marks it `unconfirmed: <old>`) · `epic` (the initiative's tracker key) ·
 `repos` · `working_on` (one line) · `responsibilities` · `stats` (auto, § Stats) · `registered` (auto: when the
 lane started — set by a register that creates or reactivates the entry, never by touch/end) · `heartbeat` (auto) ·
 `updated` (auto). These are operational state, **not** knowledge — the registry is excluded from
 `make index`/`make verify` and the doc DB count.
+
+## Retire and `owns:`
+
+`session.py retire [--dry-run]` (run by the zombie sweep's `--kill` mode; the list mode only previews it) sets
+`state: retired` on every `standby` row past `expires` and prints `owns: <tickets, PRs>` for each, taken from the
+swarm ledgers and `sessions/<name>/prs.tsv`, so the owner of the leftovers is visible. A row that ends by
+supersession prints the same line. Rename and archive carry `sessions/<name>/` (the `prs.tsv`) with the row.

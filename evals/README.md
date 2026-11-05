@@ -97,7 +97,7 @@ suite or a behaviour case is added or renamed.
 | `repo-docs` | 5+5 | — |
 | `self-assessment` | 5+5 | — |
 | `session-handoff` | 7+6 | `session-handoff-behaviour-first-handoff` |
-| `session-register` | 5+5 | `session-register-behaviour-narrate-back-first`, `session-register-behaviour-no-work-before-narrate-back` |
+| `session-register` | 5+5 | `session-register-behaviour-narrate-back-first`, `session-register-behaviour-no-work-before-narrate-back`, `session-register-behaviour-resume-reconfirms`, `session-register-behaviour-successor-rebriefs` |
 | `session-retro` | 5+5 | — |
 | `sign-queue` | 8+4 | `sign-queue-behaviour-enqueue-not-paste`, `sign-queue-behaviour-not-applicable` |
 | `slack-draft` | 5+5 | `slack-draft-behaviour-not-applicable` |
