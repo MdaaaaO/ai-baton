@@ -100,7 +100,10 @@ Layout (all under `.context/reference/env/`, created by `kb.py init`):
                        environment name), tracker.kind / key_regex / url_template / mcp_tools,
                        github.org / review_bot / bots / owner_teams, slack.domain, systems.*,
                        tz_default, domains, labels, self_assessment, diagrams, verify, length,
-                       swarm.lease_minutes (120) / swarm.resources ([]) / swarm.units ({}), kit.install_mode
+                       swarm.ack_minutes (20) / swarm.stall_minutes (90) / swarm.max_workers (4) /
+                       swarm.lease_minutes (120) / swarm.resources ([]) / swarm.units ({}) /
+                       swarm.budget.{epic_usd,worker_usd,worker_minutes (none), worker_forks (4), split_turns (10),
+                       hard_stop (false)}, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
   _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
   <system>.md          one doc per system (slack, tracker, github, aws, notion, …); one `## <kind>`
@@ -1135,4 +1138,343 @@ gen_eval_rules.py — copy the review rules into the kit-review eval prompts.
 between `<!-- rules:begin -->` and `<!-- rules:end -->`, and this script keeps that block equal to docs/REVIEW.md
 § 2–§ 6 (the judgment; § 1 is CI's). Run it after editing the rules; `tests/test_eval_rules.py` fails when a prompt
 drifts. Usage: gen_eval_rules.py [--check]  (exit 1 when a prompt would change). Stdlib only.
+```
+
+## `swarm.py`
+
+```text
+usage: swarm.py [-h]
+                {init,add,approve,assign,status,progress,pass,apply,tick,render,resume,grant,watch,decision,hold,budget,show} ...
+
+swarm.py — an epic's task ledger: one JSON file a session writes, one row per ticket.
+
+`docs/swarm.md` is the contract. Its § What moves a row is the state machine: `MOVES` below is that table as data and
+`tests/test_swarm.py` holds the two together. Nothing runs between sessions: the orchestrator calls this at a tick, the
+verifier calls `pass`, and the file is the state. The `## Swarm` table in the epic's context doc is rendered from the
+file, never the reverse.
+
+Every subcommand takes the epic key first:
+  init      create the ledger (--repo, --session, --waves, the budget caps, --max-workers)
+  add       a row per ticket: --area, --dep, --wave, --sizing, --dw or --ticket-file, --cap-usd. A new row on an approved
+            plan, or a changed area, dep, wave, sizing or cap, resets `plan_approved`, unless it is an --incident lane or
+            --already-done bookkeeping
+  approve   the owner's go on the plan, with its --decision line. `assign` refuses until then
+  assign    a worker takes the row: --kind, --name, --ref, --worktree, --branch. --rebrief moves no row. Either way the
+            READY in force ends, because the head it named is about to move. Refused before the plan's go, under a STOP or
+            HOLD on the ticket or on either lane, at a budget cap, past the worker cap, or with a dependency not done; an
+            incident lane skips only the plan's go and the dependencies. After a FAIL on the merged commit only a new
+            --branch is taken and a re-brief is refused. --cap-usd above the current cap needs the owner's --decision line, also at the cap and
+            with --rebrief; a first cap or a lower one needs none
+  status    the orchestrator's moves: pr, ready-to-merge (--head), parked (--reason), merged (--sha), blocked (a FAIL on
+            the merged commit, --reason), done. A move the table does not have is refused, and so is `pr` on a PR already
+            merged or closed, and `pr` or `ready-to-merge` on a row with a FAIL recorded
+  apply     one grammar line, CLAIMED, PR, READY or BLOCKED. A second copy of an id changes nothing. A line from a sender
+            that is not the row's worker is recorded and moves nothing. DONE moves no row and is refused
+  progress  a new commit, status or comment restarts the clock (--head, --note); --spent records spend, which is not
+            progress; --stall counts a stall
+  pass      `DW-<n> --evidence "…" --by verifier`, on a merged row with no FAIL recorded. The last DW moves the row to
+            verified
+  tick      the orchestrator's input: ready and assignable tickets, stalled workers (assigned and claimed only), READY
+            lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions, STOPs and HOLDs
+            (--json). It writes what `swarm_budget.py sweep` writes: `spent`, each row's `spend` reading, the
+            epic's `spend` map and, when `swarm.budget.hard_stop` is armed, a STOP and its log line. A breach of a fork, minute or split cap, a cap that does not parse, a stop not
+            written, an epic cap with no orchestrator reading or a sweep that raises goes in `no_assign` and empties
+            `assignable`. --session-id names the orchestrator's session; without it this session counts only if its registry
+            row says `role: orchestrator` on this epic
+  render    prints the `## Swarm` section and writes `sessions/<name>/prs.tsv` (repo, pr, head7, state, ticket; the state
+            is the row's status; the header line alone means no open PR)
+  resume    compares the ledger with `git ls-remote` and `gh pr list`, prints the difference and what to do with a lost
+            worker (drive-to-merge, respawn-in-place, reassign, record-merge), writes nothing without --apply. It never
+            writes a pass or a READY head, so a restored row still needs its READY and its verifier (--json)
+  grant, watch, decision, hold, budget   the epic's other records. A grant and a change to a cap need a --decision line;
+            `budget --spent` records spend, which decides nothing, and needs none
+  show      prints the ledger, or one row, as JSON
+
+The file is `<content root>/state/swarm/<key>.json`. Times are UTC, `YYYY-MM-DDTHH:MM:SSZ`; ticket keys are strings:
+
+  {"schema": 1, "key", "title", "repo", "session", "doc", "created", "updated",
+   "plan_approved": bool, "plan_decision": <line>, "max_workers": n|null,
+   "budget": {"epic_usd": n|null, "worker_usd": n|null}, "spent": n, "waves": [<wave>, …],
+   "grants":    [{"id", "scope", "granted_by", "expires", "decision", "at"}],
+   "watches":   [{"id", "due", "owner", "what", "closed"}],
+   "decisions": [{"id", "question", "ticket", "opened", "closed", "line"}],
+   "holds":     [{"scope", "releaser", "reason", "at", "released_at", "released_by"}],
+   "seen":      {<line id>: <the line>},
+   "log":       [{"at", "act", "ticket", "from", "to", "by", "note", …}],
+   "tickets":   {<ticket>: {
+      "ticket", "title", "repo", "area": [path, …], "deps": [ticket, …], "sizing", "wave", "incident": bool,
+      "status": ready|assigned|claimed|pr|ready-to-merge|merged|verified|done|blocked|parked,
+      "worker": {"kind": subagent|peer|headless|null, "name", "ref", "worktree", "branch"},
+      "head": <the last known pushed sha>, "ready_head": <the sha of the READY in force, the one the gates pin>,
+      "body": <PR body file>, "pr": n|null, "pr_state": open|merged|closed|null, "merged_sha", "merged_by",
+      "budget_cap": n|null, "cap_decision": <the line behind the last raise>, "spent": n, "last_progress", "stalls": n,
+      "stall_counted_at", "rebriefs": n, "rebrief_open": <time>|null, a re-brief with no READY or BLOCKED since,
+      "fail": {"at", "merged_sha", "branch", "reason"}|null, a FAIL on the merged commit until a fix is assigned,
+      "dws": [DW-n, …], "passes": {DW-n: {"evidence", "by", "at"}},
+      "blocked": {"reason", "who", "sha", "ran", "at"}|null, "parked_reason",
+      "lines": {<sender>: {<WORD>: {"id", "at", …the line's fields}}}, "restored": true when `resume --apply` wrote it}}}
+
+Another script reads the file as plain JSON or imports this module: `load(key)`, `edit(key)` (a locked read-modify-write),
+`ledger_path(key)`, `tick_report(led)`, `budget_state(led)`, `worker_limit(led)` (the last two resolve ledger, then config,
+then default), `next_status(act, status)`, `parse_status_line(line)`, `STATUSES`, `MOVES`. Unknown keys in a row or in the file are kept. `edit` writes only when something changed.
+
+Config, defaults here: `swarm.stall_minutes` 90, `swarm.max_workers` 4, `swarm.budget.epic_usd` and
+`swarm.budget.worker_usd` none (no cap until `init` or `budget` sets one).
+
+Exit codes: 0 ok; 1 no such ledger or ticket; 2 bad usage, a malformed line, a failed read; 3 refused by a rule. Stdlib only.
+
+positional arguments:
+  {init,add,approve,assign,status,progress,pass,apply,tick,render,resume,grant,watch,decision,hold,budget,show}
+    init                create the ledger
+    add                 add a ticket's row (--update changes one)
+    approve             the owner's go on the plan
+    assign              a worker takes the row, or a re-brief that moves no
+                        row
+    status              the orchestrator's moves of a row
+    progress            a new commit, status or comment; spend; a counted
+                        stall
+    pass                the verifier records one DW-<n>; refused without
+                        --evidence or without --by verifier
+    apply               apply one CLAIMED, PR, READY or BLOCKED line
+    tick                the orchestrator's input; writes only spent, and a
+                        STOP when the hard stop is armed
+    render              print the `## Swarm` section and write
+                        sessions/<name>/prs.tsv
+    resume              compare the ledger with the remote; writes nothing
+                        without --apply
+    grant               record an owner's grant
+    watch               add a watch, or --close one
+    decision            open a decision, or --close one
+    hold                record a HOLD, or --release it
+    budget              change a cap, on the owner's decision line; or record
+                        the epic's spend
+    show                print the ledger, or one row, as JSON
+
+options:
+  -h, --help            show this help message and exit
+```
+
+## `lease.py`
+
+```text
+usage: lease.py [-h] {acquire,release,status,sweep,expire,stop,go} ...
+
+lease.py — leases on serial resources and STOP files, the swarm contract's two
+stop-and-share mechanisms (`docs/swarm.md` § Leases and holds, § STOP and the
+call in flight). See the module docstring.
+
+positional arguments:
+  {acquire,release,status,sweep,expire,stop,go}
+    acquire             take a lease on a resource, or refuse naming the
+                        holder
+    release             give a lease back (the holder, the named releaser or
+                        the owner)
+    status              leases and STOP files
+    sweep               free every expired or dead-pid lease
+    expire              free one lane's expired leases, one RELEASE line each
+    stop                write STOP-<scope>: the hook blocks every work call of
+                        the lane that holds the lease <scope>, and of a
+                        session that works that epic (an issue number, or a
+                        full ref Owner/repo#N) unless its row says role:
+                        orchestrator; every subagent of it is blocked
+    go                  lift STOP-<scope>
+
+options:
+  -h, --help            show this help message and exit
+```
+
+## `gates.py`
+
+```text
+usage: gates.py [-h] {parse,status,sign} ...
+
+gates.py — an epic's `## Verification plan` as checkable gates: who may close each one, and whether any is open.
+
+The epic issue's BODY carries one `## Verification plan` section, one gate per line (the full format, for anyone
+writing a plan or a new template: docs/verification/code-change.md § The gate format):
+
+  - [ ] VG-<n> <gate> · kind: agent|human · check: <command | test | observation> · evidence: <what counts> · signer: verifier|owner[ · when: systems.<flag>[ | systems.<flag>…]]
+
+An `agent` gate is signed by the verifier and closes on evidence; a `human` gate is signed by the owner and closes on
+a decision line. The script reads and rewrites a local file and never touches the network: the orchestrator writes
+the file from the issue body and posts it back. It runs no check either: the verifier does that.
+
+Usage:
+  gates.py parse <plan-file | ->
+      One tab-separated line per gate: `VG-<n>`, kind, signer, `command` or `manual`, the check (a command is printed
+      without its backticks), what counts as evidence, the `when:` flags or `-`, the gate.
+  gates.py status <plan-file | ->
+      One tab-separated line per gate: `VG-<n>`, `open` or `closed`, kind, signer, the gate, and why it is open where
+      there is a reason to name (`ticked with no signature`, `not applicable here: …`, a refused signature). The last
+      line is exactly `GATES: closed` or `GATES: open VG-<n>[, VG-<n>…]`. A box ticked by hand closes nothing: a gate
+      is closed only by a ticked box and a signature that `sign` itself would accept. A gate whose `when:` flags are
+      all false stays open: dropping it is the owner's re-plan delta, never an automatic skip.
+  gates.py sign <plan-file> VG-<n> --by owner --decision <decision line>
+      Closes a `human` gate. Any other `--by` is refused, so no worker, verifier or orchestrator signs one, and neither
+      does a peer message: the decision line must be in the grammar of docs/carousel.md § After the answer,
+        YYYY-MM-DD · <question> → <chosen>; not <rejected options> — <one clause why>
+      with this `VG-<n>` and no other in its question and a `<chosen>` of exactly `sign` or `signed`, so one answer
+      closes one gate and a `hold` closes none.
+  gates.py sign <plan-file> VG-<n> --by verifier --evidence <item>
+      Closes an `agent` gate. `<item>` is one of evidence_check.py's shapes (`` `cmd` → `output` ``, a URL, a #<n> or
+      commit reference) or exactly `run <id>`.
+  Either `sign` is refused while the gate's `when:` flags are all false on this machine. Signing again with the same
+  record changes nothing; a different one is refused.
+
+The file is the issue body alone, never its comments, which are anyone's text: a file with more than one
+`## Verification plan` section is refused, so a concatenated comment can neither add a gate nor close one.
+
+Exit codes: 0 ok (`status`: every gate closed; `sign`: recorded); 1 no `VG-<n>` gate in the file, or `sign` names a gate
+the file does not hold; 2 bad usage, an unreadable file, or a malformed plan (a gate line that breaks the grammar, a
+checkbox or `VG-<n>` bullet that is not a gate, a code fence left open in the plan, a repeated id, a signer the gate's
+kind does not take, an unknown flag, a second section); 3 `status`: a gate is open, or `sign`: the signature is refused, with the file untouched. Any
+exit but 0 from `status` means the epic may not close. Stdlib only.
+
+positional arguments:
+  {parse,status,sign}
+    parse              list the plan's gates
+    status             which gates are open; exit 3 while any is
+    sign               close one gate in the file
+
+options:
+  -h, --help           show this help message and exit
+```
+
+## `swarm_msg.py`
+
+```text
+usage: swarm_msg.py [-h] {format,parse,send,drain,ack,pending} ...
+
+swarm_msg.py — the swarm message grammar of docs/swarm.md § Message grammar as code, and the per-worker inbox and outbox.
+
+One line per message: `<WORD> <scope> [<field>…] v=<n> id=<id> from=<lane> [reason="…"] [note="…"]`. `format` writes a
+line and refuses a free-text one, `parse` reads it back; `send`, `drain`, `ack` and `pending` keep the record on disk, in
+`.context/state/swarm/<key>/<worker>/in.ndjson` (the inbox) and `out.ndjson` (the outbox), and in
+`.context/state/swarm/<key>/orchestrator/in.ndjson` for the orchestrator. `SendMessage` is only the wake-up.
+
+Usage:
+  swarm_msg.py format <WORD> [<arg>…] --from <lane> [--id <id>] [--key <key>] [--json] [--<field> <value>…]
+      Prints the line (or with --json its record). Positional args and `--<field>` follow the word's row in the table:
+      `format READY 123 a1b2c3d --from worker-a`, `format ASSIGN 123 brief.md --from orchestrator --rebrief 1`.
+      `NEEDS`, `DECISION` and `Assumed:` carry their own text (one arg) and are sent as a record, so `v`, `id` and
+      `from` are fields of it, not part of the text. A new id is checked against --key's files, and a --id re-send keeps it.
+  swarm_msg.py parse <line | record | ->
+      Prints the line as JSON: `word`, `ticket` (or `scope`), the line's fields, `v`, `id`, `from`. Free text, an unknown
+      word, a missing field and a grammar version it does not read are refused (exit 2), naming what is accepted.
+  swarm_msg.py send --key <key> <worker> <line | record | -> [--inbox]
+      Appends one validated record to <worker>'s outbox, or with --inbox to its inbox.
+      A second send of an id that box already holds appends one copy, marked `resent`, with a fresh `at`; a further one
+      changes nothing. The copy sits after the read mark, so `drain` shows the line again.
+  swarm_msg.py drain --key <key> <worker> [--outbox] [--json]
+      Prints <worker>'s unread inbox lines (the orchestrator drains an outbox with --outbox) and marks them read; the mark
+      is `in.read` / `out.read` beside the file, never in it.
+  swarm_msg.py ack --key <key> --as <lane> <id>…
+      Writes `ACK <scope> re=<id>` into the inbox of the line's sender. A second ack of an id changes nothing.
+  swarm_msg.py pending --key <key> [--minutes <n>] [--now <iso>]
+      Lists each id sent and not acked by its receiver, one window (`swarm.ack_minutes`, default 20) after it was sent:
+      `<id> <word> <scope> to=<lane> age=<m> resend`. After a re-send (`send` of the id again) it is listed `unreachable`
+      one window after the copy, and not before. A line to a background worker whose run ended is skipped: a `DONE` the
+      orchestrator wrote into that worker's inbox after it, for the same ticket (or a line with no ticket), and a
+      `MERGED` for the ticket of such a `DONE`, whichever came first. Prints nothing when none.
+
+Rules that are this script's own call, not docs/swarm.md's: an id is 3 to 16 letters and digits; `from=` and `<who>` are
+names; a required field is not empty; a value holds no newline or carriage return; a STOP or HOLD scope is a name or a
+full ref `Owner/repo#N`.
+
+Which lane is the orchestrator: an address you type (`send`, `drain`, `ack --as`) resolves against live registry rows only
+(not `status: ended`, not `state: retired`), so an ended orchestrator's name is an ordinary lane. A sender read from a
+stored line resolves against every row, so after a handoff the predecessor's ACK and DONE still count as the
+orchestrator's. An ACK goes to the sender of the line: a line found in `<lane>/out` was sent by `<lane>`, so its ACK lands
+in `<lane>/in`; a line in `<lane>/in` uses its stored `from`. Known leftover, in `pending` only: an ACK from a lane that
+was once an orchestrator and later acts as a worker in the same key still reads as the orchestrator's, so it can show a
+false `resend`.
+
+Exit codes: 0 ok; 1 absent (`ack`: no such id); 2 bad usage, a refused line or an I/O error. Stdlib only.
+
+positional arguments:
+  {format,parse,send,drain,ack,pending}
+
+options:
+  -h, --help            show this help message and exit
+```
+
+## `swarm_budget.py`
+
+```text
+usage: swarm_budget.py [-h] {sweep,status,digest,caps,forget} ...
+
+swarm_budget.py — the swarm's budget brake: what each worker and the epic spent, who is past a cap, the hard stop.
+
+`docs/swarm.md` is the contract: § The swarm tick step 6, § Authority matrix (only the owner raises a cap) and § STOP and
+the call in flight. `swarm.py tick` calls `sweep` inside the orchestrator's session; nothing runs between sessions. Spend is
+counted at each return and each tick, so a cap can be overshot by one step. `swarm.py` holds the one dollar flag
+(`budget_state`): this script writes the `spent` fields it reads, and adds the breaches a dollar figure cannot show.
+
+Every subcommand takes the epic key first:
+  sweep    read every worker and the orchestrator, write `spent`, report the breaches. With `swarm.budget.hard_stop` on, a
+           breach writes `STOP-<key>` through `lease.py stop`, prints what that says, and prints one line per running subagent:
+           `task-stop <ticket> task=<agent id>` for the orchestrator's `TaskStop`, or `task-stop-unknown <ticket>` when its ref
+           gives no id and that worker was not reached. It never touches a pid. --session-id names the orchestrator's session;
+           without it this session is the orchestrator only if its registry row says `role: orchestrator` on this epic. Exit 2
+           when the stop could not be written.
+  status   the same report from what the ledger holds now. Writes nothing and reads no transcript
+  digest   the digest's budget lines, a stop's line among them. Writes nothing
+  caps     the four cap fields an assignment file carries, resolved for one ticket. --forks, --minutes and --split-turns set
+           that assignment's own; a raise needs the owner's --decision line, a first or a lower cap needs none. The dollar
+           cap is set by `swarm.py assign --cap-usd`
+  forget   the owner's repair for a session recorded as an orchestrator by mistake: drop it from the map, log it, recompute the
+           epic's `spent`. A STOP it caused stays until `lease.py go`
+
+**The caps.** `spend_usd`, `forks`, `minutes` and `split_turns` are the field names an assignment file and the worker brief
+use. Each resolves assignment, then config, then default (the dollar cap has the ledger's `swarm.py budget` value between
+them): `swarm.budget.worker_usd` none, `swarm.budget.worker_forks` 4, `swarm.budget.worker_minutes` none,
+`swarm.budget.split_turns` 10. `swarm.budget.epic_usd` (none) is the epic's and `swarm.budget.hard_stop` (false) arms the
+stop. A key set to null is no cap, whichever key it is. A headless worker takes `spend_usd` as `--max-budget-usd`.
+
+**A breach.** `spend` at or past the cap, `forks` or `minutes` past it, and `split`: the stats line's split hint on for
+`split_turns` consecutive turns, for a worker or for the orchestrator. Forks, minutes and split count only a worker that
+is running. The worker finishes the step, pushes, sends `BLOCKED <ticket> budget orchestrator` and starts nothing new
+(`docs/delegation.md` § The worker brief). Only the owner raises a cap.
+
+**A reading.** One record per transcript under the row's `spend`, keyed by the worker's `ref` (a session id, a subagent's
+agent id or a transcript's absolute path): `usage` is `session_stats.py`'s TOTAL, plus for a subagent the forks its own
+`Agent` calls made; `reported` is `total_cost_usd` from a headless worker's result, `<state/swarm>/<key>/<worker>/result.json`.
+`spent` is the higher of the two and no reading ever lowers it, so a lost transcript or a harness estimate under the other
+figure cannot free budget. The row's `spent` is the sum of its readings. The epic's `spent` is each orchestrator session's
+TOTAL, which already holds that session's subagent workers, plus everything spent outside those sessions.
+
+**A meter.** One per transcript, `spend.meters[<ref>]`: the totals last seen and the row that holds it. A row counts what the
+meter grew by while it held it, so each dollar and each fork lands on one row. A peer's session holds work from before its
+assignment, so its meter starts at the totals of the first sweep that sees it, and work between the assignment and that sweep
+goes uncounted. A subagent's or a headless worker's transcript starts with the assignment, so its meter starts at zero. A
+second row naming the ref takes the meter at its first sweep; the row before it keeps what it counted and stops counting.
+
+**An orchestrator.** A session is recorded on the epic only when `--session-id` names it or its registry row says
+`role: orchestrator` on this epic, so one tick from another session cannot put that session's total on the figure.
+
+**Failing closed.** A cap that does not parse, a stop not written and an epic cap with no orchestrator reading this sweep refuse
+the next spawn (`refuse`). A `hard_stop` that is neither true, false nor null reads as true. A worker's transcript that cannot
+be read is a reported line (`spend-unread`) and closes nothing: that worker keeps its last figure until a reading or
+`swarm.py progress --spent` gives another.
+
+Another script imports `sweep(key)`, `assess(led)`, `tick_findings(report)`, `digest_lines(led, report)`,
+`row_caps(led, row)` and `CAP_FIELDS`.
+
+Exit codes: 0 ok; 1 no such ledger or ticket; 2 bad usage, a failed read, a stop not written; 3 refused by a rule. Stdlib only.
+
+positional arguments:
+  {sweep,status,digest,caps,forget}
+    sweep               read every worker, write spent, report the breaches,
+                        stop if armed
+    status              the same report from what the ledger holds; writes
+                        nothing
+    digest              the digest's budget lines, a stop's line among them;
+                        writes nothing
+    caps                the four cap fields for one assignment; the flags set
+                        its own
+    forget              drop a session from the orchestrators' map, log it,
+                        recompute the epic's spent
+
+options:
+  -h, --help            show this help message and exit
 ```
