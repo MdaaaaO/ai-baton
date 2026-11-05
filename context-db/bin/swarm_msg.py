@@ -1,0 +1,555 @@
+#!/usr/bin/env python3
+"""swarm_msg.py — the swarm message grammar of docs/swarm.md § Message grammar as code, and the per-worker inbox and outbox.
+
+One line per message: `<WORD> <scope> [<field>…] v=<n> id=<id> from=<lane> [reason="…"] [note="…"]`. `format` writes a
+line and refuses a free-text one, `parse` reads it back; `send`, `drain`, `ack` and `pending` keep the record on disk, in
+`.context/state/swarm/<key>/<worker>/in.ndjson` (the inbox) and `out.ndjson` (the outbox), and in
+`.context/state/swarm/<key>/orchestrator/in.ndjson` for the orchestrator. `SendMessage` is only the wake-up.
+
+Usage:
+  swarm_msg.py format <WORD> [<arg>…] --from <lane> [--id <id>] [--key <key>] [--json] [--<field> <value>…]
+      Prints the line (or with --json its record). Positional args and `--<field>` follow the word's row in the table:
+      `format READY 123 a1b2c3d --from worker-a`, `format ASSIGN 123 brief.md --from orchestrator --rebrief 1`.
+      `NEEDS`, `DECISION` and `Assumed:` carry their own text (one arg) and are sent as a record, so `v`, `id` and
+      `from` are fields of it, not part of the text. A new id is checked against --key's files, and a --id re-send keeps it.
+  swarm_msg.py parse <line | record | ->
+      Prints the line as JSON: `word`, `ticket` (or `scope`), the line's fields, `v`, `id`, `from`. Free text, an unknown
+      word, a missing field and a grammar version it does not read are refused (exit 2), naming what is accepted.
+  swarm_msg.py send --key <key> <worker> <line | record | -> [--inbox]
+      Appends one validated record to <worker>'s outbox, or with --inbox to its inbox. A second copy of an id changes nothing.
+  swarm_msg.py drain --key <key> <worker> [--outbox] [--json]
+      Prints <worker>'s unread inbox lines (the orchestrator drains an outbox with --outbox) and marks them read; the mark
+      is `in.read` / `out.read` beside the file, never in it.
+  swarm_msg.py ack --key <key> --as <lane> <id>…
+      Writes `ACK <scope> re=<id>` into the inbox of the line's sender. A second ack of an id changes nothing.
+  swarm_msg.py pending --key <key> [--minutes <n>] [--now <iso>]
+      Lists each id sent and not acked, older than `swarm.ack_minutes` (default 20): `<id> <word> <scope> to=<lane>
+      age=<m> resend` in the first window past, `unreachable` after a second. A line to a background worker whose run
+      ended (a `DONE` the orchestrator wrote into its inbox after the line) is skipped. Prints nothing when none.
+
+Exit codes: 0 ok; 1 absent (`ack`: no such id); 2 bad usage, a refused line or an I/O error. Stdlib only.
+"""
+from __future__ import annotations
+import argparse
+import json
+import os
+import re
+import secrets
+import shlex
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frontmatter  # noqa: E402  — same dir
+import kit_profile as profile  # noqa: E402  — same dir
+from fsutil import atomic_write, locked  # noqa: E402  — same dir
+
+GRAMMAR_VERSIONS = ("1",)          # the current version last: a parser reads the current and the previous
+CURRENT_VERSION = GRAMMAR_VERSIONS[-1]
+ORCHESTRATOR = "orchestrator"
+DEFAULT_ACK_MINUTES = 20
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+SHA_RE = re.compile(r"[0-9a-f]{7,64}")
+ID_RE = re.compile(r"[A-Za-z0-9]{3,16}")
+KEY_VALUE_RE = re.compile(r"([a-z_]+)=(.*)", re.S)
+BLOCKED_REASONS = ("budget", "stop", "lease", "scope", "input")
+
+
+class MsgError(Exception):
+    """A refused line, bad usage or a failed read: exit 2."""
+    code = 2
+
+
+class Absent(MsgError):
+    """No such id: exit 1."""
+    code = 1
+
+
+def _name(v: str) -> str:
+    if not NAME_RE.fullmatch(v):
+        raise MsgError(f"bad name {v!r}: letters, digits, `.`, `_` and `-`, starting with a letter or digit")
+    return v
+
+
+def _ticket(v: str) -> str:
+    return _name(v.lstrip("#"))
+
+
+def _sha(v: str) -> str:
+    if not SHA_RE.fullmatch(v):
+        raise MsgError(f"bad sha {v!r} (7 to 64 lowercase hex digits)")
+    return v
+
+
+def _number(v: str) -> str:
+    v = v.lstrip("#")
+    if not v.isdigit():
+        raise MsgError(f"bad number {v!r}")
+    return v
+
+
+def _reason(v: str) -> str:
+    if v not in BLOCKED_REASONS:
+        raise MsgError(f"BLOCKED reason must be one of {', '.join(BLOCKED_REASONS)}, not {v!r}")
+    return v
+
+
+def _time(v: str) -> str:
+    try:
+        datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError as e:
+        raise MsgError(f"bad time {v!r}: an ISO 8601 time") from e
+    return v
+
+
+def _one(v: str) -> str:
+    if v != "1":
+        raise MsgError(f"rebrief is 1, not {v!r}")
+    return v
+
+
+def _text(v: str) -> str:
+    return v
+
+
+# word -> (positional (name, check), keyed fields written before `v=` as {name: (check, required)}). `reason` and `note`
+# are written after `from=`. `ticket` as the first name marks a ticket-scoped line; `scope` any other.
+LINES: dict[str, tuple[tuple, dict]] = {
+    "ASSIGN": ((("ticket", _ticket), ("file", _text)), {"lease": (_name, False), "rebrief": (_one, False)}),
+    "ACK": ((("scope", _name),), {"re": (_name, True)}),
+    "CLAIMED": ((("ticket", _ticket), ("branch", _text)), {}),
+    "PR": ((("ticket", _ticket), ("branch", _text), ("sha", _sha)), {"body": (_text, True)}),
+    "READY": ((("ticket", _ticket), ("sha", _sha)), {}),
+    "MERGED": ((("ticket", _ticket), ("pr", _number), ("sha", _sha)), {}),
+    "BLOCKED": ((("ticket", _ticket), ("reason", _reason), ("who", _name)), {"sha": (_sha, False), "ran": (_text, False)}),
+    "DONE": ((("ticket", _ticket),), {}),
+    "HOLD": ((("scope", _name),), {"releaser": (_name, True)}),
+    "RELEASE": ((("scope", _name),), {}),
+    "STOP": ((("scope", _name),), {}),
+    "PARKED": ((("ticket", _ticket),), {}),
+    "STANDBY": ((("scope", _name),), {"until": (_time, True)}),
+    "RETIRED": ((("scope", _name),), {}),
+}
+AFTER_FROM = ("reason", "note")
+REASON_REQUIRED = ("HOLD", "STOP", "PARKED")
+REASON_ALLOWED = ("RELEASE", "RETIRED")
+TEXT_LINES = ("NEEDS", "DECISION", "Assumed:")   # the text their own pages fix; v, id and from sit beside it
+ALL_WORDS = (*LINES, *TEXT_LINES)
+
+
+def _check_text_line(word: str, text: str) -> str:
+    text = text.strip()
+    if not text or "\n" in text:
+        raise MsgError(f"{word} takes one non-empty line")
+    if word == "NEEDS":
+        if not re.fullmatch(r"NEEDS [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+ \S+", text):
+            raise MsgError(f"NEEDS is `NEEDS <system>.<kind> <name>` (docs/env-facts.md): {text!r}")
+    elif word == "DECISION":
+        parts = [p.strip() for p in text[len("DECISION"):].split("|")]
+        if not text.startswith("DECISION ") or len(parts) < 3 or not all(parts):
+            raise MsgError(f"DECISION is `DECISION <question> | <option> | <option>` (docs/carousel.md): {text!r}")
+    elif not re.fullmatch(r"Assumed: .+ \(revisit: .+\)", text):
+        raise MsgError(f"Assumed: is `Assumed: <one line> (revisit: <checkpoint>)` (docs/assumptions.md): {text!r}")
+    return text
+
+
+def _quote(v: str) -> str:
+    if "\n" in v or "\r" in v:
+        raise MsgError(f"a value is one line: {v!r}")
+    if not v:
+        return '""'
+    if re.search(r"[\s\"'\\]", v):
+        return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return v
+
+
+def _word(line: str) -> str:
+    return line.split(None, 1)[0] if line.split() else ""
+
+
+def _refuse_word(word: str, line: str) -> MsgError:
+    return MsgError(f"not a grammar line: {line!r}. The first word is one of {', '.join(ALL_WORDS)}; a message that is "
+                    "not one of them is free text, and swarm_msg.py refuses it")
+
+
+def new_id(taken: set[str]) -> str:
+    while True:
+        i = secrets.token_hex(3)
+        if i not in taken:
+            return i
+
+
+def build(word: str, args: list[str], fields: dict[str, str], sender: str, msg_id: str | None = None,
+          taken: set[str] = frozenset()) -> dict:
+    """A record for one line: `word`, `line`, `v`, `id`, `from` and the line's fields. Refuses free text and a missing field."""
+    sender = _name(sender)
+    if msg_id is not None and not ID_RE.fullmatch(msg_id):
+        raise MsgError(f"bad id {msg_id!r}: 3 to 16 letters and digits")
+    mid = msg_id or new_id(set(taken))
+    if word in TEXT_LINES:
+        if len(args) != 1 or fields:
+            raise MsgError(f"{word} takes its text as one argument and no fields; v, id and from are the record's")
+        text = _check_text_line(word, args[0] if args[0].startswith(word) else f"{word} {args[0]}")
+        return {"word": word, "line": text, "text": text, "v": CURRENT_VERSION, "id": mid, "from": sender}
+    if word not in LINES:
+        raise _refuse_word(word, word)
+    names, keyed = LINES[word]
+    if len(args) != len(names):
+        raise MsgError(f"{word} takes {' '.join('<' + n + '>' for n, _ in names)}, got {len(args)} argument(s)")
+    rec: dict = {"word": word}
+    for (n, check), v in zip(names, args):
+        if KEY_VALUE_RE.fullmatch(v):
+            raise MsgError(f"{n} {v!r} reads as a key=value field")
+        rec[n] = check(v)
+    allowed = {*keyed, "note", *(("reason",) if word in (*REASON_REQUIRED, *REASON_ALLOWED) else ())}
+    for k in fields:
+        if k not in allowed:
+            raise MsgError(f"{word} has no field {k}; it takes {', '.join(sorted(allowed))}")
+    for k, (check, required) in keyed.items():
+        if k in fields:
+            rec[k] = check(fields[k])
+        elif required:
+            raise MsgError(f"{word} needs {k}=")
+    if word in REASON_REQUIRED and not fields.get("reason"):
+        raise MsgError(f"{word} needs reason=")
+    for k in AFTER_FROM:
+        if k in fields:
+            rec[k] = fields[k]
+    rec.update({"v": CURRENT_VERSION, "id": mid, "from": sender})
+    rec["line"] = _render(word, names, keyed, rec)
+    return rec
+
+
+def _render(word, names, keyed, rec) -> str:
+    parts = [word, *(_quote(rec[n]) for n, _ in names)]
+    parts += [f"{k}={_quote(rec[k])}" for k in keyed if k in rec]
+    parts += [f"v={rec['v']}", f"id={rec['id']}", f"from={rec['from']}"]
+    parts += [f"{k}={_quote(rec[k])}" for k in AFTER_FROM if k in rec and k not in {n for n, _ in names}]
+    return " ".join(parts)
+
+
+def parse_line(line: str) -> dict:
+    """One grammar line as a dict. For CLAIMED, PR, READY and BLOCKED the same fields `swarm.parse_status_line` returns:
+    `word`, `ticket`, the line's own fields, `v`, `id`, `from`, and `body`, `sha`, `ran`, `note` when present."""
+    line = line.strip()
+    word = _word(line)
+    if word in TEXT_LINES:
+        raise MsgError(f"{word} carries v, id and from beside its text, as a record: parse the record, not the bare text")
+    if word not in LINES:
+        raise _refuse_word(word, line)
+    try:
+        parts = shlex.split(line)
+    except ValueError as e:
+        raise MsgError(f"not a grammar line ({e}): {line!r}") from e
+    positional: list[str] = []
+    keyed: dict[str, str] = {}
+    for part in parts[1:]:
+        m = KEY_VALUE_RE.fullmatch(part)
+        if m:
+            keyed[m.group(1)] = m.group(2)
+        elif keyed:
+            raise MsgError(f"a field after a key=value pair: {line!r}")
+        else:
+            positional.append(part)
+    names, fields = LINES[word]
+    if len(positional) != len(names):
+        raise MsgError(f"{word} takes {' '.join('<' + n + '>' for n, _ in names)}: {line!r}")
+    for need in ("v", "id", "from"):
+        if not keyed.get(need):
+            raise MsgError(f"no {need}= on the line: {line!r}")
+    if keyed["v"] not in GRAMMAR_VERSIONS:
+        raise MsgError(f"grammar version {keyed['v']} on the line; this script reads {', '.join(GRAMMAR_VERSIONS)}: {line!r}")
+    if not ID_RE.fullmatch(keyed["id"]):
+        raise MsgError(f"bad id {keyed['id']!r}: {line!r}")
+    rec: dict = {"word": word}
+    for (n, check), v in zip(names, positional):
+        rec[n] = check(v)
+    rec.update({"v": keyed["v"], "id": keyed["id"], "from": _name(keyed["from"])})
+    allowed = {*fields, "note", *(("reason",) if word in (*REASON_REQUIRED, *REASON_ALLOWED) else ())}
+    for k, v in keyed.items():
+        if k in ("v", "id", "from"):
+            continue
+        if k not in allowed:
+            raise MsgError(f"{word} has no field {k}: {line!r}")
+        rec[k] = fields[k][0](v) if k in fields else v
+    for k, (_, required) in fields.items():
+        if required and k not in rec:
+            raise MsgError(f"{word} needs {k}=: {line!r}")
+    if word in REASON_REQUIRED and "reason" not in rec:
+        raise MsgError(f"{word} needs reason=: {line!r}")
+    return rec
+
+
+def parse_any(text: str) -> dict:
+    """A grammar line, or a record (a JSON line, how `NEEDS`, `DECISION` and `Assumed:` travel): the record with `line`."""
+    text = text.strip()
+    if text.startswith("{"):
+        try:
+            raw = json.loads(text)
+        except ValueError as e:
+            raise MsgError(f"not a record ({e}): {text[:80]!r}") from e
+        word = raw.get("word") if isinstance(raw, dict) else None
+        if word in TEXT_LINES:
+            rec = build(word, [str(raw.get("text") or raw.get("line") or "")], {}, str(raw.get("from") or ""), str(raw.get("id") or "") or None)
+            if str(raw.get("v")) not in GRAMMAR_VERSIONS:
+                raise MsgError(f"grammar version {raw.get('v')} on the record; this script reads {', '.join(GRAMMAR_VERSIONS)}")
+            rec["v"] = str(raw["v"])
+            return rec
+        if isinstance(raw, dict) and isinstance(raw.get("line"), str):
+            return {**parse_line(raw["line"]), "line": raw["line"].strip()}
+        raise MsgError(f"a record is a JSON object with a `line` or a text word: {text[:80]!r}")
+    return {**parse_line(text), "line": text}
+
+
+# ── the files ───────────────────────────────────────────────────────────────────────────────
+
+def swarm_dir(key: str) -> Path:
+    return profile.context_root() / "state" / "swarm" / _name(key)
+
+
+def lane_dir(lane: str) -> str:
+    """The directory a lane's files live in: `orchestrator` for the orchestrator, else the lane. The registry row's `role`
+    says which lane is the orchestrator, so a sender is resolved without asking."""
+    if lane == ORCHESTRATOR:
+        return lane
+    row = profile.context_root() / "sessions" / f"{_name(lane)}.md"
+    try:
+        parts = frontmatter.split(row.read_text(encoding="utf-8"))
+        role = frontmatter.unquote(frontmatter.parse_flat(parts[0]).get("role", "")) if parts else ""
+    except OSError:
+        return lane
+    return ORCHESTRATOR if role == ORCHESTRATOR else lane
+
+
+def box(key: str, worker: str, which: str) -> Path:
+    return swarm_dir(key) / _name(worker) / f"{which}.ndjson"
+
+
+def read_records(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    out = []
+    for n, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip():
+            continue
+        try:
+            out.append(json.loads(raw))
+        except ValueError as e:
+            raise MsgError(f"{path} line {n} is not a record: {e}") from e
+    return out
+
+
+def all_boxes(key: str) -> list[tuple[str, str, list[dict]]]:
+    """(worker dir, `in` or `out`, its records) for every file of the epic."""
+    base = swarm_dir(key)
+    out = []
+    if base.is_dir():
+        for d in sorted(p for p in base.iterdir() if p.is_dir()):
+            for which in ("in", "out"):
+                out.append((d.name, which, read_records(d / f"{which}.ndjson")))
+    return out
+
+
+def taken_ids(key: str) -> set[str]:
+    return {r.get("id", "") for _, _, recs in all_boxes(key) for r in recs}
+
+
+def append(key: str, worker: str, which: str, rec: dict, to: str) -> bool:
+    """Append one record; False when its id is already in that file (a re-send changes nothing)."""
+    path = box(key, worker, which)
+    with locked(str(path)):
+        if any(r.get("id") == rec["id"] for r in read_records(path)):
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stored = {k: v for k, v in rec.items() if k != "text"}
+        stored.update({"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "to": to})
+        if rec["word"] in TEXT_LINES:
+            stored["text"] = rec["line"]
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(stored, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+    return True
+
+
+def show(rec: dict, as_json: bool) -> str:
+    if as_json:
+        return json.dumps(rec, ensure_ascii=False)
+    if rec["word"] in TEXT_LINES:
+        return f"{rec['line']}\t[v={rec['v']} id={rec['id']} from={rec['from']}]"
+    return rec["line"]
+
+
+# ── commands ────────────────────────────────────────────────────────────────────────────────
+
+def literal(arg: str) -> str:
+    """The line itself, or stdin for `-` (a line is text, never a path)."""
+    return sys.stdin.read() if arg == "-" else arg
+
+
+def cmd_format(a) -> int:
+    args, fields = [], {}
+    opts = {"from": a.sender, "id": a.id, "key": a.key}
+    rest = list(a.rest)
+    while rest:
+        t = rest.pop(0)
+        if t == "--json":
+            a.json = True
+        elif t.startswith("--") and len(t) > 2:
+            if not rest:
+                raise MsgError(f"{t} needs a value")
+            v = rest.pop(0)
+            if t[2:] in opts:
+                opts[t[2:]] = v
+            else:
+                fields[t[2:].replace("-", "_")] = v
+        else:
+            args.append(t)
+    if not opts["from"]:
+        raise MsgError("format needs --from <lane>")
+    taken = taken_ids(opts["key"]) if opts["key"] else set()
+    rec = build(a.word, args, fields, opts["from"], opts["id"], taken)
+    print(json.dumps(rec, ensure_ascii=False) if a.json or a.word in TEXT_LINES else rec["line"])
+    return 0
+
+
+def cmd_parse(a) -> int:
+    print(json.dumps(parse_any(literal(a.text)), ensure_ascii=False))
+    return 0
+
+
+def cmd_send(a) -> int:
+    rec = parse_any(literal(a.line))
+    which, to = ("in", lane_dir(a.worker)) if a.inbox else ("out", ORCHESTRATOR)
+    fresh = append(a.key, lane_dir(a.worker), which, rec, to)
+    print(f"{'sent' if fresh else 'no change: id ' + rec['id'] + ' is already there'} {rec['id']} -> {lane_dir(a.worker)}/{which}")
+    return 0
+
+
+def cmd_drain(a) -> int:
+    which = "out" if a.outbox else "in"
+    path = box(a.key, lane_dir(a.worker), which)
+    mark = path.with_name(f"{which}.read")
+    with locked(str(mark)):
+        try:
+            seen = int(mark.read_text(encoding="utf-8").strip() or 0)
+        except (OSError, ValueError):
+            seen = 0
+        recs = read_records(path)
+        for rec in recs[seen:]:
+            print(show(rec, a.json))
+        if len(recs) > seen:
+            atomic_write(str(mark), f"{len(recs)}\n")
+    return 0
+
+
+def cmd_ack(a) -> int:
+    me = lane_dir(a.sender)
+    boxes = all_boxes(a.key)
+    acked = {(r.get("from"), r.get("re")) for _, _, recs in boxes for r in recs if r.get("word") == "ACK"}
+    status = 0
+    for target in a.ids:
+        hit = next((r for _, _, recs in boxes for r in recs if r.get("id") == target and r.get("to") == me), None)
+        if hit is None:
+            print(f"no line {target} sent to {me}", file=sys.stderr)
+            status = 1
+            continue
+        if hit["word"] == "ACK":
+            raise MsgError(f"{target} is an ACK: nothing acks an ACK")
+        if (a.sender, target) in acked:
+            print(f"no change: {target} is already acked by {a.sender}")
+            continue
+        scope = hit.get("ticket") or hit.get("scope") or hit["from"]
+        rec = build("ACK", [scope], {"re": target}, a.sender, taken=taken_ids(a.key))
+        append(a.key, lane_dir(hit["from"]), "in", rec, lane_dir(hit["from"]))
+        print(f"acked {target} -> {lane_dir(hit['from'])}/in")
+    return status
+
+
+def _minutes() -> int:
+    v = profile.get("swarm.ack_minutes", DEFAULT_ACK_MINUTES)
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return DEFAULT_ACK_MINUTES
+
+
+def pending(key: str, minutes: int, now: datetime) -> list[dict]:
+    boxes = all_boxes(key)
+    acked = {r.get("re") for _, _, recs in boxes for r in recs if r.get("word") == "ACK"}
+    out = []
+    for worker, which, recs in boxes:
+        for i, r in enumerate(recs):
+            if r.get("word") == "ACK" or r.get("id") in acked:
+                continue
+            # a background worker whose run ended reads nothing and owes no ack: the orchestrator's DONE, written
+            # into the worker's inbox after the line, says so
+            if which == "in" and any(x.get("word") == "DONE" and x.get("from") != worker for x in recs[i + 1:]):
+                continue
+            if which == "in" and r.get("word") == "DONE" and r.get("from") != worker:
+                continue
+            at = datetime.fromisoformat(r["at"].replace("Z", "+00:00"))
+            age = (now - at).total_seconds() / 60
+            if age < minutes:
+                continue
+            out.append({"id": r["id"], "word": r["word"], "scope": r.get("ticket") or r.get("scope") or "-",
+                        "to": r.get("to", "?"), "age": int(age), "state": "unreachable" if age >= 2 * minutes else "resend"})
+    return out
+
+
+def cmd_pending(a) -> int:
+    now = datetime.fromisoformat(a.now.replace("Z", "+00:00")) if a.now else datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    for p in pending(a.key, a.minutes if a.minutes is not None else _minutes(), now):
+        print(f"{p['id']} {p['word']} {p['scope']} to={p['to']} age={p['age']}m {p['state']}")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="swarm_msg.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    f = sub.add_parser("format")
+    f.add_argument("word")
+    f.set_defaults(sender=None, id=None, key=None, json=False)
+    f.add_argument("rest", nargs=argparse.REMAINDER)
+    f.set_defaults(fn=cmd_format)
+    p = sub.add_parser("parse")
+    p.add_argument("text")
+    p.set_defaults(fn=cmd_parse)
+    s = sub.add_parser("send")
+    s.add_argument("--key", required=True)
+    s.add_argument("--inbox", action="store_true")
+    s.add_argument("worker")
+    s.add_argument("line")
+    s.set_defaults(fn=cmd_send)
+    d = sub.add_parser("drain")
+    d.add_argument("--key", required=True)
+    d.add_argument("--outbox", action="store_true")
+    d.add_argument("--json", action="store_true")
+    d.add_argument("worker")
+    d.set_defaults(fn=cmd_drain)
+    k = sub.add_parser("ack")
+    k.add_argument("--key", required=True)
+    k.add_argument("--as", dest="sender", required=True)
+    k.add_argument("ids", nargs="+")
+    k.set_defaults(fn=cmd_ack)
+    g = sub.add_parser("pending")
+    g.add_argument("--key", required=True)
+    g.add_argument("--minutes", type=int)
+    g.add_argument("--now")
+    g.set_defaults(fn=cmd_pending)
+    a = ap.parse_args(argv)
+    try:
+        return a.fn(a)
+    except MsgError as e:
+        print(f"swarm_msg: {e}", file=sys.stderr)
+        return e.code
+    except (OSError, ValueError) as e:
+        print(f"swarm_msg: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

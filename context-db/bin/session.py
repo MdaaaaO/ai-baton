@@ -58,8 +58,9 @@ CTX = str(profile.context_root())  # the one content-root resolver
 SESS_DIR = os.path.join(CTX, "sessions")
 
 # Frontmatter fields, in emit order.
-FIELDS = ["session", "session_id", "ref", "status", "epic", "repos",
+FIELDS = ["session", "session_id", "ref", "status", "lane", "role", "state", "epic", "repos",
           "working_on", "responsibilities", "stats", "registered", "heartbeat", "updated"]
+SWARM_STATES = ("running", "blocked-on-human", "blocked-on-peer", "standby", "retired")  # docs/swarm.md § Lifecycle
 STATS_HEADING = "## Session stats"
 ACTIVITY_HEADING = "## What this session did"
 NEXT_HEADING = "## Next session"
@@ -567,6 +568,12 @@ def cmd_register(a) -> None:
     # it, so the row shows under Active and the later session-end writes its stats + ledger row.
     fresh = meta.get("status") in (None, "", "ended")  # a new doc, or an ended/archived lane coming back to life
     meta["status"] = a.status or ("active" if meta.get("status") == "ended" else meta.get("status")) or "active"
+    if getattr(a, "lane", ""):  meta["lane"] = one_line(a.lane)
+    if getattr(a, "role", ""):  meta["role"] = one_line(a.role)
+    if getattr(a, "state", ""):
+        if a.state not in SWARM_STATES:
+            sys.exit(f"session: --state must be one of {', '.join(SWARM_STATES)}, not {a.state!r}")
+        meta["state"] = a.state
     if a.epic:   meta["epic"] = a.epic
     if a.repos:  meta["repos"] = a.repos
     if a.working is not None: meta["working_on"] = a.working
@@ -857,6 +864,10 @@ def main() -> int:
         sp.add_argument("--no-stats", action="store_true", help="do not refresh the stats field")
         sp.add_argument("--ref", default="")
         sp.add_argument("--status", default="")
+        if name == "register":
+            sp.add_argument("--lane", default="", help="the stable lane name a swarm message's from= carries (default: the name)")
+            sp.add_argument("--role", default="", help="swarm role: orchestrator, worker or verifier")
+            sp.add_argument("--state", default="", help="swarm state: " + " · ".join(SWARM_STATES))
         sp.add_argument("--epic", default="")
         sp.add_argument("--repos", default="")
         sp.add_argument("--working", default=None)   # None = unchanged; "" allowed to clear
