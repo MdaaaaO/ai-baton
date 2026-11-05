@@ -7,9 +7,15 @@
 #     edit could forge the approval below; CODEOWNERS asks the owner to review those, and the PAT merge
 #     would satisfy that by itself) and none of the files that judge a PR — the gate, its leak shapes, the
 #     evidence script, the allow-list and the review rules (#129: CI runs the base copies, so such a change
-#     judges every LATER PR); such a PR waits for the owner, who merges by hand;
+#     judges every LATER PR), and none under `hooks/` or a root `settings*.json` (the hooks and settings every
+#     session runs with; the owner reviews those and merges by hand); such a PR waits for the owner, who merges
+#     by hand;
 #   - every check in REQUIRED completed with success on the head (a skipped claude-review — release PRs,
 #     no token — is not success: those PRs wait for the owner);
+#   - every check in GATED (`macos`, `forced-signing`: path-gated in ci.yml, so they conclude `skipped` on a PR
+#     touching no shell or test path) completed with success on the head, or completed `skipped` beside a
+#     successful `changed-paths` on that same head; a red leg, a leg still running, or a skipped leg without that
+#     `changed-paths` success waits for the owner;
 #   - the latest review by REVIEWER is APPROVED and was submitted for this exact head (claude-review.yml
 #     turns the reviewer's `Verdict:` line into that review; a push after it means no verdict yet), and it
 #     names the run that posted it — a claude-review.yml run of a pull_request event on this head (REVIEWER
@@ -58,6 +64,8 @@ jobs:
       SHA: ${{ github.event.workflow_run.head_sha }}
       # comma-separated: a check name may contain spaces (`install-smoke (clone)`, #98)
       REQUIRED: kit-verify,pr-title,pr-issue,claude-review,install-smoke (clone),install-smoke (plugin),python-floor (3.9)
+      # ;-separated (a name may contain a comma); path-gated legs of ci.yml, see the header: a skipped one passes only beside a successful changed-paths
+      GATED: macos (portable.sh, bash/sh/dash parse);forced-signing (hostile ambient git config)
       REVIEWER: github-actions[bot]
     steps:
       - id: token
@@ -99,6 +107,9 @@ jobs:
           judges='^(context-db/bin/(review_gate|leak_shapes|review_evidence)\.py|skills/kit-health/allow\.txt|docs/REVIEW\.md)$'
           ! grep -qE "$judges" <<< "$files" \
             || skip "PR #$pr changes what judges PRs ($(grep -E "$judges" <<< "$files" | tr '\n' ' ')) — the owner reviews and merges it by hand"
+          owned='^(hooks/|settings[^/]*\.json$)'
+          ! grep -qE "$owned" <<< "$files" \
+            || skip "PR #$pr changes hooks or settings ($(grep -E "$owned" <<< "$files" | tr '\n' ' ')) — the owner reviews and merges it by hand"
 
           runs=$(gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
                    --jq '.check_runs[] | "\(.name)\t\(.status)\t\(.conclusion)\t\(.completed_at // "")"') \
@@ -118,6 +129,30 @@ jobs:
             [ -n "$line" ] || line=$(sort -t$'\t' -k4,4 <<< "$all" | tail -1)
             conclusion=$(cut -f3 <<< "$line")
             [ "$conclusion" = success ] || skip "check '$name' concluded $conclusion — waiting for the owner"
+          done
+
+          # Path-gated legs: the same pick (pending waits, newest non-skipped run). A skipped leg is the gate's
+          # "not touched" answer and passes only when changed-paths, always run, concluded success on this head.
+          IFS=';' read -ra gated <<< "$GATED"
+          for name in "${gated[@]}"; do
+            all=$(awk -F'\t' -v n="$name" '$1 == n' <<< "$runs")
+            [ -n "$all" ] || skip "check '$name' has not run on this head"
+            pending=$(awk -F'\t' '$2 != "completed" {print $2; exit}' <<< "$all")
+            [ -z "$pending" ] || skip "check '$name' is still $pending"
+            line=$(awk -F'\t' '$3 != "skipped"' <<< "$all" | sort -t$'\t' -k4,4 | tail -1)
+            [ -n "$line" ] || line=$(sort -t$'\t' -k4,4 <<< "$all" | tail -1)
+            conclusion=$(cut -f3 <<< "$line")
+            case "$conclusion" in
+              success) ;;
+              skipped)
+                cp=$(awk -F'\t' '$1 == "changed-paths"' <<< "$runs" | sort -t$'\t' -k4,4 | tail -1)
+                [ -n "$cp" ] && [ "$(cut -f2 <<< "$cp")" = completed ] \
+                  || skip "check '$name' is skipped and changed-paths has not finished on this head"
+                [ "$(cut -f3 <<< "$cp")" = success ] \
+                  || skip "check '$name' is skipped and changed-paths concluded $(cut -f3 <<< "$cp") — waiting for the owner"
+                ;;
+              *) skip "check '$name' concluded $conclusion — waiting for the owner" ;;
+            esac
           done
 
           review=$(gh api --paginate "repos/$REPO/pulls/$pr/reviews?per_page=100" \
