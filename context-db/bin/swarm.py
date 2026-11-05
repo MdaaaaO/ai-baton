@@ -16,11 +16,11 @@ Every subcommand takes the epic key first:
             READY in force ends, because the head it named is about to move. Refused before the plan's go, under a STOP or
             HOLD on the ticket or on either lane, at a budget cap, past the worker cap, or with a dependency not done; an
             incident lane skips only the plan's go and the dependencies. After a FAIL on the merged commit only a new
-            --branch is taken. --cap-usd above the current cap needs the owner's --decision line, also at the cap and
+            --branch is taken and a re-brief is refused. --cap-usd above the current cap needs the owner's --decision line, also at the cap and
             with --rebrief; a first cap or a lower one needs none
   status    the orchestrator's moves: pr, ready-to-merge (--head), parked (--reason), merged (--sha), blocked (a FAIL on
             the merged commit, --reason), done. A move the table does not have is refused, and so is `pr` on a PR already
-            merged or closed, or `ready-to-merge` on a row with a FAIL recorded
+            merged or closed, and `pr` or `ready-to-merge` on a row with a FAIL recorded
   apply     one grammar line, CLAIMED, PR, READY or BLOCKED. A second copy of an id changes nothing. A line from a sender
             that is not the row's worker is recorded and moves nothing. DONE moves no row and is refused
   progress  a new commit, status or comment restarts the clock (--head, --note); --spent records spend, which is not
@@ -837,7 +837,7 @@ def rebrief(led: dict, ticket: str, row: dict) -> str:
 
 
 def refuse_after_fail(ticket: str, row: dict) -> None:
-    """docs/swarm.md § Authority matrix: a fix for a FAIL is a new assignment on a new branch, the old worker is not reopened."""
+    """docs/swarm.md § Lifecycle: a fix for a FAIL is a new assignment on a new branch, the old worker is not reopened."""
     if row.get("fail"):
         raise Refused(f"{ticket}: a FAIL is recorded on the merged commit; the fix is a new assignment on a new --branch")
 
