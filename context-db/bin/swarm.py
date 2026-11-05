@@ -29,8 +29,8 @@ Every subcommand takes the epic key first:
             verified
   tick      the orchestrator's input: ready and assignable tickets, stalled workers (assigned and claimed only), READY
             lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions, STOPs and HOLDs
-            (--json). It writes what `swarm_budget.py sweep` writes and nothing else: `spent`, and a STOP when
-            `swarm.budget.hard_stop` is armed. A breach of a fork, minute or split cap, a cap that does not parse, a stop not
+            (--json). It writes what `swarm_budget.py sweep` writes: `spent`, each row's `spend` reading, the
+            epic's `spend` map and, when `swarm.budget.hard_stop` is armed, a STOP and its log line. A breach of a fork, minute or split cap, a cap that does not parse, a stop not
             written, an epic cap with no orchestrator reading or a sweep that raises goes in `no_assign` and empties
             `assignable`. --session-id names the orchestrator's session; without it this session counts only if its registry
             row says `role: orchestrator` on this epic
