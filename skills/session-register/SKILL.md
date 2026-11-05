@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate back and carousel when paste-started as a successor, re-arm PR-watch, rename a session, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "39"
+  version: "40"
   updated: "2026-11-02"
   reviewed: "2026-11-02"
 user-invocable: true
@@ -59,7 +59,9 @@ entries before touching a shared epic, PR or worktree.
         RESP="<what you own; what others should coordinate with you on>"
    ```
    A successor adds `SUCCESSOR_OF=<predecessor>`: registration then prints `predecessor <name> open PRs:` and that
-   session's `## Open PRs` lines (or `none`) — the list step 4 re-arms or drives.
+   session's `## Open PRs` lines (or `none`) — the list step 4 re-arms or drives. It also ends that predecessor's row
+   (`superseded by <name>`) when the row is `active`, has no heartbeat for over 12 hours and its owner process is gone;
+   any other predecessor is left as is and a line says why (`reference/lifecycle.md` § End and archiving).
    `make -C $BATON/context-db mission-build` rebuilds the private mission-control page from the registry (a local
    file, zero model turns, never a publish).
    Then fill the body of `.context/sessions/<name>.md` (a direct `Edit`, or the ctx tools naming your actor —
