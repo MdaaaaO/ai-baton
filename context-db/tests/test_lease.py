@@ -577,11 +577,12 @@ class Stop(Base):
     def test_stop_warns_a_session_that_would_lock_itself_out(self):
         warn = "this session has no role: orchestrator, so this STOP denies its own next call"
         env = {**self.env, "CLAUDE_CODE_SESSION_ID": self.sid}
+        scope = "674"
         def stop(e):
-            r = subprocess.run([sys.executable, str(BIN / "lease.py"), "stop", "674", "--reason", "x"], env=e,
+            r = subprocess.run([sys.executable, str(BIN / "lease.py"), "stop", scope, "--reason", "x"], env=e,
                                capture_output=True, text=True, timeout=60)
             self.assertEqual(r.returncode, 0, r.stderr)  # a kill switch always writes
-            self.assertTrue((self.root / "state" / "swarm" / "STOP-674").is_file())
+            self.assertTrue((self.root / "state" / "swarm" / f"STOP-{scope}").is_file())
             return r.stdout
         self.add_row(self.lane, "")
         out = stop(env)
