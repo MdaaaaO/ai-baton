@@ -22,8 +22,8 @@ holder reserves `--units` of it and a reservation past the capacity is refused, 
   lease.py expire --lane L                   free that lane's expired leases; one RELEASE line each (heartbeat.sh)
   lease.py stop <scope> --reason T [--as orchestrator|owner]
         write `state/swarm/STOP-<scope>`: the PreToolUse hook (`ctx_adapter.py hook pre-tool-use`) then denies the next
-        file write (Write, Edit, MultiEdit, NotebookEdit; Bash and MCP calls pass until the hook's matcher is widened)
-        of a session whose lane holds the lease `<scope>` or works the epic `<scope>` (an issue number, or a full ref
+        work call (Bash, the file writes, Agent and MCP tools) of a session whose lane holds the lease `<scope>`, and
+        of a subagent of a session that works the epic `<scope>` (an issue number, or a full ref
         `Owner/repo#N`, written `STOP-Owner+repo=N`); prints the in-flight rule
   lease.py go <scope> [--as orchestrator|owner]
         lift it: whoever set it, or the owner; a stop the owner set, only the owner
@@ -59,9 +59,8 @@ SCOPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+=-]*$")  # a full ref `Owner/re
 DEFAULT_MINUTES = 120
 FMT = "%Y-%m-%dT%H:%M:%SZ"
 IN_FLIGHT_RULE = (
-    "A STOP cannot beat a call already in flight: it blocks the next call the hook sees, never the running one. Today the\n"
-    "hook sees file writes only (Write, Edit, MultiEdit, NotebookEdit); Bash and MCP calls pass until its matcher is\n"
-    "widened. A worker\n"
+    "A STOP cannot beat a call already in flight: it blocks the next call the hook sees, never the running one. The hook\n"
+    "sees every work call (Bash, the file writes, Agent and MCP tools). A worker\n"
     "reports what ran before the stop landed (BLOCKED <ticket> stop <who> ran=\"...\"), runs a long call on a serial\n"
     "resource in the background and ends it by its own task id on STOP, and nobody kills a peer's pid or stops work by\n"
     "a process-name pattern. The outbox send, the inbox drain, the ack, the lease release and ending the task stay open.")
@@ -476,14 +475,16 @@ def _frontmatter(text: str) -> dict[str, str]:
     return out
 
 
-def session_row(root: Path, session_id: str) -> tuple[str, str, str]:
-    """(lane, epic, repos) of the registry row that stamped `session_id`, or ('', '', '')."""
+def session_rows(root: Path, session_id: str) -> list[tuple[str, str, str]]:
+    """(lane, epic, repos) of every live registry row that stamped `session_id`, by lane name. A subagent shares its
+    parent's session id, so a session with background workers has one row per lane."""
     if not session_id:
-        return "", "", ""
+        return []
     try:
         rows = sorted((root / "sessions").glob("*.md"))
     except OSError:
-        return "", "", ""
+        return []
+    out: list[tuple[str, str, str]] = []
     for p in rows:
         if p.name.startswith("_"):
             continue
@@ -492,8 +493,14 @@ def session_row(root: Path, session_id: str) -> tuple[str, str, str]:
         except OSError:
             continue
         if fm.get("session_id") == session_id and fm.get("status") != "ended":
-            return p.stem, fm.get("epic", ""), fm.get("repos", "")
-    return "", "", ""
+            out.append((p.stem, fm.get("epic", ""), fm.get("repos", "")))
+    return out
+
+
+def session_row(root: Path, session_id: str) -> tuple[str, str, str]:
+    """(lane, epic, repos) of the first registry row that stamped `session_id`, or ('', '', '')."""
+    rows = session_rows(root, session_id)
+    return rows[0] if rows else ("", "", "")
 
 
 REF_RE = re.compile(r"^(?:([^\s#]+)#|#)?(\d+)$")
@@ -539,22 +546,26 @@ def lane_holds(root: Path, lane: str, scope: str) -> bool:
     return any(h.get("lane") == lane and not stale(h) for h in d["holders"])
 
 
-def stop_for(root: Path, session_id: str) -> str:
-    """The reason a STOP file blocks this session's next file write, or ''. A lane is blocked by `STOP-<scope>`
-    when it holds the lease `<scope>` or its registry row's epic is `<scope>`: a full ref `Owner/repo#N` (the file
-    is `STOP-Owner+repo=N`) or an issue number."""
+def stop_for(root: Path, session_id: str, agent_id: str = "") -> str:
+    """The reason a STOP file blocks this call, or ''. `STOP-<scope>` blocks a lane that holds the lease `<scope>`,
+    and a subagent of a session whose registry row's epic is `<scope>` (a full ref `Owner/repo#N`, the file
+    `STOP-Owner+repo=N`, or an issue number). `agent_id` is what the hook input names for a subagent's call and is
+    absent for the main session's own: the main session keeps its epic's calls (its flush, its ledger) and is blocked
+    only through the lease it holds. The hook input names no lane, so a subagent is matched through every registry
+    row that shares its session id; a lane with no such row is out of reach."""
     found = stops(root)
     if not found:
         return ""
-    lane, epic, repos = session_row(root, session_id)
-    if not lane:
-        return ""
+    rows = session_rows(root, session_id)
+    if not agent_id:
+        rows = rows[:1]
     for scope, v in found.items():
-        if lane_holds(root, lane, scope) or (epic and epic_matches(scope, epic, repos)):
-            why = v.get("reason") or "no reason given"
-            return (f"STOP-{scope} ({v.get('by', 'orchestrator')}): {why}. File writes are blocked until it is lifted: "
-                    f"send the outbox line, run the inbox drain, ack, release your lease and end the task, then report "
-                    f"what ran (BLOCKED <ticket> stop <who> ran=\"...\").")
+        for lane, epic, repos in rows:
+            if lane_holds(root, lane, scope) or (agent_id and epic and epic_matches(scope, epic, repos)):
+                why = v.get("reason") or "no reason given"
+                return (f"STOP-{scope} ({v.get('by', 'orchestrator')}): {why}. Work calls are blocked until it is "
+                        f"lifted: send the outbox line, run the inbox drain, ack, release your lease and end the task, "
+                        f"then report what ran (BLOCKED <ticket> stop <who> ran=\"...\").")
     return ""
 
 

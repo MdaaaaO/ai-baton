@@ -210,8 +210,9 @@ class Review(Base):
         (self.root / "sessions" / f"{lane}.md").write_text(
             f"---\nsession: {lane}\nsession_id: {sid}\nstatus: active\nepic: {epic}\n{extra}---\n# x\n")
 
-    def hook(self, sid: str, tool: str = "Write", **inp) -> dict | None:
-        payload = json.dumps({"session_id": sid, "cwd": str(self.t), "tool_name": tool, "tool_input": inp})
+    def hook(self, sid: str, tool: str = "Write", agent: str = "", **inp) -> dict | None:
+        extra = {"agent_id": agent, "agent_type": "general-purpose"} if agent else {}
+        payload = json.dumps({"session_id": sid, "cwd": str(self.t), "tool_name": tool, "tool_input": inp, **extra})
         r = subprocess.run([sys.executable, str(ADAPTER), "hook", "pre-tool-use"], input=payload, text=True,
                            env={**self.env, "KIT_CTX": str(self.t / "none")}, capture_output=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -257,7 +258,7 @@ class Review(Base):
         self.row(self.lane, sid, "674")
         self.ok("stop", "674", "--reason", "x")
         for cmd in ("python3 context-db/bin/lease.py go 674 --as owner", "python3 lease.py stop 674 --reason y"):
-            self.assertEqual(self.hook(sid, "Bash", command=cmd)["permissionDecision"], "deny", cmd)
+            self.assertEqual(self.hook(sid, "Bash", agent="a1", command=cmd)["permissionDecision"], "deny", cmd)
 
     def test_the_holder_releases_even_when_another_releaser_is_named(self):
         self.acquire("client", self.lane, None, "--releaser", "orchestrator")
@@ -295,11 +296,11 @@ class Review(Base):
         self.row("three", c, "674", "other-repo")
         self.ok("stop", "acme/widgets#674", "--reason", "x")
         self.assertEqual([p.name for p in (self.root / "state" / "swarm").glob("STOP-*")], ["STOP-acme+widgets=674"])
-        self.assertEqual(self.hook(a)["permissionDecision"], "deny")
-        self.assertIsNone(self.hook(b))
-        self.assertIsNone(self.hook(c))
+        self.assertEqual(self.hook(a, agent="a1")["permissionDecision"], "deny")
+        self.assertIsNone(self.hook(b, agent="a1"))
+        self.assertIsNone(self.hook(c, agent="a1"))
         self.ok("go", "acme/widgets#674")
-        self.assertIsNone(self.hook(a))
+        self.assertIsNone(self.hook(a, agent="a1"))
 
     def test_a_plain_number_epic_reads_the_rows_repos(self):
         self.assertTrue(L.epic_matches("acme/widgets#674", "674", "acme/widgets"))
@@ -312,8 +313,9 @@ class Review(Base):
 
     def test_the_stop_text_says_what_is_blocked_today(self):
         out = self.ok("stop", "674", "--reason", "x")
-        self.assertIn("file writes only", out)
-        self.assertIn("Bash and MCP calls pass", out)
+        self.assertIn("sees every work call", out)
+        self.assertNotIn("file writes only", out)
+        self.assertNotIn("calls pass", out)
         self.assertNotIn("next work-tool call", out)
 
     def test_release_reason_is_printed(self):
@@ -416,8 +418,10 @@ class Stop(Base):
         (self.root / "sessions" / f"{self.lane}.md").write_text(
             f"---\nsession: {self.lane}\nsession_id: {self.sid}\nstatus: active\nepic: acme/widgets#674\n---\n# x\n")
 
-    def hook(self, tool: str = "Bash", sid: str | None = None, **inp) -> dict | None:
-        payload = json.dumps({"session_id": self.sid if sid is None else sid, "cwd": str(self.t), "tool_name": tool, "tool_input": inp})
+    def hook(self, tool: str = "Bash", sid: str | None = None, agent: str = "", **inp) -> dict | None:
+        extra = {"agent_id": agent, "agent_type": "general-purpose"} if agent else {}
+        payload = json.dumps({"session_id": self.sid if sid is None else sid, "cwd": str(self.t), "tool_name": tool,
+                              "tool_input": inp, **extra})
         r = subprocess.run([sys.executable, str(ADAPTER), "hook", "pre-tool-use"], input=payload, text=True,
                            env={**self.env, "KIT_CTX": str(self.t / "none")}, capture_output=True, timeout=60)
         self.assertEqual((r.returncode, r.stderr), (0, ""))
@@ -437,10 +441,104 @@ class Stop(Base):
 
     def test_an_epic_stop_blocks_the_lane_working_that_epic(self):  # DW-3
         self.ok("stop", "674", "--reason", "budget hard stop")
-        self.assertIn("budget hard stop", self.hook(command="ls")["permissionDecisionReason"])
+        self.assertIn("budget hard stop", self.hook(agent="a1", command="ls")["permissionDecisionReason"])
         self.ok("stop", "other", "--reason", "x")
         self.ok("go", "674")
-        self.assertIsNone(self.hook(command="ls"))  # STOP-other names a scope this lane neither holds nor works
+        self.assertIsNone(self.hook(agent="a1", command="ls"))  # STOP-other names a scope this lane neither holds nor works
+
+    def test_the_matcher_of_both_files_names_every_work_tool(self):  # DW-1
+        for f in (KIT / "hooks" / "hooks.json", KIT / "settings.json"):
+            groups = json.loads(f.read_text())["hooks"]["PreToolUse"]
+            [m] = [g["matcher"] for g in groups if "pre-tool-use" in g["hooks"][0]["command"]]
+            for tool in ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "mcp__x__y"):
+                self.assertRegex(tool, f"^(?:{m})$", f"{f.name}: {tool}")
+            self.assertNotRegex("Read", f"^(?:{m})$")
+
+    def test_a_bash_call_by_the_holding_lane_is_blocked_with_the_reason(self):  # DW-1
+        self.acquire("client", self.lane)
+        self.ok("stop", "client", "--reason", "owner needs the client")
+        out = self.hook("Bash", command="make ci")
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("owner needs the client", out["permissionDecisionReason"])
+        self.assertEqual(self.hook("mcp__x__y")["permissionDecision"], "deny")
+        self.assertEqual(self.hook("Agent", prompt="p")["permissionDecision"], "deny")
+
+    def run_hook_in_process(self, tool: str, **inp) -> list:
+        """The pre-tool-use hook run in one interpreter that records what it imported or ran: [output, events]."""
+        code = (
+            "import sys, io, json\n"
+            f"sys.path.insert(0, {str(BIN)!r})\n"
+            "events = []\n"
+            "class F:\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name in ('lease', 'swarm'): events.append('import ' + name)\n"
+            "import ctx_adapter\n"
+            "sys.meta_path.insert(0, F())\n"
+            "ctx_adapter.resolve = lambda: events.append('resolve') or (None, '')\n"
+            "ctx_adapter._deny = lambda *a: events.append('deny') or ''\n"
+            "sys.stdin = io.StringIO(sys.argv[1])\n"
+            "out = ctx_adapter.hook('pre-tool-use')\n"
+            "print(json.dumps([out, events]))\n")
+        payload = json.dumps({"session_id": self.sid, "cwd": str(self.t), "tool_name": tool, "tool_input": inp})
+        r = subprocess.run([sys.executable, "-c", code, payload], env=self.env, capture_output=True, text=True,
+                           timeout=60)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        return json.loads(r.stdout)
+
+    def test_with_no_stop_file_a_bash_call_reads_no_store(self):  # DW-2
+        shutil.rmtree(self.root / "state", ignore_errors=True)
+        self.assertEqual(self.run_hook_in_process("Bash", command="ls"), ["", []], "no swarm dir")
+        (self.root / "state" / "swarm").mkdir(parents=True)
+        self.assertEqual(self.run_hook_in_process("Bash", command="ls"), ["", []], "an empty swarm dir")
+        (self.root / "state" / "swarm" / "notes.txt").write_text("not a stop")
+        self.assertEqual(self.run_hook_in_process("mcp__x__y"), ["", []])
+        self.ok("stop", "other", "--reason", "x")  # a STOP file exists: only then is the store read
+        self.assertEqual(self.run_hook_in_process("Bash", command="ls")[1], ["import lease"])
+
+    def test_a_bash_call_passes_and_a_context_doc_write_is_still_refused(self):  # DW-3
+        fake = self.t / "ctx"
+        fake.write_text("#!/bin/sh\necho 'NO_SUCH_DOC x: no such doc' >&2\nexit 2\n")
+        fake.chmod(0o755)
+        env = {**self.env, "KIT_CTX": str(fake)}
+
+        def run(tool, **inp):
+            r = subprocess.run([sys.executable, str(ADAPTER), "hook", "pre-tool-use"], env=env, capture_output=True,
+                               text=True, timeout=60, input=json.dumps(
+                                   {"session_id": self.sid, "cwd": str(self.t), "tool_name": tool, "tool_input": inp}))
+            self.assertEqual((r.returncode, r.stderr), (0, ""))
+            return r.stdout
+        (self.root / "state" / "swarm").mkdir(parents=True)
+        self.assertEqual(run("Bash", command="cat .context/d/a.md > .context/d/a.md"), "")
+        self.assertEqual(run("Write"), "")  # a file write that names no file
+        self.assertEqual(run("Edit", file_path=""), "")
+        self.assertIn('"deny"', run("Write", file_path=str(self.root / "d" / "a.md")))
+
+    def test_an_epic_stop_spares_the_main_session_and_denies_its_subagent(self):  # DW-5
+        self.ok("stop", "674", "--reason", "budget hard stop")
+        self.assertIsNone(self.hook(command="python3 context-db/bin/swarm.py apply"))
+        self.assertIsNone(self.hook("Write", file_path="a"))
+        for cmd in ("ls", "python3 context-db/bin/lease.py go 674"):
+            self.assertEqual(self.hook(agent="a1", command=cmd)["permissionDecision"], "deny", cmd)
+        self.assertIsNone(self.hook(agent="a1", command="python3 context-db/bin/swarm_msg.py drain w"))
+
+    def test_a_lease_stop_denies_the_holder_main_session_and_subagent_alike(self):  # DW-5
+        self.acquire("client", self.lane)
+        self.ok("stop", "client", "--reason", "x")
+        self.assertEqual(self.hook(command="ls")["permissionDecision"], "deny")
+        self.assertEqual(self.hook(agent="a1", command="ls")["permissionDecision"], "deny")
+
+    def test_a_subagent_workers_own_lane_reaches_the_hook(self):  # DW-6
+        lane = "sub-" + uuid.uuid4().hex[:6]
+        (self.root / "sessions" / f"{lane}.md").write_text(  # the worker's row stamps the parent's session id
+            f"---\nsession: {lane}\nsession_id: {self.sid}\nstatus: active\nepic: acme/widgets#9\n---\n# x\n")
+        self.acquire("client", lane)
+        self.ok("stop", "client", "--reason", "x")
+        self.assertEqual(self.hook(agent="a1", command="make ci")["permissionDecision"], "deny")
+        self.ok("go", "client")
+        self.assertIsNone(self.hook(agent="a1", command="make ci"))
+        self.acquire("other-res", "no-row-lane")  # a lane with no registry row is out of reach
+        self.ok("stop", "other-res", "--reason", "x")
+        self.assertIsNone(self.hook(agent="a1", command="make ci"))
 
     def test_a_stop_for_a_lease_the_lane_does_not_hold_leaves_it_alone(self):
         self.acquire("client", self.other)
@@ -455,8 +553,8 @@ class Stop(Base):
                     "python3 $BATON/context-db/bin/swarm_msg.py drain w",
                     "python3 context-db/bin/swarm_msg.py drain w", "python3 swarm_msg.py ack w",
                     "python3 context-db/bin/lease.py release client --as holder"):
-            self.assertIsNone(self.hook(command=cmd), cmd)
-        self.assertIsNone(self.hook("TaskStop", task_id="t1"))
+            self.assertIsNone(self.hook(agent="a1", command=cmd), cmd)
+        self.assertIsNone(self.hook("TaskStop", agent="a1", task_id="t1"))
         for cmd in ("make ci", "python3 swarm_msg.py send w x; rm -rf y", "python3 swarm_msg.py send w x && ls",
                     "python3 swarm_msg.py drain w > out", "python3 swarm_msg.py drain $(ls)", "swarm_msg.py drain w\nls",
                     "python3 swarm_msg.py bogus", "python3 evil.py send",
@@ -464,12 +562,12 @@ class Stop(Base):
                     "python3 context-db/bin/lease.py status", "python3 swarm_msg.py pending w",
                     "LD_PRELOAD=/e.so python3 context-db/bin/lease.py release client", "FOO=1 python3 swarm_msg.py ack w",
                     "python3 swarm_msg.py send w \"x $(ls)\"", "python3 swarm_msg.py send w x`ls`"):
-            self.assertEqual(self.hook(command=cmd)["permissionDecision"], "deny", cmd)
-        self.assertEqual(self.hook("Write", file_path="a")["permissionDecision"], "deny")
+            self.assertEqual(self.hook(agent="a1", command=cmd)["permissionDecision"], "deny", cmd)
+        self.assertEqual(self.hook("Write", agent="a1", file_path="a")["permissionDecision"], "deny")
 
     def test_only_the_next_work_call_is_blocked_not_every_tool_of_other_lanes(self):  # DW-6
         self.ok("stop", "674", "--reason", "x")
-        self.assertIsNone(self.hook(sid="", command="ls"))  # no session id: no lane, no block
+        self.assertIsNone(self.hook(sid="", agent="a1", command="ls"))  # no session id: no lane, no block
 
     def test_stop_prints_the_in_flight_rule_and_the_owner_keeps_its_stop(self):  # DW-4
         out = self.ok("stop", "674", "--reason", "x", "--as", "owner")

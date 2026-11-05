@@ -84,9 +84,11 @@ or found, or when anything in the adapter itself fails, so a machine that has no
                        naming the ctx tool to use instead; exempt: the index's skip dirs (bin _templates sessions
                        handoff memory state), dot dirs, the generated catalogs and what the kit's store settings
                        ignore. Anything else, or any error: no decision. Also, with no ctx needed: a call from a
-                       session whose lane holds the lease `<scope>` or works the epic `<scope>` while
-                       `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox send,
-                       inbox drain, ack, lease release and ending a task stay allowed
+                       work call (any tool the hook's matcher names: Bash, the file writes, Agent, MCP) of a session
+                       whose lane holds the lease `<scope>`, or of a subagent of one that works the epic `<scope>`,
+                       while `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox
+                       send, inbox drain, ack, lease release and ending a task stay allowed. With no STOP file a
+                       call that is not a file write exits before any store read
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
                        comes back as `{"systemMessage": …}`; any exit but 0 or
                        NO_STORE (or a timeout) comes back as `ctx validate did not run: …`. Also run after a write
@@ -246,6 +248,7 @@ WRITE_VERBS = ("log", "str_replace", "insert", "create", "fm", "new", "move", "r
                "memory")  # the `ctx <verb>` calls that change the store (`memory` writes it from stdin): each gets a
                           # catalog refresh and a sync pass (`_sync_after_write`)
 CTX_VALUE_OPTIONS = ("--store", "--now")  # ctx's global options that take the next argument as their value
+FILE_WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")  # the tools whose call can write a store doc
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
 BIN = Path(__file__).resolve().parent
 KIT_ROOT = BIN.parent.parent  # context-db/bin -> context-db -> the kit root, where .claude-plugin/plugin.json lives
@@ -1106,12 +1109,14 @@ def _stop_deny(payload: dict) -> str:
     ack, lease release, ending the task) are never denied. Any failure: no decision."""
     try:
         root = _context_root()
-        if not (root / "state" / "swarm").is_dir():
-            return ""
+        with os.scandir(root / "state" / "swarm") as it:  # the common path: no STOP file, no store read, no import
+            if not any(e.name.startswith("STOP-") for e in it):
+                return ""
         import lease  # same dir (on sys.path via _context_root)
         if lease.exempt_call(str(payload.get("tool_name", "")), payload.get("tool_input")):
             return ""
-        reason = lease.stop_for(root, _session_id(payload))
+        agent = payload.get("agent_id")  # named only on a subagent's call; the main session's has none
+        reason = lease.stop_for(root, _session_id(payload), agent.strip() if isinstance(agent, str) else "")
     except Exception:  # noqa: BLE001 — a hook never fails the session
         return ""
     if not reason:
@@ -1495,6 +1500,10 @@ def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
 def hook(name: str) -> str:
     """What the hook prints (maybe nothing). Raises nothing the caller must handle beyond Exception."""
     payload = _payload()
+    if name == "pre-tool-use":
+        stop = _stop_deny(payload)  # first: a STOP needs no ctx, and with no STOP file this reads nothing
+        if stop or payload.get("tool_name") not in FILE_WRITE_TOOLS:
+            return stop  # only a file write can be a doc write: any other tool is never checked against the store
     ctx, _ = resolve()
     if name == "post-tool-use-async":
         root = _context_root()
@@ -1546,10 +1555,6 @@ def hook(name: str) -> str:
         r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
         brief = r.stdout if r.returncode == 0 else ""
         return f"{pending}\n\n{brief}" if pending else brief
-    if name == "pre-tool-use":
-        stop = _stop_deny(payload)  # before the ctx check: a STOP needs no ctx
-        if stop:
-            return stop
     if ctx is None:
         return ""
     root = _context_root()

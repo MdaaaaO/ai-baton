@@ -761,7 +761,10 @@ class Wiring(unittest.TestCase):
         for tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
             self.assertRegex(edits.split(":", 1)[1], rf"(^|\|){tool}(\||$)")
         self.assertEqual((sync, sync2), (False, False))   # validate / the pending-conflict line are synchronous: they must surface
-        self.assertEqual(plugin["pre-tool-use"], [(edits.replace("PostToolUse", "PreToolUse"), False)])  # a deny must block
+        [(pre, pre_sync)] = plugin["pre-tool-use"]  # a deny must block; its matcher also names the other work tools (#703)
+        self.assertTrue(pre.startswith("PreToolUse:") and not pre_sync)
+        for tool in ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"):
+            self.assertRegex(pre.split(":", 1)[1], rf"(^|\|){tool}(\||$)")
         [(on_edit, a1), (on_ctx, a2)] = plugin["post-tool-use-async"]
         self.assertEqual((on_edit, a1, a2), (edits, True, True))
         self.assertEqual(ctx_sync, on_ctx)  # the same ctx-tool matcher, synchronous (#515: the conflict line)

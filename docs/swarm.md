@@ -298,7 +298,22 @@ send `PR` itself only if its assignment says so.
 A `STOP` cannot beat a call already in flight. A message reaches a busy worker only after its current tool call returns,
 and the `PreToolUse` hook that reads the file `.context/state/swarm/STOP-<scope>` can block only the next call. The hook
 blocks work tools and lets through the calls this page requires after a `STOP`: the outbox send, the inbox drain, the
-ack, the lease release and ending the task. So:
+ack, the lease release and ending the task.
+
+**Status.** The hook's matcher names `Bash`, the file writes, `Agent`, `Task` and the MCP tools, so a `STOP` reaches a
+worker's next work call of any kind. With no `STOP` file a call that writes no file exits before any store read. What
+the harness passes to the hook, read from a real `PreToolUse` input: a subagent's call carries `agent_id` and
+`agent_type` beside the same `session_id` as its parent; the parent's own call carries neither; no field names the
+lane. So a `STOP` tells a background subagent from its parent, and:
+
+- An epic `STOP` denies a subagent's calls under the session that works the epic, and leaves the main session's own
+  calls (its flush, its ledger updates) running. It does not stop a peer session's own main-session calls; a lease
+  `STOP` does, whatever the call.
+- A subagent worker's own `--lane` reaches the hook through the registry row that stamped the shared `session_id`: a
+  `STOP-<resource>` on a lease held under that lane denies the subagent. A lane with no such row is out of reach, and
+  a harness that sends no `agent_id` has every call read as the main session's.
+
+So:
 
 - The stop takes effect at the next tool round, and nobody kills a peer's process to get it.
 - The worker reports what ran before the stop landed: `BLOCKED <ticket> stop <who> ran="…"`, naming every call with an
