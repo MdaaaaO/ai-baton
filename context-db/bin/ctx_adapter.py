@@ -83,10 +83,12 @@ or found, or when anything in the adapter itself fails, so a machine that has no
   pre-tool-use         a Write/Edit/MultiEdit/NotebookEdit of a `*.md` doc under an adopted content root → deny,
                        naming the ctx tool to use instead; exempt: the index's skip dirs (bin _templates sessions
                        handoff memory state), dot dirs, the generated catalogs and what the kit's store settings
-                       ignore. Anything else, or any error: no decision. Also, with no ctx needed: a call from a
-                       session whose lane holds the lease `<scope>` or works the epic `<scope>` while
-                       `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox send,
-                       inbox drain, ack, lease release and ending a task stay allowed
+                       ignore. Anything else, or any error: no decision. Also, with no ctx needed: a work call
+                       (any tool the hook's matcher names: Bash, the file writes, Agent, MCP) of a session
+                       whose lane holds the lease `<scope>`, or of a session that works the epic `<scope>` unless its row says `role: orchestrator` (a subagent always),
+                       while `state/swarm/STOP-<scope>` exists (`lease.py stop`) → deny with the reason; the outbox
+                       send, inbox drain, ack, lease release and ending a task stay allowed. With no STOP file a
+                       call that is not a file write exits before any store read
   post-tool-use        a Write/Edit under the content root → `ctx validate --changed --adopt`; a finding (exit 3)
                        comes back as `{"systemMessage": …}`; any exit but 0 or
                        NO_STORE (or a timeout) comes back as `ctx validate did not run: …`. Also run after a write
@@ -179,16 +181,61 @@ when more than one would apply: 3 over 7 over 6 over 5 over 0. `ctx` and `mcp` e
 A hook always exits 0. Stdlib only.
 """
 from __future__ import annotations
+import os
+import sys
+
+_RAW_STDIN: str | None = None  # the hook input the fast path below already read, for `_payload` to reuse
+
+
+def _fast_pre_tool_use() -> None:
+    """The PreToolUse hook runs on every work call, so its no-STOP path must cost little more than the interpreter's
+    start. Before any heavy import: when the tool writes no file and no `state/swarm/STOP-*` file exists, exit 0 with
+    no output. Anything it cannot settle from the environment (an unusual content-root layout, bad input) falls
+    through to the full hook, which decides the same way. The root rule below is the cheap cases of
+    `kit_profile.context_root()`: `CONTEXT_ROOT`, the `.context/` beside the kit, `CLAUDE_PROJECT_DIR`."""
+    global _RAW_STDIN
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return
+        _RAW_STDIN = sys.stdin.read()
+        import json
+        data = json.loads(_RAW_STDIN or "{}")
+        if not isinstance(data, dict) or data.get("tool_name") in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+            return
+        root = os.environ.get("CONTEXT_ROOT", "").strip()
+        if not root:
+            kit = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+            for base in (os.path.dirname(kit), os.path.dirname(os.path.dirname(kit))):
+                if os.path.isdir(os.path.join(base, ".context")):
+                    root = os.path.join(base, ".context")
+                    break
+            else:
+                proj = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
+                if not (proj and os.path.isdir(os.path.join(proj, ".context"))):
+                    return
+                root = os.path.join(proj, ".context")
+        try:
+            with os.scandir(os.path.join(root, "state", "swarm")) as it:
+                if any(e.name.startswith("STOP-") for e in it):
+                    return
+        except FileNotFoundError:
+            pass
+    except Exception:  # noqa: BLE001 — a hook never fails the session; the full hook decides
+        return
+    sys.exit(0)
+
+
+if __name__ == "__main__" and sys.argv[1:3] == ["hook", "pre-tool-use"]:
+    _fast_pre_tool_use()
+
 import argparse
 import contextlib
 import fnmatch
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path, PurePosixPath
@@ -246,6 +293,7 @@ WRITE_VERBS = ("log", "str_replace", "insert", "create", "fm", "new", "move", "r
                "memory")  # the `ctx <verb>` calls that change the store (`memory` writes it from stdin): each gets a
                           # catalog refresh and a sync pass (`_sync_after_write`)
 CTX_VALUE_OPTIONS = ("--store", "--now")  # ctx's global options that take the next argument as their value
+FILE_WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")  # the tools whose call can write a store doc
 CONTEXT_TOOLS = ("file_path", "notebook_path")  # the tool_input fields that name the file a Write/Edit/NotebookEdit changed
 BIN = Path(__file__).resolve().parent
 KIT_ROOT = BIN.parent.parent  # context-db/bin -> context-db -> the kit root, where .claude-plugin/plugin.json lives
@@ -1018,10 +1066,10 @@ def mcp_json(path: Path) -> int:
 
 # ── hooks ─────────────────────────────────────────────────────────────────────────────────────────────────────
 def _payload() -> dict:
-    if sys.stdin is None or sys.stdin.isatty():
+    if _RAW_STDIN is None and (sys.stdin is None or sys.stdin.isatty()):
         return {}
     try:
-        data = json.loads(sys.stdin.read() or "{}")
+        data = json.loads((sys.stdin.read() if _RAW_STDIN is None else _RAW_STDIN) or "{}")
     except ValueError:
         return {}
     return data if isinstance(data, dict) else {}
@@ -1106,12 +1154,14 @@ def _stop_deny(payload: dict) -> str:
     ack, lease release, ending the task) are never denied. Any failure: no decision."""
     try:
         root = _context_root()
-        if not (root / "state" / "swarm").is_dir():
-            return ""
+        with os.scandir(root / "state" / "swarm") as it:  # the common path: no STOP file, no store read, no import
+            if not any(e.name.startswith("STOP-") for e in it):
+                return ""
         import lease  # same dir (on sys.path via _context_root)
         if lease.exempt_call(str(payload.get("tool_name", "")), payload.get("tool_input")):
             return ""
-        reason = lease.stop_for(root, _session_id(payload))
+        agent = payload.get("agent_id")  # named only on a subagent's call; the main session's has none
+        reason = lease.stop_for(root, _session_id(payload), agent.strip() if isinstance(agent, str) else "")
     except Exception:  # noqa: BLE001 — a hook never fails the session
         return ""
     if not reason:
@@ -1495,6 +1545,10 @@ def _compact_brief(ctx: Path, store: list[str], payload: dict) -> None:
 def hook(name: str) -> str:
     """What the hook prints (maybe nothing). Raises nothing the caller must handle beyond Exception."""
     payload = _payload()
+    if name == "pre-tool-use":
+        stop = _stop_deny(payload)  # first: a STOP needs no ctx, and with no STOP file this reads nothing
+        if stop or payload.get("tool_name") not in FILE_WRITE_TOOLS:
+            return stop  # only a file write can be a doc write: any other tool is never checked against the store
     ctx, _ = resolve()
     if name == "post-tool-use-async":
         root = _context_root()
@@ -1546,10 +1600,6 @@ def hook(name: str) -> str:
         r = _ctx(ctx, store, "brief", "--registry", "--budget", str(BRIEF_BUDGET))
         brief = r.stdout if r.returncode == 0 else ""
         return f"{pending}\n\n{brief}" if pending else brief
-    if name == "pre-tool-use":
-        stop = _stop_deny(payload)  # before the ctx check: a STOP needs no ctx
-        if stop:
-            return stop
     if ctx is None:
         return ""
     root = _context_root()
