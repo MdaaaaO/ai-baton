@@ -7,6 +7,7 @@ import fcntl
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -381,6 +382,24 @@ class Sweep(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("freed a", r.stdout)
         self.assertEqual(L.resources(self.root), [])
+
+    def test_a_failing_lease_sweep_is_said_on_both_paths(self):
+        kit = self.t / "kit"
+        (kit / "skills" / "session-register").mkdir(parents=True)
+        (kit / "context-db" / "bin").mkdir(parents=True)
+        shutil.copy(ZOMBIE, kit / "skills" / "session-register" / "zombie-sweep.sh")
+        (kit / "context-db" / "bin" / "lease.py").write_text("import sys\nsys.exit(2)\n")
+        (self.root / "sessions").mkdir(exist_ok=True)
+        for args in ((), ("--kill",)):
+            r = subprocess.run(["bash", str(kit / "skills" / "session-register" / "zombie-sweep.sh"), *args],
+                               env={**self.env, "TMPDIR": str(self.t)}, capture_output=True, text=True, timeout=60)
+            self.assertIn("lease sweep did not run (exit 2)", r.stdout, args)
+            self.assertIn("zombie-sweep:", r.stdout)  # the list still goes on
+
+    def test_heartbeat_keeps_the_expire_stderr(self):
+        line = next(x for x in HEARTBEAT.read_text().splitlines() if "lease.py" in x and "expire" in x and not x.lstrip().startswith("#"))
+        self.assertIn("2>&1", line)
+        self.assertNotIn("2>/dev/null", line)
 
     def test_heartbeat_frees_its_lanes_expired_lease(self):
         self.assertIn("lease.py", HEARTBEAT.read_text())

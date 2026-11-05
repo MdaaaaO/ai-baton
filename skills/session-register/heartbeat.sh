@@ -98,7 +98,7 @@ while kill -0 "$CLAUDE_PID" 2>/dev/null; do
     sleep 60; slept=$((slept+60))
     # The holder enforces its own lease expiry (docs/swarm.md § Leases and holds): free this lane's expired
     # leases and log the RELEASE line it owes, with no model turn and no message to wait on.
-    python3 "$KITDIR/context-db/bin/lease.py" expire --lane "$NAME" 2>/dev/null | sed 's/^/lease: /' || true
+    python3 "$KITDIR/context-db/bin/lease.py" expire --lane "$NAME" 2>&1 | sed 's/^/lease: /' || true
   done
 done
 echo "$(TZ="$TZ_DEFAULT" date +'%Y-%m-%d %I:%M %p %Z') owner $CLAUDE_PID gone — ending $NAME"

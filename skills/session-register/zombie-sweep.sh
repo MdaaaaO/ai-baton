@@ -135,8 +135,10 @@ for ((i = 0; i < total; i++)); do
 done
 # Leases a dead or expired holder left behind: list mode only names what a sweep would free (lease.py sweep
 # --dry-run), so a read never writes; --kill frees them (lease.py sweep, one line each).
-if [ "$kill_mode" = 1 ]; then python3 "$KITDIR/context-db/bin/lease.py" sweep 2>/dev/null || true
-else python3 "$KITDIR/context-db/bin/lease.py" sweep --dry-run 2>/dev/null || true; fi
+lease_rc=0
+if [ "$kill_mode" = 1 ]; then python3 "$KITDIR/context-db/bin/lease.py" sweep 2>/dev/null || lease_rc=$?
+else python3 "$KITDIR/context-db/bin/lease.py" sweep --dry-run 2>/dev/null || lease_rc=$?; fi
+[ "$lease_rc" = 0 ] || echo "lease sweep did not run (exit $lease_rc)"
 echo "zombie-sweep: $zombies zombie(s), $live live, $unreg unregistered, $stale stale, $reused reused, $dead dead, $unmapped unmapped"
 if [ "$kill_mode" = 1 ]; then [ "$failed" = 0 ] || exit 1; exit 0; fi
 [ "$zombies" = 0 ] || exit 3
