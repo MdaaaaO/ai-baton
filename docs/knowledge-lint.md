@@ -42,7 +42,8 @@ read: those with a doc changed since the **lint stamp**, plus the domains the la
 - At most **6 forks per run**; the remaining domains are listed `not read` and carried in the stamp.
 - The fork's input is `ctx_lint.py bundle <domain>`: the domain's live docs, `=== <path>` before each. No logs,
   no archive. A fork gets no repo, no transcript and no tool; the harness cannot strip tools, so the restriction
-  is by instruction, as in [`cold-reader.md`](cold-reader.md).
+  is by instruction, as in [`cold-reader.md`](cold-reader.md), with the same exception: the call that delivers
+  the fork's final report is allowed, or the fork has no way to return its answer.
 
 Call `Agent` with `model: haiku` (or `sonnet`), `subagent_type: general-purpose`; paste the bundle in place of
 `<docs>` and hand it exactly this prompt:
@@ -57,7 +58,8 @@ CONTRADICTS <doc a> <doc b> <what>         two docs state incompatible facts abo
 ORPHAN <doc>                               a doc no other doc in this text refers to
 UNCHECKED <doc> <claim>                    a claim you cannot judge from this text alone
 Never judge a session log, a dated bullet or an archived doc: they are history. If nothing is wrong reply with
-exactly one line: CLEAN. Answer from this text alone — use no tool, read nothing else.
+exactly one line: CLEAN. Answer from this text alone — use no tool, read nothing else, except the one call that
+delivers your final report.
 
 <docs>
 ```
