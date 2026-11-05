@@ -235,6 +235,49 @@ class ArchiveSweep(unittest.TestCase):
         self.assertNotIn("would archive fresh-with-prompt", out)
 
 
+class LivenessInTheIndex(unittest.TestCase):
+    """The State cell shows a standby row's expiry, two live rows on one lane flag the older, and an archived row takes its
+    `prs.tsv` directory with it."""
+
+    def setUp(self):
+        self.tmp, self.root = blank_root()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _extra(self, name: str, extra: str, hb: str) -> None:
+        p = session_file(self.root, name, "active", 0, "", hb=hb)
+        p.write_text(p.read_text().replace("status: active\n", f"status: active\n{extra}\n"), encoding="utf-8")
+
+    def test_the_state_cell_says_until_when_and_whether_it_is_past(self):
+        self._extra("w-soon", "state: standby\nexpires: 2999-01-01T00:00:00Z", stamp(0))
+        self._extra("w-past", "state: standby\nexpires: 2020-01-01T00:00:00Z", stamp(0))
+        run(self.root)
+        idx = (self.root / "SESSION_INDEX.md").read_text()
+        self.assertIn("standby (until 2999-01-01T00:00:00Z)", idx)
+        self.assertIn("standby ⚠ EXPIRED (2020-01-01T00:00:00Z)", idx)
+
+    def test_two_live_rows_on_one_lane_flag_the_older_heartbeat(self):
+        self._extra("w-old", "lane: lane-a", stamp(0.2))
+        self._extra("w-new", "lane: lane-a", stamp(0))
+        self._extra("w-other", "lane: lane-b", stamp(0.1))
+        run(self.root)
+        rows = {ln.split("`")[1]: ln for ln in (self.root / "SESSION_INDEX.md").read_text().splitlines() if ln.startswith("| `")}
+        self.assertIn("SAME LANE as w-new", rows["w-old"])
+        self.assertNotIn("SAME LANE", rows["w-new"])
+        self.assertNotIn("SAME LANE", rows["w-other"])
+
+    def test_an_archived_row_takes_its_prs_table_along(self):
+        session_file(self.root, "old-orch", "ended", 30, "Register as old-2.")
+        d = self.root / "sessions" / "old-orch"
+        d.mkdir()
+        (d / "prs.tsv").write_text("repo\tpr\thead7\tstate\tticket\n")
+        run(self.root)
+        self.assertTrue((self.root / "sessions" / "archive" / "old-orch.md").is_file())
+        self.assertTrue((self.root / "sessions" / "archive" / "old-orch" / "prs.tsv").is_file())
+        self.assertFalse(d.exists())
+
+
 class ConsumedHandoff(unittest.TestCase):
     """An ended session whose § Next session names a successor that is registered leaves at the next sweep, age aside."""
 

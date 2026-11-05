@@ -10,6 +10,7 @@ names it while a dead-loop log's missing row never blocks a kill (the two review
 must reach exactly the ZOMBIE owners — never a live, unregistered, stale, reused or dead one, never one with an
 active row, nor the sweep's own ancestry. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import json
 import os
 import shutil
 import subprocess
@@ -93,6 +94,16 @@ class ZombieSweepFixture(unittest.TestCase):
     def sweep(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["bash", str(SWEEP), *args], env=self.env, capture_output=True, text=True,
                               timeout=60)
+
+    def standby(self, name: str, expires: str) -> Path:
+        f = self.ctx / "sessions" / f"{name}.md"
+        f.write_text(f"---\nsession: {name}\nstatus: active\nrole: worker\nstate: standby\nexpires: {expires}\n"
+                     "heartbeat: 2026-11-01T00:00:00Z\n---\n")
+        (self.ctx / "state" / "swarm").mkdir(parents=True, exist_ok=True)
+        (self.ctx / "state" / "swarm" / f"E-{name}.json").write_text(json.dumps(
+            {"key": "E-1", "repo": "o/r", "session": "orch",
+             "tickets": {"7": {"status": "assigned", "repo": "o/r", "pr": None, "worker": {"name": name}}}}))
+        return f
 
     def build_all_cases(self) -> dict[str, subprocess.Popen]:
         owners = {}
@@ -193,6 +204,17 @@ class ListMode(ZombieSweepFixture):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(r.stdout.strip(), "zombie-sweep: 0 zombie(s), 0 live, 0 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped")
 
+    def test_list_mode_names_a_standby_row_past_its_time_and_retires_nothing(self):
+        f = self.standby("w-late", "2026-11-02T00:00:00Z")
+        self.standby("w-early", "2999-01-01T00:00:00Z")
+        before = f.read_text()
+        r = self.sweep()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("would retire w-late", r.stdout)
+        self.assertIn("owns: ticket 7", r.stdout)
+        self.assertNotIn("w-early", r.stdout)
+        self.assertEqual(f.read_text(), before)
+
     def test_no_registry_is_a_usage_error(self):
         shutil.rmtree(self.ctx / "sessions")
         r = self.sweep()
@@ -206,6 +228,14 @@ class ListMode(ZombieSweepFixture):
 
 
 class KillMode(ZombieSweepFixture):
+    def test_kill_mode_retires_a_standby_row_past_its_time(self):
+        f = self.standby("w-late", "2026-11-02T00:00:00Z")
+        r = self.sweep("--kill")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("retired w-late", r.stdout)
+        self.assertIn("owns: ticket 7", r.stdout)
+        self.assertIn("state: retired", f.read_text())
+
     def test_kill_reaches_exactly_the_zombie_owners(self):
         owners = self.build_all_cases()
         r = self.sweep("--kill")
