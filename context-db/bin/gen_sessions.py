@@ -401,8 +401,8 @@ def main(argv: list[str] | None = None) -> int:
     ]
 
     if active:
-        out.append("| Session | Status | Epic | Working on | Responsibilities | Stats | ~$ est. | Heartbeat |")
-        out.append("|---|---|---|---|---|---|---|---|")
+        out.append("| Session | Status | Role | State | Epic | Working on | Responsibilities | Stats | ~$ est. | Heartbeat |")
+        out.append("|---|---|---|---|---|---|---|---|---|---|")
         for m in by_heartbeat(active):
             hb = m.get("heartbeat", "")
             a = age_hours(hb)
@@ -411,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
             cost, stats = cost_split(cell(m, "stats"))
             out.append(
                 f"| `{cell(m, 'session')}`{ref} | {cell(m, 'status')}{flag} "
+                f"| {cell(m, 'role')} | {cell(m, 'state')} "
                 f"| {cell(m, 'epic')} | {cell(m, 'working_on')} "
                 f"| {cell(m, 'responsibilities')} | {stats} | {cost} | {profile.local_str(hb, LOCAL_TZ)} |"
             )
