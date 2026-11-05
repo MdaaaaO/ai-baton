@@ -169,19 +169,9 @@
       }
     }
   },
-  "systems": {
-    "jira": false,
-    "slack": false,
-    "notion": false,
-    "datalake": false,
-    "airflow": false,
-    "dbt": false,
-    "aws_sso": false,
-    "incident_io": false,
-    "lattice": false,
-    "signed_commits": false
-  },
   "swarm": {
+    "_comment": "ack_minutes: minutes a swarm line may stay unacked before `swarm_msg.py pending` lists it (docs/swarm.md § The ack rule). Optional; absent = 20.",
+    "ack_minutes": 20,
     "lease_minutes": 120,
     "resources": [],
     "units": {},
@@ -193,6 +183,18 @@
       "split_turns": 10,
       "hard_stop": false
     }
+  },
+  "systems": {
+    "jira": false,
+    "slack": false,
+    "notion": false,
+    "datalake": false,
+    "airflow": false,
+    "dbt": false,
+    "aws_sso": false,
+    "incident_io": false,
+    "lattice": false,
+    "signed_commits": false
   },
   "tz_default": "UTC",
   "kit": {

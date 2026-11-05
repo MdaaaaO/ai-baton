@@ -127,7 +127,7 @@ def memory_ledger(status: str, *, ready_head: str | None = None, pr_is_open: boo
     return {"key": EPIC, "tickets": {"7": row}, "seen": {}, "log": []}
 
 
-def status_line(word: str, *, sha: str = SHA_A, line_id: str = "m1", sender: str = "lane-7", ticket: str = "7") -> str:
+def status_line(word: str, *, sha: str = SHA_A, line_id: str = "m01", sender: str = "lane-7", ticket: str = "7") -> str:
     fields = {"CLAIMED": "feat/7-x", "PR": f"feat/7-x {sha} body=7-pr.md", "READY": sha, "BLOCKED": "input orchestrator"}[word]
     return f"{word} {ticket} {fields} " + LINE_TAIL.format(id=line_id, sender=sender)
 
@@ -194,7 +194,7 @@ class CliCase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.tmp = Path(self._tmp.name)
+        self.tmp = Path(self._tmp.name).resolve()
         self.env = hermetic_env(self.tmp)
         self.root = Path(self.env["CONTEXT_ROOT"])
         self.root.mkdir()
@@ -240,8 +240,8 @@ class CliCase(unittest.TestCase):
     def to_pr(self, ticket: str = "7", sha: str = SHA_A) -> None:
         """Assigned, claimed, READY at `sha`, the draft PR opened."""
         self.assign(ticket, f"lane-{ticket}", f"feat/{ticket}-x")
-        self.ok("apply", EPIC, status_line("CLAIMED", ticket=ticket, sender=f"lane-{ticket}", line_id=f"c{ticket}"))
-        self.ok("apply", EPIC, status_line("READY", ticket=ticket, sender=f"lane-{ticket}", line_id=f"r{ticket}", sha=sha))
+        self.ok("apply", EPIC, status_line("CLAIMED", ticket=ticket, sender=f"lane-{ticket}", line_id=f"c0{ticket}"))
+        self.ok("apply", EPIC, status_line("READY", ticket=ticket, sender=f"lane-{ticket}", line_id=f"r0{ticket}", sha=sha))
         self.ok("status", EPIC, ticket, "pr", "--pr", f"10{ticket}")
 
     def to_merged(self, ticket: str = "7", sha: str = SHA_A) -> None:
@@ -458,8 +458,8 @@ class StatusMoves(CliCase):
         self.plan("7")
         self.ok("add", EPIC, "7", "--update", "--dw", "DW-1", "--dw", "DW-2")
         self.assign()
-        self.apply("CLAIMED", line_id="m1")
-        self.apply("READY", line_id="m2")
+        self.apply("CLAIMED", line_id="m01")
+        self.apply("READY", line_id="m02")
         self.assertEqual(self.row()["status"], "claimed", "READY with no PR yet moves no row")
         self.ok("status", EPIC, "7", "pr", "--pr", "12")
         self.ok("status", EPIC, "7", "ready-to-merge", "--head", SHA_A)
@@ -493,7 +493,7 @@ class StatusMoves(CliCase):
         self.assertIn("a moved head needs a new READY", self.refused("status", EPIC, "7", "ready-to-merge", "--head", SHA_B))
         self.ok("progress", EPIC, "7", "--head", SHA_B)
         self.assertIn("a moved head needs a new READY", self.refused("status", EPIC, "7", "ready-to-merge", "--head", SHA_A))
-        self.apply("READY", sha=SHA_B, line_id="m9")
+        self.apply("READY", sha=SHA_B, line_id="m09")
         self.ok("status", EPIC, "7", "ready-to-merge", "--head", SHA_B[:7])
         self.assertEqual(self.row()["status"], "ready-to-merge")
 
@@ -501,9 +501,9 @@ class StatusMoves(CliCase):
         self.plan("7")
         self.to_pr()
         self.ok("status", EPIC, "7", "ready-to-merge", "--head", SHA_A)
-        self.apply("READY", sha=SHA_A, line_id="m8")
+        self.apply("READY", sha=SHA_A, line_id="m08")
         self.assertEqual(self.row()["status"], "ready-to-merge", "the same head moves nothing")
-        self.apply("READY", sha=SHA_B, line_id="m9")
+        self.apply("READY", sha=SHA_B, line_id="m09")
         self.assertEqual(self.row()["status"], "pr")
 
     def test_merged_from_pr_only_on_an_owner_or_auto_merge(self):
@@ -663,19 +663,19 @@ class Tick(CliCase):
         self.plan("7")
         self.assign()
         self.assertEqual(len(self.tick_after(500)["stalled"]), 1, "assigned")
-        self.apply("CLAIMED", line_id="m1")
+        self.apply("CLAIMED", line_id="m01")
         self.assertEqual(len(self.tick_after(500)["stalled"]), 1, "claimed")
-        self.apply("BLOCKED", line_id="m2")
+        self.apply("BLOCKED", line_id="m02")
         self.assertEqual(self.tick_after(500)["stalled"], [], "blocked")
         self.ok("status", EPIC, "7", "parked", "--reason", "later")
         self.assertEqual(self.tick_after(500)["stalled"], [], "parked")
         self.assign()
-        self.apply("CLAIMED", line_id="m3")
-        self.apply("PR", line_id="m4")
+        self.apply("CLAIMED", line_id="m03")
+        self.apply("PR", line_id="m04")
         self.assertEqual(self.row()["status"], "pr")
         self.assertEqual(self.tick_after(500)["stalled"], [], "pr")
         self.ok("status", EPIC, "7", "pr", "--pr", "12")
-        self.apply("READY", line_id="m5")
+        self.apply("READY", line_id="m05")
         self.ok("status", EPIC, "7", "ready-to-merge", "--head", SHA_A)
         self.assertEqual(self.tick_after(500)["stalled"], [], "ready-to-merge")
 
@@ -791,8 +791,8 @@ class Tick(CliCase):
     def test_lists_ready_with_no_pr_and_a_head_past_its_ready(self):
         self.plan("7", "8")
         self.assign()
-        self.apply("CLAIMED", line_id="m1")
-        self.apply("READY", line_id="m2")
+        self.apply("CLAIMED", line_id="m01")
+        self.apply("READY", line_id="m02")
         self.assertEqual([(i["ticket"], i["head"]) for i in self.tick()["integrate"]], [("7", SHA_A)])
         self.ok("status", EPIC, "7", "pr", "--pr", "12")
         self.assertEqual(self.tick()["integrate"], [])
@@ -802,17 +802,17 @@ class Tick(CliCase):
     def test_a_ready_on_a_row_reassigned_with_its_pr_open_is_the_orchestrators_next_act(self):
         self.plan("7")
         self.to_pr()
-        self.apply("BLOCKED", sender="lane-7", line_id="m1")
+        self.apply("BLOCKED", sender="lane-7", line_id="m01")
         self.assign("7", "lane-new", "feat/7-x")
-        self.apply("CLAIMED", sender="lane-new", line_id="m2")
-        self.apply("READY", sender="lane-new", line_id="m3")
+        self.apply("CLAIMED", sender="lane-new", line_id="m02")
+        self.apply("READY", sender="lane-new", line_id="m03")
         self.assertEqual([(i["ticket"], i["pr"]) for i in self.tick()["integrate"]], [("7", 107)])
 
     def test_a_pr_line_with_no_number_yet_is_the_orchestrators_next_act(self):
         self.plan("7")
         self.assign()
-        self.apply("CLAIMED", line_id="m1")
-        self.apply("PR", line_id="m2")
+        self.apply("CLAIMED", line_id="m01")
+        self.apply("PR", line_id="m02")
         self.assertEqual([(i["ticket"], i["body"]) for i in self.tick()["integrate"]], [("7", "7-pr.md")])
 
     def test_watches_decisions_grants_and_holds_reach_the_tick(self):
@@ -892,7 +892,7 @@ class Render(CliCase):
         self.ok("add", EPIC, "7", "--update", "--title", "a | title", "--dep", "3", "--dw", "DW-1")
         self.ok("approve", EPIC, "--decision", "go again")
         self.to_pr()
-        self.apply("BLOCKED", line_id="m9")
+        self.apply("BLOCKED", line_id="m09")
         out = self.ok("render", EPIC)
         self.assertTrue(out.startswith("## Swarm\n"))
         self.assertIn("Rendered by swarm.py", out)
@@ -923,7 +923,7 @@ class Apply(CliCase):
         self.assertIn("assigned -> claimed", out)
         r = self.row()
         self.assertEqual((r["status"], r["worker"]["branch"]), ("claimed", "feat/7-x"))
-        self.apply("PR", line_id="m2")
+        self.apply("PR", line_id="m02")
         r = self.row()
         self.assertEqual((r["status"], r["head"], r["body"]), ("pr", SHA_A, "7-pr.md"))
 
@@ -935,77 +935,77 @@ class Apply(CliCase):
 
     def test_a_repeated_id_never_moves_the_row_again(self):
         """A re-send keeps its id: a second copy after the row moved on must not move it back."""
-        self.apply("CLAIMED", line_id="m1")
-        self.apply("BLOCKED", line_id="m2")
+        self.apply("CLAIMED", line_id="m01")
+        self.apply("BLOCKED", line_id="m02")
         self.assertEqual(self.row()["status"], "blocked")
-        self.apply("BLOCKED", line_id="m2")
-        self.apply("READY", line_id="m3")
+        self.apply("BLOCKED", line_id="m02")
+        self.apply("READY", line_id="m03")
         self.assertEqual(self.row()["status"], "claimed")
-        self.apply("BLOCKED", line_id="m2")
+        self.apply("BLOCKED", line_id="m02")
         self.assertEqual(self.row()["status"], "claimed")
 
     def test_a_used_id_on_another_line_is_flagged_and_moves_nothing(self):
-        self.apply("CLAIMED", line_id="m1")
-        self.assertIn("read differently", self.apply("BLOCKED", line_id="m1"))
+        self.apply("CLAIMED", line_id="m01")
+        self.assertIn("read differently", self.apply("BLOCKED", line_id="m01"))
         self.assertEqual(self.row()["status"], "claimed")
 
     def test_ready_records_the_head_and_moves_no_row(self):
-        self.apply("CLAIMED", line_id="m1")
-        out = self.apply("READY", line_id="m2")
+        self.apply("CLAIMED", line_id="m01")
+        out = self.apply("READY", line_id="m02")
         self.assertIn("no move", out)
         r = self.row()
         self.assertEqual((r["status"], r["head"], r["ready_head"]), ("claimed", SHA_A, SHA_A))
 
     def test_a_blocked_newer_than_the_ready_leaves_the_merge_gate_until_a_newer_ready(self):
         """DW-8, latest wins: the gate reads the READY in force."""
-        self.apply("CLAIMED", line_id="m1")
-        self.apply("READY", line_id="m2")
+        self.apply("CLAIMED", line_id="m01")
+        self.apply("READY", line_id="m02")
         self.ok("status", EPIC, "7", "pr", "--pr", "12")
-        self.apply("BLOCKED", line_id="m3")
+        self.apply("BLOCKED", line_id="m03")
         r = self.row()
         self.assertEqual((r["status"], r["ready_head"], r["blocked"]["reason"]), ("blocked", None, "input"))
         self.refused("status", EPIC, "7", "ready-to-merge", "--head", SHA_A)
-        self.apply("READY", line_id="m4")
+        self.apply("READY", line_id="m04")
         r = self.row()
         self.assertEqual((r["status"], r["ready_head"], r["blocked"]), ("pr", SHA_A, None))
         self.ok("status", EPIC, "7", "ready-to-merge", "--head", SHA_A)
 
     def test_ready_after_blocked_with_no_pr_goes_back_to_claimed(self):
-        self.apply("BLOCKED", line_id="m1")
-        self.apply("READY", line_id="m2")
+        self.apply("BLOCKED", line_id="m01")
+        self.apply("READY", line_id="m02")
         self.assertEqual(self.row()["status"], "claimed")
 
     def test_blocked_records_its_fields(self):
-        self.ok("apply", EPIC, f'BLOCKED 7 stop orchestrator sha={SHA_B} ran="git push; a comment" v=1 id=m1 from=lane-7')
+        self.ok("apply", EPIC, f'BLOCKED 7 stop orchestrator sha={SHA_B} ran="git push; a comment" v=1 id=m01 from=lane-7')
         b = self.row()["blocked"]
         self.assertEqual((b["reason"], b["who"], b["sha"], b["ran"]), ("stop", "orchestrator", SHA_B, "git push; a comment"))
         self.assertEqual(self.row()["head"], SHA_B)
 
     def test_latest_wins_per_sender_scope_and_line_kind(self):
-        self.apply("READY", sha=SHA_A, line_id="m1")
-        self.apply("CLAIMED", line_id="m2")
-        self.apply("READY", sha=SHA_B, line_id="m3")
+        self.apply("READY", sha=SHA_A, line_id="m01")
+        self.apply("CLAIMED", line_id="m02")
+        self.apply("READY", sha=SHA_B, line_id="m03")
         lines = self.row()["lines"]["lane-7"]
         self.assertEqual(lines["READY"]["sha"], SHA_B)
-        self.assertEqual(lines["READY"]["id"], "m3")
-        self.assertEqual(lines["CLAIMED"]["id"], "m2", "kinds do not replace each other")
+        self.assertEqual(lines["READY"]["id"], "m03")
+        self.assertEqual(lines["CLAIMED"]["id"], "m02", "kinds do not replace each other")
         self.assertEqual(self.row()["ready_head"], SHA_B)
 
     def test_a_line_from_another_sender_is_recorded_and_moves_nothing(self):
-        out = self.apply("BLOCKED", sender="lane-other", line_id="m1")
+        out = self.apply("BLOCKED", sender="lane-other", line_id="m01")
         self.assertIn("no move", out)
         r = self.row()
         self.assertEqual((r["status"], r["blocked"]), ("assigned", None))
-        self.assertEqual(r["lines"]["lane-other"]["BLOCKED"]["id"], "m1")
-        self.apply("READY", sender="lane-other", sha=SHA_B, line_id="m2")
+        self.assertEqual(r["lines"]["lane-other"]["BLOCKED"]["id"], "m01")
+        self.apply("READY", sender="lane-other", sha=SHA_B, line_id="m02")
         self.assertEqual(self.row()["head"], None, "another sender's READY sets no head")
-        self.apply("CLAIMED", sender="lane-7", line_id="m3")
+        self.apply("CLAIMED", sender="lane-7", line_id="m03")
         self.assertEqual(self.row()["status"], "claimed")
         self.assertEqual(sorted(self.row()["lines"]), ["lane-7", "lane-other"], "senders do not replace each other")
 
     def test_a_line_with_no_edge_is_recorded_and_moves_nothing(self):
         self.ok("status", EPIC, "7", "parked", "--reason", "later")
-        self.assertIn("no move from parked", self.apply("BLOCKED", line_id="m1"))
+        self.assertIn("no move from parked", self.apply("BLOCKED", line_id="m01"))
         r = self.row()
         self.assertEqual((r["status"], r["blocked"]), ("parked", None))
         self.assertIn("BLOCKED", r["lines"]["lane-7"])
@@ -1020,7 +1020,7 @@ class Apply(CliCase):
         before = self.ledger_file().read_bytes()
         for word in ("DONE", "MERGED", "PARKED", "ASSIGN", "HOLD", "ACK"):
             with self.subTest(word=word):
-                err = self.refused("apply", EPIC, f"{word} 7 v=1 id=x1 from=lane-7", code=2)
+                err = self.refused("apply", EPIC, f"{word} 7 v=1 id=x01 from=lane-7", code=2)
                 self.assertIn("CLAIMED, PR, READY, BLOCKED", err)
         self.assertEqual(self.ledger_file().read_bytes(), before)
 
@@ -1029,28 +1029,28 @@ class Apply(CliCase):
         for line in (
             "",
             "CLAIMED",
-            "CLAIMED 7 feat/7-x v=1 id=x1",  # no from=
+            "CLAIMED 7 feat/7-x v=1 id=x01",  # no from=
             "CLAIMED 7 feat/7-x v=1 from=lane-7",  # no id=
-            "CLAIMED 7 feat/7-x id=x1 from=lane-7",  # no v=
-            "CLAIMED 7 v=1 id=x1 from=lane-7",  # no branch
-            "CLAIMED 7 feat/7-x extra v=1 id=x1 from=lane-7",  # one field too many
-            "CLAIMED 7 v=1 feat/7-x id=x1 from=lane-7",  # a field after a key=value pair
-            f"PR 7 feat/7-x {SHA_A} v=1 id=x1 from=lane-7",  # no body=
-            "READY 7 NOTASHA v=1 id=x1 from=lane-7",
-            "BLOCKED 7 bored orchestrator v=1 id=x1 from=lane-7",  # a reason outside the list
-            'BLOCKED 7 input orchestrator ran="unterminated v=1 id=x1 from=lane-7',
+            "CLAIMED 7 feat/7-x id=x01 from=lane-7",  # no v=
+            "CLAIMED 7 v=1 id=x01 from=lane-7",  # no branch
+            "CLAIMED 7 feat/7-x extra v=1 id=x01 from=lane-7",  # one field too many
+            "CLAIMED 7 v=1 feat/7-x id=x01 from=lane-7",  # a field after a key=value pair
+            f"PR 7 feat/7-x {SHA_A} v=1 id=x01 from=lane-7",  # no body=
+            "READY 7 NOTASHA v=1 id=x01 from=lane-7",
+            "BLOCKED 7 bored orchestrator v=1 id=x01 from=lane-7",  # a reason outside the list
+            'BLOCKED 7 input orchestrator ran="unterminated v=1 id=x01 from=lane-7',
         ):
             with self.subTest(line=line):
                 self.refused("apply", EPIC, line, code=2)
         self.assertEqual(self.ledger_file().read_bytes(), before)
 
     def test_a_grammar_version_outside_the_list_is_refused_naming_it(self):
-        err = self.refused("apply", EPIC, f"READY 7 {SHA_A} v=9 id=x1 from=lane-7", code=2)
+        err = self.refused("apply", EPIC, f"READY 7 {SHA_A} v=9 id=x01 from=lane-7", code=2)
         self.assertIn("reads 1", err)
 
-    def test_an_unknown_key_on_a_line_is_ignored(self):
-        self.ok("apply", EPIC, 'CLAIMED 7 feat/7-x v=1 id=x1 from=lane-7 note="a note" future=1')
-        self.assertEqual(self.row()["status"], "claimed")
+    def test_an_unknown_key_on_a_line_is_refused_by_the_shared_parser(self):
+        err = self.refused("apply", EPIC, 'CLAIMED 7 feat/7-x v=1 id=x01 from=lane-7 note="a note" future=1', code=2)
+        self.assertIn("future", err)
 
     def test_an_unknown_ticket_is_absent_and_records_no_id(self):
         self.refused("apply", EPIC, status_line("CLAIMED", ticket="99"), code=1)
@@ -1161,8 +1161,8 @@ class ReadyInForce(CliCase):
     def test_a_new_worker_on_the_same_branch_inherits_no_ready(self):
         self.plan("7")
         self.assign()
-        self.apply("CLAIMED", line_id="m1")
-        self.apply("READY", line_id="m2")
+        self.apply("CLAIMED", line_id="m01")
+        self.apply("READY", line_id="m02")
         self.assign("7", "lane-new", "feat/7-x")
         self.assertIsNone(self.row()["ready_head"])
         t = self.tick_after(500)
@@ -1176,7 +1176,7 @@ class ReadyInForce(CliCase):
         self.ok("assign", EPIC, "7", "--rebrief")
         self.assertIsNone(self.row()["ready_head"])
         self.refused("status", EPIC, "7", "ready-to-merge", "--head", SHA_A)
-        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.apply("READY", line_id="m09", sha=SHA_B)
         self.ok("progress", EPIC, "7", "--head", SHA_B)
         self.ok("status", EPIC, "7", "ready-to-merge", "--head", SHA_B)
 
@@ -1187,7 +1187,7 @@ class ReadyInForce(CliCase):
         self.ok("assign", EPIC, "7", "--rebrief")
         self.assertEqual(self.tick()["needs_ready"], [{"ticket": "7", "head": SHA_A, "ready_head": None}])
         self.assertIn("needs-ready 7 ", self.ok("tick", EPIC))
-        self.apply("READY", line_id="m9")
+        self.apply("READY", line_id="m09")
         self.assertEqual(self.row()["status"], "pr", "a READY after a re-brief goes through the gates again")
 
 
@@ -1215,19 +1215,19 @@ class FailOnTheMergedCommit(CliCase):
         self.assert_only_a_new_branch_gets_it()
 
     def test_it_holds_through_a_late_ready(self):
-        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.apply("READY", line_id="m09", sha=SHA_B)
         self.assertEqual(self.row()["status"], "claimed")
         self.assert_only_a_new_branch_gets_it()
 
     def test_a_late_ready_opens_no_gate(self):
-        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.apply("READY", line_id="m09", sha=SHA_B)
         self.refused("status", EPIC, "7", "pr", "--pr", "999")
         self.assertEqual(self.tick()["integrate"], [])
         self.assertEqual([f["ticket"] for f in self.tick()["failed"]], ["7"])
         self.assertIn("failed 7 ", self.ok("tick", EPIC))
 
     def test_old_passes_never_reach_verified(self):
-        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.apply("READY", line_id="m09", sha=SHA_B)
         self.apply("PR", line_id="m10", sha=SHA_B)
         self.ok("status", EPIC, "7", "merged", "--sha", SHA_C, "--merged-by", "owner")
         self.refused("pass", EPIC, "7", "DW-2", "--evidence", "seen on the old branch", "--by", "verifier")
@@ -1360,13 +1360,13 @@ class OpenRebriefs(CliCase):
         for n, word in enumerate(("READY", "BLOCKED")):
             with self.subTest(word=word):
                 self.ok("assign", EPIC, "7", "--rebrief")
-                self.apply(word, line_id=f"a{n}", sha=SHA_B)
+                self.apply(word, line_id=f"a0{n}", sha=SHA_B)
                 self.assertIsNone(self.row()["rebrief_open"])
                 self.assertEqual(self.tick()["workers"], 0)
 
     def test_a_line_from_another_sender_answers_nothing(self):
         self.ok("assign", EPIC, "7", "--rebrief")
-        self.apply("READY", line_id="a1", sha=SHA_B, sender="lane-other")
+        self.apply("READY", line_id="a01", sha=SHA_B, sender="lane-other")
         self.assertEqual(self.tick()["workers"], 1)
 
     def test_a_park_closes_it_and_a_parked_row_opens_none(self):
@@ -1399,7 +1399,7 @@ class PrStateNeverMovesBack(CliCase):
         self.plan("7")
         self.to_merged()
         self.ok("status", EPIC, "7", "blocked", "--reason", "DW-1 fails on the merged commit")
-        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.apply("READY", line_id="m09", sha=SHA_B)
         self.refused("status", EPIC, "7", "pr")
         self.assertEqual(self.row()["pr_state"], "merged")
 
@@ -1487,8 +1487,8 @@ class Module(unittest.TestCase):
         self.assertEqual(swarm.budget_state(swarm.load(EPIC))["state"], "no-cap")
 
     def test_the_parsed_line_is_a_plain_dict(self):
-        rec = swarm.parse_status_line(f'BLOCKED #7 scope lane-x sha={SHA_A} note="a note" v=1 id=m1 from=lane-7')
-        self.assertEqual(rec, {"word": "BLOCKED", "ticket": "7", "reason": "scope", "who": "lane-x", "v": "1", "id": "m1",
+        rec = swarm.parse_status_line(f'BLOCKED #7 scope lane-x sha={SHA_A} note="a note" v=1 id=m01 from=lane-7')
+        self.assertEqual(rec, {"word": "BLOCKED", "ticket": "7", "reason": "scope", "who": "lane-x", "v": "1", "id": "m01",
                                "from": "lane-7", "sha": SHA_A, "note": "a note"})
 
     def test_a_short_and_a_long_sha_are_one_head(self):

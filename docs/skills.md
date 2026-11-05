@@ -55,7 +55,8 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 
 One orchestrator session owns an epic, workers build its tickets and a verifier records each pass. The roles, the
 lifecycle, the authority matrix, the message grammar and the swarm tick are one contract, [`docs/swarm.md`](swarm.md),
-which every swarm skill and agent cites instead of restating it. Those skills and agents are not built yet.
+which every swarm skill and agent cites instead of restating it. The `verifier` agent is built; the swarm skills are
+not built yet, so nothing starts it.
 
 ## Capability tier — needs a system
 
@@ -68,9 +69,11 @@ which every swarm skill and agent cites instead of restating it. Those skills an
 
 ## Agents
 
-The forked workers that skills run under. Where they fit is shown in `docs/architecture.md`.
+The forked workers that skills run under, and the swarm's verifier. Where they fit is shown in `docs/architecture.md`.
 
 - **triage** — cheap read-only worker (Haiku) that summarises. It never posts.
 - **review-runner** — Opus worker that runs `pr-review` steps 1–4 for one PR — the only place those steps and
   the bundle-vs-live-read contract are written.
 - **auto-runner** — Sonnet worker for the auto-approve path on trivial PRs.
+- **verifier** — Opus worker, started fresh by the swarm's orchestrator, that checks a ticket's `READY` head, its merged
+  commit and an epic's agent gates. It never wrote the change, and only it records a pass.

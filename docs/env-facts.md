@@ -68,7 +68,7 @@ github.signed_commits` still answer for one release, from `systems.*`, with a de
 / `.timeout` — pr-open's local verify command for the `## Verified` section; absent = pr-open asks the session
 to cite the commands it ran instead), `length` (`length.repos.<owner/repo>.pr_words` — overrides the PR
 surface's default word budget for `length_check.py`; absent = the kit default of 1,000 applies; no override
-exists for the ticket or handoff surface), `commits` (commit-subject style, `commit-style.md`), `datalake`, `cost` (cost-report's spend table,
+exists for the ticket or handoff surface), `commits` (commit-subject style, `commit-style.md`), `swarm.ack_minutes` (minutes a swarm message may stay unacked before `swarm_msg.py pending` lists it; absent = 20), `datalake`, `cost` (cost-report's spend table,
 identity, phases — optional, absent = private mode — and `cost.prices`: the dated `$/Mtok` table every spend estimate
 uses, `{priced_at, default, models}`, absent = the table built into `session_stats.py`), `datalake.kind` (warehouse vendor — optional, picks the
 `datalake-<vendor>` manifest), `datalake.mcp_tools` (MCP tool names that differ by vendor connector, e.g.
