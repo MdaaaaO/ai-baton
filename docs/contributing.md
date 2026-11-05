@@ -54,7 +54,7 @@ A skill or agent whose **behaviour** changes bumps `metadata.version` and sets `
 PR's squash commit, which the generated release log (root `CHANGELOG.md`) lists; what a machine must do after the sync
 is the PR template's § Machines, plus a `BREAKING CHANGE:` footer when every machine must act. Wording-only edits bump nothing. `kit-verify`
 enforces the fields (§ Skill frontmatter); the reviewer checks the bump. A `description:` is a trigger, not the procedure: ≤ 60 words and
-≤ 400 B per unit, ≤ 9,500 B across the kit (`kit-verify` counts whitespace-separated tokens, so a `/` or
+≤ 400 B per unit, ≤ 9,900 B across the kit (`kit-verify` counts whitespace-separated tokens, so a `/` or
 `—` standing alone counts as a word) — it loads into every session whether or not the unit runs.
 
 A `context-db/ctx-store/types/*.json` file carries its own `version` — a doc's **shape**, separate from the

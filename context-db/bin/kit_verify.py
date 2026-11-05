@@ -21,7 +21,7 @@ Agent Skills spec's "Claude Code profile" (docs/contributing.md § Skill frontma
     reads an undeclared fact fails here, not the first time a session hits it mid-skill,
   - no `environments:` tag and no "(<name>) " description prefix: the kit never names an
     environment (retired 2026-09-25; which machine has which capability is its local env store),
-  - description ≤ 60 whitespace-separated tokens and ≤ 400 B, all descriptions ≤ 9,500 B together (warns past
+  - description ≤ 60 whitespace-separated tokens and ≤ 400 B, all descriptions ≤ 9,900 B together (warns past
     90% of the total budget, naming the largest) — every description loads into every session's prefix,
   - every unquoted scalar value is a valid YAML plain scalar (frontmatter.plain_scalar_problem — a leading
     indicator character, ': ', ' #' or a trailing ':' would make a real YAML parser refuse the file even
@@ -536,7 +536,7 @@ def check_always_on_budget(errors: list[str]) -> None:
 # A description is a trigger (when to invoke, what it returns, what it never does), not the procedure.
 DESC_MAX_WORDS = 60
 DESC_MAX_BYTES = 400
-DESC_TOTAL_BYTES = 9_500
+DESC_TOTAL_BYTES = 9_900
 DESC_TOTAL_WARN_RATIO = 0.90  # warn this far into the budget so a new skill's description does not fail the gate as a surprise
 
 

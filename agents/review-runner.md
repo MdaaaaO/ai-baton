@@ -1,10 +1,10 @@
 ---
 name: review-runner
-description: "Opus worker for pr-review steps 1-4 (snapshot, trap KB, review pass, verification) plus the modelling-PR checks: writes $CTX/triage.json, returns only the overview block. Use when pr-review spawns a per-PR runner; never posts. Trivial-PR --auto goes to auto-runner."
+description: "Opus worker for pr-review steps 1-4 plus the modelling-PR checks: writes $CTX/triage.json, returns only the overview block. Use when pr-review spawns a per-PR runner; never posts. Trivial-PR --auto goes to auto-runner."
 metadata:
-  version: "20"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "21"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   facts: "tracker.mcp_tools.search"
 model: opus
 effort: medium

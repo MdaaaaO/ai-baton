@@ -1,11 +1,11 @@
 ---
 name: sign-queue
-description: "Commits and pushes in a signed-commits repo from a process with no signing identity: worktree-first, exact staging, a message file, then a queued job the user drains on the host with `make sign`. Use when committing, pushing or rebasing there, or when asked why signing happens on the host; never paste git one-liners. Inert when `systems.signed_commits` is false."
+description: "Commits and pushes in a signed-commits repo from a process with no signing identity: enqueues a job the user drains on the host with `make sign`. Use when committing, pushing or rebasing there, or when asked why signing happens on the host. Inert when `systems.signed_commits` is false."
 compatibility: "Designed for Claude Code; needs signed_commits (systems.*)"
 metadata:
-  version: "27"
-  updated: "2026-11-02"
-  reviewed: "2026-11-02"
+  version: "28"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   requires: "signed_commits"
 ---
 

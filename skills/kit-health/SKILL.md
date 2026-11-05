@@ -1,8 +1,8 @@
 ---
 name: kit-health
-description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke. Its `lint` mode (`/kit-health lint`) checks the store still says what is true. Walks each finding, reports to `.context/kit-health/`. Run after `make claude_sync`, monthly, when a skill misbehaves, or to lint the store."
+description: "Audits the kit on this machine: frontmatter versioning, env-value leaks, env-store coverage, wiring, an engine smoke; `lint` mode checks the store. Run after `make claude_sync`, monthly, when a skill misbehaves, or to lint the store."
 metadata:
-  version: "87"
+  version: "88"
   updated: "2026-11-04"
   reviewed: "2026-11-04"
   facts: "aws.profile kit-health"

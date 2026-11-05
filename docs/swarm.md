@@ -298,7 +298,31 @@ send `PR` itself only if its assignment says so.
 A `STOP` cannot beat a call already in flight. A message reaches a busy worker only after its current tool call returns,
 and the `PreToolUse` hook that reads the file `.context/state/swarm/STOP-<scope>` can block only the next call. The hook
 blocks work tools and lets through the calls this page requires after a `STOP`: the outbox send, the inbox drain, the
-ack, the lease release and ending the task. So:
+ack, the lease release and ending the task.
+
+**Status.** The hook's matcher names `Bash`, the file writes, `Agent`, `Task` and the MCP tools, so a `STOP` reaches a
+worker's next work call of any kind. With no `STOP` file a call that writes no file exits before any store read. What
+the harness passes to the hook, read from a real `PreToolUse` input: a subagent's call carries `agent_id` and
+`agent_type` beside the same `session_id` as its parent; the parent's own call carries neither; no field names the
+lane. So a `STOP` tells a background subagent from its parent, and:
+
+- An epic `STOP` denies a subagent's calls under the session that works the epic, and the main session's own calls
+  too, unless its registry row says `role: orchestrator`: a row with no role, or a peer worker's, is denied, so a
+  `STOP` that cannot tell who is calling fails closed. The role is set at registration:
+  `make session-register NAME=<name> EPIC=<epic> ROLE=orchestrator` (`swarm-run` will do it, #684). A session without
+  it that stops its own epic is locked until the owner runs `lease.py go <scope>` from their own terminal, where no
+  hook runs; the same lockout applies to a lease the session itself holds, whatever its role. `lease.py stop` prints
+  that warning when it sees either case and still writes the file. `go` is deliberately not exempt: a stopped lane
+  must not be able to lift its own `STOP`. The orchestrator's flush and ledger updates keep running. The main rows,
+  among rows that share a `session_id`, are every row with `role: orchestrator`, else every row, so the result never
+  depends on file order. A lease `STOP` denies the main session when any of those rows holds the lease, whatever the
+  role; a lease held by a non-main row (a worker lane beside an orchestrator row) denies only its subagents. The hook
+  input names no lane, so one `STOP` denies every subagent of the session, also one working another epic.
+- A subagent worker's own `--lane` reaches the hook through the registry row that stamped the shared `session_id`: a
+  `STOP-<resource>` on a lease held under that lane denies the subagent. A lane with no such row is out of reach, and
+  a harness that sends no `agent_id` has every call read as the main session's.
+
+So:
 
 - The stop takes effect at the next tool round, and nobody kills a peer's process to get it.
 - The worker reports what ran before the stop landed: `BLOCKED <ticket> stop <who> ran="…"`, naming every call with an

@@ -1,10 +1,10 @@
 ---
 name: auto-runner
-description: "Sonnet worker for the trivial-PR auto-approve path (docs-only/dependency-bump PRs that passed trivial-check.py): writes $CTX/auto.json, returns AUTO approve/fallback lines only. Use when trivial-check.py routes a PR here. Any doubt is a fallback; never posts."
+description: "Sonnet worker for the trivial-PR auto-approve path: writes $CTX/auto.json, returns AUTO approve/fallback lines only. Use when trivial-check.py routes a PR here. Any doubt is a fallback; never posts."
 metadata:
-  version: "7"
-  updated: "2026-10-02"
-  reviewed: "2026-10-17"
+  version: "8"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
 model: sonnet
 effort: medium
 omitClaudeMd: true

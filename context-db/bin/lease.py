@@ -22,8 +22,8 @@ holder reserves `--units` of it and a reservation past the capacity is refused, 
   lease.py expire --lane L                   free that lane's expired leases; one RELEASE line each (heartbeat.sh)
   lease.py stop <scope> --reason T [--as orchestrator|owner]
         write `state/swarm/STOP-<scope>`: the PreToolUse hook (`ctx_adapter.py hook pre-tool-use`) then denies the next
-        file write (Write, Edit, MultiEdit, NotebookEdit; Bash and MCP calls pass until the hook's matcher is widened)
-        of a session whose lane holds the lease `<scope>` or works the epic `<scope>` (an issue number, or a full ref
+        work call (Bash, the file writes, Agent and MCP tools) of a session whose lane holds the lease `<scope>`, and
+        of any session that works the epic `<scope>` unless its row says `role: orchestrator` (an issue number, or a full ref
         `Owner/repo#N`, written `STOP-Owner+repo=N`); prints the in-flight rule
   lease.py go <scope> [--as orchestrator|owner]
         lift it: whoever set it, or the owner; a stop the owner set, only the owner
@@ -59,9 +59,8 @@ SCOPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+=-]*$")  # a full ref `Owner/re
 DEFAULT_MINUTES = 120
 FMT = "%Y-%m-%dT%H:%M:%SZ"
 IN_FLIGHT_RULE = (
-    "A STOP cannot beat a call already in flight: it blocks the next call the hook sees, never the running one. Today the\n"
-    "hook sees file writes only (Write, Edit, MultiEdit, NotebookEdit); Bash and MCP calls pass until its matcher is\n"
-    "widened. A worker\n"
+    "A STOP cannot beat a call already in flight: it blocks the next call the hook sees, never the running one. The hook\n"
+    "sees every work call (Bash, the file writes, Agent and MCP tools). A worker\n"
     "reports what ran before the stop landed (BLOCKED <ticket> stop <who> ran=\"...\"), runs a long call on a serial\n"
     "resource in the background and ends it by its own task id on STOP, and nobody kills a peer's pid or stops work by\n"
     "a process-name pattern. The outbox send, the inbox drain, the ack, the lease release and ending the task stay open.")
@@ -445,7 +444,16 @@ def stop(root: Path, scope: str, reason: str, who: str) -> list[str]:
             if cur.get("by") == "owner" and who != "owner":
                 raise Refused(f"STOP-{scope} is the owner's; only the owner may rewrite it")
         atomic_write(str(p), json.dumps({"scope": scope, "reason": reason, "by": who, "at": fmt(now())}, indent=2) + "\n")
-    return [f"STOP-{scope} written by {who} (`--as` is a declared role, not a proof): {reason}", IN_FLIGHT_RULE]
+    out = [f"STOP-{scope} written by {who} (`--as` is a declared role, not a proof): {reason}", IN_FLIGHT_RULE]
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+    rows = session_rows(root, sid) if sid else []
+    mine = main_rows(rows) if rows else []  # the rows a main call of this session is judged by (`stop_for`)
+    own = f"the owner lifts it with lease.py go {scope} from their own terminal"
+    if any(lane_holds(root, r[0], scope) for r in mine):  # survives `role: orchestrator`, so it is the one to name
+        out.append(f"this session holds the lease {scope}, so this STOP denies its own next call; {own}")
+    elif any(r[1] and epic_matches(scope, r[1], r[2]) for r in rows) and not any(r[3] == "orchestrator" for r in rows):
+        out.append(f"this session has no role: orchestrator, so this STOP denies its own next call; {own}")
+    return out
 
 
 def go(root: Path, scope: str, who: str) -> list[str]:
@@ -476,14 +484,16 @@ def _frontmatter(text: str) -> dict[str, str]:
     return out
 
 
-def session_row(root: Path, session_id: str) -> tuple[str, str, str]:
-    """(lane, epic, repos) of the registry row that stamped `session_id`, or ('', '', '')."""
+def session_rows(root: Path, session_id: str) -> list[tuple[str, str, str, str]]:
+    """(lane, epic, repos, role) of every live registry row that stamped `session_id`, by lane name. A subagent shares its
+    parent's session id, so a session with background workers has one row per lane."""
     if not session_id:
-        return "", "", ""
+        return []
     try:
         rows = sorted((root / "sessions").glob("*.md"))
     except OSError:
-        return "", "", ""
+        return []
+    out: list[tuple[str, str, str, str]] = []
     for p in rows:
         if p.name.startswith("_"):
             continue
@@ -492,8 +502,21 @@ def session_row(root: Path, session_id: str) -> tuple[str, str, str]:
         except OSError:
             continue
         if fm.get("session_id") == session_id and fm.get("status") != "ended":
-            return p.stem, fm.get("epic", ""), fm.get("repos", "")
-    return "", "", ""
+            out.append((p.stem, fm.get("epic", ""), fm.get("repos", ""), fm.get("role", "")))
+    return out
+
+
+def session_row(root: Path, session_id: str) -> tuple[str, str, str]:
+    """(lane, epic, repos) of the first registry row that stamped `session_id`, or ('', '', '')."""
+    rows = session_rows(root, session_id)
+    return rows[0][:3] if rows else ("", "", "")
+
+
+def main_rows(rows: list[tuple[str, str, str, str]]) -> list[tuple[str, str, str, str]]:
+    """The main session's rows among those sharing one session id: every row with `role: orchestrator`, else every
+    row. The result does not depend on the order of the rows."""
+    orch = [r for r in rows if r[3] == "orchestrator"]
+    return orch or rows
 
 
 REF_RE = re.compile(r"^(?:([^\s#]+)#|#)?(\d+)$")
@@ -539,22 +562,34 @@ def lane_holds(root: Path, lane: str, scope: str) -> bool:
     return any(h.get("lane") == lane and not stale(h) for h in d["holders"])
 
 
-def stop_for(root: Path, session_id: str) -> str:
-    """The reason a STOP file blocks this session's next file write, or ''. A lane is blocked by `STOP-<scope>`
-    when it holds the lease `<scope>` or its registry row's epic is `<scope>`: a full ref `Owner/repo#N` (the file
-    is `STOP-Owner+repo=N`) or an issue number."""
+def stop_for(root: Path, session_id: str, agent_id: str = "") -> str:
+    """The reason a STOP file blocks this call, or ''. `STOP-<scope>` blocks a lane that holds the lease `<scope>`
+    (whichever call it makes), and every subagent of a session whose registry row's epic is `<scope>` (a full ref
+    `Owner/repo#N`, the file `STOP-Owner+repo=N`, or an issue number). `agent_id` is what the hook input names for a
+    subagent's call and is absent for the main session's own. The main session's rows are those with
+    `role: orchestrator`, else every row of the session. A main call is blocked by a lease any of them holds. An epic
+    STOP spares it only when a row says `role: orchestrator`: a row with no role, or a peer worker, is blocked.
+    The hook input names no lane, so a subagent is matched through every registry row that shares its session id,
+    and one STOP denies every subagent of that session whatever its epic; a lane with no such row is out of reach."""
     found = stops(root)
     if not found:
         return ""
-    lane, epic, repos = session_row(root, session_id)
-    if not lane:
+    rows = session_rows(root, session_id)
+    if not rows:
         return ""
+    spared = False
+    if not agent_id:
+        rows = main_rows(rows)
+        spared = any(r[3] == "orchestrator" for r in rows)
     for scope, v in found.items():
-        if lane_holds(root, lane, scope) or (epic and epic_matches(scope, epic, repos)):
-            why = v.get("reason") or "no reason given"
-            return (f"STOP-{scope} ({v.get('by', 'orchestrator')}): {why}. File writes are blocked until it is lifted: "
-                    f"send the outbox line, run the inbox drain, ack, release your lease and end the task, then report "
-                    f"what ran (BLOCKED <ticket> stop <who> ran=\"...\").")
+        for lane, epic, repos, role in rows:
+            by_epic = bool(epic) and epic_matches(scope, epic, repos) and not spared
+            if lane_holds(root, lane, scope) or by_epic:
+                why = v.get("reason") or "no reason given"
+                return (f"STOP-{scope} ({v.get('by', 'orchestrator')}): {why}. Work calls are blocked. Send the "
+                        f"outbox line, drain the inbox, ack, release your lease and end the task. The owner lifts it "
+                        f"with `lease.py go {scope}` from their own terminal; an orchestrator registers with "
+                        f"`role: orchestrator` before it stops.")
     return ""
 
 
@@ -631,9 +666,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="list what a sweep would free, change nothing")
     s = sub.add_parser("expire", help="free one lane's expired leases, one RELEASE line each")
     s.add_argument("--lane", required=True)
-    s = sub.add_parser("stop", help="write STOP-<scope>: the hook blocks file writes of the lane that holds the lease "
-                       "<scope> or works that epic (an issue number, or a full ref Owner/repo#N). The session that "
-                       "orchestrates the epic is blocked too, since a subagent shares its session id")
+    s = sub.add_parser("stop", help="write STOP-<scope>: the hook blocks every work call of the lane that holds the "
+                       "lease <scope>, and of a session that works that epic (an issue number, or a full ref "
+                       "Owner/repo#N) unless its row says role: orchestrator; every subagent of it is blocked")
     s.add_argument("scope")
     s.add_argument("--reason", required=True)
     s.add_argument("--as", dest="as_", choices=STOP_SETTERS, default="orchestrator",
