@@ -1098,7 +1098,8 @@ class Records(CliCase):
         self.refused("hold", EPIC, "7", "--release", "--by", "owner", code=1)
 
     def test_a_budget_change_needs_its_decision(self):
-        self.refused("budget", EPIC, "--epic-usd", "5", code=2)
+        self.refused("budget", EPIC, "--epic-usd", "5")
+        self.refused("budget", EPIC, "--epic-usd", "5", "--decision", "  ")
         self.refused("budget", EPIC, "--decision", "a line", code=2)
         self.ok("budget", EPIC, "--epic-usd", "5", "--decision", "a line")
         self.assertEqual(self.ledger()["budget"]["epic_usd"], 5.0)
@@ -1152,6 +1153,283 @@ class ExitCodes(CliCase):
         out = self.ok("--help")
         for word in ("plan_approved", "tickets", "passes", "ready_head", "swarm.stall_minutes", "prs.tsv"):
             self.assertIn(word, out)
+
+
+class ReadyInForce(CliCase):
+    """Every assign ends the READY in force, a re-brief included: the head it named is about to move."""
+
+    def test_a_new_worker_on_the_same_branch_inherits_no_ready(self):
+        self.plan("7")
+        self.assign()
+        self.apply("CLAIMED", line_id="m1")
+        self.apply("READY", line_id="m2")
+        self.assign("7", "lane-new", "feat/7-x")
+        self.assertIsNone(self.row()["ready_head"])
+        t = self.tick_after(500)
+        self.assertEqual(t["workers"], 1)
+        self.assertEqual(t["integrate"], [])
+        self.assertEqual([s["ticket"] for s in t["stalled"]], ["7"])
+
+    def test_a_rebrief_shuts_the_gate_until_a_new_ready(self):
+        self.plan("7")
+        self.to_pr()
+        self.ok("assign", EPIC, "7", "--rebrief")
+        self.assertIsNone(self.row()["ready_head"])
+        self.refused("status", EPIC, "7", "ready-to-merge", "--head", SHA_A)
+        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.ok("progress", EPIC, "7", "--head", SHA_B)
+        self.ok("status", EPIC, "7", "ready-to-merge", "--head", SHA_B)
+
+    def test_a_rebrief_at_ready_to_merge_needs_a_new_ready_and_says_so(self):
+        self.plan("7")
+        self.to_pr()
+        self.ok("status", EPIC, "7", "ready-to-merge", "--head", SHA_A)
+        self.ok("assign", EPIC, "7", "--rebrief")
+        self.assertEqual(self.tick()["needs_ready"], [{"ticket": "7", "head": SHA_A, "ready_head": None}])
+        self.assertIn("needs-ready 7 ", self.ok("tick", EPIC))
+        self.apply("READY", line_id="m9")
+        self.assertEqual(self.row()["status"], "pr", "a READY after a re-brief goes through the gates again")
+
+
+class FailOnTheMergedCommit(CliCase):
+    """The guard is the row's recorded FAIL, whatever the status just before the assign."""
+
+    def setUp(self):
+        super().setUp()
+        self.plan("7")
+        self.ok("add", EPIC, "7", "--update", "--dw", "DW-1", "--dw", "DW-2")
+        self.to_merged()
+        self.ok("pass", EPIC, "7", "DW-1", "--evidence", "seen on the merged commit", "--by", "verifier")
+        self.ok("status", EPIC, "7", "blocked", "--reason", "DW-2 fails on the merged commit")
+
+    def assert_only_a_new_branch_gets_it(self):
+        self.refused("assign", EPIC, "7", "--kind", "subagent", "--name", "lane-new")
+        self.refused("assign", EPIC, "7", "--kind", "subagent", "--name", "lane-new", "--branch", "feat/7-x")
+        self.assign("7", "lane-new", "fix/7-y")
+        r = self.row()
+        self.assertEqual((r["status"], r["worker"]["branch"], r["fail"]), ("assigned", "fix/7-y", None))
+        self.assertEqual((r["pr"], r["pr_state"], r["head"], r["merged_sha"], r["passes"]), (None, None, None, None, {}))
+
+    def test_it_holds_through_a_park(self):
+        self.ok("status", EPIC, "7", "parked", "--reason", "an owner call")
+        self.assert_only_a_new_branch_gets_it()
+
+    def test_it_holds_through_a_late_ready(self):
+        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.assertEqual(self.row()["status"], "claimed")
+        self.assert_only_a_new_branch_gets_it()
+
+    def test_a_late_ready_opens_no_gate(self):
+        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.refused("status", EPIC, "7", "pr", "--pr", "999")
+        self.assertEqual(self.tick()["integrate"], [])
+        self.assertEqual([f["ticket"] for f in self.tick()["failed"]], ["7"])
+        self.assertIn("failed 7 ", self.ok("tick", EPIC))
+
+    def test_old_passes_never_reach_verified(self):
+        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.apply("PR", line_id="m10", sha=SHA_B)
+        self.ok("status", EPIC, "7", "merged", "--sha", SHA_C, "--merged-by", "owner")
+        self.refused("pass", EPIC, "7", "DW-2", "--evidence", "seen on the old branch", "--by", "verifier")
+        self.assertEqual(self.row()["status"], "merged")
+
+    def test_the_old_worker_is_not_re_briefed(self):
+        self.refused("assign", EPIC, "7", "--rebrief")
+        self.assertEqual(self.row()["rebriefs"], 0)
+
+
+class CapRaise(CliCase):
+    """Raising a cap is the owner's: docs/swarm.md § Authority matrix. A first cap or a lower one decides nothing."""
+
+    def assign_cap(self, *args: str, name: str = "lane-7", ticket: str = "7") -> list[str]:
+        return ["assign", EPIC, ticket, "--kind", "subagent", "--name", name, "--branch", f"feat/{ticket}-x", *args]
+
+    def test_a_raise_needs_the_decision_line_and_writes_it(self):
+        self.plan("7")
+        self.assign("7", "lane-7", "feat/7-x", "--cap-usd", "5")
+        before = self.ledger_file().read_bytes()
+        self.refused(*self.assign_cap("--cap-usd", "10"))
+        self.refused(*self.assign_cap("--cap-usd", "10", "--decision", "  "))
+        self.assertEqual(self.ledger_file().read_bytes(), before)
+        self.ok(*self.assign_cap("--cap-usd", "10", "--decision", "the owner raised it"))
+        r = self.row()
+        self.assertEqual((r["budget_cap"], r["cap_decision"]), (10.0, "the owner raised it"))
+        entry = [e for e in self.ledger()["log"] if e["act"] == "cap"]
+        self.assertEqual([(e["from"], e["to"], e["note"]) for e in entry], [(5.0, 10.0, "the owner raised it")])
+
+    def test_a_first_cap_and_a_lower_cap_need_no_decision(self):
+        self.plan("7")
+        self.assign("7", "lane-7", "feat/7-x", "--cap-usd", "5")
+        self.assign("7", "lane-7", "feat/7-x", "--cap-usd", "3")
+        r = self.row()
+        self.assertEqual((r["budget_cap"], r["cap_decision"]), (3.0, None))
+        self.assertEqual([e for e in self.ledger()["log"] if e["act"] == "cap"], [])
+
+    def test_a_first_cap_above_the_epics_worker_cap_is_a_raise(self):
+        self.plan("7", worker_usd=8)
+        self.refused(*self.assign_cap("--cap-usd", "20"))
+        self.ok(*self.assign_cap("--cap-usd", "20", "--decision", "the owner raised it"))
+        self.assertEqual(self.row()["budget_cap"], 20.0)
+
+    def test_the_decision_route_works_at_the_cap(self):
+        self.plan("7")
+        self.assign("7", "lane-7", "feat/7-x", "--cap-usd", "5")
+        self.ok("progress", EPIC, "7", "--spent", "5")
+        self.refused(*self.assign_cap())
+        self.refused(*self.assign_cap("--cap-usd", "10"))
+        self.refused(*self.assign_cap("--cap-usd", "4", "--decision", "a lower cap frees nothing"))
+        self.ok(*self.assign_cap("--cap-usd", "10", "--decision", "the owner raised it"))
+        self.assertEqual((self.row()["status"], self.row()["budget_cap"]), ("assigned", 10.0))
+
+    def test_a_rebrief_takes_the_same_route(self):
+        self.plan("7")
+        self.to_pr()
+        self.ok("assign", EPIC, "7", "--rebrief", "--cap-usd", "5")
+        self.refused("assign", EPIC, "7", "--rebrief", "--cap-usd", "10")
+        self.ok("assign", EPIC, "7", "--rebrief", "--cap-usd", "10", "--decision", "the owner raised it")
+        self.assertEqual((self.row()["status"], self.row()["budget_cap"]), ("pr", 10.0))
+
+    def test_an_incident_widens_no_cap(self):
+        self.plan("7")
+        self.ok("add", EPIC, "7", "--update", "--cap-usd", "5")
+        self.ok("approve", EPIC, "--decision", "go on the plan")
+        self.ok("add", EPIC, "7", "--update", "--incident", "--cap-usd", "9")
+        self.assertFalse(self.ledger()["plan_approved"], "a raise through `add` still goes back to the owner")
+
+
+class LanesUnderStopOrHold(CliCase):
+    """`assign` checks the lane named on the line, and the row's old worker too when it differs."""
+
+    def setUp(self):
+        super().setUp()
+        self.plan("7")
+
+    def stop(self, scope: str) -> None:
+        (self.root / "state" / "swarm" / f"STOP-{scope}").write_text("{}", encoding="utf-8")
+
+    def hold(self, scope: str) -> None:
+        self.ok("hold", EPIC, scope, "--releaser", "lane-x", "--reason", "a shared resource")
+
+    def refused_to(self, name: str) -> str:
+        return self.refused("assign", EPIC, "7", "--kind", "subagent", "--name", name, "--branch", "feat/7-x")
+
+    def test_a_stop_on_the_lane_on_the_line(self):
+        self.stop("lane-new")
+        self.assertIn("STOP on lane-new", self.refused_to("lane-new"))
+        self.assertEqual(self.row()["status"], "ready")
+
+    def test_a_hold_on_the_lane_on_the_line(self):
+        self.hold("lane-new")
+        self.assertIn("HOLD on lane-new", self.refused_to("lane-new"))
+        self.assertEqual(self.row()["status"], "ready")
+
+    def test_a_stop_on_the_old_worker(self):
+        self.assign()
+        self.stop("lane-7")
+        self.assertIn("STOP on lane-7", self.refused_to("lane-new"))
+
+    def test_a_hold_on_the_old_worker(self):
+        self.assign()
+        self.hold("lane-7")
+        self.assertIn("HOLD on lane-7", self.refused_to("lane-new"))
+
+    def test_a_stop_on_another_lane_stops_nothing(self):
+        self.stop("lane-other")
+        self.assign()
+        self.assertEqual(self.row()["worker"]["name"], "lane-7")
+
+
+class OpenRebriefs(CliCase):
+    """A worker re-briefed at any status runs again, so it counts toward `swarm.max_workers` until it answers."""
+
+    def setUp(self):
+        super().setUp()
+        self.plan("7", "8", max_workers=1)
+        self.to_pr()
+
+    def test_a_row_re_briefed_at_pr_takes_a_slot(self):
+        self.assertEqual(self.tick()["workers"], 0)
+        self.ok("assign", EPIC, "7", "--rebrief")
+        t = self.tick()
+        self.assertEqual((t["workers"], t["assignable"]), (1, []))
+        self.assertEqual([r["ticket"] for r in t["rebriefs_open"]], ["7"])
+        self.assertIn("rebrief-open 7 ", self.ok("tick", EPIC))
+        self.assertIn("no free worker slot", self.refused("assign", EPIC, "8", "--kind", "subagent", "--name", "lane-8"))
+
+    def test_a_ready_or_a_blocked_answers_it(self):
+        for n, word in enumerate(("READY", "BLOCKED")):
+            with self.subTest(word=word):
+                self.ok("assign", EPIC, "7", "--rebrief")
+                self.apply(word, line_id=f"a{n}", sha=SHA_B)
+                self.assertIsNone(self.row()["rebrief_open"])
+                self.assertEqual(self.tick()["workers"], 0)
+
+    def test_a_line_from_another_sender_answers_nothing(self):
+        self.ok("assign", EPIC, "7", "--rebrief")
+        self.apply("READY", line_id="a1", sha=SHA_B, sender="lane-other")
+        self.assertEqual(self.tick()["workers"], 1)
+
+    def test_a_park_closes_it_and_a_parked_row_opens_none(self):
+        self.ok("assign", EPIC, "7", "--rebrief")
+        self.ok("status", EPIC, "7", "parked", "--reason", "an owner call")
+        self.assertEqual(self.tick()["workers"], 0)
+        self.ok("assign", EPIC, "7", "--rebrief")
+        self.assertIsNone(self.row()["rebrief_open"], "a parked row has no worker to restart")
+        self.assertEqual(self.tick()["workers"], 0)
+
+    def test_a_merge_closes_it(self):
+        self.ok("assign", EPIC, "7", "--rebrief")
+        self.ok("status", EPIC, "7", "merged", "--sha", SHA_C, "--merged-by", "owner")
+        self.assertEqual(self.tick()["workers"], 0)
+
+    def test_the_stall_flag_stays_assigned_and_claimed_only(self):
+        self.ok("assign", EPIC, "7", "--rebrief")
+        self.assertEqual(self.tick_after(500)["stalled"], [])
+
+
+class PrStateNeverMovesBack(CliCase):
+    """`status pr` leaves a merged or closed `pr_state` alone. A new PR opens its own."""
+
+    def set_pr_state(self, state: str) -> None:
+        led = self.ledger()
+        led["tickets"]["7"]["pr_state"] = state
+        self.ledger_file().write_text(json.dumps(led), encoding="utf-8")
+
+    def test_no_number_on_a_merged_pr(self):
+        self.plan("7")
+        self.to_merged()
+        self.ok("status", EPIC, "7", "blocked", "--reason", "DW-1 fails on the merged commit")
+        self.apply("READY", line_id="m9", sha=SHA_B)
+        self.refused("status", EPIC, "7", "pr")
+        self.assertEqual(self.row()["pr_state"], "merged")
+
+    def test_a_closed_pr_stays_closed_and_a_new_number_is_open(self):
+        self.plan("7")
+        self.to_pr()
+        self.set_pr_state("closed")
+        self.refused("status", EPIC, "7", "pr")
+        self.refused("status", EPIC, "7", "pr", "--pr", str(self.row()["pr"]))
+        self.assertEqual(self.row()["pr_state"], "closed")
+        self.ok("status", EPIC, "7", "pr", "--pr", "999")
+        self.assertEqual((self.row()["pr"], self.row()["pr_state"]), (999, "open"))
+
+
+class NullConfigAndSpend(CliCase):
+
+    def test_an_explicit_null_means_the_default(self):
+        self.store_config(max_workers=None, stall_minutes=None)
+        self.plan("7")
+        t = self.tick()
+        self.assertEqual((t["max_workers"], t["stall_minutes"]), (swarm.DEFAULTS["swarm.max_workers"],
+                                                                 swarm.DEFAULTS["swarm.stall_minutes"]))
+
+    def test_recording_spend_decides_nothing(self):
+        self.plan("7")
+        log_before = self.ledger()["log"]
+        self.ok("budget", EPIC, "--spent", "3")
+        self.assertEqual((self.ledger()["spent"], self.ledger()["log"]), (3.0, log_before))
+        self.refused("budget", EPIC, "--spent", "4", "--worker-usd", "9")
+        self.assertEqual(self.ledger()["spent"], 3.0)
 
 
 class Module(unittest.TestCase):
@@ -1407,6 +1685,29 @@ class Resume(CliCase):
         self.plan("7")
         self.to_pr()
         self.assertEqual(self.actions()["7"]["action"], "ask")
+
+    def test_a_closed_pr_is_recorded_and_said(self):
+        self.plan("7")
+        self.to_pr()
+        self.set_prs([self.pr(107, "feat/7-x", SHA_A, state="CLOSED")])
+        res = self.actions()["7"]
+        self.assertEqual((res["action"], res["note"]), ("ask", "PR #107 is closed"))
+        self.assertEqual(res["changes"]["pr_state"], ["open", "closed"])
+        text = self.resume()
+        self.assertNotIn("gh does not list it", text)
+        self.assertNotIn("the ledger and the remote agree", text)
+        self.actions("--apply")
+        self.assertEqual(self.row()["pr_state"], "closed")
+        self.ok("status", EPIC, "7", "pr", "--pr", "999")
+
+    def test_a_recorded_fail_is_a_reassign_whatever_gh_shows(self):
+        self.plan("7")
+        self.to_merged()
+        self.ok("status", EPIC, "7", "blocked", "--reason", "DW-1 fails on the merged commit")
+        self.set_prs([self.pr(107, "feat/7-x", SHA_A, state="MERGED", merge=SHA_C)])
+        res = self.actions()["7"]
+        self.assertEqual(res["action"], "reassign")
+        self.assertIn("new branch", res["note"])
 
     def test_a_failed_read_is_exit_2_never_nothing_on_the_remote(self):
         self.plan("7")

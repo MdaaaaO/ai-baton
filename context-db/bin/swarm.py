@@ -12,24 +12,31 @@ Every subcommand takes the epic key first:
             plan, or a changed area, dep, wave, sizing or cap, resets `plan_approved`, unless it is an --incident lane or
             --already-done bookkeeping
   approve   the owner's go on the plan, with its --decision line. `assign` refuses until then
-  assign    a worker takes the row: --kind, --name, --ref, --worktree, --branch. --rebrief moves no row. Refused before the
-            plan's go, under a STOP or HOLD, at a budget cap, past the worker cap, or with a dependency not done; an
-            incident lane skips only the plan's go and the dependencies
+  assign    a worker takes the row: --kind, --name, --ref, --worktree, --branch. --rebrief moves no row. Either way the
+            READY in force ends, because the head it named is about to move. Refused before the plan's go, under a STOP or
+            HOLD on the ticket or on either lane, at a budget cap, past the worker cap, or with a dependency not done; an
+            incident lane skips only the plan's go and the dependencies. After a FAIL on the merged commit only a new
+            --branch is taken. --cap-usd above the current cap needs the owner's --decision line, also at the cap and
+            with --rebrief; a first cap or a lower one needs none
   status    the orchestrator's moves: pr, ready-to-merge (--head), parked (--reason), merged (--sha), blocked (a FAIL on
-            the merged commit, --reason), done. A move the table does not have is refused
+            the merged commit, --reason), done. A move the table does not have is refused, and so is `pr` on a PR already
+            merged or closed, or `ready-to-merge` on a row with a FAIL recorded
   apply     one grammar line, CLAIMED, PR, READY or BLOCKED. A second copy of an id changes nothing. A line from a sender
             that is not the row's worker is recorded and moves nothing. DONE moves no row and is refused
   progress  a new commit, status or comment restarts the clock (--head, --note); --spent records spend, which is not
             progress; --stall counts a stall
-  pass      `DW-<n> --evidence "…" --by verifier`, on a merged row only. The last DW moves the row to verified
+  pass      `DW-<n> --evidence "…" --by verifier`, on a merged row with no FAIL recorded. The last DW moves the row to
+            verified
   tick      the orchestrator's input, never a write: ready and assignable tickets, stalled workers (assigned and claimed
-            only), READY lines with no PR yet, budget state, watches due, open decisions, STOPs and HOLDs (--json)
+            only), READY lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions,
+            STOPs and HOLDs (--json)
   render    prints the `## Swarm` section and writes `sessions/<name>/prs.tsv` (repo, pr, head7, state, ticket; the state
             is the row's status; the header line alone means no open PR)
   resume    compares the ledger with `git ls-remote` and `gh pr list`, prints the difference and what to do with a lost
             worker (drive-to-merge, respawn-in-place, reassign, record-merge), writes nothing without --apply. It never
             writes a pass or a READY head, so a restored row still needs its READY and its verifier (--json)
-  grant, watch, decision, hold, budget   the epic's other records; grant and budget need a --decision line
+  grant, watch, decision, hold, budget   the epic's other records. A grant and a change to a cap need a --decision line;
+            `budget --spent` records spend, which decides nothing, and needs none
   show      prints the ledger, or one row, as JSON
 
 The file is `<content root>/state/swarm/<key>.json`. Times are UTC, `YYYY-MM-DDTHH:MM:SSZ`; ticket keys are strings:
@@ -49,7 +56,9 @@ The file is `<content root>/state/swarm/<key>.json`. Times are UTC, `YYYY-MM-DDT
       "worker": {"kind": subagent|peer|headless|null, "name", "ref", "worktree", "branch"},
       "head": <the last known pushed sha>, "ready_head": <the sha of the READY in force, the one the gates pin>,
       "body": <PR body file>, "pr": n|null, "pr_state": open|merged|closed|null, "merged_sha", "merged_by",
-      "budget_cap": n|null, "spent": n, "last_progress", "stalls": n, "stall_counted_at", "rebriefs": n,
+      "budget_cap": n|null, "cap_decision": <the line behind the last raise>, "spent": n, "last_progress", "stalls": n,
+      "stall_counted_at", "rebriefs": n, "rebrief_open": <time>|null, a re-brief with no READY or BLOCKED since,
+      "fail": {"at", "merged_sha", "branch", "reason"}|null, a FAIL on the merged commit until a fix is assigned,
       "dws": [DW-n, …], "passes": {DW-n: {"evidence", "by", "at"}},
       "blocked": {"reason", "who", "sha", "ran", "at"}|null, "parked_reason",
       "lines": {<sender>: {<WORD>: {"id", "at", …the line's fields}}}, "restored": true when `resume --apply` wrote it}}}
@@ -258,8 +267,9 @@ def new_row(ticket: str) -> dict:
             "incident": False, "status": "ready",
             "worker": {"kind": None, "name": None, "ref": None, "worktree": None, "branch": None},
             "head": None, "ready_head": None, "body": None, "pr": None, "pr_state": None, "merged_sha": None, "merged_by": None,
-            "budget_cap": None, "spent": 0, "last_progress": None, "stalls": 0, "stall_counted_at": None, "rebriefs": 0,
-            "dws": [], "passes": {}, "blocked": None, "parked_reason": None, "lines": {}}
+            "budget_cap": None, "cap_decision": None, "spent": 0, "last_progress": None, "stalls": 0, "stall_counted_at": None,
+            "rebriefs": 0, "rebrief_open": None, "fail": None, "dws": [], "passes": {}, "blocked": None, "parked_reason": None,
+            "lines": {}}
 
 
 def row_of(led: dict, ticket: str) -> dict:
@@ -272,12 +282,16 @@ def row_of(led: dict, ticket: str) -> dict:
 def set_status(led: dict, ticket: str, row: dict, to: str, act: str, **fields) -> None:
     log(led, act, ticket, **{"from": row["status"], "to": to}, **fields)
     row["status"] = to
+    if to in NO_WORKER_STATUSES:
+        row["rebrief_open"] = None
 
 
 def config(key: str):
-    """A numeric `swarm.*` key, or its default in `DEFAULTS` when the store has none or holds something else."""
+    """A numeric `swarm.*` key, or its default in `DEFAULTS` when the store has none, a null or something else."""
     value = profile.get(key, DEFAULTS[key])
-    if value is None or (isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0):
+    if value is None:
+        return DEFAULTS[key]
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
         return value
     print(f"swarm: {key} is not a number ({value!r}); using {DEFAULTS[key]}", file=sys.stderr)
     return DEFAULTS[key]
@@ -323,8 +337,10 @@ def current_wave(led: dict) -> str | None:
 
 
 def active_tickets(led: dict) -> list[str]:
-    """The rows whose worker is running. A READY in force means the run ended and the next act is the orchestrator's."""
-    return [t for t, r in led["tickets"].items() if r["status"] in STALL_STATUSES and not r["ready_head"]]
+    """The rows whose worker is running: assigned or claimed with no READY in force (a READY means the run ended and the
+    next act is the orchestrator's), and a row at any status with an open re-brief."""
+    return [t for t, r in led["tickets"].items()
+            if (r["status"] in STALL_STATUSES and not r["ready_head"]) or r.get("rebrief_open")]
 
 
 def row_cap(led: dict, row: dict):
@@ -362,14 +378,18 @@ def hard_reasons(led: dict) -> list[str]:
     return out
 
 
-def row_reasons(led: dict, row: dict) -> list[str]:
+def row_reasons(led: dict, row: dict, lane: str | None = None, cap=None) -> list[str]:
+    """Why this row may not take a worker. `lane` is the worker about to take it, checked beside the row's present one;
+    `cap` is the cap it would take it under, by default the row's."""
     out = []
-    scopes = {row["ticket"], row["worker"]["name"]} & set(read_stops())
-    if scopes:
-        out.append(f"STOP on {', '.join(sorted(scopes))}")
-    if row_held(led, row):
-        out.append(f"HOLD on {row['ticket']}")
-    cap = row_cap(led, row)
+    scopes = {row["ticket"], row["worker"]["name"], lane} - {None}
+    stops = scopes & set(read_stops())
+    if stops:
+        out.append(f"STOP on {', '.join(sorted(stops))}")
+    held = scopes & {h["scope"] for h in live_holds(led)}
+    if held:
+        out.append(f"HOLD on {', '.join(sorted(held))}")
+    cap = row_cap(led, row) if cap is None else cap
     if cap is not None and (row.get("spent") or 0) >= cap:
         out.append(f"worker budget at its cap ({row.get('spent') or 0:.2f} of {cap:.2f})")
     return out
@@ -417,14 +437,21 @@ def tick_report(led: dict, now: datetime | None = None) -> dict:
             if minutes > limit:
                 stalled.append({"ticket": t, "worker": r["worker"]["name"], "minutes": int(minutes), "stalls": r["stalls"],
                                 "next": stall_step(r)})
+        if r.get("fail"):  # the old worker's READY opens nothing: the fix is a new assignment on a new branch
+            continue
         if (r["status"] in STALL_STATUSES and r["ready_head"]) or (r["status"] == "pr" and r["pr"] is None):
             integrate.append({"ticket": t, "status": r["status"], "head": r["head"], "body": r["body"], "pr": r["pr"]})
-        if r["status"] in ("pr", "ready-to-merge") and r["ready_head"] and not same_sha(r["head"], r["ready_head"]):
+        moved = r["ready_head"] and not same_sha(r["head"], r["ready_head"])
+        if (r["status"] in ("pr", "ready-to-merge") and moved) or (r["status"] == "ready-to-merge" and not r["ready_head"]):
             needs_ready.append({"ticket": t, "head": r["head"], "ready_head": r["ready_head"]})
     return {"key": led["key"], "now": moment.astimezone(timezone.utc).strftime(LEDGER_TIME), "plan_approved": approved,
             "wave": wave, "workers": len(active), "max_workers": worker_limit(led), "stall_minutes": limit,
             "ready": ready, "waiting": waiting, "assignable": [] if hard else queue[:slots], "no_assign": no_assign,
-            "stalled": stalled, "integrate": integrate, "needs_ready": needs_ready, "budget": budget_state(led),
+            "stalled": stalled, "integrate": integrate, "needs_ready": needs_ready,
+            "rebriefs_open": [{"ticket": t, "worker": r["worker"]["name"], "since": r["rebrief_open"]}
+                              for t, r in rows.items() if r.get("rebrief_open")],
+            "failed": [{"ticket": t, "status": r["status"], **r["fail"]} for t, r in rows.items() if r.get("fail")],
+            "budget": budget_state(led),
             "watches_due": [w for w in led["watches"] if not w.get("closed") and parse_time(w["due"]) <= moment],
             "decisions_open": [d for d in led["decisions"] if not d.get("closed")],
             "grants_expired": [g for g in led["grants"] if g.get("expires") and parse_time(g["expires"]) <= moment],
@@ -536,6 +563,8 @@ def apply_line(led: dict, line: str) -> str:
         log(led, word, ticket, by=sender, id=rec["id"], note=f"sender is not the row's worker {worker}")
         return f"{word} {ticket}: no move, sent by {sender} and the row's worker is {worker}"
     touch(row, now)
+    if word in ("READY", "BLOCKED"):  # the run this line ends is the one the re-brief started
+        row["rebrief_open"] = None
     before = row["status"]
     sha = rec.get("sha")
     to = next_status(word, before, new_head=word == "READY" and not same_sha(sha, row["ready_head"]), pr_open=pr_open(row))
@@ -671,6 +700,9 @@ def compare_row(ticket: str, row: dict, heads: dict, prs: list, trees: dict) -> 
     if pr:
         change("pr", row["pr"], pr.get("number"))
         change("pr_state", row["pr_state"], state.lower())
+    closed = not pr and any(p.get("number") == row["pr"] and p.get("state") == "CLOSED" for p in prs)
+    if closed:
+        change("pr_state", row["pr_state"], "closed")
     if state == "MERGED" and not row["merged_sha"]:
         change("merged_sha", None, (pr.get("mergeCommit") or {}).get("oid"))
         if status not in ("merged", "blocked", "parked"):
@@ -691,9 +723,13 @@ def compare_row(ticket: str, row: dict, heads: dict, prs: list, trees: dict) -> 
         elif status != "ready" or branch in heads:
             result["action"] = "reassign"
     elif row["pr"] and not pr and status in ("pr", "ready-to-merge"):
-        result.update(action="ask", note=f"the ledger names PR #{row['pr']} and gh does not list it")
+        result.update(action="ask", note=None if closed else f"the ledger names PR #{row['pr']} and gh does not list it")
     elif changes:
         result["action"] = "update"
+    if closed:
+        result["note"] = f"PR #{row['pr']} is closed"
+    if row.get("fail"):
+        result.update(action="reassign", note="a FAIL is recorded on the merged commit: the fix is a new assignment on a new branch")
     return result
 
 
@@ -707,6 +743,8 @@ def restore_row(led: dict, ticket: str, row: dict, changes: dict) -> None:
             row[field] = new
     row["last_progress"] = now_iso()
     row["restored"] = True
+    if row["status"] in NO_WORKER_STATUSES:
+        row["rebrief_open"] = None
     log(led, "resume", ticket, note=json.dumps(before, ensure_ascii=False))
 
 
@@ -765,7 +803,9 @@ def cmd_add(a) -> int:
             led["waves"].append(row["wave"])
         log(led, "add", ticket, to=row["status"])
         replanned = old is None or any(row[f] != old[f] for f in PLAN_FIELDS)
-        if led["plan_approved"] and replanned and not (a.incident or a.already_done):
+        current = row_cap(led, old) if old is not None else None
+        cap_raised = current is not None and a.cap_usd is not None and a.cap_usd > current  # an incident widens no cap
+        if led["plan_approved"] and (cap_raised or (replanned and not (a.incident or a.already_done))):
             led["plan_approved"] = False
             log(led, "replan", ticket, note="a row changed on an approved plan: the plan needs a new go")
             print(f"{ticket}: the plan needs a new go", file=sys.stderr)
@@ -784,18 +824,51 @@ def cmd_approve(a) -> int:
 
 
 def rebrief(led: dict, ticket: str, row: dict) -> str:
-    """`ASSIGN … rebrief=1`: no row moves. The stall window restarts, or the next tick would flag the row again at once."""
+    """`ASSIGN … rebrief=1`: no row moves. The stall window restarts, or the next tick would flag the row again at once. The
+    READY in force ends, because the head it named is about to move. The worker runs again, so it takes a slot until it
+    answers; at a status with no worker a re-brief restarts nothing."""
     row["rebriefs"] += 1
     row["stall_counted_at"] = now_iso()
+    row["ready_head"] = None
+    if row["status"] not in NO_WORKER_STATUSES:
+        row["rebrief_open"] = row["stall_counted_at"]
     log(led, "rebrief", ticket, to=next_status("rebrief", row["status"]))
     return f"{ticket}: re-brief {row['rebriefs']}, no move, {row['status']}"
+
+
+def refuse_after_fail(ticket: str, row: dict) -> None:
+    """docs/swarm.md § Authority matrix: a fix for a FAIL is a new assignment on a new branch, the old worker is not reopened."""
+    if row.get("fail"):
+        raise Refused(f"{ticket}: a FAIL is recorded on the merged commit; the fix is a new assignment on a new --branch")
+
+
+def checked_cap(led: dict, ticket: str, row: dict, a) -> float | None:
+    """`--cap-usd`, once it may be set. Raising a cap is the owner's (docs/swarm.md § Authority matrix): a cap above the one
+    the row runs under now, its own or the epic's per-worker cap, needs the decision line. A first or a lower cap needs none."""
+    current = row_cap(led, row)
+    if a.cap_usd is not None and current is not None and a.cap_usd > current and not (a.decision or "").strip():
+        raise Refused(f"{ticket}: raising the cap from {current:.2f} to {a.cap_usd:.2f} needs the owner's --decision line")
+    return a.cap_usd
+
+
+def set_cap(led: dict, ticket: str, row: dict, cap: float | None, decision: str | None) -> None:
+    if cap is None:
+        return
+    current = row_cap(led, row)
+    row["budget_cap"] = cap
+    if current is not None and cap > current:
+        row["cap_decision"] = (decision or "").strip()
+        log(led, "cap", ticket, **{"from": current, "to": cap}, note=row["cap_decision"])
 
 
 def cmd_assign(a) -> int:
     ticket = clean_ticket(a.ticket)
     with edit(a.key) as led:
         row = row_of(led, ticket)
+        cap = checked_cap(led, ticket, row, a)
         if a.rebrief:
+            refuse_after_fail(ticket, row)
+            set_cap(led, ticket, row, cap, a.decision)
             print(rebrief(led, ticket, row))
             return 0
         if not a.kind or not a.name:
@@ -805,29 +878,28 @@ def cmd_assign(a) -> int:
         to = next_status("assign", before)
         if to is None:
             raise Refused(f"{ticket}: no assignment from {before}; the table moves {', '.join(MOVES[0].frm)}")
-        reasons = hard_reasons(led) + row_reasons(led, row)
+        reasons = hard_reasons(led) + row_reasons(led, row, lane=a.name, cap=cap)
         if not row["incident"]:
             reasons += [] if led["plan_approved"] else ["plan not approved"]
             unmet = unmet_deps(led, row)
             reasons += [f"waiting on {', '.join(unmet)}"] if unmet else []
         if len([t for t in active_tickets(led) if t != ticket]) >= worker_limit(led):
             reasons.append(f"no free worker slot ({worker_limit(led)} running)")
-        failed_merge = before == "blocked" and row["merged_sha"]
+        fail = row.get("fail")  # recorded, so it holds through a park or a late READY, whatever the status is now
         branch = a.branch or row["worker"]["branch"]
-        if failed_merge and (not a.branch or a.branch == row["worker"]["branch"]):
+        if fail and (not a.branch or a.branch == fail["branch"]):
             reasons.append("a fix for a FAIL on the merged commit needs a new --branch")
         if reasons:
             raise Refused(f"{ticket}: not assigned: {'; '.join(reasons)}")
-        if branch != row["worker"]["branch"] and row["worker"]["branch"]:  # a head and a PR belong to a branch
-            row.update(head=None, ready_head=None, body=None, pr=None, pr_state=None)
-        if failed_merge:  # the fix merges again and is verified whole: a pass on the old commit proves nothing about the new
-            row.update(merged_sha=None, merged_by=None, passes={})
+        if fail or (branch != row["worker"]["branch"] and row["worker"]["branch"]):  # a head and a PR belong to a branch
+            row.update(head=None, body=None, pr=None, pr_state=None)
+        if fail:  # the fix merges again and is verified whole: a pass on the old commit proves nothing about the new
+            row.update(merged_sha=None, merged_by=None, passes={}, fail=None)
         if row["worker"]["name"] != a.name:
             row["rebriefs"] = 0
         row["worker"] = {"kind": a.kind, "name": a.name, "ref": a.ref, "worktree": a.worktree, "branch": branch}
-        row.update(blocked=None, parked_reason=None)
-        if a.cap_usd is not None:
-            row["budget_cap"] = a.cap_usd
+        row.update(blocked=None, parked_reason=None, ready_head=None, rebrief_open=None)  # a new run: the old READY named its head
+        set_cap(led, ticket, row, cap, a.decision)
         touch(row, now_iso())
         set_status(led, ticket, row, to, "assign", by=a.name)
     print(f"{ticket}: {before} -> {to}")
@@ -874,10 +946,15 @@ def status_act(a, row: dict, ticket: str) -> tuple[str, dict]:
     if a.status == "pr":
         if a.pr is None and row["pr"] is None:
             raise SwarmError(f"{ticket}: status pr needs --pr <number>")
+        refuse_after_fail(ticket, row)
+        if row["pr_state"] in ("merged", "closed") and a.pr in (None, row["pr"]):
+            raise Refused(f"{ticket}: PR #{row['pr']} is {row['pr_state']}; a new PR needs its own --pr, and `resume` records "
+                          "a reopened one")
         return "PR", {"pr": a.pr if a.pr is not None else row["pr"], "pr_state": "open"}
     if a.status == "ready-to-merge":
         if not a.head:
             raise SwarmError(f"{ticket}: status ready-to-merge needs --head <the READY head the gates held on>")
+        refuse_after_fail(ticket, row)
         if row["status"] != a.status and not (same_sha(a.head, row["ready_head"]) and same_sha(a.head, row["head"])):
             raise Refused(f"{ticket}: the gates hold at {a.head[:7]}, the READY in force is {(row['ready_head'] or 'none')[:7]} "
                           f"and the head is {(row['head'] or 'none')[:7]}: a moved head needs a new READY")
@@ -897,8 +974,10 @@ def status_act(a, row: dict, ticket: str) -> tuple[str, dict]:
         if not a.reason:
             raise SwarmError(f"{ticket}: status blocked needs --reason (a FAIL on the merged commit; a worker's BLOCKED goes "
                              "through apply)")
+        now = now_iso()
         return "fail", {"blocked": {"reason": "verifier-fail", "who": "orchestrator", "sha": row["merged_sha"], "ran": a.reason,
-                                    "at": now_iso()}}
+                                    "at": now},
+                        "fail": {"at": now, "merged_sha": row["merged_sha"], "branch": row["worker"]["branch"], "reason": a.reason}}
     return "close", {}
 
 
@@ -944,6 +1023,7 @@ def cmd_pass(a) -> int:
             return 0
         if row["status"] != "merged":
             raise Refused(f"{ticket}: a pass follows the merge; the row is at {row['status']}")
+        refuse_after_fail(ticket, row)
         if row["passes"].get(a.dw, {}).get("evidence") == evidence:
             print(f"{ticket}: no change, {a.dw} is already passed")
             return 0
@@ -981,7 +1061,11 @@ def print_tick(rep: dict) -> None:
     for i in rep["integrate"]:
         print(f"integrate {i['ticket']} status={i['status']} head={(i['head'] or '-')[:7]}")
     for n in rep["needs_ready"]:
-        print(f"needs-ready {n['ticket']} head={(n['head'] or '-')[:7]} ready_head={n['ready_head'][:7]}")
+        print(f"needs-ready {n['ticket']} head={(n['head'] or '-')[:7]} ready_head={(n['ready_head'] or '-')[:7]}")
+    for r in rep["rebriefs_open"]:
+        print(f"rebrief-open {r['ticket']} worker={r['worker']} since={r['since']}")
+    for f in rep["failed"]:
+        print(f"failed {f['ticket']} status={f['status']} branch={f['branch']}")
     for o in b["over"]:
         print(f"over-budget {o['ticket']} spent={o['spent']:.2f} cap={o['cap']:.2f}")
     for w in rep["watches_due"]:
@@ -1142,17 +1226,20 @@ def cmd_hold(a) -> int:
 
 
 def cmd_budget(a) -> int:
-    if not a.decision.strip():
-        raise Refused("a budget change needs its decision line")
-    if a.epic_usd is None and a.worker_usd is None and a.spent is None:
+    caps = a.epic_usd is not None or a.worker_usd is not None
+    if not caps and a.spent is None:
         raise SwarmError("budget needs --epic-usd, --worker-usd or --spent")
+    decision = (a.decision or "").strip()
+    if caps and not decision:
+        raise Refused("a change to a cap needs its decision line")
     with edit(a.key) as led:
         for field, value in (("epic_usd", a.epic_usd), ("worker_usd", a.worker_usd)):
             if value is not None:
                 led["budget"][field] = value
         if a.spent is not None:
             led["spent"] = a.spent
-        log(led, "budget", note=a.decision.strip())
+        if caps:
+            log(led, "budget", note=decision)
         b = budget_state(led)
     print(f"{a.key}: budget {b['state']}, spent {b['spent']:.2f}")
     return 0
@@ -1211,8 +1298,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ref")
     p.add_argument("--worktree")
     p.add_argument("--branch")
-    p.add_argument("--cap-usd", type=float)
-    p.add_argument("--rebrief", action="store_true", help="ASSIGN rebrief=1: the row does not move")
+    p.add_argument("--cap-usd", type=float, help="the row's cap; above the current cap it needs --decision")
+    p.add_argument("--decision", help="the owner's decision line behind a raised cap")
+    p.add_argument("--rebrief", action="store_true", help="ASSIGN rebrief=1: the row does not move, the READY in force ends")
 
     p = command("status", cmd_status, "the orchestrator's moves of a row")
     p.add_argument("ticket")
@@ -1282,8 +1370,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = command("budget", cmd_budget, "change a cap, on the owner's decision line; or record the epic's spend")
     p.add_argument("--epic-usd", type=float)
     p.add_argument("--worker-usd", type=float)
-    p.add_argument("--spent", type=float)
-    p.add_argument("--decision", required=True)
+    p.add_argument("--spent", type=float, help="the epic's spend so far, USD; needs no decision line")
+    p.add_argument("--decision", help="the decision line; a change to a cap needs it")
 
     p = command("show", cmd_show, "print the ledger, or one row, as JSON")
     p.add_argument("ticket", nargs="?")
