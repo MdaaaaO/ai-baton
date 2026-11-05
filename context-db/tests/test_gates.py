@@ -533,6 +533,16 @@ class Verifier(unittest.TestCase):
             self.assertIn(rule, section)
         self.assertIn("An epic gets the gate run", " ".join(self.body.split()))
 
+    def test_a_child_in_the_gate_run_is_held_to_merged_and_not_to_step_1s_pin(self):
+        # HEAD is a default-branch commit in this run, so step 1's headRefOid pin, read literally, fails every child.
+        section = " ".join(self.section("5. phase=gates").split())
+        child = section.split("- Each child:", 1)[1].split("Then, for each", 1)[0]
+        self.assertNotIn("as in step 1", child)
+        for phrase in ("the ticket body and PR fields step 1 reads", "saved the same way",
+                       "Step 1's `headRefOid` pin does not apply here", "`state` `MERGED`",
+                       "`mergeCommit.oid` an ancestor of `HEAD`"):
+            self.assertIn(phrase, child)
+
     def test_the_probe_runs_in_the_background_and_a_cut_call_is_no_failure(self):
         section = " ".join(self.section("2. The two checks").split())
         for phrase in ("`run_in_background: true`", "completion notice", "A call the tool cut short is not a failing check: re-run it"):

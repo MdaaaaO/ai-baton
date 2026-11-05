@@ -5,8 +5,8 @@ You copy the `## Verification plan` section of this page into the epic issue's b
 the gate format, which every plan and every template under `docs/verification/` uses. Who acts on a gate is
 `docs/swarm.md` § Authority matrix; when the epic may close is its § Lifecycle.
 
-**Where it plugs in.** `epic-discover` offers a template when it writes the epic. The verifier closes the agent gates
-in its gate run. The owner signs the human ones. `gates.py status` must exit 0 before the epic closes.
+**Where it plugs in.** `epic-discover` will offer a template when it writes the epic, once it is built. The verifier
+closes the agent gates in its gate run. The owner signs the human ones. `gates.py status` must exit 0 before the epic closes.
 
 **What breaks if it is ignored.** A change that merged, deployed and broke its first scheduled run counts as done at the
 merge. A gate written after the work measures what the work happened to do. A gate with no signer closes on the author's

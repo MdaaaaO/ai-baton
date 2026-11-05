@@ -98,8 +98,8 @@ does not name is not yours this run. `CHILDREN` names each child as `<ticket>:<p
 - The tree. Take the default branch from `gh repo view <repo> --json defaultBranchRef --jq .defaultBranchRef.name`, run
   `git -C <CHECKOUT> fetch origin <default branch>`, and `HEAD` must be an ancestor of `FETCH_HEAD`, or `FAIL` with `-`.
   Then add and remove `$CTX/tree` at `HEAD` as in step 1.
-- Each child: its ticket body and its PR as in step 1, saved under `$CTX/<ticket>/`. Its `state` must be `MERGED` and its
-  `mergeCommit.oid` an ancestor of `HEAD`, or `FAIL` with `-`.
+- Each child: the ticket body and PR fields step 1 reads, saved the same way under `$CTX/<ticket>/`. Step 1's `headRefOid`
+  pin does not apply here: the child's check is `state` `MERGED` and `mergeCommit.oid` an ancestor of `HEAD`, or `FAIL` with `-`.
 
 Then, for each `VG-<n>` in `GATES`:
 
