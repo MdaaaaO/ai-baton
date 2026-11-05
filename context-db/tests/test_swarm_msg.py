@@ -256,6 +256,28 @@ class Registry(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0)
             self.assertIn("--state must be one of", r.stderr)
 
+    def test_the_make_target_passes_role_state_and_lane_only_when_set(self):  # DW-3
+        engine = BIN.parent
+        with tempfile.TemporaryDirectory() as t:
+            ctx = str(Path(t) / ".context")
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("CLAUDE_CODE_SESSION_ID", "SESSION_ID", "CONTEXT_ROOT", "CONTEXT", "MAKEFLAGS", "MFLAGS", "MAKELEVEL")}
+
+            def reg(name: str, *extra: str) -> str:
+                p = subprocess.run(["make", "-C", str(engine), "session-register", f"NAME={name}", f"CONTEXT={ctx}",
+                                    "NOSTATS=1", *extra], env=env, capture_output=True, text=True, timeout=120)
+                self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+                return (Path(ctx) / "sessions" / f"{name}.md").read_text()
+            doc = reg("kit-make-a", "ROLE=worker", "STATE=blocked-on-peer", "LANE=kit-lane")
+            for line in ("role: worker", "state: blocked-on-peer", "lane: kit-lane"):
+                self.assertIn(line, doc)
+            plain = reg("kit-make-b")
+            for field in ("role", "state", "lane"):
+                self.assertRegex(plain, rf"(?m)^{field}: *$")  # a call without them leaves the field blank
+            bad = subprocess.run(["make", "-C", str(engine), "session-register", "NAME=kit-make-c", f"CONTEXT={ctx}",
+                                  "NOSTATS=1", "STATE=asleep"], env=env, capture_output=True, text=True, timeout=120)
+            self.assertNotEqual(bad.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

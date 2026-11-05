@@ -169,6 +169,10 @@
       }
     }
   },
+  "swarm": {
+    "_comment": "ack_minutes: minutes a swarm line may stay unacked before `swarm_msg.py pending` lists it (docs/swarm.md § The ack rule). Optional; absent = 20.",
+    "ack_minutes": 20
+  },
   "systems": {
     "jira": false,
     "slack": false,
