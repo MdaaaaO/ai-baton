@@ -7,8 +7,8 @@ tags: [behaviour, cold-reader]
 
 Read the following artefact text. Answer in exactly three lines, one each: WHERE it plugs in, WHAT
 changes, WHAT could break. If the text does not say, reply with exactly one line instead: UNSURE
-<question> naming what is missing. Answer from this text alone — use no tool, read nothing else. No
-other prose.
+<question> naming what is missing. Answer from this text alone — use no tool, read nothing else, except
+the one call that delivers your final report. No other prose.
 
 ## Summary
 

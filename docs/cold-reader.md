@@ -21,14 +21,16 @@ other than `Nothing.`.
 Call the `Agent` tool with `model: haiku`, `subagent_type: general-purpose` (`docs/delegation.md` §
 Sizing — a read/classify job). The harness offers no way to strip a fork's tools, and the kit ships no
 tool-less agent definition, so the restriction is by instruction, not mechanism: the brief hands the
-worker only the artefact text and tells it to answer from that text alone, using no tool. The input is
+worker only the artefact text and tells it to answer from that text alone, using no tool. The one exception
+is the call that hands the worker's final report back to its caller: a worker told to use no tool at all can
+end with no report, so the brief names that call as the exception. The input is
 the artefact text only, pasted in place of `<artefact>`; hand it exactly this prompt:
 
 ```
 Read the following artefact text. Answer in exactly three lines, one each: WHERE it plugs in, WHAT
 changes, WHAT could break. If the text does not say, reply with exactly one line instead: UNSURE
-<question> naming what is missing. Answer from this text alone — use no tool, read nothing else. No
-other prose.
+<question> naming what is missing. Answer from this text alone — use no tool, read nothing else, except
+the one call that delivers your final report. No other prose.
 
 <artefact>
 ```
@@ -55,8 +57,8 @@ tool by instruction), same pasting rule, a different prompt:
 Read the following four lines. They are written for the person who runs a change. Answer in exactly three
 lines, one each: CAN what that person can do now, MUST what that person must do differently, CHECK what that
 person runs or looks at to see it work. If the text does not say, reply with exactly one line instead: UNSURE
-<question> naming what is missing. Answer from this text alone — use no tool, read nothing else. No other
-prose.
+<question> naming what is missing. Answer from this text alone — use no tool, read nothing else, except
+the one call that delivers your final report. No other prose.
 
 <block>
 ```

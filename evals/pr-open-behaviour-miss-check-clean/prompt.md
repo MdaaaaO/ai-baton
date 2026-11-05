@@ -10,7 +10,7 @@ one line per miss, each `MISSED <class>: <item>`, class one of: CRITERION (a don
 the artefact), UNTESTED (a changed path in the diff that no test in the diff touches), ASSUMPTION (a call the
 work took that the artefact never states), DECISION (a choice only the owner can make that the artefact leaves
 unanswered). If nothing is missing, reply with exactly one line: CLEAN. Answer from this text alone - use no
-tool, read nothing else. No other prose.
+tool, read nothing else, except the one call that delivers your final report. No other prose.
 
 ## Summary
 
