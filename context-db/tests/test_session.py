@@ -5,6 +5,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -924,6 +925,113 @@ class SuccessorSeesPredecessorOpenPRs(unittest.TestCase):
         self.assertNotIn("## Next session", r.stdout)  # only the Open PRs section
         r = run("session.py", "register", "--name", "kit-02", "--no-stats", root=self.root)
         self.assertNotIn("predecessor", r.stdout)  # a plain registration prints nothing extra
+
+    def _active(self, name: str, heartbeat: str) -> None:
+        (self.root / "sessions" / f"{name}.md").write_text(
+            f"---\nsession: {name}\nstatus: active\nheartbeat: {heartbeat}\n---\n\n## Open PRs\n\nnone\n", encoding="utf-8")
+
+    def test_a_stale_active_predecessor_is_ended_as_superseded(self):
+        self._active("kit-07", "2020-01-01T00:00:00Z")
+        r = run("session.py", "register", "--name", "kit-07-2", "--no-stats", "--successor-of", "kit-07", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ended predecessor kit-07", r.stdout)
+        # the register's own index sweep archives an ended row whose successor has registered
+        files = list((self.root / "sessions").rglob("kit-07.md")) + list((self.root / "sessions").rglob("kit-07-2026*.md"))
+        self.assertEqual(len(files), 1)
+        doc = files[0].read_text(encoding="utf-8")
+        self.assertIn("status: ended", doc)
+        self.assertIn("superseded by kit-07-2", doc)
+
+    def test_a_fresh_active_predecessor_stays_active_with_a_warning(self):
+        from datetime import datetime, timezone
+        self._active("kit-08", datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        r = run("session.py", "register", "--name", "kit-08-2", "--no-stats", "--successor-of", "kit-08", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("predecessor kit-08 left as is: still active", r.stderr)
+        self.assertIn("status: active", (self.root / "sessions" / "kit-08.md").read_text(encoding="utf-8"))
+
+    def _hb_ago(self, hours: float) -> str:
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _register(self, pred: str, env: dict | None = None):
+        return run("session.py", "register", "--name", f"{pred}-2", "--no-stats", "--successor-of", pred, root=self.root, env=env)
+
+    def test_a_live_owner_keeps_a_stale_predecessor_active(self):
+        # the owner process the heartbeat log names is still running (a claude-named stand-in): never ended, whatever the age
+        self._active("kit-09", self._hb_ago(40))
+        tmpdir = Path(self.tmp.name) / "tmp"
+        logdir = tmpdir / f"ai-baton-{os.getuid()}"
+        logdir.mkdir(parents=True)
+        fake = Path(self.tmp.name) / "claude"
+        fake.symlink_to(shutil.which("sleep"))
+        proc = subprocess.Popen([str(fake), "60"])
+        try:
+            (logdir / "heartbeat-k.log").write_text(f"2026-01-01 start name=kit-09 owner={proc.pid} interval=60 session=none\n", encoding="utf-8")
+            r = self._register("kit-09", env={"TMPDIR": str(tmpdir)})
+        finally:
+            proc.kill()
+            proc.wait()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("owner process is still running", r.stderr)
+        self.assertIn("status: active", (self.root / "sessions" / "kit-09.md").read_text(encoding="utf-8"))
+
+    def test_a_dead_owner_does_not_keep_a_stale_predecessor(self):
+        self._active("kit-10", self._hb_ago(40))
+        tmpdir = Path(self.tmp.name) / "tmp"
+        logdir = tmpdir / f"ai-baton-{os.getuid()}"
+        logdir.mkdir(parents=True)
+        (logdir / "heartbeat-k.log").write_text("2026-01-01 start name=kit-10 owner=999999999 interval=60 session=none\n", encoding="utf-8")
+        r = self._register("kit-10", env={"TMPDIR": str(tmpdir)})
+        self.assertIn("ended predecessor kit-10", r.stdout)
+
+    def test_a_superseded_row_gets_its_stats_block_and_a_ledger_row(self):
+        home = Path(self.tmp.name) / "home"
+        proj = home / ".claude" / "projects" / "-x"
+        proj.mkdir(parents=True)
+        (proj / "sid-11.jsonl").write_text(json.dumps({"type": "assistant", "requestId": "r1", "timestamp": "2026-09-26T10:00:05Z",
+            "message": {"id": "m1", "model": "claude-opus-x", "usage": {"input_tokens": 10, "output_tokens": 5},
+                        "content": [{"type": "text", "text": "ok"}]}}) + "\n", encoding="utf-8")
+        (self.root / "sessions" / "kit-11.md").write_text(
+            f"---\nsession: kit-11\nstatus: active\nsession_id: sid-11\nheartbeat: {self._hb_ago(40)}\n---\n\n## Open PRs\n\nnone\n", encoding="utf-8")
+        r = run("session.py", "register", "--name", "kit-11-2", "--successor-of", "kit-11", root=self.root, env={"HOME": str(home)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        files = list((self.root / "sessions").rglob("kit-11.md")) + list((self.root / "sessions").rglob("kit-11-2026*.md"))
+        self.assertEqual(len(files), 1)
+        self.assertIn("## Session stats", files[0].read_text(encoding="utf-8"))
+        self.assertIn("kit-11", (self.root / "sessions" / "_ledger.md").read_text(encoding="utf-8"))
+
+    def test_a_superseded_row_with_a_prompt_is_not_listed_as_a_starter(self):
+        (self.root / "sessions" / "kit-12.md").write_text(
+            f"---\nsession: kit-12\nstatus: active\nheartbeat: {self._hb_ago(20)}\n---\n\n## Open PRs\n\nnone\n\n"
+            "## Next session\n\nPick the work up from the notes, then continue.\n", encoding="utf-8")
+        r = self._register("kit-12")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ended predecessor kit-12", r.stdout)
+        index = (self.root / "SESSION_INDEX.md").read_text(encoding="utf-8")
+        self.assertNotIn("Register as the successor of kit-12;", index)
+        self.assertFalse((self.root / "sessions" / "kit-12.md").exists())  # swept to the archive
+
+    def test_a_stale_row_with_another_status_is_left_with_a_line(self):
+        (self.root / "sessions" / "kit-13.md").write_text(
+            f"---\nsession: kit-13\nstatus: blocked\nheartbeat: {self._hb_ago(40)}\n---\n\n## Open PRs\n\nnone\n", encoding="utf-8")
+        r = self._register("kit-13")
+        self.assertIn("predecessor kit-13 left as is: its status is `blocked`", r.stderr)
+        self.assertIn("status: blocked", (self.root / "sessions" / "kit-13.md").read_text(encoding="utf-8"))
+
+    def test_a_predecessor_without_a_heartbeat_is_left_alone(self):
+        (self.root / "sessions" / "kit-14.md").write_text(
+            "---\nsession: kit-14\nstatus: active\n---\n\n## Open PRs\n\nnone\n", encoding="utf-8")
+        r = self._register("kit-14")
+        self.assertIn("no readable heartbeat", r.stderr)
+        self.assertIn("status: active", (self.root / "sessions" / "kit-14.md").read_text(encoding="utf-8"))
+
+    def test_ended_reason_is_cleared_when_the_lane_registers_again(self):
+        (self.root / "sessions" / "kit-15.md").write_text(
+            "---\nsession: kit-15\nstatus: ended\nended_reason: superseded by kit-15-2\nheartbeat: 2026-01-01T00:00:00Z\n---\n\n## Open PRs\n\nnone\n", encoding="utf-8")
+        r = run("session.py", "register", "--name", "kit-15", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("ended_reason", (self.root / "sessions" / "kit-15.md").read_text(encoding="utf-8"))
 
     def _archived(self, fn: str, session: str, heartbeat: str, body: str) -> None:
         adir = self.root / "sessions" / "archive"
