@@ -939,7 +939,7 @@ class TickHook(BudgetCase):
     def test_the_docstring_says_what_a_tick_writes(self):
         doc = SWARM.read_text(encoding="utf-8")
         self.assertNotIn("never a write", doc)
-        self.assertIn("`spent`, and a STOP when", " ".join(doc.split()))
+        self.assertIn("`spent`, each row's `spend` reading", " ".join(doc.split()))
 
 
 class OrchestratorReading(BudgetCase):
