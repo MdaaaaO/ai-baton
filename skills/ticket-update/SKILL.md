@@ -1,10 +1,10 @@
 ---
 name: ticket-update
-description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment, label/status sync, and an optional durable pointer to the thread or PR; never restating earlier comments. Invoke whenever a ticket step lands or direction changes."
+description: "How a session posts a progress update on a tracker ticket (Jira or GitHub issues): one lean, dated DELTA comment, label/status sync, an optional pointer to the thread or PR. Invoke whenever a ticket step lands or direction changes."
 metadata:
-  version: "18"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "19"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   facts: "tracker.kind,tracker.mcp_tools.transitions_list,tracker.mcp_tools.remote_link,tracker.write_api,tracker.setting cloud_id"
 user-invocable: true
 ---

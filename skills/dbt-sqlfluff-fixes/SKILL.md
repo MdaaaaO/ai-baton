@@ -1,11 +1,11 @@
 ---
 name: dbt-sqlfluff-fixes
-description: "Recognise and fix the sqlfluff violations recurring in dbt models: WHERE/ON line breaks, indent fights, short aliases, AS alignment, nested CASE. Use when writing or editing a dbt .sql model, or when a PR's lint-models check fails and you need the reviewdog findings fixed in one CI round."
+description: "Fix the sqlfluff violations recurring in dbt models: WHERE/ON line breaks, indent fights, short aliases, AS alignment, nested CASE. Use when writing or editing a dbt .sql model, or when a PR's lint-models check fails."
 compatibility: "Designed for Claude Code; needs dbt (systems.*)"
 metadata:
-  version: "8"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "9"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   requires: "dbt"
 user-invocable: true
 ---

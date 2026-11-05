@@ -1,11 +1,11 @@
 ---
 name: notion-page-review
-description: "Reviews a Notion page tree (page, sub-pages, every thread) against the user's position, walks proposals in batches of 4, posts only approved ones as thread replies or inline comments. Invoke when the user asks to \"go through\", \"catch up on\" or \"comment on\" a Notion page."
+description: "Reviews a Notion page tree (sub-pages, every thread) against the user's position, walks proposals in batches of 4, posts approved ones as replies or inline comments. Invoke when the user asks to \"go through\", \"catch up on\" or \"comment on\" a Notion page."
 compatibility: "Designed for Claude Code; needs notion (systems.*)"
 metadata:
-  version: "13"
-  updated: "2026-10-02"
-  reviewed: "2026-10-02"
+  version: "14"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   requires: "notion"
   facts: "systems.slack"
 user-invocable: true

@@ -1,10 +1,10 @@
 ---
 name: kit-setup
-description: "Scaffold this workspace for the kit from inside a session: runs the kit's setup.sh --personal here, reports the result, hands over to /kit-health. Use once, when setting up this workspace right after plugin install."
+description: "Scaffold this workspace for the kit from inside a session: runs setup.sh --personal, reports, hands over to /kit-health. Use once, when setting up this workspace right after plugin install."
 metadata:
-  version: "3"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "4"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
 user-invocable: true
 ---
 

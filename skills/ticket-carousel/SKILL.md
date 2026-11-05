@@ -1,10 +1,10 @@
 ---
 name: ticket-carousel
-description: "Turns candidates (a list, free text, or a repo/URL to mine) into tickets one at a time: draft, dedup, before any is created via ticket-open. Invoke when asked to turn a landscape read, retro or idea list into tickets."
+description: "Turns candidates (a list, free text, or a repo/URL to mine) into tickets one at a time: draft, dedup, then ticket-open. Invoke when asked to turn a landscape read, retro or idea list into tickets."
 metadata:
-  version: "2"
-  updated: "2026-10-23"
-  reviewed: "2026-10-23"
+  version: "3"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   facts: "tracker.kind"
 user-invocable: true
 ---

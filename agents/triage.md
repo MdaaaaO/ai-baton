@@ -1,10 +1,10 @@
 ---
 name: triage
-description: Cheap read-only triage worker (low effort, no CLAUDE.md). Use when a skill forks pr-event-brief/alerts-sweep, or any read-and-summarise delegation needs only a short brief. Never posts to GitHub, the tracker or chat and never decides for the main session.
+description: "Cheap read-only triage worker. Use when a skill forks pr-event-brief/alerts-sweep, or any read-and-summarise delegation needs only a short brief. Never posts to GitHub, the tracker or chat and never decides."
 metadata:
-  version: "11"
-  updated: "2026-10-15"
-  reviewed: "2026-10-15"
+  version: "12"
+  updated: "2026-11-04"
+  reviewed: "2026-11-04"
   facts: "tracker.mcp_tools.search"
 model: haiku
 effort: low
