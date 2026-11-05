@@ -10,8 +10,8 @@ flowchart TD
   D --> A[4 Assign: assignable only, one message, one worktree each]
   A --> S[5 Stalls: assigned and claimed rows]
   S --> B[6 Budget: caps, hard stop]
-  B --> G[7 Integrate: draft PR, owners, review, verifier read, merge gate]
-  G --> V[8 Verify: phase=merged, then phase=gates]
+  B --> G[7 Integrate: draft PR, owners, review, ready, merge gate]
+  G --> V[8 Verify: phase=read on a READY head, phase=merged, phase=gates]
   V --> DG[9 Digest]
   DG --> F[10 Flush: render, heartbeat, next wake-up]
   D -.-> HD{{owner: an open decision}}

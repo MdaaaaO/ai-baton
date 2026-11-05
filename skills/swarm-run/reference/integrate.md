@@ -1,4 +1,4 @@
-# integrate.md — step 7 and 8 in detail
+# integrate.md — steps 7 and 8 in detail
 
 The rules are `docs/swarm.md` § Authority matrix (a routine merge, a protected path) and § Lifecycle (the verifier
 works twice). This page holds the reads and the input lines the skill's steps point at.
@@ -7,8 +7,9 @@ works twice). This page holds the reads and the input lines the skill's steps po
 
 - The rules: the first `CODEOWNERS` GitHub reads (`.github/`, the root, `docs/`), at the PR's base, read live:
   `gh api repos/<owner/repo>/contents/<path>?ref=<base> --jq .content | base64 -d`. The last matching pattern wins.
-- The protection: `gh api repos/<owner/repo>/branches/<base>/protection --jq .required_pull_request_reviews`. A 404
-  is no protection, which is no code-owner gate, not an error.
+- The protection: `gh api repos/<owner/repo>/branches/<base>/protection --jq .required_pull_request_reviews`. Only a
+  404 whose message is `Branch not protected` means no protection, and so no code-owner gate. A 403, a 404 with any
+  other message, or any other failure leaves the gate unknown, and an unknown gate routes the merge to the owner.
 - A path whose owners, minus the PR's author, are empty (or teams the author alone belongs to) has no reachable
   reviewer: report `needs owner of <path>` at PR open. A `READY` head on that PR does not count toward the merge gate
   until the owner answers.

@@ -57,9 +57,10 @@ under a `STOP`, and `no_assign` says why: assign nothing and put the reason in t
 
 - **Probe a peer first:** `ListAgents`, by ref; where the harness has no peer list, the registry row's heartbeat.
 - **Per ticket:** `ticket-pickup` for the sizing, the Done-when probe and the sketch (its launch step is replaced by
-  this one); a worktree and branch from the default branch; `swarm_budget.py caps <key> <ticket>`; the assignment file
-  from `$BATON/context-db/_templates/assignment.md` at `.context/state/swarm/<key>/<worker>/assignment.md`, every field
-  filled; `swarm.py assign`; the `ASSIGN` line into the worker's inbox (`swarm_msg.py format` + `send --inbox`).
+  this one); a worktree and branch from the default branch; `swarm.py assign --kind …` first, because `caps` prints
+  the headless `flag:` line only once the row's kind is set; then `swarm_budget.py caps <key> <ticket>`; the assignment
+  file from `$BATON/context-db/_templates/assignment.md` at `.context/state/swarm/<key>/<worker>/assignment.md`, every
+  field filled; the `ASSIGN` line into the worker's inbox (`swarm_msg.py format` + `send --inbox`).
 - **Spawn all in one message**, in the background, the model the Sizing line names, one worktree each. A headless
   worker takes the caps' `flag:` line (`--max-budget-usd`).
 - **An incident lane** is only for breakage in what is merged: `swarm.py add <key> <t> --incident`, a dated re-plan
@@ -85,9 +86,10 @@ pattern. A worker's own dollar breach is its `BLOCKED … budget` and leaves the
 
 For each `integrate` entry (a `READY` with no PR) or a peer's `PR` line, in this order (`reference/integrate.md`):
 
-1. **Draft PR** from the worker's body file: `gh pr create --draft --body-file <file>`, then `swarm.py status <key>
-   <t> pr --pr <n>`. It stays a draft until the review overview, the miss check and the verifier's `phase=read` are
-   all back, because a repo's own auto-merge can merge a non-draft PR as soon as its gates hold.
+1. **Draft PR** from the worker's body file: `gh pr create -R <owner/repo> --draft --base <default> --head <worker
+   branch> --title "<title>" --body-file <file> </dev/null`, the title passing `commit_style.py title`, then
+   `swarm.py status <key> <t> pr --pr <n>`. It stays a draft until the review overview, the miss check and the
+   verifier's `phase=read` are all back, because a repo's own auto-merge can merge a non-draft PR once its gates hold.
 2. **Code owners at PR open:** owners per touched path from the live `CODEOWNERS` and the branch protection. A path
    whose only reachable owner is the author → `needs owner of <path>` in the digest before any `READY` head counts.
    Approved means `reviewDecision: APPROVED`, never one review.
@@ -98,21 +100,21 @@ For each `integrate` entry (a `READY` with no PR) or a peer's `PR` line, in this
 4. **Review:** the `review-runner` overview (`model: sonnet` for a diff of 20 changed lines or fewer, by `git diff
    --shortstat`) and the miss check (`docs/miss-check.md`). Findings → `ASSIGN <t> <file> rebrief=1` with the
    findings inline in `note="…"`, then resume that worker. A clean review needs no wake.
-5. **Verifier read:** a fresh `verifier` with `PHASE: read` on the `READY` head (`reference/integrate.md` has the
-   line). `FAIL` → a re-brief. `PASS` opens the gate for that head only.
-6. **Ready and watch:** with all three back and no protected path, `gh pr ready`, then arm `pr-watch`. When the only
-   open gate is one known check run, wait with a background `gh run watch <id> --exit-status`, never a Monitor window.
-   After a push, cancel the review runs still going on the old head.
-7. **Merge gate**, read from `swarm.merge.<owner/repo>` (`auto | orchestrator | owner`, default `orchestrator`): when
+5. **Ready and watch:** with the overview, the miss check and step 8's `phase=read` back and no protected path,
+   `gh pr ready`, then arm `pr-watch`. When the only open gate is one known check run, wait with a background
+   `gh run watch <id> --exit-status`, never a Monitor window. After a push, cancel the review runs on the old head.
+6. **Merge gate**, read from `swarm.merge.<owner/repo>` (`auto | orchestrator | owner`, default `orchestrator`): when
    the gates hold at the `READY` head, `swarm.py status <key> <t> ready-to-merge --head <sha>`. `orchestrator` → one
    standalone `bash $BATON/skills/pr-watch/pr-merge.sh <owner/repo> <pr> <READY sha>` call; `auto` and `owner` →
    watch for it. A moved head, a base update included, needs a new `READY`. Never an admin or bypass merge.
-8. **Merged:** `swarm.py status <key> <t> merged --pr <n> --sha <sha> [--merged-by owner|auto]`, `MERGED` into the
+7. **Merged:** `swarm.py status <key> <t> merged --pr <n> --sha <sha> [--merged-by owner|auto]`, `MERGED` into the
    worker's inbox, and `DONE` for a background worker whose run has ended.
 
 ## 8. Verify
 
-Each merged PR → a fresh `verifier`, `PHASE: merged`; it alone calls `swarm.py pass`. A `FAIL` → `swarm.py status
+Each `READY` head before its merge → a fresh `verifier`, `PHASE: read` (`reference/integrate.md` has the line):
+`FAIL` → a re-brief; `PASS` opens step 7's gate for that head only, at the next tick. Each merged PR → a fresh
+`verifier`, `PHASE: merged`; it alone calls `swarm.py pass`. A `FAIL` → `swarm.py status
 <key> <t> blocked --reason "…"`, and the fix is a new assignment on a new branch. All passed → `ticket-close`, then
 `swarm.py status <key> <t> done`. After the last child's `phase=merged`: the epic body to `$CTX/plan.md`, `gates.py
 status $CTX/plan.md`, a verifier `PHASE: gates` naming only the open agent gates, and the signed file posted back.

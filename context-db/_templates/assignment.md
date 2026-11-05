@@ -20,10 +20,15 @@ updated: {{DATE}}
 <!-- <owner/repo>#<n>, its title, and the link. The ticket body is the spec; this file never paraphrases it. -->
 
 ## Worker
-<!-- lane `<worker>` (the from= on every line), kind `subagent | peer | headless`, model, and the epic key `<key>`. -->
+<!-- lane `<worker>` (the from= on every line), kind `subagent | peer | headless`, model, and the epic key `<key>`
+     (also `key:` above). Every inbox and outbox call takes it: `swarm_msg.py drain --key <key> <worker>`,
+     `swarm_msg.py send --key <key> <worker> …`, `swarm_msg.py ack --key <key> --as <worker> <id>`. -->
 
 ## Worktree
-<!-- The absolute path of this ticket's worktree. Work only there; never the main checkout. -->
+<!-- The absolute path of this ticket's worktree, and the exact line that makes it when it does not exist yet:
+     path: <path>
+     add: git worktree add <path> -b <branch> origin/<default branch>
+     An existing worktree is reused, never made twice. Work only there; never the main checkout. -->
 
 ## Branch
 <!-- `<branch>`, cut from `origin/<default branch>`. Merge the base in to update it; never rebase or force-push. -->
@@ -71,7 +76,8 @@ updated: {{DATE}}
 ## Report points
 <!-- Lines only, through `swarm_msg.py send` to the outbox and as the final message:
      CLAIMED once the worktree and branch are found; READY <t> <sha> with the branch pushed and green and
-     `done_when.py coverage` covered; BLOCKED, NEEDS, DECISION, Assumed: when they happen; DONE after MERGED.
+     `done_when.py coverage` covered; BLOCKED, NEEDS, DECISION, Assumed: when they happen. A background worker's run
+     ends at READY and the orchestrator writes its DONE; a peer session sends DONE itself once it reads MERGED.
      Inbox: `swarm_msg.py drain --key <key> <worker>` at every tool round; ack each line. No free-text progress. -->
 
 ## Who can say go
