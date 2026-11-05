@@ -7,6 +7,7 @@ import fcntl
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -450,9 +451,10 @@ class Stop(Base):
         for f in (KIT / "hooks" / "hooks.json", KIT / "settings.json"):
             groups = json.loads(f.read_text())["hooks"]["PreToolUse"]
             [m] = [g["matcher"] for g in groups if "pre-tool-use" in g["hooks"][0]["command"]]
-            for tool in ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "mcp__x__y"):
-                self.assertRegex(tool, f"^(?:{m})$", f"{f.name}: {tool}")
-            self.assertNotRegex("Read", f"^(?:{m})$")
+            for tool in ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task", "mcp__x__y"):
+                self.assertTrue(re.search(m, tool), f"{f.name}: {tool}")  # as the harness applies it: unanchored
+            for tool in ("Read", "BashOutput", "TaskOutput", "TaskStop", "TodoWrite", "Grep"):
+                self.assertFalse(re.search(m, tool), f"{f.name}: {tool}")
 
     def test_a_bash_call_by_the_holding_lane_is_blocked_with_the_reason(self):  # DW-1
         self.acquire("client", self.lane)
@@ -514,6 +516,7 @@ class Stop(Base):
         self.assertIn('"deny"', run("Write", file_path=str(self.root / "d" / "a.md")))
 
     def test_an_epic_stop_spares_the_main_session_and_denies_its_subagent(self):  # DW-5
+        self.add_row(self.lane, "orchestrator")
         self.ok("stop", "674", "--reason", "budget hard stop")
         self.assertIsNone(self.hook(command="python3 context-db/bin/swarm.py apply"))
         self.assertIsNone(self.hook("Write", file_path="a"))
@@ -538,25 +541,77 @@ class Stop(Base):
         (self.root / "sessions" / f"{name}.md").write_text(
             f"---\nsession: {name}\nsession_id: {self.sid}\nstatus: active\nepic: {epic}\n{extra}---\n# x\n")
 
-    def test_the_main_row_is_not_picked_by_file_name(self):  # DW-6
-        worker = "a-" + uuid.uuid4().hex[:6]  # sorts before the main session's row
+    def test_the_main_rows_do_not_depend_on_file_order(self):  # DW-6
+        other = "a-" + uuid.uuid4().hex[:6]  # sorts before self.lane ("w-")
+        self.assertLess(other, self.lane)
+        for roles in (("", ""), ("worker", "worker"), ("orchestrator", "orchestrator")):
+            self.add_row(other, roles[0], "acme/widgets#9")
+            self.add_row(self.lane, roles[1], "acme/widgets#9")
+            for holder in (other, self.lane):
+                self.acquire("res", holder)
+                self.ok("stop", "res", "--reason", "x")
+                self.assertEqual(self.hook(command="ls")["permissionDecision"], "deny", f"{roles} held by {holder}")
+                self.ok("go", "res")
+                self.ok("release", "res", "--lane", holder)
+
+    def test_an_orchestrator_row_makes_the_others_subagent_only(self):  # DW-5
+        worker = "a-" + uuid.uuid4().hex[:6]
         self.add_row(worker, "worker", "acme/widgets#9")
-        self.assertLess(worker, self.lane)
+        self.add_row(self.lane, "orchestrator")
         self.acquire("wres", worker)
         self.ok("stop", "wres", "--reason", "x")
-        self.assertIsNone(self.hook(command="ls"))  # main call: not judged by the worker's lease
+        self.assertIsNone(self.hook(command="ls"))  # the main call is not judged by the worker's lease
         self.assertEqual(self.hook(agent="a1", command="ls")["permissionDecision"], "deny")  # its subagent is
-        self.acquire("mres", self.lane)
-        self.ok("stop", "mres", "--reason", "y")
-        self.assertEqual(self.hook(command="ls")["permissionDecision"], "deny")  # judged by its own
 
-    def test_an_epic_stop_denies_a_peer_worker_main_call_and_spares_the_others(self):  # DW-5
+    def test_an_epic_stop_spares_only_a_main_row_with_role_orchestrator(self):  # DW-5
         self.ok("stop", "674", "--reason", "x")
-        for role, denied in (("worker", True), ("orchestrator", False), ("", False)):
+        for role, denied in (("worker", True), ("", True), ("peer", True), ("orchestrator", False)):
             self.add_row(self.lane, role)
             out = self.hook(command="ls")
             self.assertEqual(out is not None and out["permissionDecision"] == "deny", denied, role)
             self.assertEqual(self.hook("Write", file_path="a") is not None, denied, role)
+            if denied:
+                self.assertIn("lease.py go 674", out["permissionDecisionReason"])
+                self.assertIn("role: orchestrator", out["permissionDecisionReason"])
+
+    def test_one_stop_denies_every_subagent_of_the_session_whatever_its_epic(self):  # DW-6
+        self.add_row(self.lane, "orchestrator", "acme/widgets#9")
+        self.add_row("z-" + uuid.uuid4().hex[:6], "", "acme/widgets#674")
+        self.ok("stop", "674", "--reason", "x")
+        self.assertEqual(self.hook(agent="a1", command="ls")["permissionDecision"], "deny")
+        self.assertIsNone(self.hook(command="ls"))
+
+    def test_the_hook_finds_the_stop_at_the_root_kit_profile_resolves(self):
+        """The fast path keeps a copy of the root rule: it must find a STOP where `kit_profile.context_root()` looks."""
+        layouts = {  # name: (kit dir below the case dir, the content root below it, env)
+            "env": ("plugin/k", "anything", {"CONTEXT_ROOT": "{top}/anything"}),
+            "blank": ("kit", ".context", {"CONTEXT_ROOT": " "}),
+            "sibling": ("kit", ".context", {}),
+            "worktree": (".worktrees/k", ".context", {}),
+            "project": ("plugin/k", "proj/.context", {"CLAUDE_PROJECT_DIR": "{top}/proj"}),
+        }
+        for name, (kitrel, rootrel, extra) in layouts.items():
+            top = self.t / f"case-{name}"
+            bindir = top / kitrel / "context-db" / "bin"
+            bindir.mkdir(parents=True)
+            for n in ("ctx_adapter.py", "kit_profile.py"):
+                shutil.copy(BIN / n, bindir / n)
+            root = top / rootrel
+            (root / "state" / "swarm").mkdir(parents=True)
+            (root / "state" / "swarm" / "STOP-x").write_text("by: orchestrator\nreason: r\n")
+            (top / "proj").mkdir(exist_ok=True)
+            env = {k: v for k, v in os.environ.items() if k not in ("CONTEXT_ROOT", "CLAUDE_PROJECT_DIR")}
+            env.update({k: v.format(top=top) for k, v in extra.items()})
+            env["HOME"] = str(top)
+            asked = subprocess.run([sys.executable, str(bindir / "kit_profile.py"), "context"], env=env, cwd=str(top),
+                                   capture_output=True, text=True, timeout=60).stdout.strip()
+            self.assertEqual(Path(asked).resolve(), root.resolve(), name)
+            r = subprocess.run([sys.executable, "-X", "importtime", str(bindir / "ctx_adapter.py"), "hook",
+                                "pre-tool-use"], env=env, cwd=str(top), capture_output=True, text=True, timeout=60,
+                               input=json.dumps({"session_id": self.sid, "cwd": str(top), "tool_name": "Bash",
+                                                 "tool_input": {"command": "ls"}}))
+            mods = {ln.split("|")[-1].strip() for ln in r.stderr.splitlines() if ln.startswith("import time:")}
+            self.assertIn("lease", mods, f"{name}: the fast path missed the STOP at the resolved root")
 
     def test_a_lease_stop_denies_the_holder_main_session_and_subagent_alike(self):  # DW-5
         self.acquire("client", self.lane)

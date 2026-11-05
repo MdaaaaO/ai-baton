@@ -23,7 +23,7 @@ holder reserves `--units` of it and a reservation past the capacity is refused, 
   lease.py stop <scope> --reason T [--as orchestrator|owner]
         write `state/swarm/STOP-<scope>`: the PreToolUse hook (`ctx_adapter.py hook pre-tool-use`) then denies the next
         work call (Bash, the file writes, Agent and MCP tools) of a session whose lane holds the lease `<scope>`, and
-        of a subagent of a session that works the epic `<scope>` (an issue number, or a full ref
+        of any session that works the epic `<scope>` unless its row says `role: orchestrator` (an issue number, or a full ref
         `Owner/repo#N`, written `STOP-Owner+repo=N`); prints the in-flight rule
   lease.py go <scope> [--as orchestrator|owner]
         lift it: whoever set it, or the owner; a stop the owner set, only the owner
@@ -503,10 +503,11 @@ def session_row(root: Path, session_id: str) -> tuple[str, str, str]:
     return rows[0][:3] if rows else ("", "", "")
 
 
-def main_row(rows: list[tuple[str, str, str, str]]) -> tuple[str, str, str, str]:
-    """The main session's row among those sharing one session id: the first with `role: orchestrator`, else the first
-    whose role is not `worker`, else the first."""
-    return next((r for r in rows if r[3] == "orchestrator"), None) or next((r for r in rows if r[3] != "worker"), rows[0])
+def main_rows(rows: list[tuple[str, str, str, str]]) -> list[tuple[str, str, str, str]]:
+    """The main session's rows among those sharing one session id: every row with `role: orchestrator`, else every
+    row. The result does not depend on the order of the rows."""
+    orch = [r for r in rows if r[3] == "orchestrator"]
+    return orch or rows
 
 
 REF_RE = re.compile(r"^(?:([^\s#]+)#|#)?(\d+)$")
@@ -553,29 +554,32 @@ def lane_holds(root: Path, lane: str, scope: str) -> bool:
 
 
 def stop_for(root: Path, session_id: str, agent_id: str = "") -> str:
-    """The reason a STOP file blocks this call, or ''. `STOP-<scope>` blocks a lane that holds the lease `<scope>`,
-    and a subagent of a session whose registry row's epic is `<scope>` (a full ref `Owner/repo#N`, the file
-    `STOP-Owner+repo=N`, or an issue number). `agent_id` is what the hook input names for a subagent's call and is
-    absent for the main session's own. The main session is the row with `role: orchestrator`, else the first row whose
-    role is not `worker`: it keeps its epic's calls (its flush, its ledger) and is blocked only through the lease it
-    holds, unless its row's role is `worker` (a peer worker session), which an epic STOP blocks too. The hook input names no lane, so a subagent is matched through every registry
-    row that shares its session id; a lane with no such row is out of reach."""
+    """The reason a STOP file blocks this call, or ''. `STOP-<scope>` blocks a lane that holds the lease `<scope>`
+    (whichever call it makes), and every subagent of a session whose registry row's epic is `<scope>` (a full ref
+    `Owner/repo#N`, the file `STOP-Owner+repo=N`, or an issue number). `agent_id` is what the hook input names for a
+    subagent's call and is absent for the main session's own. The main session's rows are those with
+    `role: orchestrator`, else every row of the session. A main call is blocked by a lease any of them holds. An epic
+    STOP spares it only when a row says `role: orchestrator`: a row with no role, or a peer worker, is blocked.
+    The hook input names no lane, so a subagent is matched through every registry row that shares its session id,
+    and one STOP denies every subagent of that session whatever its epic; a lane with no such row is out of reach."""
     found = stops(root)
     if not found:
         return ""
     rows = session_rows(root, session_id)
     if not rows:
         return ""
+    spared = False
     if not agent_id:
-        rows = [main_row(rows)]
+        rows = main_rows(rows)
+        spared = any(r[3] == "orchestrator" for r in rows)
     for scope, v in found.items():
         for lane, epic, repos, role in rows:
-            by_epic = bool(epic) and epic_matches(scope, epic, repos) and (bool(agent_id) or role == "worker")
+            by_epic = bool(epic) and epic_matches(scope, epic, repos) and not spared
             if lane_holds(root, lane, scope) or by_epic:
                 why = v.get("reason") or "no reason given"
-                return (f"STOP-{scope} ({v.get('by', 'orchestrator')}): {why}. Work calls are blocked until it is "
-                        f"lifted: send the outbox line, run the inbox drain, ack, release your lease and end the task, "
-                        f"then report what ran (BLOCKED <ticket> stop <who> ran=\"...\").")
+                return (f"STOP-{scope} ({v.get('by', 'orchestrator')}): {why}. Work calls are blocked. Send the "
+                        f"outbox line, drain the inbox, ack, release your lease and end the task. The owner lifts it "
+                        f"with `lease.py go {scope}`; an orchestrator registers with `role: orchestrator`.")
     return ""
 
 
@@ -652,9 +656,9 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="list what a sweep would free, change nothing")
     s = sub.add_parser("expire", help="free one lane's expired leases, one RELEASE line each")
     s.add_argument("--lane", required=True)
-    s = sub.add_parser("stop", help="write STOP-<scope>: the hook blocks file writes of the lane that holds the lease "
-                       "<scope> or works that epic (an issue number, or a full ref Owner/repo#N). The session that "
-                       "orchestrates the epic is blocked too, since a subagent shares its session id")
+    s = sub.add_parser("stop", help="write STOP-<scope>: the hook blocks every work call of the lane that holds the "
+                       "lease <scope>, and of a session that works that epic (an issue number, or a full ref "
+                       "Owner/repo#N) unless its row says role: orchestrator; every subagent of it is blocked")
     s.add_argument("scope")
     s.add_argument("--reason", required=True)
     s.add_argument("--as", dest="as_", choices=STOP_SETTERS, default="orchestrator",

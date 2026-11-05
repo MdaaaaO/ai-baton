@@ -184,7 +184,9 @@ def recorded_install_mode() -> str:
 
 def context_root(ignore_env: bool = False) -> Path:
     """The engine's ONE content-root resolver: every script (kb, session, gen_index, gen_sessions, verify, new.sh via
-    `kit_profile.py context`, the Makefile's CONTEXT) asks this function and keeps no copy of its own. The order is
+    `kit_profile.py context`, the Makefile's CONTEXT) asks this function and keeps no copy of its own, except `ctx_adapter._fast_pre_tool_use`, which repeats the cheap cases
+    (`CONTEXT_ROOT`, the sibling `.context/`, `CLAUDE_PROJECT_DIR`) to skip the heavy imports; `test_lease` checks the
+    two agree. The order is
     documented once, in docs/layout.md's "Content root" paragraph.
     `CONTEXT_ROOT`, else the `.context/` beside the kit — also found from a kit worktree
     (`<root>/.worktrees/<name>/`), where the sibling is two levels up. On the plugin path the kit sits in

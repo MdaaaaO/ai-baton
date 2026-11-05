@@ -764,7 +764,7 @@ class Wiring(unittest.TestCase):
         [(pre, pre_sync)] = plugin["pre-tool-use"]  # a deny must block; its matcher also names the other work tools (#703)
         self.assertTrue(pre.startswith("PreToolUse:") and not pre_sync)
         for tool in ("Bash", "Write", "Edit", "MultiEdit", "NotebookEdit"):
-            self.assertRegex(pre.split(":", 1)[1], rf"(^|\|){tool}(\||$)")
+            self.assertRegex(tool, pre.split(":", 1)[1])
         [(on_edit, a1), (on_ctx, a2)] = plugin["post-tool-use-async"]
         self.assertEqual((on_edit, a1, a2), (edits, True, True))
         self.assertEqual(ctx_sync, on_ctx)  # the same ctx-tool matcher, synchronous (#515: the conflict line)
