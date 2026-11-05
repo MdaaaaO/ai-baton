@@ -347,7 +347,7 @@ options:
 ## `session.py`
 
 ```text
-usage: session.py [-h] {register,touch,end,stats,rename} ...
+usage: session.py [-h] {register,touch,end,stats,retire,rename} ...
 
 session.py — maintain a session's self-reported entry in the live session
 registry. Each active Claude session that works on an epic/feature keeps ONE
@@ -387,7 +387,9 @@ default). Empty CLI values are treated as "leave unchanged" so the Makefile
 can pass every flag unconditionally. Stdlib only.
 
 positional arguments:
-  {register,touch,end,stats,rename}
+  {register,touch,end,stats,retire,rename}
+    retire              retire every standby row past its `expires`
+                        (swarm.standby_hours); prints owns: per row
 
 options:
   -h, --help            show this help message and exit

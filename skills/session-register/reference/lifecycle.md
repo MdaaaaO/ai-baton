@@ -147,3 +147,19 @@ lane started — set by a register that creates or reactivates the entry, never 
 `state: retired` on every `standby` row past `expires` and prints `owns: <tickets, PRs>` for each, taken from the
 swarm ledgers and `sessions/<name>/prs.tsv`, so the owner of the leftovers is visible. A row that ends by
 supersession prints the same line. Rename and archive carry `sessions/<name>/` (the `prs.tsv`) with the row.
+
+## Liveness and failover
+
+**A successor orchestrator re-briefs.** For each worker in the `live assignments` block send one
+`ASSIGN <ticket> rebrief=1` (SendMessage by the worker's ref) and wait for its ack. A worker whose registry
+heartbeat is under 5 minutes old is live (re-brief once); an older heartbeat means it ended with no return:
+`swarm.py resume` classifies its row (drive-to-merge when a PR is open, else respawn in place or reassign), no
+re-brief. No registry row: `ListAgents` decides. Standby, retired and ended workers are skipped.
+**A resume re-confirms.** Re-registering a live row without `WORKING=` whose `working_on` was not touched within
+12 hours marks it `unconfirmed: <old>` and prints a line asking for `WORKING=`: restate the current work, or
+`session-touch` it, before trusting it; never keep a stale `working_on` silently.
+**One process per session id.** A register of the same session id under a new `ref` while the row's heartbeat is
+under 5 minutes old prints `DUPLICATE REGISTER` naming both refs: the second process stands down (tell the
+owner, do no work) and leaves the row to the first.
+A parked session registers `STATE=standby`; the row carries `expires` (`swarm.standby_hours`, default 24 h from
+the last heartbeat) and the zombie sweep's `--kill` mode retires it past that (`session.py retire`).

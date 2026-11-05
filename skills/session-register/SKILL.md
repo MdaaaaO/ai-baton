@@ -65,19 +65,11 @@ entries before touching a shared epic, PR or worktree.
    hours and its owner process is gone, and prints `owns: <tickets, PRs>` for it; pass `REF_GONE=1` only after
    `ListAgents` shows the predecessor's ref is not live (it skips the 12 h wait, never the owner-process check).
    Any other predecessor is left as is and a line says why (`reference/lifecycle.md` § End and archiving).
-   **A successor orchestrator re-briefs.** For each worker in the `live assignments` block send one
-   `ASSIGN <ticket> rebrief=1` (SendMessage by the worker's ref) and wait for its ack. A worker whose registry
-   heartbeat is under 5 minutes old is live (re-brief once); an older heartbeat means it ended with no return:
-   `swarm.py resume` classifies its row (drive-to-merge when a PR is open, else respawn in place or reassign), no
-   re-brief. No registry row: `ListAgents` decides. Standby, retired and ended workers are skipped.
-   **A resume re-confirms.** Re-registering a live row without `WORKING=` whose `working_on` was not touched within
-   12 hours marks it `unconfirmed: <old>` and prints a line asking for `WORKING=`: restate the current work, or
-   `session-touch` it, before trusting it; never keep a stale `working_on` silently.
-   **One process per session id.** A register of the same session id under a new `ref` while the row's heartbeat is
-   under 5 minutes old prints `DUPLICATE REGISTER` naming both refs: the second process stands down (tell the
-   owner, do no work) and leaves the row to the first.
-   A parked session registers `STATE=standby`; the row carries `expires` (`swarm.standby_hours`, default 24 h from
-   the last heartbeat) and the zombie sweep's `--kill` mode retires it past that (`session.py retire`).
+   **A successor orchestrator re-briefs** each live worker once (`ASSIGN <ticket> rebrief=1`, wait for the ack); an
+   older heartbeat means ended with no return, so `swarm.py resume` decides. **A resume re-confirms:** a live row
+   whose `working_on` is older than 12 h is marked `unconfirmed: <old>`; pass `WORKING=` or `session-touch` it, never
+   keep it silently. **`DUPLICATE REGISTER`** (same session id, new `ref`, heartbeat under 5 min) means you stand
+   down. A `STATE=standby` row expires and the sweep retires it. Detail: `reference/lifecycle.md` § Liveness and failover.
    `make -C $BATON/context-db mission-build` rebuilds the private mission-control page from the registry (a local
    file, zero model turns, never a publish).
    Then fill the body of `.context/sessions/<name>.md` (a direct `Edit`, or the ctx tools naming your actor —
