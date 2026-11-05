@@ -19,7 +19,8 @@ works twice). This page holds the reads and the input lines the skill's steps po
 ## The repo's own merge gate
 
 `swarm.protected_paths` is the floor. Where the repo has its own auto-merge (a workflow that merges, or a ruleset with
-merge rules), read it at the base and add every path it reserves for the owner. Two outcomes per PR:
+merge rules), read it at the base and add every path it reserves for the owner. A gate it cannot read reserves the
+whole PR for the owner. Two outcomes per PR:
 
 | The PR touches | The repo's auto-merge | The skill |
 |---|---|---|

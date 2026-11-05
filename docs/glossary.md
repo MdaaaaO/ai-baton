@@ -103,7 +103,7 @@ One or two sentences each, alphabetical. Where a term is enforced by code, the f
 - **Stamp** — `.context/kit-health/HEALTH-<env>.md`, written by `kit-health --stamp` after a run with no errors:
   the kit commit and version this environment was last green at.
 - **Swarm tick** — one pass of the orchestrator's loop: re-read the ledger, the tracker and git, never memory; act on
-  what changed; stop until the next wake-up. `docs/swarm.md` (#676) fixes the order (planned, `swarm-run`, #684).
+  what changed; stop until the next wake-up. `docs/swarm.md` (#676) fixes the order (`swarm-run`, #684).
 - **Ticket** — one tracker item (a Jira issue or a GitHub issue, per `tracker.kind`), always cited by its key as a
   link. `ticket-open` / `ticket-update` / `ticket-close` act on it; `tracker.key_regex` recognises it.
 - **Understanding** — the fourth layer and the kit's keystone: the person knows what changed and why. A person cannot
