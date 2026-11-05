@@ -832,7 +832,7 @@ class Tick(CliCase):
         t = self.tick()
         self.assertEqual((t["watches_due"], t["decisions_open"]), ([], []))
 
-    def test_tick_writes_nothing(self):
+    def test_tick_with_nothing_to_sweep_leaves_the_ledger_bytes_unchanged(self):
         self.plan("7")
         self.assign()
         before = self.ledger_file().read_bytes()

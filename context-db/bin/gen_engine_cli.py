@@ -60,6 +60,11 @@ TOOLS = (
     "transcripts.py",
     "leak_shapes.py",
     "gen_eval_rules.py",
+    "swarm.py",
+    "lease.py",
+    "gates.py",
+    "swarm_msg.py",
+    "swarm_budget.py",
 )
 # Tools without an argument parser: listed by docstring, never executed (running them would do their job, not print
 # help — gen_eval_rules.py would rewrite the eval prompts; transcripts.py and leak_shapes.py are importable
