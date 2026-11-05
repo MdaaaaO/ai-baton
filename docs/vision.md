@@ -77,6 +77,7 @@ is on `main` today. A status with a version means it shipped in that release. `p
 | miss check: a fork asks "what did you miss?" | verifier | PR, close, handoff | #622 | shipped (`0.13.0`) |
 | `pr-open`: the PR checklist and body gates | verifier | PR | n/a | existing |
 | `pr-watch`: surfaces only events you can act on | verifier | PR | n/a | existing |
+| `swarm-run`: the orchestrator's tick on an approved epic | verifier | epic, PR | #684 | existing |
 | `pr-event-brief`: triage of one watch event | verifier | PR | n/a | existing |
 | `pr-scan`: your review queue | verifier | PR queue | n/a | existing |
 | `pr-review`: you review another's PR | verifier | PR | n/a | existing |
