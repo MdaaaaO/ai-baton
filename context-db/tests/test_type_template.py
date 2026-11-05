@@ -18,8 +18,9 @@ import type_template as tt  # noqa: E402
 NO_TEMPLATE_TYPES = {"session", "ledger"}
 
 # `default.md` seeds an unknown type; `self-assessment-charter.md` is the self-assessment domain's own
-# README seed (`kit-health.py`'s `seed_pairs`), not a doc type.
-NO_TYPE_TEMPLATES = {"default", "self-assessment-charter"}
+# README seed (`kit-health.py`'s `seed_pairs`), not a doc type; `assignment.md` is the swarm orchestrator's order to
+# one worker, written under `state/swarm/`, which no store walker reads, so it is no doc type either.
+NO_TYPE_TEMPLATES = {"default", "self-assessment-charter", "assignment"}
 
 
 class LiveStoreTies(unittest.TestCase):

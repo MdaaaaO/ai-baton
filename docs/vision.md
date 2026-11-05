@@ -77,6 +77,7 @@ is on `main` today. A status with a version means it shipped in that release. `p
 | miss check: a fork asks "what did you miss?" | verifier | PR, close, handoff | #622 | shipped (`0.13.0`) |
 | `pr-open`: the PR checklist and body gates | verifier | PR | n/a | existing |
 | `pr-watch`: surfaces only events you can act on | verifier | PR | n/a | existing |
+| `swarm-run`: the orchestrator's tick on an approved epic | verifier | epic, PR | #684 | existing |
 | `pr-event-brief`: triage of one watch event | verifier | PR | n/a | existing |
 | `pr-scan`: your review queue | verifier | PR queue | n/a | existing |
 | `pr-review`: you review another's PR | verifier | PR | n/a | existing |
@@ -118,13 +119,14 @@ is on `main` today. A status with a version means it shipped in that release. `p
 The layers are not equally thick. Most rows record or gate. Few ask the person to act. The miss check closes the
 last gap in the verifier layer: a fork that grades the work before its author signs it.
 
-Swarm mode (#674) adds to each layer. The engine is built; the skills are not, so nothing runs by itself yet. One
+Swarm mode (#674) adds to each layer. The engine is built, and so is the orchestrator's skill; the spec skills are not. One
 orchestrator session owns an epic and runs `swarm-run` (#684), one swarm tick at a time. Built, in the engine: the task
 ledger `swarm.py` (#677), the message grammar and inboxes `swarm_msg.py` (#678), leases and STOP files `lease.py`
 (#679), the budget brake `swarm_budget.py` (#680), the verification gates `gates.py` and the `verifier` agent, a role
-that never wrote the change and alone records a pass (#681), and the `builder` agent with its worker brief (#685). Not
+that never wrote the change and alone records a pass (#681), the `builder` agent with its worker brief (#685), and
+`swarm-run` with the assignment file (#684). Not
 built yet: the data-migration gates (#689), the spec skills `epic-discover` and `epic-decompose`, with the owner's go
-before any worker starts (#682, #683), `swarm-run` with the assignment file, liveness and failover (#686), and the
+before any worker starts (#682, #683), liveness and failover (#686), and the
 inbox, the digest, the weekly report and the plan walkthrough (#688, #690). The contract is `docs/swarm.md` (#676), and
 it says what is built. Why the mode needs no server: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
