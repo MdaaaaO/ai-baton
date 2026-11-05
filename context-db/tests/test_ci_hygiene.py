@@ -669,6 +669,90 @@ class AutoMergeCheckPick(unittest.TestCase):
         self.assertIn("has not run on this head", out)
 
 
+class AutoMergeGatedLegs(unittest.TestCase):
+    """auto-merge.yml's GATED loop (ci.yml's path-gated legs), run for real on synthetic check-run rows like
+    AutoMergeCheckPick: a leg that concluded `skipped` passes only beside a successful `changed-paths` on the
+    same head; a red, cancelled or running leg, or a changed-paths that is not a success, waits."""
+
+    LOOP = None
+    GATED = "macos (portable.sh, bash/sh/dash parse);forced-signing (hostile ambient git config)"
+    MACOS = "macos (portable.sh, bash/sh/dash parse)"
+    FSIGN = "forced-signing (hostile ambient git config)"
+    T0, T1 = "2026-11-05T09:00:00Z", "2026-11-05T09:01:00Z"
+
+    @classmethod
+    def setUpClass(cls):
+        text = (WORKFLOWS / "auto-merge.yml").read_text(encoding="utf-8")
+        start = text.index("          IFS=';' read -ra gated")
+        end = text.index("          done", start) + len("          done")
+        cls.LOOP = "\n".join(line[10:] for line in text[start:end].splitlines())
+
+    def decide(self, rows: list[tuple[str, str, str, str]]) -> str:
+        runs = "\n".join("\t".join(r) for r in rows)
+        script = ('skip() { echo "SKIP: $*"; exit 0; }\n'
+                  f'GATED={self.GATED!r}\nruns=$(cat)\n{self.LOOP}\necho PASS\n')
+        r = subprocess.run(["bash", "-c", script], input=runs, capture_output=True, text=True, timeout=10)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def legs(self, macos=("completed", "skipped"), fsign=("completed", "skipped"), cp=("completed", "success")):
+        return [(self.MACOS, *macos, self.T1), (self.FSIGN, *fsign, self.T1), ("changed-paths", *cp, self.T0)]
+
+    def test_skipped_legs_pass_beside_a_successful_changed_paths(self):
+        self.assertEqual(self.decide(self.legs()), "PASS")
+
+    def test_successful_legs_pass(self):
+        self.assertEqual(self.decide(self.legs(macos=("completed", "success"), fsign=("completed", "success"))), "PASS")
+
+    def test_skipped_legs_wait_when_changed_paths_failed(self):
+        out = self.decide(self.legs(cp=("completed", "failure")))
+        self.assertIn("changed-paths concluded failure", out)
+
+    def test_skipped_legs_wait_when_changed_paths_is_still_running(self):
+        out = self.decide(self.legs(cp=("in_progress", "null")))
+        self.assertIn("changed-paths has not finished", out)
+
+    def test_a_changed_paths_rerun_still_running_waits_beside_an_older_success(self):
+        rows = self.legs() + [("changed-paths", "in_progress", "null", "")]
+        self.assertIn("changed-paths has not finished", self.decide(rows))
+
+    def test_a_leg_still_running_waits(self):
+        out = self.decide(self.legs(macos=("in_progress", "null")))
+        self.assertIn("still in_progress", out)
+
+    def test_a_red_forced_signing_waits(self):
+        out = self.decide(self.legs(fsign=("completed", "failure")))
+        self.assertIn("concluded failure", out)
+
+    def test_a_cancelled_macos_waits(self):
+        out = self.decide(self.legs(macos=("completed", "cancelled")))
+        self.assertIn("concluded cancelled", out)
+
+    def test_a_leg_that_never_ran_waits(self):
+        rows = [r for r in self.legs() if not r[0].startswith(self.FSIGN)]
+        self.assertIn("has not run on this head", self.decide(rows))
+
+
+class AutoMergeOwnedPaths(unittest.TestCase):
+    """auto-merge.yml leaves a PR that changes hooks/ or a root settings*.json to the owner: the pattern is run for
+    real with grep, so a drift in the YAML or a wider regex fails here."""
+
+    def test_the_owned_pattern_matches_only_the_hooks_and_root_settings(self):
+        text = (WORKFLOWS / "auto-merge.yml").read_text(encoding="utf-8")
+        m = re.search(r"^          owned='([^']+)'$", text, re.M)
+        self.assertIsNotNone(m, "the owned= pattern moved — update this test")
+        self.assertIn("changes hooks or settings", text)
+        self.assertIn("merges it by hand", text.split("changes hooks or settings", 1)[1].split("\n", 1)[0])
+
+        def hit(path: str) -> bool:
+            return subprocess.run(["grep", "-qE", m.group(1)], input=path + "\n", text=True).returncode == 0
+
+        for path in ("hooks/hooks.json", "hooks/pre-push", "settings.json", "settings.local.example.json"):
+            self.assertTrue(hit(path), f"{path} must be left to the owner")
+        for path in ("docs/settings.md", "skills/x/settings.json", "hooks.json", "context-db/hooks/x.py"):
+            self.assertFalse(hit(path), f"{path} must not be held for the owner")
+
+
 class TreeReviewPrompt(unittest.TestCase):
     """`--allowed-tools` takes a variable number of values: a prompt passed as the next argument is swallowed
     as a tool name and `claude -p` runs with no input. tree-review.yml must feed the prompt on stdin."""

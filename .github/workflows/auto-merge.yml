@@ -145,9 +145,11 @@ jobs:
             case "$conclusion" in
               success) ;;
               skipped)
-                cp=$(awk -F'\t' '$1 == "changed-paths"' <<< "$runs" | sort -t$'\t' -k4,4 | tail -1)
-                [ -n "$cp" ] && [ "$(cut -f2 <<< "$cp")" = completed ] \
+                # any changed-paths run still going waits, even beside an older success (a rerun)
+                cpall=$(awk -F'\t' '$1 == "changed-paths"' <<< "$runs")
+                [ -n "$cpall" ] && [ -z "$(awk -F'\t' '$2 != "completed"' <<< "$cpall")" ] \
                   || skip "check '$name' is skipped and changed-paths has not finished on this head"
+                cp=$(sort -t$'\t' -k4,4 <<< "$cpall" | tail -1)
                 [ "$(cut -f3 <<< "$cp")" = success ] \
                   || skip "check '$name' is skipped and changed-paths concluded $(cut -f3 <<< "$cp") — waiting for the owner"
                 ;;
