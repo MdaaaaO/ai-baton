@@ -2,9 +2,9 @@
 """swarm_budget.py — the swarm's budget brake: what each worker and the epic spent, who is past a cap, the hard stop.
 
 `docs/swarm.md` is the contract: § The swarm tick step 6, § Authority matrix (only the owner raises a cap) and § STOP and
-the call in flight. The orchestrator runs this inside its own session; nothing runs between sessions. Spend is counted at
-each return and each tick, so a cap can be overshot by one step. `swarm.py` holds the one dollar flag (`budget_state`):
-this script writes the `spent` fields it reads, and adds the breaches a dollar figure cannot show.
+the call in flight. `swarm.py tick` calls `sweep` inside the orchestrator's session; nothing runs between sessions. Spend is
+counted at each return and each tick, so a cap can be overshot by one step. `swarm.py` holds the one dollar flag
+(`budget_state`): this script writes the `spent` fields it reads, and adds the breaches a dollar figure cannot show.
 
 Every subcommand takes the epic key first:
   sweep    read every worker and the orchestrator, write `spent`, report the breaches. With `swarm.budget.hard_stop` on, a
@@ -35,11 +35,12 @@ agent id or a transcript's absolute path): `usage` is `session_stats.py`'s TOTAL
 figure cannot free budget. The row's `spent` is the sum of its readings. The epic's `spent` is each orchestrator session's
 TOTAL, which already holds that session's subagent workers, plus everything spent outside those sessions.
 
-**Failing closed.** A cap that does not parse, and a worker with no reading while a dollar cap is in force, refuse the next
-spawn (`refuse`), never read as zero; for a worker whose transcript is gone, `swarm.py progress --spent` records the figure
-by hand. A `hard_stop` that is neither true, false nor null reads as true.
+**Failing closed.** A cap that does not parse and a stop not written refuse the next spawn (`refuse`). A `hard_stop` that is
+neither true, false nor null reads as true. A transcript that cannot be read is a reported line (`spend-unread`) and closes
+nothing: that worker keeps its last figure until a reading or `swarm.py progress --spent` gives another.
 
-Another script imports `sweep(key)`, `assess(led)`, `digest_lines(led, report)`, `row_caps(led, row)` and `CAP_FIELDS`.
+Another script imports `sweep(key)`, `assess(led)`, `tick_findings(report)`, `digest_lines(led, report)`,
+`row_caps(led, row)` and `CAP_FIELDS`.
 
 Exit codes: 0 ok; 1 no such ledger or ticket; 2 bad usage, a failed read, a stop not written; 3 refused by a rule. Stdlib only.
 """
@@ -361,7 +362,7 @@ def assess(led: dict, now: datetime | None = None, unread: list[dict] | None = N
         if t not in running:
             continue
         if reading is None:
-            missing.append({"who": t, "why": "no reading yet: `swarm_budget.py sweep` reads it", "blocks": True})
+            missing.append({"who": t, "why": "no reading yet: `swarm_budget.py sweep` reads it"})
         common = {"scope": "worker", "ticket": t, "worker": r["worker"]["name"]}
         if caps["forks"] is not None and forks > caps["forks"]:
             breaches.append({**common, "kind": "forks", "value": forks, "cap": caps["forks"]})
@@ -371,10 +372,6 @@ def assess(led: dict, now: datetime | None = None, unread: list[dict] | None = N
             breaches.append({**common, "kind": "split", "value": streak, "cap": caps["split_turns"]})
     unread = missing if unread is None else unread
     refuse = [f"budget config: {e}" for e in errors]
-    for u in unread:
-        capped = budget["epic_usd"] is not None or (u["who"] in rows and swarm.row_cap(led, rows[u["who"]]) is not None)
-        if u["blocks"] and capped:
-            refuse.append(f"spend unread for {u['who']}: {u['why']}")
     return {"key": led["key"], "now": moment.astimezone(timezone.utc).strftime(swarm.LEDGER_TIME), "budget": budget,
             "workers": workers, "orchestrator": own, "breaches": breaches, "unread": unread, "config_errors": errors,
             "hard_stop": {"on": hard_on, "state": "none", "reason": None}, "task_stops": [], "refuse": refuse}
@@ -411,26 +408,23 @@ def sweep(key: str, session_id: str | None = None, now: datetime | None = None) 
     moment = now or datetime.now(timezone.utc)
     session_id = session_id or os.environ.get("CLAUDE_CODE_SESSION_ID") or None
     led = swarm.load(key)
-    running = swarm.active_tickets(led)
     readings, unread = {}, []
     for t, r in led["tickets"].items():
         ended = r["status"] in ("verified", "done") and reading_key(r) in (r.get("spend") or {})
         if not r["worker"].get("name") or ended:
             continue
         reading, why = read_worker(key, r)
-        rkey = reading_key(r)
         if reading["usage"] is not None or reading["reported"] is not None:
-            readings[t] = (rkey, reading)
+            readings[t] = (reading_key(r), reading)
         if why:
-            unread.append({"who": t, "why": why, "blocks": t in running or not r.get("spent")})
+            unread.append({"who": t, "why": why})
     orchestrator = None
     if session_id:
         orchestrator, why = read_orchestrator(session_id)
         if why:
-            unread.append({"who": "orchestrator", "why": why, "blocks": True})
+            unread.append({"who": "orchestrator", "why": why})
     elif swarm.budget_state(led)["epic_usd"] is not None:
-        unread.append({"who": "orchestrator", "why": "no session id: run this in the orchestrator's session or pass --session-id",
-                       "blocks": True})
+        unread.append({"who": "orchestrator", "why": "no session id: run this in the orchestrator's session or pass --session-id"})
     stamp = moment.astimezone(timezone.utc).strftime(swarm.LEDGER_TIME)
     with swarm.edit(key) as locked:
         write_readings(locked, {t: v for t, v in readings.items() if t in locked["tickets"]}, session_id, orchestrator, stamp)
@@ -440,6 +434,26 @@ def sweep(key: str, session_id: str | None = None, now: datetime | None = None) 
         with swarm.edit(key) as locked:
             swarm.log(locked, "hard-stop", note=report["hard_stop"]["reason"])
     return report
+
+
+def report_lines(report: dict, breaches: list[dict]) -> list[str]:
+    """What these breaches, the unread readings and a stop print as, here and in `swarm.py tick`."""
+    lines = [f"over-budget {x.get('ticket') or x['scope']} kind={x['kind']} value={x['value']} cap={x['cap']}" for x in breaches]
+    lines += [f"spend-unread {u['who']} why={json.dumps(u['why'], ensure_ascii=False)}" for u in report["unread"]]
+    stop = report["hard_stop"]
+    if stop["state"] != "none":
+        lines.append(f"hard-stop {report['key']} {stop['state']} reason={json.dumps(stop.get('error') or stop['reason'], ensure_ascii=False)}")
+    lines += [f"task-stop {t['ticket']} task={t['task']}" for t in report["task_stops"]]
+    return lines
+
+
+def tick_findings(report: dict) -> dict:
+    """What `swarm.py tick` adds to its report. `no_assign` closes the pool: a breach no dollar figure shows, a refusal.
+    A dollar breach is the tick's own, through `budget_state`, so it is left out here and prints once."""
+    others = [x for x in report["breaches"] if x["kind"] != "spend"]
+    return {"no_assign": [f"over budget: {describe(x)}" for x in others] + report["refuse"], "over": others,
+            "unread": report["unread"], "hard_stop": report["hard_stop"], "task_stops": report["task_stops"],
+            "lines": report_lines(report, others)}
 
 
 def digest_lines(led: dict, report: dict) -> list[str]:
@@ -476,14 +490,8 @@ def print_report(report: dict) -> None:
               f"minutes={'-' if w['minutes'] is None else w['minutes']}/{c['minutes']} split={w['split_streak']}/{c['split_turns']}")
     if report["orchestrator"]:
         print(f"orchestrator total={report['orchestrator']['total']:.2f} split={report['orchestrator']['split_streak']}")
-    for x in report["breaches"]:
-        print(f"over-budget {x.get('ticket') or x['scope']} kind={x['kind']} value={x['value']} cap={x['cap']}")
-    for u in report["unread"]:
-        print(f"spend-unread {u['who']} why={json.dumps(u['why'], ensure_ascii=False)}")
-    if stop["state"] != "none":
-        print(f"hard-stop {report['key']} {stop['state']} reason={json.dumps(stop.get('error') or stop['reason'], ensure_ascii=False)}")
-    for t in report["task_stops"]:
-        print(f"task-stop {t['ticket']} task={t['task']}")
+    for line in report_lines(report, report["breaches"]):
+        print(line)
     for r in report["refuse"]:
         print(f"no-spawn {r}")
 

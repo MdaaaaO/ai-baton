@@ -212,16 +212,16 @@ class SpendReading(BudgetCase):
                 self.write_result("lane-7", bad)
                 out = self.sweep()
                 self.assertIn("spend-unread 7", out)
-                self.assertIn("no-spawn spend unread for 7", out)
                 self.assertEqual(self.row()["spent"], 0)
+                self.assertNotIn("spend", self.row())
 
-    def test_a_missing_transcript_is_unread_and_refuses_spawn_under_a_dollar_cap(self):
+    def test_a_missing_transcript_is_a_reported_line_that_refuses_nothing(self):
         self.plan("7", epic_usd=10)
         self.assign("7", "nobody")
         out = self.sweep("--session-id", "nobody-either")
         self.assertIn("spend-unread 7", out)
-        self.assertIn("no-spawn spend unread for 7", out)
         self.assertIn("spend-unread orchestrator", out)
+        self.assertNotIn("no-spawn", out)
 
     def test_a_transcript_the_readers_choke_on_is_unread_not_a_crash(self):
         path = self.write_session("peer-sid", [])
@@ -232,16 +232,14 @@ class SpendReading(BudgetCase):
         self.assertNotIn("Traceback", p.stderr)
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("spend-unread 7", p.stdout)
-        self.assertIn("no-spawn spend unread for 7", p.stdout)
         self.assertEqual(self.row()["spent"], 0)
 
-    def test_an_ended_worker_with_a_figure_by_hand_stops_refusing(self):
-        self.plan("7", epic_usd=10)
+    def test_a_figure_by_hand_stands_with_the_transcript_gone(self):
+        self.plan("7")
         self.assign("7", "gone")
-        self.ok(SWARM, "apply", EPIC, f"READY 7 {'a' * 40} v=1 id=x1 from=lane-7")
-        self.assertIn("no-spawn spend unread for 7", self.sweep("--session-id", "gone-too"))
         self.ok(SWARM, "progress", EPIC, "7", "--spent", "2.5")
-        self.assertNotIn("no-spawn spend unread for 7", self.sweep("--session-id", "gone-too"))
+        self.assertIn("spend-unread 7", self.sweep())
+        self.assertEqual(self.row()["spent"], 2.5)
 
     def test_a_worker_with_no_ref_is_told_how_to_name_it(self):
         self.plan("7")
@@ -249,20 +247,12 @@ class SpendReading(BudgetCase):
         out = self.sweep()
         self.assertIn("swarm.py assign --ref", out)
 
-    def test_an_unread_worker_refuses_nothing_with_no_dollar_cap(self):
-        self.plan("7")
-        self.assign("7", "nobody")
-        out = self.sweep()
-        self.assertIn("spend-unread 7", out)
-        self.assertNotIn("no-spawn", out)
-
-    def test_tick_flags_a_cap_breach_from_what_the_sweep_wrote(self):
+    def test_a_sweep_flags_a_cap_breach_and_a_tick_prints_it(self):
         self.write_subagent(ORCH, "w7", [turn("w7-1", usd=3.0)])
         self.plan("7")
         self.assign("7", "w7", "subagent", "--cap-usd", "2")
-        self.assertNotIn("over-budget 7", self.ok(SWARM, "tick", EPIC))
         self.assertIn("over-budget 7 kind=spend value=3.0 cap=2.0", self.sweep())
-        self.assertIn("over-budget 7", self.ok(SWARM, "tick", EPIC))
+        self.assertIn("over-budget 7 spent=3.00 cap=2.00", self.ok(SWARM, "tick", EPIC))
 
     def test_past_the_epic_cap_tick_assigns_nothing_and_the_digest_says_so(self):
         self.write_session(ORCH, [turn("o1", usd=11.0)])
@@ -352,7 +342,7 @@ class OtherCaps(BudgetCase):
         self.config(worker_minutes=1)
         self.forks(9)
         head = "a" * 40
-        self.ok(SWARM, "apply", EPIC, f"READY 7 {head} v=1 id=x1 from=lane-7")
+        self.ok(SWARM, "apply", EPIC, f"READY 7 {head} v=1 id=abc1 from=lane-7")
         later = self.assign_time() + timedelta(hours=5)
         self.assertNotIn("over-budget", self.sweep("--now", later.strftime(swarm.LEDGER_TIME)))
 
@@ -574,8 +564,176 @@ class SplitBreach(BudgetCase):
         self.write_subagent(ORCH, "w7", fat_turns(29))
         self.plan("7")
         self.assign("7", "w7")
-        self.ok(SWARM, "apply", EPIC, f"READY 7 {'a' * 40} v=1 id=x1 from=lane-7")
+        self.ok(SWARM, "apply", EPIC, f"READY 7 {'a' * 40} v=1 id=abc1 from=lane-7")
         self.assertNotIn("over-budget", self.sweep())
+
+
+class TickHook(BudgetCase):
+    """DW-1 and DW-3 through the tick itself: `swarm.py tick` sweeps, and what the sweep finds reaches its report."""
+
+    def tick(self, *args: str) -> dict:
+        return json.loads(self.ok(SWARM, "tick", EPIC, "--json", *args))
+
+    def forks_over(self) -> None:
+        self.write_subagent(ORCH, "w7", [turn("w7-1", tools=tuple(f"toolu_{i}" for i in range(5)))])
+        self.plan("7", "8")
+        self.assign("7", "w7")
+
+    def test_a_tick_writes_spent_with_no_other_call(self):
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=3.0)])
+        self.plan("7")
+        self.assign("7", "w7", "subagent", "--cap-usd", "2")
+        out = self.ok(SWARM, "tick", EPIC)
+        self.assertEqual(self.row()["spent"], 3.0)
+        self.assertIn("over-budget 7 spent=3.00 cap=2.00", out)
+        self.assertNotIn("kind=spend", out, "a dollar breach prints once, the tick's own line")
+
+    def test_a_dollar_breach_on_a_worker_leaves_the_pool_open(self):
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=3.0)])
+        self.plan("7", "8")
+        self.assign("7", "w7", "subagent", "--cap-usd", "2")
+        t = self.tick()
+        self.assertEqual(t["assignable"], ["8"])
+        self.assertEqual(t["no_assign"], [])
+
+    def test_a_fork_breach_reaches_no_assign_and_empties_assignable(self):
+        self.forks_over()
+        t = self.tick()
+        self.assertIn("over budget: 7 made 5 forks, cap 4", t["no_assign"])
+        self.assertEqual(t["assignable"], [])
+        out = self.ok(SWARM, "tick", EPIC)
+        self.assertRegex(out, r"(?m)^over-budget 7 kind=forks value=5 cap=4$")
+        self.assertRegex(out, r"(?m)^no-assign over budget: 7 made 5 forks, cap 4$")
+
+    def test_a_minute_breach_reaches_no_assign(self):
+        self.config(worker_minutes=30)
+        self.write_subagent(ORCH, "w7", [turn("w7-1")])
+        self.plan("7", "8")
+        self.assign("7", "w7")
+        at = self.assign_time() + timedelta(minutes=31)
+        t = self.tick("--now", at.strftime(swarm.LEDGER_TIME))
+        self.assertIn("over budget: 7 ran 31 minutes, cap 30", t["no_assign"])
+        self.assertEqual(t["assignable"], [])
+
+    def test_a_split_breach_reaches_no_assign_for_a_worker_and_the_orchestrator(self):
+        self.write_subagent(ORCH, "w7", fat_turns(29))
+        self.plan("7", "8")
+        self.assign("7", "w7")
+        self.assertIn("over budget: 7 carried the split hint for 10 turns, cap 10", self.tick()["no_assign"])
+        self.setUp()
+        self.write_session(ORCH, fat_turns(29))
+        self.plan("7")
+        self.env["CLAUDE_CODE_SESSION_ID"] = ORCH
+        t = self.tick()
+        self.assertIn("over budget: the orchestrator carried the split hint for 10 turns, cap 10", t["no_assign"])
+        self.assertEqual(t["assignable"], [])
+
+    def test_the_pool_reopens_when_the_worker_past_its_cap_stops(self):
+        self.forks_over()
+        self.assertEqual(self.tick()["assignable"], [])
+        self.ok(SWARM, "apply", EPIC, "BLOCKED 7 budget orchestrator v=1 id=abc1 from=lane-7")
+        self.assertEqual(self.tick()["assignable"], ["8"])
+
+    def test_a_hard_stop_empties_assignable_and_says_who_to_stop(self):
+        self.config(hard_stop=True)
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=3.0)])
+        self.plan("7", "8")
+        self.assign("7", "w7", "subagent", "--cap-usd", "2")
+        out = self.ok(SWARM, "tick", EPIC)
+        self.assertTrue(self.stop_file().exists())
+        self.assertRegex(out, rf"(?m)^hard-stop {EPIC} written reason=")
+        self.assertRegex(out, r"(?m)^task-stop 7 task=w7$")
+        t = self.tick()
+        self.assertEqual(t["assignable"], [])
+        self.assertIn(f"STOP on {EPIC}", t["no_assign"])
+        self.assertEqual(t["budget_sweep"]["hard_stop"]["state"], "already")
+
+    def test_a_stop_not_written_closes_the_pool_and_the_tick_still_exits_0(self):
+        self.config(hard_stop=True)
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=3.0)])
+        self.plan("7", "8")
+        self.assign("7", "w7", "subagent", "--cap-usd", "2")
+        (self.root / "state" / "swarm" / "stops.lock").mkdir()
+        t = self.tick()
+        self.assertEqual(t["assignable"], [])
+        self.assertTrue(any(r.startswith("hard stop not written") for r in t["no_assign"]), t["no_assign"])
+
+    def test_a_cap_that_does_not_parse_closes_the_pool(self):
+        self.config(worker_forks="four")
+        self.plan("7")
+        t = self.tick()
+        self.assertEqual(t["assignable"], [])
+        self.assertTrue(any(r.startswith("budget config: swarm.budget.worker_forks") for r in t["no_assign"]), t["no_assign"])
+
+    def test_an_unreadable_transcript_is_a_line_and_the_pool_stays_open(self):
+        self.plan("7", "8", epic_usd=10)
+        self.assign("7", "nobody")
+        t = self.tick()
+        self.assertEqual(t["assignable"], ["8"])
+        self.assertEqual(t["no_assign"], [])
+        self.assertRegex(self.ok(SWARM, "tick", EPIC), r"(?m)^spend-unread 7 why=")
+
+    def test_a_sweep_that_raises_closes_the_pool_and_the_tick_still_prints(self):
+        self.plan("7")
+        lock = self.root / "state" / "swarm" / f"{EPIC}.json.lock"
+        lock.unlink()
+        lock.mkdir()  # the ledger's lock cannot open: only a write needs it
+        p = self.run_script(SWARM, "tick", EPIC)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertRegex(p.stdout, r"(?m)^no-assign budget sweep failed: ")
+        self.assertRegex(p.stdout, r"(?m)^ready 7$")
+        self.assertNotRegex(p.stdout, r"(?m)^assignable ")
+
+    def test_run_as_a_script_a_raise_from_the_second_copy_is_caught(self):
+        self.plan("7")
+        self.assign("7", "nobody")
+        path = self.root / "state" / "swarm" / f"{EPIC}.json"
+        led = self.ledger()
+        for entry in led["log"]:
+            entry["at"] = "not a time"  # the sweep's minute clock raises `SwarmError` from `swarm_budget`'s copy of this module
+        path.write_text(json.dumps(led), encoding="utf-8")
+        p = self.run_script(SWARM, "tick", EPIC)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("Traceback", p.stderr)
+        self.assertRegex(p.stdout, r"(?m)^no-assign budget sweep failed: ")
+
+    def test_run_as_a_script_from_any_directory_the_lazy_import_finds_its_neighbour(self):
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=1.0)])
+        self.plan("7")
+        self.assign("7", "w7")
+        env = {k: v for k, v in self.env.items() if k != "PYTHONPATH"}
+        p = subprocess.run([sys.executable, str(SWARM), "tick", EPIC], capture_output=True, text=True, env=env,
+                           stdin=subprocess.DEVNULL, cwd=self.tmp)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("budget sweep failed", p.stdout)
+        self.assertEqual(self.row()["spent"], 1.0)
+
+    def test_tick_report_stays_a_pure_read(self):
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=3.0)])
+        self.plan("7")
+        self.assign("7", "w7")
+        path = self.root / "state" / "swarm" / f"{EPIC}.json"
+        before = path.read_bytes()
+        with mock.patch.dict(os.environ, {"CONTEXT_ROOT": str(self.root), "HOME": str(self.tmp)}):
+            report = swarm.tick_report(swarm.load(EPIC))
+        self.assertEqual(path.read_bytes(), before)
+        self.assertNotIn("budget_sweep", report)
+
+    def test_a_tick_with_nothing_new_to_read_writes_nothing(self):
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=1.0)])
+        self.plan("7")
+        self.assign("7", "w7")
+        self.ok(SWARM, "tick", EPIC)
+        path = self.root / "state" / "swarm" / f"{EPIC}.json"
+        before = path.read_bytes()
+        self.ok(SWARM, "tick", EPIC)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_the_docstring_says_what_a_tick_writes(self):
+        doc = SWARM.read_text(encoding="utf-8")
+        self.assertNotIn("never a write", doc)
+        self.assertIn("`spent`, and a STOP when", " ".join(doc.split()))
 
 
 class WorkerBrief(unittest.TestCase):
