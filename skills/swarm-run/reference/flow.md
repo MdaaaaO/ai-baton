@@ -5,7 +5,7 @@ the work behind each one waits, and everything else goes on.
 
 ```mermaid
 flowchart TD
-  R[1 Read: swarm.py tick, tracker, git] --> I[2 Inbox: drain, apply, ack; STOP and HOLD first]
+  R[1 Read: swarm.py tick, tracker, git] --> I[2 Inbox: /swarm-inbox, its MARK/SEEN/CLOSE-DRAFT trailers, apply, ack; STOP and HOLD first]
   I --> D[3 Decisions: BLOCKED, NEEDS, DECISION]
   D --> A[4 Assign: assignable only, one message, one worktree each]
   A --> S[5 Stalls: assigned and claimed rows]

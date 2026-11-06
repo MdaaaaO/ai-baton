@@ -4,7 +4,7 @@
     check.py <index.html> [--allow-host HOST]... [--sections sessions,cost,...]
 
 Reads the page with the stdlib HTML parser (no browser, no network) and reports one finding per line:
-  - a required section id is missing (default: sessions, cost, catalog, priorities, queues, pointers) or the
+  - a required section id is missing (default: sessions, cost, catalog, priorities, queues, swarm, pointers) or the
     label text "data as of" is;
   - the #data / #build JSON blocks are missing, are not application/json, or do not parse as a JSON object;
   - a <script src>, <iframe>, <object>, <embed>, <link href>, <img src> or <form action>, a <meta http-equiv=refresh>
@@ -42,7 +42,7 @@ from urllib.parse import urlsplit
 HERE = Path(__file__).resolve().parent
 ENGINE_BIN = HERE.parent.parent / "context-db" / "bin"
 
-SECTIONS = ("sessions", "cost", "catalog", "priorities", "queues", "pointers")
+SECTIONS = ("sessions", "cost", "catalog", "priorities", "queues", "swarm", "pointers")
 LABEL = "data as of"
 BLOCKS = ("data", "build")
 KIT_HOSTS = ("github.com",)

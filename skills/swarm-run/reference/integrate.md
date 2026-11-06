@@ -11,7 +11,7 @@ works twice). This page holds the reads and the input lines the skill's steps po
   404 whose message is `Branch not protected` means no protection, and so no code-owner gate. A 403, a 404 with any
   other message, or any other failure leaves the gate unknown, and an unknown gate routes the merge to the owner.
 - A path whose owners, minus the PR's author, are empty (or teams the author alone belongs to) has no reachable
-  reviewer: report `needs owner of <path>` at PR open. A `READY` head on that PR does not count toward the merge gate
+  reviewer: report `needs owner of <path>` at PR open, as an open decision (`swarm.py decision`) the digest shows. A `READY` head on that PR does not count toward the merge gate
   until the owner answers.
 - Approved is `gh pr view <pr> --json reviewDecision` reading `APPROVED`. One approving review under a code-owner
   rule is not it.
@@ -24,7 +24,7 @@ whole PR for the owner. Two outcomes per PR:
 
 | The PR touches | The repo's auto-merge | The skill |
 |---|---|---|
-| a reserved path | skips it | keeps it out of its own merge; the digest says `needs the owner's merge`, because the PR waits with no red check and no event |
+| a reserved path | skips it | keeps it out of its own merge; an open decision `needs the owner's merge` (`swarm.py decision`) shows in the digest, because the PR waits with no red check and no event |
 | a `swarm.protected_paths` path the gate does not reserve | would merge it once ready | keeps the draft and stops at `NEEDS owner` before `gh pr ready`, because marking it ready arms the merge |
 | neither | may merge it | marks it ready only once the overview, the miss check and the verifier's read are back |
 

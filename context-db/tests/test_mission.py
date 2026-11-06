@@ -45,7 +45,7 @@ EMAIL = "someone" + "@" + "example.invalid"
 SESSION_INDEX_STAMP = "2026-10-10T09:30:00Z"
 INDEX_DATE = "2026-10-10"
 TOP_KEYS = ["as_of", "catalog", "cost", "links", "pointers", "priorities", "queues", "schema", "sessions",
-            "stale_hours", "tz"]
+            "stale_hours", "swarm", "tz"]
 OUTPUTS = ["data.json", "build.json", "index.html", "last.sha", ".gitignore"]
 
 # a tiny page: every token the engine knows, one part, both script blocks
@@ -242,6 +242,18 @@ def write_sources(root: Path) -> None:
             {"repo": "widgets", "pr": 7, "head": "0123abc", "status": "posted", "ts": "2026-10-09T09:00:00Z"}]
     write(root, "state/pr-review/ledger.jsonl", "\n".join(json.dumps(r) for r in rows) + "\nnot json\n")
     (Path(root) / "state" / "sign-queue").mkdir(parents=True, exist_ok=True)
+    write(root, "state/swarm/ep-1.json", json.dumps({
+        "key": "ep-1", "title": "Placeholder epic", "repo": "acme/widgets", "plan_approved": True, "updated": "2026-10-09T08:00:00Z",
+        "spent": 4.25, "budget": {"epic_usd": 10.0, "worker_usd": None},
+        "decisions": [{"id": "d1", "question": "Keep the old flag?", "ticket": "2", "closed": None},
+                      {"id": "d2", "question": "Done one", "ticket": "1", "closed": "2026-10-09T07:00:00Z"}],
+        "holds": [],
+        "tickets": {"1": {"title": "First piece", "status": "done", "pr": 11, "spent": 1.5, "spend": {"a": {"spent": 1.5}}},
+                    "2": {"title": "Second piece", "status": "blocked", "spent": 2.0, "spend": {},
+                          "blocked": {"reason": "FAIL on the merged commit", "who": "owner"}},
+                    "10": {"title": None, "status": "ready", "spent": 0}}}))
+    write(root, "state/swarm/ep-1/digest.json", json.dumps({"at": "2026-10-09T08:30:00Z", "text": "the last digest\n"}))
+    write(root, "state/swarm/ep-1/inbox.json", "{}")
 
 
 def build_base(tmp: Path) -> Path:
@@ -590,6 +602,7 @@ class DataShape(unittest.TestCase):
         self.assertEqual(sorted(DATA["priorities"]), ["items", "path", "present", "problems"])
         self.assertEqual(sorted(DATA["queues"]), ["kit_health", "pr_review", "sign_queue"])
         self.assertEqual(sorted(DATA["pointers"]), ["index", "memory", "problems", "session_index", "sources"])
+        self.assertEqual(sorted(DATA["swarm"]), ["epics", "path", "problems"])
         entry = DATA["sessions"]["active"][0]
         self.assertEqual(sorted(entry), ["cost_usd", "crons", "epic", "epic_url", "has_prompt", "heartbeat",
                                          "heartbeat_local", "name", "open_prs", "path", "prompt", "ref", "repos",
@@ -739,10 +752,11 @@ class MissingSources(Store):
                                                        "problems": [], "rows": 0})
         self.assertEqual(data["queues"]["sign_queue"], {"jobs": [], "path": "state/sign-queue", "problems": []})
         self.assertEqual(data["queues"]["kit_health"], {"latest": None, "problems": [], "stamp": None})
+        self.assertEqual(data["swarm"], {"epics": [], "path": "state/swarm", "problems": []})
         self.assertEqual((data["cost"]["problems"], data["pointers"]["problems"]), ([], []))  # absent is not a problem
         present = {s["name"]: s["present"] for s in data["pointers"]["sources"]}
         self.assertEqual({k for k, v in present.items() if not v},
-                         {"index", "kit_health", "ledger", "memory", "pr_review", "priorities", "session_index", "sign_queue"})
+                         {"index", "kit_health", "ledger", "memory", "pr_review", "priorities", "session_index", "sign_queue", "swarm"})
         self.assertEqual(data["sessions"]["counts"]["active"], 3)  # the rest of the store is read as usual
 
     def test_a_bare_blank_store_builds_an_empty_page(self):
@@ -877,6 +891,7 @@ class UnreadableSources(Store):
              lambda d: self.assertIsNone(d["queues"]["kit_health"]["latest"]["outcome"])),
             ("kit-health/HEALTH-test.md", lambda d: d["queues"]["kit_health"], "queues.kit_health",
              lambda d: self.assertIsNone(d["queues"]["kit_health"]["stamp"])),
+            ("state/swarm/ep-1.json", lambda d: d["swarm"], "swarm", lambda d: self.assertEqual(d["swarm"]["epics"], [])),
             ("memory/MEMORY.md", lambda d: d["pointers"], "pointers", lambda d: None),
             ("INDEX.md", lambda d: d["pointers"], "pointers", lambda d: None),
             ("SESSION_INDEX.md", lambda d: d["pointers"], "pointers", lambda d: None))
@@ -1308,8 +1323,32 @@ class Pointers(unittest.TestCase):
             "catalog": ".", "index": "INDEX.md", "kit_health": "kit-health", "ledger": "sessions/_ledger.md",
             "memory": "memory/MEMORY.md", "pr_review": "state/pr-review/ledger.jsonl",
             "priorities": "reference/priorities.md", "session_index": "SESSION_INDEX.md", "sessions": "sessions",
-            "sign_queue": "state/sign-queue"})
+            "sign_queue": "state/sign-queue", "swarm": "state/swarm"})
         self.assertTrue(all(s["present"] for s in sources))
+
+    def test_the_swarm_panel_reads_the_ledger_and_the_last_digest(self):
+        """The swarm section: one row per top-level ledger (a sub-directory's files are not ledgers), spend from the
+        ledger's own fields, closed decisions left out, a blocked ticket with who must act."""
+        epics = DATA["swarm"]["epics"]
+        self.assertEqual([e["key"] for e in epics], ["ep-1"])
+        e = epics[0]
+        self.assertEqual((e["spent"], e["epic_usd"], e["plan_approved"]), (4.25, 10.0, True))
+        self.assertEqual(e["by_status"], {"blocked": 1, "done": 1, "ready": 1})
+        self.assertEqual([t["ticket"] for t in e["tickets"]], ["1", "2", "10"])  # numeric order
+        self.assertEqual([(t["spent"], t["readings"]) for t in e["tickets"]], [(1.5, 1), (2.0, 0), (0, 0)])
+        self.assertEqual(e["blocked"], [{"ticket": "2", "reason": "FAIL on the merged commit", "who": "owner"}])
+        self.assertEqual(e["shipped"], [{"ticket": "1", "title": "First piece", "pr": 11}])
+        self.assertEqual(e["decisions_open"], [{"id": "d1", "question": "Keep the old flag?", "ticket": "2"}])
+        self.assertEqual(e["digest"], {"at": "2026-10-09T08:30:00Z", "text": "the last digest\n"})
+
+    def test_the_panel_reads_spend_and_cap_as_the_digest_does(self):
+        """The cap in config and the spend on the rows: `$7.50 of $50.00`, not `$0.00 (no epic cap)`; a verified row is shipped."""
+        led = {"key": "ep-2", "budget": {}, "tickets": {"1": {"status": "verified", "spent": 7.5, "title": "x"},
+                                                       "2": {"status": "assigned"}}}
+        with mock.patch.object(mission.swarm, "config", lambda key: 50.0):
+            row = mission.swarm_epic(led, None)
+        self.assertEqual((row["spent"], row["epic_usd"]), (7.5, 50.0))
+        self.assertEqual([t["ticket"] for t in row["shipped"]], ["1"])
 
 
 # ── pure helpers, called in process ───────────────────────────────────────────────────────────────────────────

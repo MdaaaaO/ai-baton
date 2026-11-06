@@ -7,7 +7,7 @@ the orchestrator's registered name, the `from=` on its lines.
 |---|---|
 | 0 | `make -C $BATON/context-db session-register NAME=<lane> EPIC=<key> ROLE=orchestrator [SUCCESSOR_OF=<old>]` |
 | 1 | `python3 $E/swarm.py tick <key> --json` · `python3 $E/swarm.py resume <key> --repo-dir <clone> --json` |
-| 2 | `python3 $E/swarm_msg.py drain --key <key> <lane>` · `… drain --key <key> <worker> --outbox` · `python3 $E/swarm.py apply <key> "<line>"` · `python3 $E/swarm_msg.py ack --key <key> --as <lane> <id>…` · `python3 $E/swarm_msg.py pending --key <key>` |
+| 2 | `/swarm-inbox <key> <peer lines…>`, then its trailers: `python3 $BATON/skills/swarm-inbox/scripts/inbox.py mark <key> <lane>/<in\|out>=<n>…` · `… inbox.py seen <key> --at <iso> --refs <ids>` · `… inbox.py draft-close --key <key> <id> --outcome sent\|sent-edited\|gone` · `python3 $E/swarm.py apply <key> "<line>"` · `python3 $E/swarm_msg.py ack --key <key> --as <lane> <id>…` · `python3 $E/swarm_msg.py pending --key <key>` |
 | 3 | `python3 $E/swarm.py decision <key> --question "…" --for-ticket <t>` · `… decision <key> --close <id> --line "<decision line>"` |
 | 4 | `python3 $E/swarm.py assign <key> <t> --kind subagent\|peer\|headless --name <worker> --ref <ref> --worktree <dir> --branch <b>`, then `python3 $E/swarm_budget.py caps <key> <t>` (the `flag:` line needs the kind set) · `python3 $E/swarm_msg.py format ASSIGN <t> <file> --from <lane> --key <key>` · `python3 $E/swarm_msg.py send --key <key> <worker> "<line>" --inbox` |
 | 4, incident | `python3 $E/swarm.py add <key> <t> --incident --area <path> --dw DW-<n>` |

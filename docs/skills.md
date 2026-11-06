@@ -60,6 +60,11 @@ which every swarm skill and agent cites instead of restating it.
 - **swarm-run** — the orchestrator's tick on an approved epic: assigns its tickets to `builder` workers, drains their
   returns, integrates and verifies the PRs, writes the digest. The spec skills that approve an epic
   (`epic-discover`, `epic-decompose`) are not built yet.
+- **swarm-inbox** — a forked sweep for the tick: every swarm channel (outboxes, the orchestrator's inbox, tracker
+  comments, PR events, due watches, chat where enabled) as one `ITEM` line each, or `NO-OP`. It never writes.
+- **swarm-status** — the swarm digest once per `swarm.digest_hours` and at each wave end: shipped, blocked, decisions,
+  spend, stalls, next and the operator lines, on the epic, in the context doc, as a chat draft where enabled, and in
+  mission-control's swarm panel.
 
 ## Capability tier — needs a system
 
