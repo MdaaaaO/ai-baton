@@ -55,8 +55,11 @@ is the full contract. `docs/authoring.md` explains how to write a new one.
 
 One orchestrator session owns an epic, workers build its tickets and a verifier records each pass. The roles, the
 lifecycle, the authority matrix, the message grammar and the swarm tick are one contract, [`docs/swarm.md`](swarm.md),
-which every swarm skill and agent cites instead of restating it. The `verifier` agent is built; the swarm skills are
-not built yet, so nothing starts it.
+which every swarm skill and agent cites instead of restating it.
+
+- **swarm-run** — the orchestrator's tick on an approved epic: assigns its tickets to `builder` workers, drains their
+  returns, integrates and verifies the PRs, writes the digest. The spec skills that approve an epic
+  (`epic-discover`, `epic-decompose`) are not built yet.
 
 ## Capability tier — needs a system
 
@@ -77,3 +80,5 @@ The forked workers that skills run under, and the swarm's verifier. Where they f
 - **auto-runner** — Sonnet worker for the auto-approve path on trivial PRs.
 - **verifier** — Opus worker, started fresh by the swarm's orchestrator, that checks a ticket's `READY` head, its merged
   commit and an epic's agent gates. It never wrote the change, and only it records a pass.
+- **builder** — swarm worker that builds one assigned ticket in its own worktree, pushes and returns grammar lines. It
+  never opens or merges a PR.
