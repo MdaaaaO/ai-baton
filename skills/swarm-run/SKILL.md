@@ -72,10 +72,12 @@ Only `assigned` and `claimed` rows stall. Per `stalled` entry, by its `next`: `c
 --stall`; `rebrief` → count it and send one `ASSIGN … rebrief=1` with what is missing in `note="…"`;
 `reassign-or-park` → a new worker (`swarm.py assign`) or `swarm.py status <key> <t> parked --reason "…"` plus the
 `PARKED` line. Each leaves its ledger line. A lost worker (`unreachable`, `⚠ STALE`, ended with no return, lost its
-background task) → `swarm.py resume <key> --repo-dir <clone> --json`, and act on each row's `action`: `drive-to-merge`
-→ step 7; `respawn-in-place` → resume its run with the note and the findings inline; `reassign` → a new worker;
-`record-merge` or `update` → `--apply`; `ask` → step 3. `ASSIGN … rebrief=1` goes only to a live run, one whose
-heartbeat is under 5 minutes old; a dead run is respawned, never messaged. **Before you touch a worktree**,
+background task) → `swarm.py resume <key> --repo-dir <clone> --json`. `resume` gives every assigned or claimed row an
+`action` and reads no heartbeat, so apply one only to the ticket whose worker failed the liveness probe (step 4's
+`ListAgents` by ref, or the reopen window first), never to a live worker's row: `none` is a no-op; `drive-to-merge` →
+step 7; `respawn-in-place` → resume its run with the note and the findings inline; `reassign` → a new worker;
+`record-merge` or `update` → `--apply`; `ask` → step 3. A live but stalled run gets the `rebrief` above, a gone run is
+respawned, never messaged. **Before you touch a worktree**,
 `ps -eo pid,args` for its path: a worker that ended its turn on a background CI is still running, a merge into its
 worktree voids that run, and its CI line is a placeholder until the run ends.
 

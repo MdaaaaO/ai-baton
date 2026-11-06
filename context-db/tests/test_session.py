@@ -320,6 +320,10 @@ class LivenessAndFailover(unittest.TestCase):
         self.assertIn("ref-first", r.stderr)
         self.assertIn("ref-second", r.stderr)
         self.assertIn("stands down", r.stderr)
+        self.assertEqual(r.returncode, 3)
+        row = (self.root / "sessions" / "kit-d-1.md").read_text(encoding="utf-8")
+        self.assertIn("ref: ref-first", row)   # no register: the first process keeps the row
+        self.assertNotIn("ref-second", row)
 
     def test_the_same_ref_or_an_old_heartbeat_or_another_session_id_does_not_warn(self):
         env = {"CLAUDE_CODE_SESSION_ID": "sid-dup"}
@@ -352,12 +356,64 @@ class LivenessAndFailover(unittest.TestCase):
                                                  ("5", "pr", "kit-w-nobody"))})
         out = self._reg("kit-o-2", "--successor-of", "kit-o-1").stdout
         self.assertIn("live assignments of predecessor kit-o-1:", out)
-        self.assertEqual(out.count("rebrief: ASSIGN 1 rebrief=1 to kit-w-live"), 1)
-        self.assertIn("no rebrief: reassign 2", out)       # a stale heartbeat is ended with no return
-        self.assertNotIn("ASSIGN 2 ", out)
+        self.assertEqual(out.count("ASSIGN 1 rebrief=1 to kit-w-live once"), 1)
+        self.assertIn("ref=r-kit-w-dead", out)             # an old heartbeat is not a verdict: the ref is probed
+        self.assertNotIn("no rebrief", out)
+        self.assertNotIn("reassign 2", out)
         self.assertNotIn("kit-w-idle", out)                # standby is not a live run
         self.assertNotIn("ASSIGN 4 ", out)                 # merged is not an assignment
-        self.assertIn("rebrief: ASSIGN 5 rebrief=1 to kit-w-nobody once, if its ref is live", out)  # no row: ListAgents decides
+        self.assertIn("ASSIGN 5 rebrief=1 to kit-w-nobody once", out)  # no row: ListAgents decides
+        self.assertIn("`ListAgents`", out)
+
+    def test_a_ten_minute_old_heartbeat_is_probed_by_ref_never_called_ended(self):
+        self._row("kit-o-1", status="ended")
+        self._row("kit-w-slow", heartbeat=self._t(seconds=-600))
+        self._ledger("kit-o-1", {"7": {"status": "assigned", "repo": "o/r", "pr": None, "pr_state": None,
+                                       "worker": {"kind": "peer", "name": "kit-w-slow", "ref": "r-slow"}}})
+        out = self._reg("kit-o-2", "--successor-of", "kit-o-1").stdout
+        self.assertIn("ref=r-slow kind=peer (registry heartbeat 6", out)
+        self.assertIn("probe ref r-slow with `ListAgents`: live -> ASSIGN 7 rebrief=1", out)
+        self.assertIn("gone -> `swarm.py resume`", out)
+        self.assertIn("older than 90 min", out)
+        self.assertNotIn("ended with no return", out)
+
+    def test_a_subagent_worker_of_a_dead_predecessor_goes_to_resume_without_a_probe(self):
+        self._row("kit-o-1", status="ended")
+        self._row("kit-w-sub", heartbeat=self._t(seconds=-30))
+        self._ledger("kit-o-1", {"7": {"status": "assigned", "repo": "o/r", "pr": None, "pr_state": None,
+                                       "worker": {"kind": "subagent", "name": "kit-w-sub", "ref": "r-sub"}}})
+        out = self._reg("kit-o-2", "--successor-of", "kit-o-1").stdout
+        self.assertIn("no probe", out)
+        self.assertIn("`swarm.py resume` classifies 7", out)
+        self.assertNotIn("ASSIGN 7", out)
+
+    def test_an_archived_predecessor_reads_the_prs_table_of_its_newest_suffixed_lane(self):
+        arch = self.root / "sessions" / "archive"
+        for stem, hb, pr in (("kit-z", "2026-10-01T00:00:00Z", "1"), ("kit-z-20261104", "2026-11-04T00:00:00Z", "99")):
+            (arch / stem).mkdir(parents=True)
+            (arch / stem / "prs.tsv").write_text(f"repo\tpr\thead7\tstate\tticket\no/r\t{pr}\tabc1234\topen\t3\n", encoding="utf-8")
+            (arch / f"{stem}.md").write_text(f"---\nsession: kit-z\nstatus: ended\nheartbeat: {hb}\n---\n", encoding="utf-8")
+        out = self._reg("kit-o-2", "--successor-of", "kit-z").stdout
+        self.assertIn("o/r\t99\tabc1234", out)
+        self.assertNotIn("o/r\t1\t", out)
+
+    def test_a_row_written_before_confirmed_existed_is_confirmed_not_marked(self):
+        p = self._row("kit-r-9", working_on="legacy")
+        r = self._reg("kit-r-9")
+        doc = p.read_text(encoding="utf-8")
+        self.assertNotIn("unconfirmed", doc)
+        self.assertNotIn("not confirmed", r.stderr)
+        self.assertRegex(doc, r"confirmed: \d{4}-")
+
+    def test_a_reregister_without_state_keeps_standby_and_its_expiry(self):
+        self._reg("kit-w-3", "--state", "standby")
+        p = self.root / "sessions" / "kit-w-3.md"
+        exp = [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.startswith("expires:")][0]
+        run("session.py", "touch", "--name", "kit-w-3", "--no-stats", root=self.root)
+        self._reg("kit-w-3", "--working", "something new")
+        doc = p.read_text(encoding="utf-8")
+        self.assertIn("state: standby", doc)
+        self.assertIn(exp, doc)
 
     def test_ref_gone_supersedes_a_predecessor_whose_heartbeat_is_still_young(self):
         self._row("kit-o-1", heartbeat=self._t(hours=-1))

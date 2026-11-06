@@ -132,6 +132,7 @@ def _age_seconds(v) -> float | None:
     return None if t is None else (datetime.now(timezone.utc) - t).total_seconds()
 
 
+EXIT_DUPLICATE_REGISTER = 3  # `register` refused: a second process holds the row
 DUP_REGISTER_SECONDS = 300  # a re-register under a new ref inside this window of the last heartbeat is a second process
 
 
@@ -252,6 +253,14 @@ def _archived_candidates(name: str) -> list:
             if (meta.get("session") or os.path.splitext(fn)[0]) == name:
                 cands.append((meta.get("heartbeat", ""), fn))
     return sorted(cands)
+
+
+def _archive_dir(name: str) -> str:
+    """`sessions/archive/<stem>` for the newest archived lane of `name` (`archive_path` suffixes a taken name with
+    `-YYYYMMDD`, and the lane's directory follows its file's stem); the bare name when no archived doc is found."""
+    cands = _archived_candidates(name)
+    stem = max(cands)[1][:-3] if cands else name
+    return os.path.join(SESS_DIR, "archive", stem)
 
 
 def restore_from_archive(name: str) -> str:
@@ -506,7 +515,7 @@ def _predecessor_open_prs(name: str) -> str:
 def _prs_tsv_rows(name: str):
     """The data rows of `sessions/<name>/prs.tsv` (`repo<TAB>pr<TAB>head7<TAB>state<TAB>ticket`, as `swarm.py render` writes
     it), live dir else the archived one; `None` when there is no such file."""
-    for d in (os.path.join(SESS_DIR, name), os.path.join(SESS_DIR, "archive", name)):
+    for d in (os.path.join(SESS_DIR, name), _archive_dir(name)):
         f = os.path.join(d, "prs.tsv")
         if os.path.isfile(f):
             try:
@@ -562,10 +571,14 @@ def _owns_line(name: str, meta: dict) -> str:
 
 def _predecessor_assignments(pred: str) -> str:
     """The `live assignments` block a successor orchestrator sees at registration: every assigned, claimed or pr ticket of
-    the ledgers the predecessor ran, minus workers whose registry row is standby, retired or ended. Each worker is probed by
-    its registry heartbeat (fresh under `DUP_REGISTER_SECONDS` = live; older = ended with no return, reassign, never re-brief);
-    a worker with no row is for the caller's `ListAgents`. One `ASSIGN <ticket> rebrief=1` per live or unprobed worker."""
+    the ledgers the predecessor ran, minus workers whose registry row is standby, retired or ended. This script cannot call
+    `ListAgents`, so it never decides live or ended from a heartbeat age: each row prints the worker's ref and heartbeat age
+    and says to probe the ref (a live ref gets one `ASSIGN <ticket> rebrief=1`, a gone ref goes to `swarm.py resume`); with
+    no peer list, a heartbeat older than `swarm.stall_minutes` is gone. A background-subagent worker dies with the session
+    that spawned it, so once the predecessor's process is gone it goes to `swarm.py resume` with no probe."""
     head = f"live assignments of predecessor {pred}:"
+    stall = int(_cfg_number("swarm.stall_minutes", 90))
+    pred_alive = None  # read lazily: only a subagent row needs it
     out = []
     for led in _ledgers():
         if led.get("session") != pred:
@@ -573,18 +586,23 @@ def _predecessor_assignments(pred: str) -> str:
         for t, r in led["tickets"].items():
             if r.get("status") not in ("assigned", "claimed", "pr"):
                 continue
-            w = (r.get("worker") or {}).get("name") or ""
+            wk = r.get("worker") or {}
+            w = wk.get("name") or ""
             wmeta, _ = read_doc(path_for(w)) if w else (None, None)
             if wmeta and (wmeta.get("state") in ("standby", "retired") or wmeta.get("status") == "ended"):
                 continue
             age = _age_seconds(wmeta.get("heartbeat", "")) if wmeta else None
-            if wmeta is None:
-                probe, act = "no registry row: probe with ListAgents", f"rebrief: ASSIGN {t} rebrief=1 to {w or '(unassigned)'} once, if its ref is live"
-            elif age is not None and age < DUP_REGISTER_SECONDS:
-                probe, act = f"registry heartbeat {int(age)}s old: live", f"rebrief: ASSIGN {t} rebrief=1 to {w} once"
-            else:
-                probe, act = "registry heartbeat stale: ended with no return", f"no rebrief: reassign {t} (swarm.py resume classifies it)"
-            out.append(f"  {t} {r['status']} worker={w or '-'} ref={(r.get('worker') or {}).get('ref') or '-'} ({probe})\n  {act}")
+            hb = f"registry heartbeat {int(age)}s old" if age is not None else "no registry heartbeat"
+            ident = f"  {t} {r['status']} worker={w or '-'} ref={wk.get('ref') or '-'} kind={wk.get('kind') or '-'} ({hb})"
+            if wk.get("kind") == "subagent":
+                if pred_alive is None:
+                    pred_alive = _owner_alive(pred)
+                if not pred_alive:
+                    out.append(f"{ident}\n  no probe: a background subagent dies with the session that spawned it, and {pred}'s process is gone: "
+                               f"`swarm.py resume` classifies {t}")
+                    continue
+            out.append(f"{ident}\n  probe ref {wk.get('ref') or '-'} with `ListAgents`: live -> ASSIGN {t} rebrief=1 to {w or '(unassigned)'} once; "
+                       f"gone -> `swarm.py resume` classifies {t}. No peer list: a heartbeat older than {stall} min is gone")
     return head + "\n" + ("\n".join(out) if out else "none")
 
 
@@ -684,12 +702,15 @@ def _reconfirm_working_on(meta: dict, name: str) -> None:
     heartbeat this register writes must not vouch for an old focus. The text is kept, marked `unconfirmed: …`, and a line
     asks for `WORKING=`; a register or touch that names the focus clears the mark and stamps `confirmed`."""
     from gen_sessions import STALE_HOURS  # lazy: gen_sessions imports this module
+    if not meta.get("confirmed"):  # a row written before `confirmed` existed: its focus is taken as confirmed
+        meta["confirmed"] = now_iso()
+        return
     age = _age_seconds(meta.get("confirmed", ""))
     old = str(meta.get("working_on", ""))
     if old.startswith(UNCONFIRMED) or (age is not None and age <= STALE_HOURS * 3600):
         return
     meta["working_on"] = UNCONFIRMED + old
-    print(f"working_on of {name} was not confirmed since {meta.get('confirmed') or 'it was first written'}: marked `unconfirmed` "
+    print(f"working_on of {name} was not confirmed since {meta.get('confirmed')}: marked `unconfirmed` "
           f"- pass WORKING=\"...\" to session-register (or session-touch) to say what it is doing now", file=sys.stderr)
 
 
@@ -716,8 +737,10 @@ def cmd_register(a) -> None:
                 and age is not None and age < DUP_REGISTER_SECONDS):
             print(f"DUPLICATE REGISTER: session_id {harness_id} is registering under ref {a.ref}, but {a.name} is held by "
                   f"ref {prev_ref} with a heartbeat {int(age)}s old — two processes on one transcript each re-spawn the "
-                  f"workers. This process stands down: no spawn, no re-brief, no register until that ref is gone.",
+                  f"workers. This process stands down: nothing was written and the row stays with {prev_ref} "
+                  f"(exit {EXIT_DUPLICATE_REGISTER}): no spawn, no re-brief, no register until that ref is gone.",
                   file=sys.stderr)
+            sys.exit(EXIT_DUPLICATE_REGISTER)
         meta["session_id"] = one_line(harness_id)
     if a.ref:    meta["ref"] = a.ref
     # A session that registers is active by definition: registering over an ended (or restored) doc reactivates

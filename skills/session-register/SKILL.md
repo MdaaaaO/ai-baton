@@ -65,10 +65,11 @@ entries before touching a shared epic, PR or worktree.
    hours and its owner process is gone, and prints `owns: <tickets, PRs>` for it; pass `REF_GONE=1` only after
    `ListAgents` shows the predecessor's ref is not live (it skips the 12 h wait, never the owner-process check).
    Any other predecessor is left as is and a line says why (`reference/lifecycle.md` § End and archiving).
-   **A successor orchestrator re-briefs** each live worker once (`ASSIGN <ticket> rebrief=1`, wait for the ack); an
-   older heartbeat means ended with no return, so `swarm.py resume` decides. **A resume re-confirms:** a live row
+   **A successor orchestrator re-briefs** each live worker once (`ASSIGN <ticket> rebrief=1`, wait for the ack): probe each
+   printed ref with `ListAgents`; a gone ref (or, with no peer list, a heartbeat older than `swarm.stall_minutes`) goes to
+   `swarm.py resume`, as does a `subagent` worker once its predecessor's process is gone. **A resume re-confirms:** a live row
    whose `working_on` is older than 12 h is marked `unconfirmed: <old>`; pass `WORKING=` or `session-touch` it, never
-   keep it silently. **`DUPLICATE REGISTER`** (same session id, new `ref`, heartbeat under 5 min) means you stand
+   keep it silently. **`DUPLICATE REGISTER`** (same session id, new `ref`, heartbeat under 5 min) exits 3 with no write: you stand
    down. A `STATE=standby` row expires and the sweep retires it. Detail: `reference/lifecycle.md` § Liveness and failover.
    `make -C $BATON/context-db mission-build` rebuilds the private mission-control page from the registry (a local
    file, zero model turns, never a publish).

@@ -37,7 +37,7 @@ Every subcommand takes the epic key first:
   render    prints the `## Swarm` section and writes `sessions/<name>/prs.tsv` (repo, pr, head7, state, ticket; the state
             is the row's status; the header line alone means no open PR)
   resume    compares the ledger with `git ls-remote` and `gh pr list`, prints the difference and what to do with a lost
-            worker (drive-to-merge, respawn-in-place, reassign, record-merge), writes nothing without --apply. It never
+            worker (drive-to-merge, respawn-in-place, reassign, record-merge, update, ask), writes nothing without --apply. It never
             writes a pass or a READY head, so a restored row still needs its READY and its verifier (--json)
   grant, watch, decision, hold, budget   the epic's other records. A grant and a change to a cap need a --decision line;
             `budget --spent` records spend, which decides nothing, and needs none
