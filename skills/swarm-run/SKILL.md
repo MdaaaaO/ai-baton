@@ -2,7 +2,7 @@
 name: swarm-run
 description: "The swarm orchestrator's tick: assigns an approved epic's tickets, drains returns, integrates and verifies PRs, writes the digest. Use when running or resuming an epic's swarm, or on its tick wake-up. Not for one ticket (`ticket-pickup`) or a PR you own alone (`pr-watch`)."
 metadata:
-  version: "1"
+  version: "2"
   updated: "2026-11-05"
   reviewed: "2026-11-05"
 user-invocable: true
@@ -36,9 +36,11 @@ its children, their PRs) and the branches. Ledger and branches disagree → `swa
 
 ## 2. Inbox
 
-Drain your inbox, each worker's outbox and each returned run's final lines (`swarm_msg.py drain`), tracker comments,
-PR events, chat items where the machine has chat, and `watches_due`. A `STOP` or `HOLD` acts first. Status lines go
-through `swarm.py apply <key> "<line>"`; ack each id (`swarm_msg.py ack --as <your lane>`). `swarm_msg.py pending`:
+Run `/swarm-inbox <key>` (a forked sweep) for one `ITEM` line per new outbox and inbox line, tracker comment, PR event,
+chat item where the machine has chat, and due watch; `NO-OP` means nothing new. Each returned run's final lines are
+items too. The sweep writes nothing: you act on each item, run its `SEEN` and `CLOSE-DRAFT` trailers, and
+`swarm_msg.py drain` still marks the lines read. A read-failed line is unknown, never quiet. A `STOP` or `HOLD`
+acts first. Status lines go through `swarm.py apply <key> "<line>"`; ack each id (`swarm_msg.py ack --as <your lane>`). `swarm_msg.py pending`:
 re-send once with the same id; the next window makes the lane `unreachable` (step 5). Inside `swarm.reopen_minutes`
 a miss is a wait, never a loss.
 
@@ -123,7 +125,8 @@ a malformed plan's 2 included, is no close.
 
 ## 9. Digest
 
-Every `swarm.digest_hours` (default 4) and at each wave end, on the epic through `ticket-update`: shipped; blocked,
+`/swarm-status <key>` (`--wave-end` at a wave end): it posts nothing until `swarm.digest_hours` (default 4) have
+passed. The digest goes on the epic through `ticket-update`: shipped; blocked,
 with who must act; `needs owner of <path>` and `needs the owner's merge`; decisions open; spend against caps; stalls;
 next. Headless, it ends with the `Decisions` block.
 

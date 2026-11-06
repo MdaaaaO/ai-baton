@@ -110,6 +110,8 @@ is on `main` today. A status with a version means it shipped in that release. `p
 | Simplified Technical English output style | understanding | every text | #542 | existing |
 | explainability finding and WBD line | understanding | PR review | #387 | existing |
 | `repo-docs`: a README that reads in one pass | understanding | README | n/a | existing |
+| `swarm-inbox`: every swarm channel as one inbox item each | understanding | epic, PR, chat | #688 | existing |
+| `swarm-status`: the swarm digest, once per cadence | understanding | epic, chat, mission page | #688 | existing |
 | `cost-report`: spend against work shipped | understanding | machine | n/a | existing |
 | `self-assessment`: your own week | understanding | week file | n/a | existing |
 | `mission-control`: the store as one page | understanding | machine | n/a | existing |
@@ -127,7 +129,7 @@ that never wrote the change and alone records a pass (#681), the `builder` agent
 `swarm-run` with the assignment file (#684). Not
 built yet: the data-migration gates (#689), the spec skills `epic-discover` and `epic-decompose`, with the owner's go
 before any worker starts (#682, #683), liveness and failover (#686), and the
-inbox, the digest, the weekly report and the plan walkthrough (#688, #690). The contract is `docs/swarm.md` (#676), and
+weekly report and the plan walkthrough (#690). The inbox sweep `swarm-inbox` and the digest `swarm-status` are built (#688). The contract is `docs/swarm.md` (#676), and
 it says what is built. Why the mode needs no server: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
 ## Non-goals

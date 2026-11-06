@@ -179,7 +179,7 @@ flowchart LR
 It asks no questions: run the block for your path above, from your workspace root. `--personal` takes your login
 and name from `gh`, your repos from the clones under the root and the timezone from the OS; every `systems.*` flag
 is false, so a skill that needs Jira, Slack or a warehouse stops with one "not applicable" line. Re-running is safe.
-Setup also adopts `.context/` as a ctx store: every context write goes through validated, audited verbs.
+Setup adopts `.context/` as a ctx store: every context write goes through validated, audited verbs.
 
 On the plugin path `/kit-setup` runs the plugin's own `setup.sh` from inside the session (the plugin root moves on
 every update); it seeds `.context/` and the root `CLAUDE.md`, no `Makefile` include. Identity without `gh`:
@@ -211,7 +211,7 @@ explains the clone's hooks and guards.
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
-| Swarm mode | `swarm-run` |
+| Swarm mode | `swarm-run` · `swarm-inbox` · `swarm-status` |
 | Needs a system (`systems.*`) | `sign-queue` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
 It ships five agents (`triage`, `review-runner`, `auto-runner`, `verifier`, `builder`) and the `context-db/` engine
