@@ -3,7 +3,7 @@
 
 Six sections, in this order, then the operator's four lines (docs/operator-brief.md): shipped, blocked (with who must act),
 decisions open, spend against caps, stalls, next. The text is a pure function of the ledger and the clock: the same ledger
-and `--now` print the same digest. `render`, `due` and `show` read and write nothing; `posted` is the main session's one
+and `--now` print the same digest. `render` and `due` read and write nothing; `posted` is the main session's one
 write, after the digest is on the tracker.
 
 Usage:
@@ -32,7 +32,7 @@ import swarm_msg  # noqa: E402
 
 MARK = "<!-- swarm-digest -->"
 SECTIONS = ("Shipped", "Blocked", "Decisions open", "Spend", "Stalls", "Next")
-DONE = ("merged", "verified", "done")
+DONE = swarm.SHIPPED
 DEFAULT_HOURS = 4
 
 
@@ -103,7 +103,7 @@ def operator_lines(led: dict, sec: dict) -> list[str]:
     else:
         diff = "Nothing."
     check = f"`swarm.py show {led['key']}` → one row per ticket, wave {rep['wave'] or '-'}."
-    unread = len(budget.get("unread") or [])
+    unread = len([u for u in budget.get("unread") or [] if u.get("who") != "orchestrator"])
     gap = f"Spend of {plural(unread, 'worker')} with no reading." if unread else "Work on any ticket that is not on the ledger."
     return [f"- Can now: {can}", f"- Do differently: {diff}", f"- Check with: {check}", f"- Not covered: {gap}"]
 

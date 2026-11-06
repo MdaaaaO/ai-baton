@@ -1,15 +1,15 @@
 # swarm-inbox
 
 A forked, haiku-priced sweep that turns every channel of a running swarm into one list of normalized items for the
-orchestrator's tick, or `NO-OP`. It never writes; the main session runs the `SEEN` and `CLOSE-DRAFT` trailers it returns.
+orchestrator's tick, or `NO-OP`. It never writes; the main session runs the `MARK`, `SEEN` and `CLOSE-DRAFT` trailers it returns.
 
 **Reads:** worker outboxes, the orchestrator's inbox, peer messages, human comments on the epic and its tickets, PR
 events, due watches and, where `systems.slack` is true, the chat threads of pending drafts.
 
-**Item:** `ITEM <kind> <scope> src=<source> ref=<ref> at=<utc> "<gist>"`, the gist one line of 120 characters at most.
-Kinds: `line` (a swarm line, verbatim), `delta` (a human comment that adds scope: it waits for a go), `decision` (a human
+**Item:** `ITEM <kind> <scope> src=<source> ref=<ref> at=<utc> "<gist>"`, the gist one line of 120 characters at most, except a `line` item, which keeps the swarm line byte for byte.
+Kinds: `line` (a swarm line, byte for byte: `swarm.py apply` takes it as it stands), `delta` (a human comment that adds scope: it waits for a go), `decision` (a human
 question: it goes to the digest's Decisions), `comment`, `pr-event`, `watch`, `chat`, and `draft-sent`, `draft-edited`,
-`draft-pending` (a chat draft read back as sent, sent with edits, or still pending). Bot comments are dropped.
+`draft-pending`, `draft-gone` (a chat draft read back as sent, sent with edits, still pending, or deleted). Bot comments are dropped.
 
 **Needs:** nothing for the core. The chat tier needs `systems.slack`.
 

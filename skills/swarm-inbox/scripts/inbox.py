@@ -6,27 +6,33 @@ must never see and prints one line per item:
 
   ITEM <kind> <scope> src=<source> ref=<ref> at=<utc> "<gist>"
 
-kinds: line (a swarm grammar line, verbatim), delta (a human comment that adds scope), decision (a human question),
+kinds: line (a swarm grammar line, byte for byte: the quotes inside stay, the tick applies it; every other kind is
+capped at 120 characters), delta (a human comment that adds scope), decision (a human question),
 comment (any other human comment), pr-event, watch (a ledger watch that is due), chat, draft-sent, draft-edited,
-draft-pending. A STOP or HOLD line sorts first, then oldest first. `NO-OP` when there is nothing.
+draft-pending, draft-gone (a draft deleted from the thread). A STOP or HOLD line sorts first, then oldest first. `NO-OP` when there is nothing.
 
 Usage:
   inbox.py local <key> [--now <iso>]       unread lines of orchestrator/in.ndjson and every worker's out.ndjson (past the
-                                           `.read` mark, which it never moves), plus the ledger's due watches. Writes nothing
-  inbox.py since <key>                     the time the tracker was last swept through (`none` before the first sweep)
-  inbox.py seen <key> --at <iso>           moves that time to --at, never back (state/swarm/<key>/inbox.json); the main
-                                           session runs it, the fork never does
+                                           `.read` mark, which it never moves), plus the ledger's due watches. Writes nothing.
+                                           Ends with `READ-TO <lane>/<in|out>=<n> ...`: the record count it read each box to
+  inbox.py mark <key> <lane>/<in|out>=<n>...  moves each `.read` mark to n records, never back: only what the sweep read,
+                                           so a line that arrived meanwhile stays unread (the main session runs it)
+  inbox.py since <key> [--refs]            the time the tracker was last swept through (`none` before the first sweep);
+                                           --refs: the ids already taken at exactly that time, one per line
+  inbox.py seen <key> --at <iso> [--refs <id,id>]
+                                           moves that time to --at, never back (state/swarm/<key>/inbox.json), with the ids
+                                           read at exactly that time; the main session runs it, the fork never does
   inbox.py chat <key>                      with `systems.slack` false: one line, `swarm-inbox: chat tier not applicable here`
                                            and exit 0; else one `DRAFT-OPEN` line per draft not yet read back
   inbox.py normalize [-]                   a JSON list of raw items on stdin (kind, scope, src, ref, at, gist, author,
                                            author_type) to ITEM lines: drops a bot (type, `[bot]` login or a configured bot) and the swarm's own
-                                           digest comments, collapses a gist to one line of 120 characters at most
+                                           digest comments, collapses a gist to one line of 120 characters at most (a `line` item is kept as it is)
   inbox.py draft-add --key <key> --channel <c> --thread <ts> --draft-id <id> --gist <text>
-  inbox.py draft-close --key <key> <draft-id> --outcome sent|sent-edited
+  inbox.py draft-close --key <key> <draft-id> --outcome sent|sent-edited|gone
                                            the two writers of `state/swarm/<key>/drafts.ndjson`; the main session runs them,
                                            the fork never does
 
-The drain mark and the ACK stay with `swarm_msg.py drain` at the tick. Exit codes: 0 ok; 2 bad usage. Stdlib only.
+The read marks move with `mark` (to what the sweep read); the ACK stays with `swarm_msg.py ack`. Exit codes: 0 ok; 2 bad usage. Stdlib only.
 """
 from __future__ import annotations
 import argparse
@@ -42,12 +48,12 @@ import kit_profile as profile  # noqa: E402
 import swarm  # noqa: E402
 import swarm_msg  # noqa: E402
 
-KINDS = ("line", "delta", "decision", "comment", "pr-event", "watch", "chat", "draft-sent", "draft-edited", "draft-pending")
+KINDS = ("line", "delta", "decision", "comment", "pr-event", "watch", "chat", "draft-sent", "draft-edited", "draft-pending", "draft-gone")
 URGENT = ("STOP", "HOLD")
 GIST = 120
 DIGEST_MARK = "<!-- swarm-digest"
 CHAT_OFF = "swarm-inbox: chat tier not applicable here — slack is false"
-OUTCOMES = ("sent", "sent-edited")
+OUTCOMES = ("sent", "sent-edited", "gone")
 
 
 def one_line(text: str) -> str:
@@ -56,7 +62,9 @@ def one_line(text: str) -> str:
 
 
 def item(kind: str, scope: str, src: str, ref: str, at: str, gist: str) -> dict:
-    return {"kind": kind, "scope": scope or "-", "src": src, "ref": ref or "-", "at": at or "-", "gist": one_line(gist)}
+    # a swarm line is applied as it stands: only the newlines go, nothing is cut or re-quoted
+    text = re.sub(r"\s*\n\s*", " ", str(gist or "")).strip() if kind == "line" else one_line(gist)
+    return {"kind": kind, "scope": scope or "-", "src": src, "ref": ref or "-", "at": at or "-", "gist": text}
 
 
 def render(it: dict) -> str:
@@ -76,23 +84,25 @@ def is_bot(raw: dict, bots: set[str]) -> bool:
             or DIGEST_MARK in str(raw.get("gist") or ""))
 
 
-def unread(path, which: str) -> list[dict]:
-    mark = path.with_name(f"{which}.read")
+def read_mark(path, which: str) -> int:
     try:
-        seen = int(mark.read_text(encoding="utf-8").strip() or 0)
+        return max(int(path.with_name(f"{which}.read").read_text(encoding="utf-8").strip() or 0), 0)
     except (OSError, ValueError):
-        seen = 0
-    return swarm_msg.read_records(path)[max(seen, 0):]
+        return 0
 
 
-def local_items(key: str, now: datetime) -> list[dict]:
+def local_items(key: str, now: datetime, offsets: dict | None = None) -> list[dict]:
     out = []
     base = swarm_msg.swarm_dir(key)
     boxes = [("orchestrator", "in")]
     if base.is_dir():
         boxes += [(d.name, "out") for d in sorted(p for p in base.iterdir() if p.is_dir()) if d.name != "orchestrator"]
     for lane, which in boxes:
-        for rec in unread(swarm_msg.box(key, lane, which), which):
+        path = swarm_msg.box(key, lane, which)
+        recs = swarm_msg.read_records(path)
+        if offsets is not None and len(recs) > read_mark(path, which):
+            offsets[f"{lane}/{which}"] = len(recs)
+        for rec in recs[read_mark(path, which):]:
             line = rec.get("text") or rec.get("line") or ""
             src = "orchestrator-in" if lane == "orchestrator" else f"out:{lane}"
             out.append(item("line", str(rec.get("scope") or rec.get("ticket") or "-"), src, str(rec.get("id") or "-"),
@@ -124,8 +134,33 @@ def open_drafts(key: str) -> list[dict]:
 
 def cmd_local(a) -> int:
     now = swarm.parse_time(a.now) if a.now else datetime.now(timezone.utc)
-    items = local_items(a.key, now)
+    offsets: dict[str, int] = {}
+    items = local_items(a.key, now, offsets)
     print("\n".join(render(i) for i in items) if items else "NO-OP")
+    if offsets:
+        print("READ-TO " + " ".join(f"{k}={n}" for k, n in sorted(offsets.items())))
+    return 0
+
+
+def cmd_mark(a) -> int:
+    moved = []
+    for spec in a.marks:
+        m = re.fullmatch(r"([\w.-]+)/(in|out)=(\d+)", spec)
+        if not m:
+            print(f"inbox: not <lane>/<in|out>=<n>: {spec!r}", file=sys.stderr)
+            return 2
+        lane, which, n = m.group(1), m.group(2), int(m.group(3))
+        path = swarm_msg.box(a.key, lane, which)
+        mark = path.with_name(f"{which}.read")
+        if not path.is_file():
+            print(f"inbox: no such box: {lane}/{which}", file=sys.stderr)
+            return 2
+        with fsutil.locked(str(mark)):
+            n = min(n, len(swarm_msg.read_records(path)))
+            if n > read_mark(path, which):
+                fsutil.atomic_write(str(mark), f"{n}\n")
+                moved.append(f"{lane}/{which}={n}")
+    print("marked " + " ".join(moved) if moved else "no change")
     return 0
 
 
@@ -133,15 +168,23 @@ def seen_path(key: str):
     return swarm_msg.swarm_dir(key) / "inbox.json"
 
 
-def read_since(key: str) -> str | None:
+def read_state(key: str) -> dict:
     try:
-        return json.loads(seen_path(key).read_text(encoding="utf-8")).get("tracker_at")
-    except (OSError, ValueError, AttributeError):
-        return None
+        d = json.loads(seen_path(key).read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def read_since(key: str) -> str | None:
+    return read_state(key).get("tracker_at")
 
 
 def cmd_since(a) -> int:
-    print(read_since(a.key) or "none")
+    if a.refs:
+        print("\n".join(str(r) for r in read_state(a.key).get("refs", [])))
+    else:
+        print(read_since(a.key) or "none")
     return 0
 
 
@@ -151,10 +194,17 @@ def cmd_seen(a) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     with fsutil.locked(str(path)):
         old = read_since(a.key)
-        if old and swarm.parse_time(old) >= swarm.parse_time(at):
+        refs = [r for r in (a.refs or "").split(",") if r]
+        if old and swarm.parse_time(old) > swarm.parse_time(at):
             print(f"no change: already swept through {old}")
             return 0
-        fsutil.atomic_write(str(path), json.dumps({"tracker_at": at}) + "\n")
+        if old and swarm.parse_time(old) == swarm.parse_time(at):
+            # same instant: a comment that landed after the sweep still has to be read, so keep the ids taken
+            refs = sorted(set(read_state(a.key).get("refs", [])) | set(refs))
+            if refs == read_state(a.key).get("refs", []):
+                print(f"no change: already swept through {old}")
+                return 0
+        fsutil.atomic_write(str(path), json.dumps({"tracker_at": at, "refs": refs}) + "\n")
     print(f"swept through {at}")
     return 0
 
@@ -229,11 +279,17 @@ def main(argv: list[str]) -> int:
     s.set_defaults(fn=cmd_local)
     s = sub.add_parser("since")
     s.add_argument("key")
+    s.add_argument("--refs", action="store_true")
     s.set_defaults(fn=cmd_since)
     s = sub.add_parser("seen")
     s.add_argument("key")
     s.add_argument("--at", required=True)
+    s.add_argument("--refs")
     s.set_defaults(fn=cmd_seen)
+    s = sub.add_parser("mark")
+    s.add_argument("key")
+    s.add_argument("marks", nargs="+")
+    s.set_defaults(fn=cmd_mark)
     s = sub.add_parser("chat")
     s.add_argument("key")
     s.set_defaults(fn=cmd_chat)

@@ -15,7 +15,7 @@ Run by the orchestrator at `swarm-run`'s digest step, in the main session. `rend
 
 ## Steps
 
-1. `python3 $S/digest.py due <key> [--wave-end]` → `due`, or `not due: next <iso>`. Not due ends the run, silently.
+1. `python3 $S/digest.py due <key> [--wave-end]` → `due`, or `not due: next <iso>`. Not due ends the run: nothing is rendered or posted, and the reply is the one line, `not due until <iso>`.
 2. `python3 $S/digest.py render <key>` → the digest: a dated headline ending in `<!-- swarm-digest -->`, the six sections
    (Shipped, Blocked with who must act, Decisions open, Spend against the caps, Stalls, Next) and the closing
    `**For the operator**` lines (Can now / Do differently / Check with / Not covered). Post it as rendered; reword nothing

@@ -110,6 +110,32 @@ class Render(Case):
             self.assertIn(name, d)
         self.assertEqual(len(d["operator"]), 4)
 
+    def test_the_orchestrator_is_not_a_worker_in_not_covered(self):
+        """One worker and the orchestrator both unread: the line says 1 worker, not 2."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("digest_under_test", DIGEST)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        rep = {"plan_approved": True, "no_assign": [], "wave": None}
+        budget = {"unread": [{"who": "1"}, {"who": "orchestrator"}]}
+        lines = mod.operator_lines({"key": KEY}, {"_rep": rep, "_budget": budget, "Shipped": [], "Decisions open": []})
+        self.assertEqual(lines[3], "- Not covered: Spend of 1 worker with no reading.")
+
+    def test_the_owners_asks_of_the_integrate_step_are_in_decisions_open(self):
+        """Step 7 files `needs owner of <path>` and `needs the owner's merge` as decisions; render shows them as they are."""
+        self.fixture()
+        self.ok(SWARM, "decision", KEY, "--question", "needs owner of infra/deploy.yaml: only the author can review it",
+                "--for-ticket", "3")
+        self.ok(SWARM, "decision", KEY, "--question", "needs the owner's merge of PR 12: hooks/x.sh", "--for-ticket", "4")
+        out = self.render()
+        self.assertIn("needs owner of infra/deploy.yaml", out)
+        self.assertIn("needs the owner's merge of PR 12", out)
+
+    def test_a_verified_row_is_shipped(self):
+        self.fixture()
+        self.patch("4", status="verified", title="the fourth")
+        self.assertIn("#4 the fourth (verified)", self.render())
+
     def test_no_ledger_is_exit_1(self):
         self.assertEqual(self.run_py(DIGEST, "render", "nope").returncode, 1)
 

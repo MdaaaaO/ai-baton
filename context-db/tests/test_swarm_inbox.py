@@ -63,7 +63,7 @@ class Local(Case):
         self.box("orchestrator", "in", self.rec("DONE", "5", "2026-11-01T10:00:00Z", "aaa1"),
                  self.rec("NEEDS", "5", "2026-11-01T11:00:00Z", "aaa2"), read=1)
         self.box("lane-7", "out", self.rec("CLAIMED", "7", "2026-11-01T09:00:00Z", "bbb1"))
-        got = self.out("local", KEY).splitlines()
+        got = [x for x in self.out("local", KEY).splitlines() if x.startswith("ITEM")]
         self.assertEqual(len(got), 2, got)
         self.assertIn("src=orchestrator-in ref=aaa2", got[1])
         self.assertTrue(got[0].startswith("ITEM line 7 src=out:lane-7 ref=bbb1 at=2026-11-01T09:00:00Z"), got[0])
@@ -91,6 +91,44 @@ class Local(Case):
         self.assertNotIn("w2", got)
         self.assertNotIn("w3", got)
 
+    def test_a_long_quoted_line_is_kept_byte_for_byte_and_applies(self):
+        """The sweep's `line` item is the swarm line as written, so `swarm.py apply` takes it (it once came back cut at 120
+        characters with its quotes turned to apostrophes: `No closing quotation`, exit 2)."""
+        swarm_py = INBOX.parents[3] / "context-db" / "bin" / "swarm.py"
+        line = ('BLOCKED 1 input orchestrator note="need the owner to say which retry policy applies here, the ticket names two '
+                'and the brief does not choose between them" v=1 id=7d14a8 from=lane-1')
+        self.assertGreater(len(line), 120)
+        self.box("lane-1", "out", {"word": "BLOCKED", "scope": "1", "line": line, "v": 1, "id": "7d14a8", "from": "lane-1",
+                                   "at": "2026-11-01T10:00:00Z"})
+        got = self.out("local", KEY).splitlines()[0]
+        self.assertTrue(got.endswith(f' "{line}"'), got)
+        taken = got[got.index(' "') + 2:-1]
+        self.assertEqual(taken, line)
+        sub = lambda *a: subprocess.run([sys.executable, str(swarm_py), *a], capture_output=True, text=True, env=self.env,  # noqa: E731
+                                        stdin=subprocess.DEVNULL)
+        sub("init", KEY, "--repo", "o/r", "--title", "t")
+        sub("add", KEY, "1", "--title", "one")
+        p = sub("apply", KEY, taken)
+        self.assertNotIn("not a grammar line", p.stderr, p.stderr)
+        self.assertNotIn("No closing quotation", p.stderr, p.stderr)
+
+    def test_the_sweep_names_what_it_read_to_and_mark_moves_only_that_far(self):
+        """A line that lands while the fork reads the tracker stays unread: the mark goes to the count `local` printed."""
+        self.box("orchestrator", "in", self.rec("DONE", "5", "2026-11-01T10:00:00Z", "aaa1"),
+                 self.rec("NEEDS", "5", "2026-11-01T11:00:00Z", "aaa2"))
+        self.box("lane-7", "out", self.rec("CLAIMED", "7", "2026-11-01T09:00:00Z", "bbb1"))
+        out = self.out("local", KEY).splitlines()
+        self.assertEqual(out[-1], "READ-TO lane-7/out=1 orchestrator/in=2")
+        self.box("orchestrator", "in", self.rec("DONE", "5", "2026-11-01T10:00:00Z", "aaa1"),
+                 self.rec("NEEDS", "5", "2026-11-01T11:00:00Z", "aaa2"), self.rec("DONE", "6", "2026-11-01T12:00:00Z", "aaa3"))
+        self.assertIn("marked", self.out("mark", KEY, "lane-7/out=1", "orchestrator/in=2"))
+        again = self.out("local", KEY)
+        self.assertIn("ref=aaa3", again)
+        self.assertNotIn("ref=aaa2", again)
+        self.assertIn("no change", self.out("mark", KEY, "orchestrator/in=1"))
+        self.assertEqual((self.dir / "orchestrator" / "in.read").read_text().strip(), "2")
+        self.assertEqual(self.run_cli("mark", KEY, "nonsense").returncode, 2)
+
 
 class Since(Case):
     def test_none_then_moves_forward_only(self):
@@ -99,6 +137,16 @@ class Since(Case):
         self.assertEqual(self.out("since", KEY).strip(), "2026-11-02T10:00:00Z")
         self.assertIn("no change", self.out("seen", KEY, "--at", "2026-11-01T10:00:00Z"))
         self.assertEqual(self.out("since", KEY).strip(), "2026-11-02T10:00:00Z")
+
+    def test_a_comment_at_the_watermark_is_not_dropped_and_not_taken_twice(self):
+        """Same-instant comments: the ids taken stay with the time, so a late one at that time is read, a taken one is not."""
+        self.out("seen", KEY, "--at", "2026-11-02T10:00:00Z", "--refs", "c1,c2")
+        self.assertEqual(self.out("since", KEY, "--refs").split(), ["c1", "c2"])
+        self.assertIn("swept through", self.out("seen", KEY, "--at", "2026-11-02T10:00:00Z", "--refs", "c3"))
+        self.assertEqual(self.out("since", KEY, "--refs").split(), ["c1", "c2", "c3"])
+        self.assertIn("no change", self.out("seen", KEY, "--at", "2026-11-02T10:00:00Z", "--refs", "c3"))
+        self.out("seen", KEY, "--at", "2026-11-02T11:00:00Z", "--refs", "c4")
+        self.assertEqual(self.out("since", KEY, "--refs").split(), ["c4"])
 
     def test_a_bad_time_is_a_usage_error(self):
         self.assertEqual(self.run_cli("seen", KEY, "--at", "yesterday").returncode, 2)
@@ -193,6 +241,14 @@ class Chat(Case):
             {"kind": "draft-pending", "scope": "674", "src": "chat", "ref": "D3", "gist": "still pending"}]))
         for k in ("draft-sent", "draft-edited", "draft-pending"):
             self.assertIn(f"ITEM {k} 674", got)
+
+    def test_a_deleted_draft_has_a_gone_outcome_and_stops_coming_back(self):
+        self.config(systems={"slack": True})
+        self.out("draft-add", "--key", KEY, "--channel", "C1", "--thread", "1.1", "--draft-id", "D9", "--gist", "x")
+        self.assertIn("closed: gone", self.out("draft-close", "--key", KEY, "D9", "--outcome", "gone"))
+        self.assertEqual(self.out("chat", KEY).strip(), "NO-DRAFTS")
+        got = self.out("normalize", stdin=json.dumps([{"kind": "draft-gone", "scope": "674", "src": "chat", "ref": "D9", "gist": "deleted"}]))
+        self.assertIn("ITEM draft-gone 674", got)
 
 
 if __name__ == "__main__":

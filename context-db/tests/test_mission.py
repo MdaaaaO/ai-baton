@@ -1341,6 +1341,15 @@ class Pointers(unittest.TestCase):
         self.assertEqual(e["decisions_open"], [{"id": "d1", "question": "Keep the old flag?", "ticket": "2"}])
         self.assertEqual(e["digest"], {"at": "2026-10-09T08:30:00Z", "text": "the last digest\n"})
 
+    def test_the_panel_reads_spend_and_cap_as_the_digest_does(self):
+        """The cap in config and the spend on the rows: `$7.50 of $50.00`, not `$0.00 (no epic cap)`; a verified row is shipped."""
+        led = {"key": "ep-2", "budget": {}, "tickets": {"1": {"status": "verified", "spent": 7.5, "title": "x"},
+                                                       "2": {"status": "assigned"}}}
+        with mock.patch.object(mission.swarm, "config", lambda key: 50.0):
+            row = mission.swarm_epic(led, None)
+        self.assertEqual((row["spent"], row["epic_usd"]), (7.5, 50.0))
+        self.assertEqual([t["ticket"] for t in row["shipped"]], ["1"])
+
 
 # ── pure helpers, called in process ───────────────────────────────────────────────────────────────────────────
 @contextlib.contextmanager

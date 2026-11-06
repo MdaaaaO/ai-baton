@@ -57,6 +57,7 @@ import gen_index  # noqa: E402  — same dir: the doc catalog walk
 import gen_sessions  # noqa: E402  — same dir: the session registry parser
 import kit_profile as profile  # noqa: E402  — same dir: the one content-root resolver
 import leak_shapes  # noqa: E402  — same dir: the secret shapes and their redaction
+import swarm  # noqa: E402  — same dir: the swarm ledger's spend and shipped definitions
 from fsutil import atomic_write  # noqa: E402  — same dir
 from session import OPEN_PRS_HEADING  # noqa: E402  — the writer owns the session doc's section headings
 from session_stats import SPEND_BASIS  # noqa: E402  — one spend-basis wording
@@ -607,15 +608,16 @@ def swarm_epic(led: dict, digest: dict | None) -> dict:
         if who or row.get("parked_reason"):
             blocked.append({"ticket": str(t), "reason": (who or {}).get("reason") or row.get("parked_reason"),
                             "who": (who or {}).get("who")})
-        if status in ("done", "merged"):
+        if status in swarm.SHIPPED:
             shipped.append({"ticket": str(t), "title": row.get("title"), "pr": row.get("pr")})
     decisions = [{"id": d.get("id"), "question": d.get("question"), "ticket": d.get("ticket")}
                  for d in led.get("decisions") or [] if isinstance(d, dict) and not d.get("closed")]
     budget = led.get("budget") if isinstance(led.get("budget"), dict) else {}
+    spent, epic_usd = swarm.epic_spend(led)
     holds = [h for h in led.get("holds") or [] if isinstance(h, (str, dict))]
     return {"key": led.get("key"), "title": led.get("title"), "repo": led.get("repo"),
             "plan_approved": bool(led.get("plan_approved")), "updated": norm_stamp(led.get("updated")),
-            "spent": led.get("spent") or 0, "epic_usd": budget.get("epic_usd"), "worker_usd": budget.get("worker_usd"),
+            "spent": spent, "epic_usd": epic_usd, "worker_usd": budget.get("worker_usd"),
             "by_status": by_status, "tickets": tickets, "blocked": blocked, "shipped": shipped,
             "decisions_open": decisions, "holds": len(holds), "digest": digest}
 
