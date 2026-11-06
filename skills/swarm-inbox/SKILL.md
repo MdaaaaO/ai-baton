@@ -31,7 +31,7 @@ state change rides a trailer the main session runs (`swarm-run`'s drain still ma
    - adds or changes scope, a new ask or a new constraint → `delta`
    - asks something the swarm cannot answer from the contract → `decision`
    - anything else (thanks, status, a link) → `comment`
-   A bot comment is dropped; so is a comment that starts with `<!-- swarm-digest`, which is the swarm's own digest.
+   A bot comment is dropped; so is a comment that holds `<!-- swarm-digest`, the swarm's own digest.
    PR events are `pr-event`. Remember the newest `created_at` read as `NEWEST`.
 4. Chat: `python3 $S/inbox.py chat <key>`. The line `swarm-inbox: chat tier not applicable here — slack is false` ends
    this step and nothing else is read from chat. Otherwise each `DRAFT-OPEN` line is read back (skill `slack-draft`, § 3):

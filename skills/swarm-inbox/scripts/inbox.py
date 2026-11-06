@@ -73,7 +73,7 @@ def order(items: list[dict]) -> list[dict]:
 def is_bot(raw: dict, bots: set[str]) -> bool:
     who = str(raw.get("author") or "")
     return (str(raw.get("author_type") or "").lower() == "bot" or who.endswith("[bot]") or who.lower() in bots
-            or str(raw.get("gist") or "").lstrip().startswith(DIGEST_MARK))
+            or DIGEST_MARK in str(raw.get("gist") or ""))
 
 
 def unread(path, which: str) -> list[dict]:

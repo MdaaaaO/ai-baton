@@ -135,7 +135,8 @@ class Normalize(Case):
 
     def test_the_swarms_own_digest_comment_is_dropped(self):
         got = self.out("normalize", stdin=self.raw(
-            {"kind": "comment", "scope": "1", "gist": "<!-- swarm-digest --> 🟢 digest", "author": "owner"}))
+            {"kind": "comment", "scope": "1", "gist": "<!-- swarm-digest --> 🟢 digest", "author": "owner"},
+            {"kind": "comment", "scope": "1", "gist": "🟢 2026-11-05 — Swarm digest e: 0 shipped <!-- swarm-digest -->", "author": "owner"}))
         self.assertEqual(got.strip(), "NO-OP")
 
     def test_a_question_is_a_decision_item_and_a_long_gist_is_one_short_line(self):
