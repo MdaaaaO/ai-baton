@@ -39,7 +39,7 @@ leaves the machine. This skill checks that the page is current, rebuilds it when
    and never repeat the redacted value in a reply.
 3. Run `make -C $BATON/context-db mission-open`. It prints the absolute path of `index.html` and never starts a
    browser; the user opens that path in a browser on this machine.
-4. Run `python3 $BATON/skills/mission-control/check.py <that path>`. Exit 0 means all six sections and both JSON
+4. Run `python3 $BATON/skills/mission-control/check.py <that path>`. Exit 0 means all seven sections and both JSON
    blocks are present and a text scan of the markup, the styles and the inline scripts found none of: a remote load,
    a connection or loader call (`fetch(`, `new Worker`, `new Audio` and the like), a markup write (`innerHTML`,
    `outerHTML`, `insertAdjacentHTML`, `document.write`), a navigation (`window.open`, a `location =` or `location +=`
@@ -57,10 +57,12 @@ leaves the machine. This skill checks that the page is current, rebuilds it when
      large docs.
    - **priorities** — the priorities file's checkboxes, read-only, grouped by section.
    - **queues** — the PR-review ledger, the sign-queue jobs and the latest kit-health outcome.
+   - **swarm** — each running epic's ledger: tickets by status, spend against the caps, open decisions, who a blocked
+     ticket waits on, and the last posted digest. Empty when no swarm ledger exists.
    - **pointers** — memory pointers, the INDEX and SESSION_INDEX generated lines, the sources list and the
      data-as-of line.
 6. Say how to read it. A tab opens by its bare hash (`#sessions`, `#cost`, `#catalog`, `#priorities`, `#queues`,
-   `#pointers` after the path) and the page remembers the last tab in one browser key; nothing else is stored.
+   `#swarm`, `#pointers` after the path) and the page remembers the last tab in one browser key; nothing else is stored.
    Staleness and cron times are computed when the page is opened (against the opening time, in the store's display
    zone and in UTC), so the same file reads differently later without a rebuild.
 7. Say what the page cannot do. It is read-only: it writes nothing back and runs nothing. It offers copy buttons for

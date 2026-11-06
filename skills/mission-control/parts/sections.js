@@ -317,6 +317,40 @@ function renderQueues(body, data) {
   put(body, kh.latest && kh.latest.outcome === null ? cannotRead(kh.latest.path) : null);
 }
 
+// ── swarm ──────────────────────────────────────────────────────────────────────────────────────────────
+function renderSwarm(body, data) {
+  const sw = data.swarm || {};
+  const epics = list(sw.epics);
+  put(body, problemList(sw.problems));
+  if (!epics.length) {
+    put(body, unreadable(sw.problems, sw.path) ? cannotRead(sw.path) : empty('none — no swarm ledger'));
+    return;
+  }
+  epics.forEach((e) => {
+    put(body, heading((e.key || '—') + (present(e.title) ? ' · ' + e.title : ''), e.plan_approved ? 'plan approved' : 'plan not approved'));
+    const by = e.by_status || {};
+    put(body, el('p', null, Object.keys(by).sort().map((k) => [badge(k + ' ' + by[k]), ' '])));
+    put(body, facts([
+      ['repo', e.repo],
+      ['spent', '$' + fmt(e.spent, 2) + (isNum(e.epic_usd) ? ' of $' + fmt(e.epic_usd, 2) : ' (no epic cap)')],
+      ['open decisions', fmt(list(e.decisions_open).length, 0)],
+      ['holds', fmt(e.holds, 0)],
+    ]));
+    put(body, table([{ label: 'Ticket' }, { label: 'Status' }, { label: 'PR' }, { label: 'Spent' }, { label: 'Readings' }],
+      list(e.tickets).map((t) => ['#' + t.ticket + (present(t.title) ? ' ' + t.title : ''), t.status || '—',
+        isNum(t.pr) ? '#' + t.pr : '—', '$' + fmt(t.spent, 2), fmt(t.readings, 0)])));
+    const blocked = list(e.blocked);
+    put(body, blocked.length ? [heading('Blocked', blocked.length), el('ul', { class: 'plain' },
+      blocked.map((x) => el('li', null, '#' + x.ticket + ': ' + (x.reason || '—') + (present(x.who) ? ' · ' + x.who + ' must act' : ''))))] : null);
+    const open = list(e.decisions_open);
+    put(body, open.length ? [heading('Decisions open', open.length), el('ul', { class: 'plain' },
+      open.map((d) => el('li', null, (d.id || '') + ': ' + (d.question || '—') + (present(d.ticket) ? ' (#' + d.ticket + ')' : ''))))] : null);
+    const dg = e.digest;
+    put(body, heading('Last digest', dg && dg.at ? stampText(dg.at) : 'none posted'));
+    put(body, dg && present(dg.text) ? el('div', { class: 'outcome' }, dg.text) : null);
+  });
+}
+
 // ── pointers ───────────────────────────────────────────────────────────────────────────────────────────
 function renderPointers(body, data) {
   const p = data.pointers || {};
@@ -348,5 +382,5 @@ function renderPointers(body, data) {
 
 const RENDER = {
   sessions: renderSessions, cost: renderCost, catalog: renderCatalog,
-  priorities: renderPriorities, queues: renderQueues, pointers: renderPointers,
+  priorities: renderPriorities, queues: renderQueues, swarm: renderSwarm, pointers: renderPointers,
 };
