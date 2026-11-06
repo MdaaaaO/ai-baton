@@ -389,6 +389,17 @@ and the owner pre-empts with `HOLD` or `STOP`. A dead pid means free. The holder
 `RELEASE` itself. A hold names one releaser; only that releaser or the owner ends it, and the `RELEASE` goes in the task
 ledger, so the other authority sees it at the next tick.
 
+### Registry state, expiry and retire
+
+A lane's registry row carries `state` beside its `status`. `standby` is set by `STANDBY` or a `STATE=standby`
+register, and the row then carries `expires`: its last heartbeat plus `swarm.standby_hours` (default 24). The zombie
+sweep's `--kill` mode runs `session.py retire`, which marks every `standby` row past `expires` as `state: retired`
+(its `status` stays `active`) and prints `owns: <tickets, PRs>` for each, so the orchestrator moves or clears that
+work instead of probing for it. The list mode only previews the retire. A re-register on a row whose `working_on` is
+older than 12 hours marks it `unconfirmed` until it is restated. A successor's re-brief skips `standby`, `retired`
+and `ended` rows. Fields and commands: `skills/session-register/reference/lifecycle.md` § Fields and § Retire and
+`owns:`.
+
 ## The swarm tick
 
 One pass of the orchestrator's loop. A tick runs only inside the orchestrator's session: a worker's return or the
