@@ -18,7 +18,7 @@ wake-up at full prefix (`reference/cost-controls.md`).
 
 A `Monitor` dies with the session that armed it, and the next session inherits its PRs silently. So **arming
 watches is part of session startup**: `session-register` (startup step 4) re-arms one multi-PR watch over every
-open PR you take over, from the predecessor's `## Open PRs` list; `session-handoff` refreshes that list before
+open PR you take over, from the predecessor's PR list (`sessions/<name>/prs.tsv`, else its `## Open PRs` section); `session-handoff` refreshes it before
 ending. Never assume a watch exists because the context doc says one was armed.
 
 ## Arm a watch

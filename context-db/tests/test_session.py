@@ -324,6 +324,12 @@ class LivenessAndFailover(unittest.TestCase):
         row = (self.root / "sessions" / "kit-d-1.md").read_text(encoding="utf-8")
         self.assertIn("ref: ref-first", row)   # no register: the first process keeps the row
         self.assertNotIn("ref-second", row)
+        self.assertIn("`ListAgents`", r.stderr)    # the refusal says how to find out the old ref is gone
+        self.assertIn("REF_GONE=1", r.stderr)
+        r = self._reg("kit-d-1", "--ref", "ref-second", "--ref-gone", env=env)  # the old ref probed gone: a real resume
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("DUPLICATE", r.stderr)
+        self.assertIn("ref: ref-second", (self.root / "sessions" / "kit-d-1.md").read_text(encoding="utf-8"))
 
     def test_the_same_ref_or_an_old_heartbeat_or_another_session_id_does_not_warn(self):
         env = {"CLAUDE_CODE_SESSION_ID": "sid-dup"}

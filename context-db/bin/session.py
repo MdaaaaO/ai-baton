@@ -733,12 +733,14 @@ def cmd_register(a) -> None:
         # The same session_id under a new ref while the row's heartbeat is fresh is a second process on one transcript: each
         # would re-spawn the workers, so the second stands down before any spawn or re-brief (session-register step 1).
         age = _age_seconds(prev_hb)
-        if (prev_live and meta.get("session_id") == harness_id and a.ref and prev_ref and a.ref != prev_ref
+        if (not getattr(a, "ref_gone", False) and prev_live and meta.get("session_id") == harness_id and a.ref and prev_ref and a.ref != prev_ref
                 and age is not None and age < DUP_REGISTER_SECONDS):
             print(f"DUPLICATE REGISTER: session_id {harness_id} is registering under ref {a.ref}, but {a.name} is held by "
                   f"ref {prev_ref} with a heartbeat {int(age)}s old — two processes on one transcript each re-spawn the "
                   f"workers. This process stands down: nothing was written and the row stays with {prev_ref} "
-                  f"(exit {EXIT_DUPLICATE_REGISTER}): no spawn, no re-brief, no register until that ref is gone.",
+                  f"(exit {EXIT_DUPLICATE_REGISTER}): no spawn, no re-brief. Probe ref {prev_ref} with `ListAgents`: live -> stand down; "
+                  f"gone (a resumed crash) -> register again with REF_GONE=1 (--ref-gone). With no peer list, retry after "
+                  f"{DUP_REGISTER_SECONDS} s.",
                   file=sys.stderr)
             sys.exit(EXIT_DUPLICATE_REGISTER)
         meta["session_id"] = one_line(harness_id)
@@ -1089,14 +1091,15 @@ def main() -> int:
     for name in ("register", "touch", "end", "stats"):
         sp = sub.add_parser(name)
         if name == "register":
-            sp.add_argument("--successor-of", default="", help="the predecessor's session name: print its `## Open PRs` "
-                            "list after registering (step 4 of session-register re-arms or drives each one); also ends that "
+            sp.add_argument("--successor-of", default="", help="the predecessor's session name: print its PR list (`prs.tsv`, "
+                            "else `## Open PRs`) after registering (step 4 of session-register re-arms or drives each one); also ends that "
                             "row as `superseded by <name>` when it is `active`, its heartbeat is over 12h old and its owner "
                             "process is gone, else leaves it and says why")
         if name == "register":
-            sp.add_argument("--ref-gone", action="store_true", help="with --successor-of: the caller probed the harness's peer "
-                            "list and the predecessor's ref is not live, so it is superseded without waiting STALE_HOURS "
-                            "(a live owner process still stops it)")
+            sp.add_argument("--ref-gone", action="store_true", help="the caller probed the harness's peer list and a ref is "
+                            "not live: with --successor-of the predecessor is superseded without waiting STALE_HOURS "
+                            "(a live owner process still stops it); without it, a same-session-id register over a fresh "
+                            "row skips the duplicate-register check (the old ref is gone)")
         sp.add_argument("--name", required=(name != "stats"))
         sp.add_argument("--session-id", default="", help="transcript to derive stats from (default $CLAUDE_CODE_SESSION_ID)")
         sp.add_argument("--no-stats", action="store_true", help="do not refresh the stats field")

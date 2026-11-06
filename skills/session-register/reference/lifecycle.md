@@ -163,7 +163,9 @@ probe. Standby, retired and ended workers are skipped.
 `session-touch` it, before trusting it; never keep a stale `working_on` silently.
 **One process per session id.** A register of the same session id under a new `ref` while the row's heartbeat is
 under 5 minutes old prints `DUPLICATE REGISTER` naming both refs and exits 3 without writing: the second process
-stands down (tell the owner, do no work) and the row stays with the first ref.
+stands down and the row stays with the first ref. It probes the old ref with `ListAgents`: live, it stays down (tell
+the owner, do no work); gone (a crash resumed on the same transcript), it registers again with `REF_GONE=1`, which
+skips the check. With no peer list it retries after 5 minutes.
 A parked session registers `STATE=standby`; the row carries `expires`, fixed when it enters standby
 (`swarm.standby_hours`, default 24 h later; a touch or a re-register without `STATE=` keeps both) and the zombie
 sweep's `--kill` mode retires it past that (`session.py retire`). A lane that wakes re-registers with `STATE=running`.

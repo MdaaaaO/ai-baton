@@ -69,8 +69,8 @@ entries before touching a shared epic, PR or worktree.
    printed ref with `ListAgents`; a gone ref (or, with no peer list, a heartbeat older than `swarm.stall_minutes`) goes to
    `swarm.py resume`, as does a `subagent` worker once its predecessor's process is gone. **A resume re-confirms:** a live row
    whose `working_on` is older than 12 h is marked `unconfirmed: <old>`; pass `WORKING=` or `session-touch` it, never
-   keep it silently. **`DUPLICATE REGISTER`** (same session id, new `ref`, heartbeat under 5 min) exits 3 with no write: you stand
-   down. A `STATE=standby` row expires and the sweep retires it. Detail: `reference/lifecycle.md` § Liveness and failover.
+   keep it silently. **`DUPLICATE REGISTER`** (same session id, new `ref`, heartbeat under 5 min) exits 3 with no write: probe the old ref with `ListAgents`; live, you stand
+   down; gone (a resumed crash), register again with `REF_GONE=1`. A `STATE=standby` row expires and the sweep retires it. Detail: `reference/lifecycle.md` § Liveness and failover.
    `make -C $BATON/context-db mission-build` rebuilds the private mission-control page from the registry (a local
    file, zero model turns, never a publish).
    Then fill the body of `.context/sessions/<name>.md` (a direct `Edit`, or the ctx tools naming your actor —
