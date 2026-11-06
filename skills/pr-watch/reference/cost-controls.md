@@ -64,7 +64,7 @@ The shell polling is free; what costs is every line emitted and every Monitor ex
   PR's live head: then the watcher already followed that move and the argument is only the arming command's
   original head, reused on the re-arm, so the state is kept (re-arming used to report the same move twice). The dir is shared by every session
   on the same machine: a successor taking over a PR inherits the silence and reads the current verdict from the
-  predecessor's `## Open PRs` list instead.
+  predecessor's PR list (`prs.tsv`, else `## Open PRs`) instead.
 
 ## Why park
 

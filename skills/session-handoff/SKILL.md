@@ -2,9 +2,9 @@
 name: session-handoff
 description: "Flushes durable knowledge before a session ends or a ticket/PR/epic step lands: context doc, priorities, indexes, stats, the next-session prompt; then stops monitors, closes the registry row. Invoke when finishing work, before ending a session, or on \"wrap up / hand off / update context\"."
 metadata:
-  version: "43"
-  updated: "2026-11-04"
-  reviewed: "2026-11-04"
+  version: "44"
+  updated: "2026-11-05"
+  reviewed: "2026-11-05"
 user-invocable: true
 ---
 
@@ -102,8 +102,8 @@ end"** rules in `$BATON/WORKSPACE.md` (the shared body of the root `CLAUDE.md`).
    TOTAL of main session + every subagent transcript (`<session-id>/subagents/*.jsonl`) — quote the total,
    the block shows the main/subagent split — and say "estimate" when you quote it. If the transcript isn't discoverable (no
    `CLAUDE_CODE_SESSION_ID`, e.g. a subagent), say so and skip; never invent the figures.
-9. **Session registry + PR watches** — first refresh the `## Open PRs` list in
-   `.context/sessions/<name>.md` (every open PR you own: `repo#n`, current head, what it waits on):
+9. **Session registry + PR watches** — first refresh `.context/sessions/<name>/prs.tsv` in place of the prose `## Open PRs`
+   (every open PR you own: `repo`, `pr`, `head7`, `state`, `ticket`; an orchestrator also leaves the swarm ledger current):
    your `pr-watch` `Monitor`s died with step 7, and the successor's `session-register` startup step
    re-arms exactly that list. Then mark the session ended:
    `make -C $BATON/context-db session-end NAME=<name> NEXT=<prompt file>` (step 10 writes the file; or

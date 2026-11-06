@@ -162,6 +162,23 @@ def cell(m: dict, key: str) -> str:
     return (m.get(key, "") or "").replace("|", "\\|")
 
 
+def state_cell(m: dict) -> str:
+    """The State cell: `standby` shows when the sweep retires it (or that the time has passed); anything else as is."""
+    st, exp = cell(m, "state"), cell(m, "expires")
+    if st != "standby" or not exp:
+        return st
+    t = _parse_expires(exp)
+    late = t is not None and t <= datetime.now(timezone.utc)
+    return f"standby ⚠ EXPIRED ({exp})" if late else f"standby (until {exp})"
+
+
+def _parse_expires(v: str):
+    try:
+        return datetime.strptime(v, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def cost_split(stats: str) -> tuple[str, str]:
     """('~$44', stats without the cost term) — the estimate gets its own column."""
     m = re.search(r"\s*·\s*(~\$[\d.,]+[kK]?)", stats)
@@ -281,6 +298,17 @@ def archive_path(name: str, m: dict) -> str:
         n += 1
 
 
+def _archive_session_dir(name: str, dst_md: str) -> None:
+    """`sessions/<name>/` (the `prs.tsv` a swarm orchestrator keeps) moves with its row, to `archive/<stem of dst>/`."""
+    src = os.path.join(SESS_DIR, name)
+    dst = dst_md[:-3]
+    if os.path.isdir(src) and not os.path.exists(dst):
+        try:
+            os.replace(src, dst)
+        except OSError:
+            pass
+
+
 def sweep(ended: list[dict], dry_run: bool, registered: Mapping[str, datetime] | None = None
           ) -> tuple[list[dict], int]:
     """Move the ended sessions nothing waits on to sessions/archive/; returns (still live, moved count).
@@ -300,6 +328,7 @@ def sweep(ended: list[dict], dry_run: bool, registered: Mapping[str, datetime] |
         os.makedirs(ARCHIVE_DIR, exist_ok=True)
         try:
             os.replace(m["_path"], dst)
+            _archive_session_dir(cell(m, "session"), dst)
         except FileNotFoundError:
             continue  # a concurrent regen (heartbeat, another session's flush) already took it
         except OSError as e:
@@ -403,15 +432,24 @@ def main(argv: list[str] | None = None) -> int:
     if active:
         out.append("| Session | Status | Role | State | Epic | Working on | Responsibilities | Stats | ~$ est. | Heartbeat |")
         out.append("|---|---|---|---|---|---|---|---|---|---|")
+        lanes: dict[str, list[dict]] = {}
+        for m in active:
+            lanes.setdefault(cell(m, "lane") or cell(m, "session"), []).append(m)
         for m in by_heartbeat(active):
             hb = m.get("heartbeat", "")
             a = age_hours(hb)
             flag = " ⚠ STALE" if a is not None and a > STALE_HOURS else ""
+            # two live rows on one lane: the older heartbeat is the one a restart left behind (a ghost to retire)
+            mates = [x for x in lanes[cell(m, "lane") or cell(m, "session")] if x is not m]
+            newer = [x for x in mates if (x.get("heartbeat", "") or "") > (hb or "")]
+            if newer:
+                flag += f" ⚠ SAME LANE as {cell(newer[0], 'session')}"
+            state = state_cell(m)
             ref = f" `{cell(m, 'ref')}`" if cell(m, "ref") else ""
             cost, stats = cost_split(cell(m, "stats"))
             out.append(
                 f"| `{cell(m, 'session')}`{ref} | {cell(m, 'status')}{flag} "
-                f"| {cell(m, 'role')} | {cell(m, 'state')} "
+                f"| {cell(m, 'role')} | {state} "
                 f"| {cell(m, 'epic')} | {cell(m, 'working_on')} "
                 f"| {cell(m, 'responsibilities')} | {stats} | {cost} | {profile.local_str(hb, LOCAL_TZ)} |"
             )
