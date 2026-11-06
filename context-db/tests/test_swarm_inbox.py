@@ -129,6 +129,20 @@ class Local(Case):
         self.assertEqual((self.dir / "orchestrator" / "in.read").read_text().strip(), "2")
         self.assertEqual(self.run_cli("mark", KEY, "nonsense").returncode, 2)
 
+    def test_a_corrupt_or_negative_read_mark_is_refused_not_read_as_zero(self):
+        """`drain` refuses ("fix or delete it"); `local` and `mark` do too, else every old line comes back as new."""
+        self.box("orchestrator", "in", self.rec("STOP", "5", "2026-11-01T10:00:00Z", "aaa1"))
+        mark = self.dir / "orchestrator" / "in.read"
+        for bad in ("abc\n", "-1\n"):
+            mark.write_text(bad, encoding="utf-8")
+            for args in (("local", KEY), ("mark", KEY, "orchestrator/in=1")):
+                p = self.run_cli(*args)
+                self.assertEqual(p.returncode, 2, (args, bad, p.stdout, p.stderr))
+                self.assertIn("fix or delete it", p.stderr)
+                self.assertNotIn("ITEM", p.stdout)
+        mark.unlink()
+        self.assertIn("ref=aaa1", self.out("local", KEY))
+
 
 class Since(Case):
     def test_none_then_moves_forward_only(self):

@@ -313,8 +313,8 @@ finished worker waits in its inbox file and is never invisible. The read mark li
   into the orchestrator's inbox, the orchestrator's into the worker's. A second ack of an id changes nothing, an id not
   sent to that lane exits 1, and nothing acks an `ACK`. `swarm_msg.py pending` reads the `ACK` there.
 - **The send.** `send` appends one validated record. A second send of an id into the same box appends one copy marked
-  `resent`, after the read mark, so `drain` shows it again; a third changes nothing. `drain --outbox` is how the
-  orchestrator reads a worker's outbox. The orchestrator is the lane whose live registry row says `role: orchestrator`;
+  `resent`, after the read mark, so `drain` shows it again; a third changes nothing. `drain --outbox` reads a worker's
+  outbox by hand; the tick reads it through `swarm-inbox`. The orchestrator is the lane whose live registry row says `role: orchestrator`;
   an ended one is an ordinary lane to an address typed now, yet a stored sender still resolves to the orchestrator.
 - **The orchestrator** reads its own inbox and every outbox at each tick, and writes to a worker's inbox before it wakes
   that worker.
@@ -399,7 +399,7 @@ out; the order is fixed here.
 | # | Step | What the orchestrator does |
 |---|---|---|
 | 1 | Read | Re-reads the task ledger (`swarm.py tick`), the tracker (the epic, its children, their PRs) and git (branches and heads). Where the task ledger and the branches disagree, `swarm.py resume` prints the difference and the orchestrator decides or asks. |
-| 2 | Inbox | Drains its own inbox, every worker's return and outbox, peer messages, tracker comments, PR events, chat items where the machine has chat, and watches due. Applies the status lines (`swarm.py apply`) and acks. A `STOP` or `HOLD` takes effect first. |
+| 2 | Inbox | Reads, through the `swarm-inbox` sweep, its own inbox, every worker's return and outbox, peer messages, tracker comments, PR events, chat items where the machine has chat, and watches due. Runs the sweep's `MARK` trailer (`inbox.py mark`, which moves each read mark to what the sweep read), applies the status lines (`swarm.py apply`) and acks. A `STOP` or `HOLD` takes effect first. |
 | 3 | Decisions | Handles `BLOCKED`, `NEEDS` and `DECISION` lines. A comment that adds scope becomes a dated delta. Every open decision goes in one batch: the carousel, or the digest's `Decisions` block (§ Never block on a human). |
 | 4 | Assignment | Assigns the next ready tickets of the current wave, up to `swarm.max_workers` (default 4), each with an assignment file and its own worktree, all spawned in one message with the model the Sizing line names. Never before the plan is approved, past the epic budget or under a `STOP`. Before any assignment to a peer it probes liveness: `ListAgents`, by ref, not heartbeat age. Where the harness has no peer list, the registry row's heartbeat is the probe. An incident lane may start past the plan (§ Authority matrix) and pre-empts the queue. |
 | 5 | Stalls | Stall and failover rules apply only to `assigned` and `claimed` rows. Rows in `pr`, `ready-to-merge`, `blocked`, `parked` or under a `HOLD` are exempt and have their own watches: the PR watch, the owner's decision, the hold's releaser. A worker with no new commit, status or comment past `swarm.stall_minutes` (default 90) has stalled. At two stalls it gets one re-brief, then the ticket is reassigned or parked, with a task ledger entry. An assignment whose worker is `unreachable`, whose registry row is `⚠ STALE`, that ended with no return or that lost its background task returns here: `swarm.py resume` shows whether to drive a PR it finds to merge, respawn it in place or reassign it. |

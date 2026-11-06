@@ -85,10 +85,18 @@ def is_bot(raw: dict, bots: set[str]) -> bool:
 
 
 def read_mark(path, which: str) -> int:
+    """The `.read` count, as `swarm_msg.py drain` reads it: a missing mark is 0, an unreadable, corrupt or negative one is
+    refused (exit 2), never read as 0, which would hand the tick every old line again."""
+    mark = path.with_name(f"{which}.read")
     try:
-        return max(int(path.with_name(f"{which}.read").read_text(encoding="utf-8").strip() or 0), 0)
-    except (OSError, ValueError):
+        seen = int(mark.read_text(encoding="utf-8").strip() or 0)
+    except FileNotFoundError:
         return 0
+    except (OSError, ValueError) as err:
+        raise swarm_msg.MsgError(f"{mark} is not a readable line count ({err}): fix or delete it") from err
+    if seen < 0:
+        raise swarm_msg.MsgError(f"{mark} holds a negative count ({seen}): fix or delete it")
+    return seen
 
 
 def local_items(key: str, now: datetime, offsets: dict | None = None) -> list[dict]:

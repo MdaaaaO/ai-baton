@@ -16,16 +16,16 @@ Run by the orchestrator at `swarm-run`'s digest step, in the main session. `rend
 ## Steps
 
 1. `python3 $S/digest.py due <key> [--wave-end]` → `due`, or `not due: next <iso>`. Not due ends the run: nothing is rendered or posted, and the reply is the one line, `not due until <iso>`.
-2. `python3 $S/digest.py render <key>` → the digest: a dated headline ending in `<!-- swarm-digest -->`, the six sections
+2. `python3 $S/digest.py render <key> > $CTX/digest.txt` (`CTX` is `swarm-run`'s scratch directory, `mktemp -d`) → the digest: a dated headline ending in `<!-- swarm-digest -->`, the six sections
    (Shipped, Blocked with who must act, Decisions open, Spend against the caps, Stalls, Next) and the closing
    `**For the operator**` lines (Can now / Do differently / Check with / Not covered). Post it as rendered; reword nothing
    and keep the marker, `swarm-inbox` drops any comment that holds it.
-3. Post it as one delta on the tracking issue (skill `ticket-update`), then append the same text to the epic's context doc
+3. Post `$CTX/digest.txt` as one delta on the tracking issue (skill `ticket-update`), then append the same text to the epic's context doc
    with `ctx_log`.
 4. Where `systems.slack` is true, draft it to the owner's chat (skill `slack-draft`) and record the draft:
    `python3 $BATON/skills/swarm-inbox/scripts/inbox.py draft-add --key <key> --channel <c> --thread <t> --draft-id <id> --gist "swarm digest"`.
    With slack false this step is one line and nothing else: `chat tier not applicable here`.
-5. `python3 $S/digest.py posted <key> < digest.txt` stores the time and text in the ledger directory; the next `due` and
+5. `python3 $S/digest.py posted <key> < $CTX/digest.txt` stores the time and text in the ledger directory; the next `due` and
    the mission-control swarm panel read it. Run it last, only after step 3 succeeded.
 
 Headless (no `AskUserQuestion`): the open decisions of the digest also go into a `Decisions` block (`docs/carousel.md` § No
