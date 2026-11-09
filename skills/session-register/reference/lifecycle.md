@@ -56,7 +56,10 @@ no `/loop` wake-up re-bills the prefix for a heartbeat.
 The same minute tick runs the zombie sweep (`zombie-sweep.sh --kill`, § Zombie sweep) about every `session.sweep_hours`
 (default 24; `null` turns it off). A machine-wide stamp and lock (`zombie-sweep.stamp`, `zombie-sweep.lock`, beside the
 logs) keep loops that come due together to one sweep; its lines land in the heartbeat log prefixed `sweep:`. It runs in
-the background under a timeout where the host has one, so a failing or hanging sweep never stops the beat.
+the background under a timeout where the host has one, so a failing or hanging sweep never stops the beat. It passes
+`--min-ended-minutes 30`: `session-end` marks the row ended before the rest of the handoff close-out runs, so a row
+whose `ended_at` is under 30 minutes old reads `RECENT` and is spared. The loop is detached, so the sweep's ancestry
+guard does not cover its own owner: once all of the owner's rows are ended, it is a target like any other.
 
 A second start for the SAME session is a no-op, also under another key: the same name and the same owning process
 is one loop (pidfile `$TMPDIR/ai-baton-<uid>/heartbeat-<key>.pid`; log `…heartbeat-<key>.log` beside it, `<key>`
@@ -76,7 +79,7 @@ pane; an earlier key), so the verdict is per owner, judged across every log that
 is gone never vouches for a kill, yet an active row it names still keeps the owner `LIVE` (a loop can die under a
 working session, after an earlier handoff in the same pane) while a missing row from it proves nothing (a name renamed
 away, a log from before a reboot). One line per owner, every name its logs carry comma-joined and `row=` their
-statuses in the same order: `ZOMBIE` (owner alive, a heartbeat loop alive, every row `ended` or archived, a dead-loop
+statuses in the same order: `RECENT` (a `ZOMBIE` whose row ended under `--min-ended-minutes` ago, spared), `ZOMBIE` (owner alive, a heartbeat loop alive, every row `ended` or archived, a dead-loop
 log's missing one aside), `LIVE` (any row active, or this script's own session), `UNREGISTERED` (a live-loop name with
 no row in `sessions/` or `sessions/archive/`, and none active), `STALE` (every loop is gone, so the logs may predate a
 reboot and the pid belong to anyone), `REUSED` (the pid's comm is no longer claude-shaped), `DEAD` (owner gone; the
@@ -143,7 +146,8 @@ after a fresh register it may not exist yet. A duplicate heading is merged on th
 (ListAgents ref — the stable id) · `status` (`active`|`idle`|`ended`) · `state` (`standby`|`retired`, optional; retired keeps `status: active`) · `expires` (standby only: set when the row enters standby, `swarm.standby_hours` later; a touch does not move it) · `confirmed` (when `working_on` was last set; older than 12 h at a re-register marks it `unconfirmed: <old>`) · `epic` (the initiative's tracker key) ·
 `repos` · `working_on` (one line) · `responsibilities` · `stats` (auto, § Stats) · `registered` (auto: when the
 lane started — set by a register that creates or reactivates the entry, never by touch/end) · `heartbeat` (auto) ·
-`updated` (auto). These are operational state, **not** knowledge — the registry is excluded from
+`updated` (auto) · `ended_at` (auto: when `session-end` or a supersession ended the row; a touch does not move it,
+a re-register clears it — the zombie sweep's `--min-ended-minutes` reads it). These are operational state, **not** knowledge — the registry is excluded from
 `make index`/`make verify` and the doc DB count.
 
 ## Retire and `owns:`

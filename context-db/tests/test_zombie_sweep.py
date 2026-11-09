@@ -84,8 +84,9 @@ class ZombieSweepFixture(unittest.TestCase):
         if loop is not None:
             (self.logs / f"heartbeat-{key}.pid").write_text(f"{loop}\n")
 
-    def row(self, name: str, status: str, archived: str | None = None) -> None:
-        text = f"---\nsession: {name}\nsession_id: none\nstatus: {status}\n---\n"
+    def row(self, name: str, status: str, archived: str | None = None, ended_at: str | None = None) -> None:
+        text = f"---\nsession: {name}\nsession_id: none\nstatus: {status}\n" + (
+            f"ended_at: {ended_at}\n" if ended_at else "") + "---\n"
         if archived:
             (self.ctx / "sessions" / "archive" / archived).write_text(text)
         else:
@@ -180,7 +181,7 @@ class ListMode(ZombieSweepFixture):
         self.assertIn("UNMAPPED heartbeat-nostart.log", out)
         # the second log for z-ended's owner adds no second verdict
         self.assertEqual(sum(1 for line in out if " z-ended " in line), 1, out)
-        self.assertEqual(out[-1], "zombie-sweep: 2 zombie(s), 1 live, 1 unregistered, 1 stale, 1 reused, 1 dead, 1 unmapped")
+        self.assertEqual(out[-1], "zombie-sweep: 2 zombie(s), 1 live, 1 unregistered, 1 stale, 1 reused, 1 dead, 1 unmapped, 0 recent")
         for name, p in owners.items():
             self.assertIsNone(p.poll(), f"list mode must not touch any process ({name})")
 
@@ -195,14 +196,14 @@ class ListMode(ZombieSweepFixture):
         self.assertIn(f"ZOMBIE ca-ended,cb-arch owner={pid['pair-zombie']} comm=node row=ended,archived", out)
         self.assertIn(f"LIVE da-old,db-ended owner={pid['stale-beside']} row=active,ended", out)
         self.assertIn(f"ZOMBIE ea-gone,eb-ended owner={pid['renamed-beside']} comm=node row=none,ended", out)
-        self.assertEqual(out[-1], "zombie-sweep: 2 zombie(s), 2 live, 1 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped")
+        self.assertEqual(out[-1], "zombie-sweep: 2 zombie(s), 2 live, 1 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped, 0 recent")
         for name, p in owners.items():
             self.assertIsNone(p.poll(), f"list mode must not touch any process ({name})")
 
     def test_nothing_to_sweep_exits_zero(self):
         r = self.sweep()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(r.stdout.strip(), "zombie-sweep: 0 zombie(s), 0 live, 0 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped")
+        self.assertEqual(r.stdout.strip(), "zombie-sweep: 0 zombie(s), 0 live, 0 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped, 0 recent")
 
     def test_list_mode_names_a_standby_row_past_its_time_and_retires_nothing(self):
         f = self.standby("w-late", "2026-11-02T00:00:00Z")
@@ -266,6 +267,37 @@ class KillMode(ZombieSweepFixture):
             self.assertIsNone(owners[name].poll(), f"--kill must never reach {name}'s owner: a row of its is not ended")
         self.assertIsNone(self.loop.poll(), "the heartbeat loops are never a target")
 
+    def test_min_ended_minutes_spares_a_row_that_ended_recently(self):
+        # the scheduled run (heartbeat.sh) passes --min-ended-minutes 30: session-end marks the row ended before
+        # the rest of the handoff close-out runs, so a session that ended minutes ago is spared (#726)
+        from datetime import datetime, timedelta, timezone
+        ago = lambda m: (datetime.now(timezone.utc) - timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        loop = self.loop.pid
+        owners = {k: self.spawn("node") for k in ("young", "old", "unstamped")}
+        for k, p in owners.items():
+            self.log(k, k, p.pid, loop)
+        self.row("young", "ended", ended_at=ago(5))
+        self.row("old", "ended", ended_at=ago(120))
+        self.row("unstamped", "ended")                               # ended before the field existed: long ago
+        r = self.sweep("--kill", "--min-ended-minutes", "30")
+        out = r.stdout.splitlines()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"RECENT young owner={owners['young'].pid} row=ended ended 5m ago (under 30m)", out)
+        self.assertIn(f"KILLED old owner={owners['old'].pid} comm=node row=ended", out)
+        self.assertIn(f"KILLED unstamped owner={owners['unstamped'].pid} comm=node row=ended", out)
+        self.assertTrue(out[-1].startswith("zombie-sweep: 2 zombie(s), ") and out[-1].endswith(", 1 recent"), out[-1])
+        self.assertIsNone(owners["young"].poll(), "a session that ended 5 minutes ago may still be closing out")
+        for k in ("old", "unstamped"):
+            self.assertIsNotNone(owners[k].wait(timeout=10), f"{k}'s owner must have been ended")
+        r = self.sweep("--kill")                                     # without the flag (a manual run): no grace
+        self.assertIn(f"KILLED young owner={owners['young'].pid} comm=node row=ended", r.stdout.splitlines())
+
+    def test_min_ended_minutes_takes_a_whole_number_only(self):
+        for bad in (["--min-ended-minutes"], ["--min-ended-minutes", "half"], ["--min-ended-minutes=-1"]):
+            r = self.sweep(*bad)
+            self.assertEqual(r.returncode, 2, bad)
+            self.assertIn("usage: zombie-sweep.sh", r.stderr)
+
     def test_kill_never_targets_the_scripts_own_ancestry(self):
         # a claude-shaped process (a script named `node`) whose own heartbeat log maps it to an ended row runs
         # the sweep with --kill itself: it is the sweep's parent, so it reads LIVE (this session) and survives
@@ -284,7 +316,7 @@ class KillMode(ZombieSweepFixture):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertTrue(any(line.startswith("LIVE self-run owner=") and line.endswith("(this session)") for line in out), out)
         self.assertFalse(any(line.startswith("KILLED ") or line.startswith("ZOMBIE ") for line in out), out)
-        self.assertEqual(out[-1], "zombie-sweep: 0 zombie(s), 1 live, 0 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped")
+        self.assertEqual(out[-1], "zombie-sweep: 0 zombie(s), 1 live, 0 unregistered, 0 stale, 0 reused, 0 dead, 0 unmapped, 0 recent")
 
 
 if __name__ == "__main__":

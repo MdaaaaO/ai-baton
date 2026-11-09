@@ -25,7 +25,9 @@
 # (`zombie-sweep.sh --kill`, unchanged kill rules): one machine-wide stamp `zombie-sweep.stamp` and lock
 # `zombie-sweep.lock` beside the logs, so loops due at the same moment sweep once. The sweep runs in the background
 # under a timeout where the host has one, each output line lands in this log prefixed `sweep:`, and a sweep that
-# fails or hangs never stops the beat. The sweep never kills this loop's own owner (its ancestry guard).
+# fails or hangs never stops the beat. It passes `--min-ended-minutes 30`, so a session whose row ended under 30 minutes
+# ago (still closing out its handoff) is spared; this loop's own owner is a kill target like any other once all its
+# rows ended — the loop is detached, so the sweep's ancestry guard does not cover it.
 # Log/pidfile: $TMPDIR/ai-baton-<uid>/heartbeat-<key>.{log,pid} where <key> is $CLAUDE_CODE_SESSION_ID
 # when the harness set one, else the session NAME. Keying on the session id — not the name alone —
 # means two live sessions that end up registered under the same NAME (a naming accident, not something
@@ -70,7 +72,7 @@ sweep_tick() {
     tmo=""; command -v timeout >/dev/null 2>&1 && tmo="timeout 600"
     command -v gtimeout >/dev/null 2>&1 && [ -z "$tmo" ] && tmo="gtimeout 600"
     # shellcheck disable=SC2086
-    $tmo bash "$SWEEP_SCRIPT" --kill 2>&1 | sed 's/^/sweep: /'
+    $tmo bash "$SWEEP_SCRIPT" --kill --min-ended-minutes 30 2>&1 | sed 's/^/sweep: /'
     exit 0
   ) </dev/null &
   return 0

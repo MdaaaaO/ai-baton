@@ -158,7 +158,7 @@ whether there is one; nothing to hand over → omit `NEXT`; `NEXT=none` withdraw
 reactivates it: `reference/lifecycle.md` § End and archiving. Then do the rest of the `session-handoff` close-out.
 A row that says `ended` while its claude process still runs (a pane never closed after the handoff) is a zombie:
 `bash $BATON/skills/session-register/zombie-sweep.sh` lists them, `--kill` ends them (`reference/lifecycle.md`
-§ Zombie sweep; `kit-health` § 4 reports them); the heartbeat runs `--kill` itself every `session.sweep_hours` (24).
+§ Zombie sweep; `kit-health` § 4 reports them); the heartbeat runs `--kill --min-ended-minutes 30` itself every `session.sweep_hours` (24).
 
 Row fields: `reference/lifecycle.md` § Fields — operational state, **not** knowledge (excluded from
 `make index`/`make verify` and the doc DB count).

@@ -289,8 +289,8 @@ class ScheduledSweep(unittest.TestCase):
     """The minute tick runs `zombie-sweep.sh --kill` when the machine-wide stamp is missing or older than
     `session.sweep_hours`. A stub `sleep` ends the owner on its first call, so the inner loop runs exactly one
     tick; a stub sweep script (HEARTBEAT_SWEEP_SCRIPT) counts its runs. The fake clock is the stamp's content (an
-    epoch). The sweep's own ancestry guard (never kill the heartbeat that runs it) is proven by
-    test_zombie_sweep's test_kill_never_targets_the_scripts_own_ancestry."""
+    epoch). The grace for a row that ended minutes ago is proven by test_zombie_sweep's
+    test_min_ended_minutes_spares_a_row_that_ended_recently."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="kit-heartbeat-sweep."))
@@ -374,6 +374,13 @@ class ScheduledSweep(unittest.TestCase):
         outs = [a.communicate(timeout=30)[0], b.communicate(timeout=30)[0]]
         self.assertEqual(self.count(), 1)
         self.assertEqual(sum("sweep: swept" in o for o in outs), 1)
+
+    def test_the_scheduled_sweep_kills_with_a_30_minute_grace(self):
+        # a session marks its row ended, then finishes its handoff close-out: the scheduled run spares it (#726)
+        args = self.tmp / "sweep-args"
+        self.set_sweep(f'echo "$*" > {args}')
+        self.run_tick()
+        self.assertEqual(args.read_text().strip(), "--kill --min-ended-minutes 30")
 
     def test_a_failing_sweep_never_stops_the_heartbeat(self):
         self.set_sweep('echo "boom"; exit 7')
