@@ -1,5 +1,5 @@
-// Boot: read the two JSON blocks, fill the time lines, draw the six sections and wire the tabs.
-const TABS = ['sessions', 'cost', 'catalog', 'priorities', 'queues', 'pointers'];
+// Boot: read the two JSON blocks, fill the time lines, draw the seven sections and wire the tabs.
+const TABS = ['sessions', 'cost', 'catalog', 'priorities', 'queues', 'swarm', 'pointers'];
 const TAB_KEY = 'mission.tab';
 
 function readBlock(id) {

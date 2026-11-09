@@ -57,6 +57,7 @@ import gen_index  # noqa: E402  — same dir: the doc catalog walk
 import gen_sessions  # noqa: E402  — same dir: the session registry parser
 import kit_profile as profile  # noqa: E402  — same dir: the one content-root resolver
 import leak_shapes  # noqa: E402  — same dir: the secret shapes and their redaction
+import swarm  # noqa: E402  — same dir: the swarm ledger's spend and shipped definitions
 from fsutil import atomic_write  # noqa: E402  — same dir
 from session import OPEN_PRS_HEADING  # noqa: E402  — the writer owns the session doc's section headings
 from session_stats import SPEND_BASIS  # noqa: E402  — one spend-basis wording
@@ -91,6 +92,7 @@ PATHS = {
     "session_index": "SESSION_INDEX.md",
     "sessions": "sessions",
     "sign_queue": "state/sign-queue",
+    "swarm": "state/swarm",
 }
 
 # sessions/_ledger.md header label -> data.json key (the writer is session.py's _ledger_append)
@@ -609,6 +611,70 @@ def read_sign_queue(seen: list[str]) -> dict:
     return {"path": PATHS["sign_queue"], "jobs": jobs, "problems": sorted(problems)}
 
 
+def swarm_epic(led: dict, digest: dict | None) -> dict:
+    """One epic's row for the swarm panel, from its ledger as the swarm wrote it. The spend is the ledger's own: the
+    epic's `spent`, each ticket's `spent` and the count of readings in its `spend`; nothing is priced here."""
+    rows = led.get("tickets") if isinstance(led.get("tickets"), dict) else {}
+    tickets, by_status, blocked, shipped = [], {}, [], []
+    for t, row in sorted(rows.items(), key=lambda kv: (len(str(kv[0])), str(kv[0]))):
+        row = row if isinstance(row, dict) else {}
+        status = str(row.get("status") or "?")
+        by_status[status] = by_status.get(status, 0) + 1
+        spend = row.get("spend") if isinstance(row.get("spend"), dict) else {}
+        entry = {"ticket": str(t), "title": row.get("title"), "status": status, "wave": row.get("wave"),
+                 "pr": row.get("pr"), "spent": row.get("spent") or 0, "readings": len(spend)}
+        tickets.append(entry)
+        who = row.get("blocked") if isinstance(row.get("blocked"), dict) else None
+        if who or row.get("parked_reason"):
+            blocked.append({"ticket": str(t), "reason": (who or {}).get("reason") or row.get("parked_reason"),
+                            "who": (who or {}).get("who")})
+        if status in swarm.SHIPPED:
+            shipped.append({"ticket": str(t), "title": row.get("title"), "pr": row.get("pr")})
+    decisions = [{"id": d.get("id"), "question": d.get("question"), "ticket": d.get("ticket")}
+                 for d in led.get("decisions") or [] if isinstance(d, dict) and not d.get("closed")]
+    budget = led.get("budget") if isinstance(led.get("budget"), dict) else {}
+    spent, epic_usd = swarm.epic_spend(led)
+    holds = [h for h in led.get("holds") or [] if isinstance(h, (str, dict))]
+    return {"key": led.get("key"), "title": led.get("title"), "repo": led.get("repo"),
+            "plan_approved": bool(led.get("plan_approved")), "updated": norm_stamp(led.get("updated")),
+            "spent": spent, "epic_usd": epic_usd, "worker_usd": budget.get("worker_usd"),
+            "by_status": by_status, "tickets": tickets, "blocked": blocked, "shipped": shipped,
+            "decisions_open": decisions, "holds": len(holds), "digest": digest}
+
+
+def read_swarm(seen: list[str]) -> dict:
+    """Every epic ledger under state/swarm/ (top-level *.json), with its last posted digest. Reads only: no clock."""
+    problems: list[str] = []
+    epics = []
+    for n in list_source(PATHS["swarm"], "swarm", problems) or []:
+        if not n.endswith(".json"):
+            continue
+        rel = f"{PATHS['swarm']}/{n}"
+        text = read_source(rel, "swarm", problems)
+        if text is None:
+            continue
+        try:
+            led = json.loads(text)
+        except ValueError as e:
+            problems.append(problem("swarm", rel, e))
+            continue
+        if not isinstance(led, dict):
+            problems.append(problem("swarm", rel, TypeError()))
+            continue
+        digest = None
+        dtext = read_source(f"{PATHS['swarm']}/{n[:-5]}/digest.json", "swarm", problems)
+        if dtext:
+            try:
+                d = json.loads(dtext)
+                digest = {"at": norm_stamp(d.get("at")), "text": d.get("text")} if isinstance(d, dict) else None
+            except ValueError as e:
+                problems.append(problem("swarm", f"{PATHS['swarm']}/{n[:-5]}/digest.json", e))
+        row = swarm_epic(led, digest)
+        note(seen, row["updated"])
+        epics.append(row)
+    return {"path": PATHS["swarm"], "epics": epics, "problems": sorted(problems)}
+
+
 def outcome_of(text: str) -> str:
     """The walk log's `## Outcome of the walk …` heading line and the first line under it, as written."""
     lines = text.split("\n")
@@ -687,6 +753,7 @@ def assemble() -> dict:
     priorities = read_priorities()
     queues = {"pr_review": read_pr_review(seen), "sign_queue": read_sign_queue(seen),
               "kit_health": read_kit_health(seen)}
+    swarm = read_swarm(seen)
     pointers = read_pointers(seen)
     as_of = max(seen) if seen else None
     return {
@@ -700,6 +767,7 @@ def assemble() -> dict:
         "catalog": catalog,
         "priorities": priorities,
         "queues": queues,
+        "swarm": swarm,
         "pointers": pointers,
     }
 

@@ -99,6 +99,7 @@ STATUSES = ("ready", "assigned", "claimed", "pr", "ready-to-merge", "merged", "v
 # only a new ASSIGN restarts it (docs/swarm.md § The lines, `PARKED`), so a late BLOCKED leaves it parked.
 BEFORE_MERGED = ("ready", "assigned", "claimed", "pr", "ready-to-merge", "blocked")
 STALL_STATUSES = ("assigned", "claimed")
+SHIPPED = ("merged", "verified", "done")  # what the digest's Shipped and the mission-control panel count
 NO_WORKER_STATUSES = ("ready", "merged", "verified", "done", "parked")
 STALLS_BEFORE_REBRIEF = 2
 
@@ -351,12 +352,22 @@ def row_cap(led: dict, row: dict):
     return worker if worker is not None else config("swarm.budget.worker_usd")
 
 
+def epic_spend(led: dict) -> tuple[float, float | None]:
+    """The epic's spend and its cap, the one reading `budget_state`, the digest and the mission-control panel share: the larger
+    of the epic's `spent` and the sum of the rows, and the ledger's `epic_usd` or else the config's. Tolerates a ledger that
+    was not loaded (a missing or malformed field reads as nothing)."""
+    budget = led.get("budget") if isinstance(led.get("budget"), dict) else {}
+    epic = budget.get("epic_usd")
+    epic = epic if epic is not None else config("swarm.budget.epic_usd")
+    rows = led.get("tickets") if isinstance(led.get("tickets"), dict) else {}
+    nums = [r.get("spent") or 0 for r in rows.values() if isinstance(r, dict)]
+    return max(led.get("spent") or 0, sum(nums)), epic
+
+
 def budget_state(led: dict) -> dict:
     """`state` is `over` at or past the epic cap, `no-cap` with none set, else `ok`; `over` lists the rows at their own cap."""
-    epic = led["budget"].get("epic_usd")
-    epic = epic if epic is not None else config("swarm.budget.epic_usd")
+    spent, epic = epic_spend(led)
     rows = led["tickets"]
-    spent = max(led.get("spent") or 0, sum(r.get("spent") or 0 for r in rows.values()))
     over = []
     for t, r in rows.items():
         cap = row_cap(led, r)

@@ -34,7 +34,7 @@ from tests.test_mission import (  # noqa: E402 — the fixture store and the run
 import gen_sessions  # noqa: E402 — same dir: the stale rule the page mirrors
 import mission  # noqa: E402 — same dir: the stamp format, the part syntax
 
-SECTIONS = ("sessions", "cost", "catalog", "priorities", "queues", "pointers")
+SECTIONS = ("sessions", "cost", "catalog", "priorities", "queues", "swarm", "pointers")
 TEMPLATE_LABEL = "skills/mission-control/page.tpl.html"  # what build.json names the kit's own template
 FORGE_HOSTS = {"github.com", "tracker.example"}  # the only hosts the placeholder store's links point at
 BUDGET = 45 * 1024  # the template and its parts together
@@ -151,7 +151,7 @@ class Files(unittest.TestCase):
         total = len(TEMPLATE.read_bytes()) + sum(len(p.read_bytes()) for p in PARTS.iterdir())
         self.assertLess(total, BUDGET)
 
-    def test_six_sections_six_tabs_and_the_label(self):
+    def test_seven_sections_seven_tabs_and_the_label(self):
         for sid in SECTIONS:
             self.assertEqual(self.template.count(f'<section id="{sid}">'), 1, sid)
             self.assertEqual(self.template.count(f'<a id="tab-{sid}" href="#{sid}">'), 1, sid)
@@ -252,11 +252,11 @@ class Files(unittest.TestCase):
         """The generator's `problems` keys, one per reader (docs/engine-cli.md): each is drawn in its own section, and an
         unreadable source gets an empty state that names the file instead of a bare 'none'."""
         sections = self.parts["sections.js"]
-        for key in ("s.problems", "c.problems", "p.problems", "pr.problems", "sq.problems", "kh.problems"):
+        for key in ("s.problems", "c.problems", "p.problems", "pr.problems", "sq.problems", "kh.problems", "sw.problems"):
             self.assertIn(f"problemList({key})", sections, key)
-        self.assertEqual(len(re.findall(r"problemList\(\w+\.problems\)", sections)), 9)  # sessions twice, then catalog, cost, priorities, three queues, pointers
+        self.assertEqual(len(re.findall(r"problemList\(\w+\.problems\)", sections)), 10)  # sessions twice, then catalog, cost, priorities, three queues, swarm, pointers
         self.assertIn("'not available — cannot read '", sections)
-        for call in ("cannotRead(ledgerPath)", "cannotRead(p.path)", "cannotRead(pr.path)", "cannotRead(sq.path)",
+        for call in ("cannotRead(ledgerPath)", "cannotRead(p.path)", "cannotRead(pr.path)", "cannotRead(sq.path)", "cannotRead(sw.path)",
                      "cannotRead(memoryPath)"):
             self.assertIn(call, sections, call)
 
@@ -289,7 +289,7 @@ class RealTemplate(unittest.TestCase):
         self.assertEqual(json.loads(script_json(self.page, "build")), json.loads(text(BUILT, "build.json")))
         self.assertEqual(self.page.count("<script"), 3)
 
-    def test_the_page_holds_the_six_sections_and_the_label(self):
+    def test_the_page_holds_the_seven_sections_and_the_label(self):
         for sid in SECTIONS:
             self.assertIn(f'<section id="{sid}">', self.page, sid)
         self.assertIn("data as of", self.page)
@@ -310,7 +310,7 @@ class RealTemplate(unittest.TestCase):
         self.assertEqual(r.stderr, "")
         self.assertTrue(one_line(r.stdout))
         self.assertRegex(r.stdout,
-                         r"^ok: .*index\.html: 6 sections, 2 JSON blocks, no remote load or script call found\n$")
+                         r"^ok: .*index\.html: 7 sections, 2 JSON blocks, no remote load or script call found\n$")
 
     def test_check_accepts_the_page_built_from_a_blank_store(self):
         page = text(BUILT_BLANK, "index.html")

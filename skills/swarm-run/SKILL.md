@@ -2,7 +2,7 @@
 name: swarm-run
 description: "The swarm orchestrator's tick: assigns an approved epic's tickets, drains returns, integrates and verifies PRs, writes the digest. Use when running or resuming an epic's swarm, or on its tick wake-up. Not for one ticket (`ticket-pickup`) or a PR you own alone (`pr-watch`)."
 metadata:
-  version: "2"
+  version: "3"
   updated: "2026-11-05"
   reviewed: "2026-11-05"
 user-invocable: true
@@ -36,9 +36,13 @@ its children, their PRs) and the branches. Ledger and branches disagree → `swa
 
 ## 2. Inbox
 
-Drain your inbox, each worker's outbox and each returned run's final lines (`swarm_msg.py drain`), tracker comments,
-PR events, chat items where the machine has chat, and `watches_due`. A `STOP` or `HOLD` acts first. Status lines go
-through `swarm.py apply <key> "<line>"`; ack each id (`swarm_msg.py ack --as <your lane>`). `swarm_msg.py pending`:
+Run `/swarm-inbox <key> <peer lines…>` (a forked sweep): after the key, one swarm line per peer message received since
+the last tick and the final lines of each returned run, one per line. It returns one `ITEM` line per new outbox and inbox
+line, peer line, tracker comment, PR event, chat item where the machine has chat, and due watch; `NO-OP` means nothing
+new. The sweep writes nothing: you act on each item and run its trailers, `MARK`, `SEEN` and `CLOSE-DRAFT`. `MARK`
+moves each read mark to the count the sweep read, so a line that arrived while it read stays unread; never run
+`swarm_msg.py drain` on those boxes at the tick, it marks to the length at that moment. A read-failed line is unknown,
+never quiet. A `STOP` or `HOLD` acts first. Status lines go through `swarm.py apply <key> "<line>"`; ack each id (`swarm_msg.py ack --as <your lane>`). `swarm_msg.py pending`:
 re-send once with the same id; the next window makes the lane `unreachable` (step 5). Inside `swarm.reopen_minutes`
 a miss is a wait, never a loss.
 
@@ -96,11 +100,13 @@ For each `integrate` entry (a `READY` with no PR) or a peer's `PR` line, in this
    `swarm.py status <key> <t> pr --pr <n>`. It stays a draft until the review overview, the miss check and the
    verifier's `phase=read` are all back, because a repo's own auto-merge can merge a non-draft PR once its gates hold.
 2. **Code owners at PR open:** owners per touched path from the live `CODEOWNERS` and the branch protection. A path
-   whose only reachable owner is the author → `needs owner of <path>` in the digest before any `READY` head counts.
+   whose only reachable owner is the author → `swarm.py decision <key> --question "needs owner of <path>: only the author
+   can review it" --for-ticket <t>`, which the digest's Decisions block shows, before any `READY` head counts.
    Approved means `reviewDecision: APPROVED`, never one review.
 3. **Protected paths:** `swarm.protected_paths` (default `.github/`, `hooks/`, `settings*.json`) plus every path the
    repo's own merge gate reserves for its owner (its auto-merge workflow or rulesets, read at the base). A PR on one is
-   never merged by you: the digest says `needs the owner's merge`. Where the repo's auto-merge would still take it,
+   never merged by you: `swarm.py decision <key> --question "needs the owner's merge of PR <n>: <path>" --for-ticket <t>`,
+   which the digest's Decisions block shows. Where the repo's auto-merge would still take it,
    stop at `NEEDS owner` before `gh pr ready`: marking it ready arms that merge.
 4. **Review:** the `review-runner` overview (`model: sonnet` for a diff of 20 changed lines or fewer, by `git diff
    --shortstat`) and the miss check (`docs/miss-check.md`). Findings → `ASSIGN <t> <file> rebrief=1` with the
@@ -128,9 +134,10 @@ a malformed plan's 2 included, is no close.
 
 ## 9. Digest
 
-Every `swarm.digest_hours` (default 4) and at each wave end, on the epic through `ticket-update`: shipped; blocked,
-with who must act; `needs owner of <path>` and `needs the owner's merge`; decisions open; spend against caps; stalls;
-next. Headless, it ends with the `Decisions` block.
+`/swarm-status <key>` (`--wave-end` at a wave end): the first digest and every wave end post at once, any other tick
+only when `swarm.digest_hours` (default 4) have passed since the last. The digest goes on the epic through `ticket-update`,
+as rendered: shipped; blocked, with who must act; decisions open (the owner's asks of step 7 are there); spend against
+caps; stalls; next. Headless, it ends with the `Decisions` block.
 
 ## 10. Flush
 
