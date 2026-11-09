@@ -41,7 +41,7 @@ LEAK_SHAPES = [
     # a ticket key: a letters-only prefix (`W37-2026` is a week, not a key) that is not a well-known acronym followed by
     # a number (`AES-256`, `RSA-2048`, `ARM-64`, `SHA-256`); kit-health adds the tracker's own `key_regex` beside this
     (r"\b(?!(?:UTF|ISO|SHA|RFC|PEP|CVE|MD|HTTP|TLS|KEY|ABC|UTC|API|SQL|AWS|IAM|EKS|ADR|ERR|PR|CI|GH|ID|TF|AES|RSA|ARM|DES|DSA|ECC|"
-     r"HMAC|PBKDF|PKCS|FIPS|NIST|IEEE|ANSI|DIN|GPT|IPV|TCP|UDP|EC|CPU|GPU|RAM|USB|HDMI|PCI|X|V)-)[A-Z]{2,10}-\d{2,6}\b", "ticket key"),
+     r"HMAC|PBKDF|PKCS|FIPS|NIST|IEEE|ANSI|DIN|GPT|IPV|TCP|UDP|EC|CPU|GPU|RAM|USB|HDMI|PCI|X|V|DW|VG)-)[A-Z]{2,10}-\d{2,6}\b", "ticket key"),
     # a real number behind a placeholder prefix (#92): the ticket-key shape above exempts `KEY-` / `ABC-`, so the
     # examples keep to the canonical numbers and a slug placeholder (`KEY-123`, `KEY-456`, `key-123-<slug>`)
     (r"\b(?:KEY|ABC)-(?!(?:123|456)\b)\d{2,6}\b", "real-looking number behind a placeholder prefix — use KEY-123 / KEY-456"),
