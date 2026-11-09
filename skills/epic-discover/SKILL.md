@@ -124,5 +124,7 @@ owner who asks for one of these gets that reason in one line, and the grant is n
 ## 6. Hand over
 
 One carousel: `epic-decompose` now (Recommended) · a `walkthrough` of the epic first, so the owner reads the plan before
-decomposition asks for a go · stop here. Report in one line: the issue link, the doc id, the ledger key, the gates
+decomposition asks for a go · stop here. Offer `epic-decompose` only when this session lists it among its skills; where
+it does not (until it ships), stop here is the recommended option and the report says decomposition waits
+for it. Report in one line: the issue link, the doc id, the ledger key, the gates
 (`VG-1`…`VG-<n>`, how many human) and the grants.
