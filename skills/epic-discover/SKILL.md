@@ -23,7 +23,8 @@ neither. Scratch: `CTX=$(mktemp -d)`, spelled out in each call. `E=$BATON/contex
 - `python3 $E/kit_profile.py get swarm` (`resources`, `protected_paths`, `max_workers`, `budget`; exit 1 = every
   default, `$BATON/docs/env-facts.md` names them) and `python3 $E/kit_profile.py get systems`, only to list which
   capabilities the epic touches.
-- Size it: an epic's tracking issue is `opus`, main session (`$BATON/docs/delegation.md` § Sizing). It is always
+- Size it: an epic's tracking issue is `opus`, main session, this skill's own rule (`$BATON/docs/delegation.md`
+  § Sizing has no epic row). It is always
   interviewed; `Interview: SKIP` never applies.
 
 ## 2. The interview — rounds of one carousel each
@@ -96,13 +97,14 @@ owner who asks for one of these gets that reason in one line, and the grant is n
    $E/length_check.py $CTX/epic.md --surface ticket`.
 2. **The tracking issue**: `ticket-open`'s Core steps 1, 2 and 6 and its tracker adapter, public-text check included,
    with this body. Its step 1b is this skill's interview.
-3. **The context doc**: `make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=<slug> KEY=<key>`, then
+3. **The context doc**: `make -C $BATON/context-db new TYPE=epic DOMAIN=<domain> SLUG=<slug> KEY=<key> TITLE="<title>"`, then
    `## Tracker & links` and `## Goal` filled through the store's write tools.
 4. **The task ledger**: `python3 $E/swarm.py init <key> --title "<title>" --repo <owner/repo> --session <orchestrator
    lane> --doc <doc id> --max-workers <n> --epic-usd <n> --worker-usd <n>`. `<key>` is the tracking issue's key as a
    name (its number on GitHub); the lane is this session's unless the owner named another.
 5. **Grants**: per granted option, `python3 $E/swarm.py grant <key> --scope "<scope>" --by owner --expires
-   <YYYY-MM-DD> --decision "<line>"`.
+   <YYYY-MM-DD> --decision "<line>"`. `--expires` is 00:00Z of that date, so the epic-deadline default passes the day
+   after the deadline; the 14-day default passes today plus 15 days.
 6. **Decision lines** (`docs/carousel.md` § After the answer) under the doc's *Key decisions & gotchas*: the Goal when
    the owner chose another than yours, the template, the caps, and each grant, the same line `swarm.py grant` took.
 7. **`## Swarm`**: `python3 $E/swarm.py render <key>` inserted with `ctx_insert` before `## Session log`.

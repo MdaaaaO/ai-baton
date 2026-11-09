@@ -38,9 +38,9 @@ ticket of every wave.
 
 | Step | Who acts | What happens | Artefact it leaves |
 |---|---|---|---|
-| Discover | orchestrator, owner | The epic interview: goal, constraints, gates, grants, budget. | **Epic issue**, with its `## Verification plan` of `VG-<n>` gates |
-| Decompose | orchestrator | Sized child tickets with `## Done when` ids, disjoint areas and waves. | **Context doc** with the plan, and the child tickets |
-| Owner go | owner | Approves the plan. No worker spawns before it. | **Task ledger**, `.context/state/swarm/<key>.json`, with the plan marked approved, rendered as a `## Swarm` table in the context doc |
+| Discover | orchestrator, owner | The epic interview: goal, constraints, gates, grants, budget. | **Epic issue**, with its `## Verification plan` of `VG-<n>` gates; the **context doc** and the **task ledger** (`.context/state/swarm/<key>.json`, plan not approved, grants only), both made here by `epic-discover` |
+| Decompose | orchestrator | Sized child tickets with `## Done when` ids, disjoint areas and waves. | The plan in the context doc, and the child tickets added to the task ledger |
+| Owner go | owner | Approves the plan. No worker spawns before it. | The task ledger with the plan marked approved, rendered as a `## Swarm` table in the context doc |
 | Run | orchestrator, workers | The swarm tick assigns the ready tickets of the current wave. Each worker builds, pushes and returns. | **Assignment file** per worker, and a pushed branch |
 | Verify | orchestrator, verifier | Per ticket: a draft PR from the worker's body file, review, CI, code-owner coverage, and the verifier's read of the `READY` head (`phase=read`). | **PR**, with the head sha the gates held on |
 | Integrate | orchestrator or owner, verifier | The merge, as § Authority matrix says, then the verifier checks the merged commit (`phase=merged`) and calls `swarm.py pass` per `DW-<n>`. | **Pass**: `DW-<n> → evidence` in the task ledger |
