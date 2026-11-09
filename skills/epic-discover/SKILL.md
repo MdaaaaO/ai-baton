@@ -48,21 +48,25 @@ next round only once the last is answered, because its drafts read those answers
 Nothing is created until every round is answered.
 
 **Headless** (no `AskUserQuestion`): draft every round at once, later rounds from round 1's recommended options, and
-put each draft in its block line, not in prose. Above the block, a few lines only: which reads returned, which a tool
-refused, that nothing was created, and, with no session file or no write tool, that the block is the only copy. End
-the reply with the plain line `Decisions` (not bold, not a heading) and one numbered line per question in
-`docs/carousel.md` § No tool's shape, `<n>. <question> — (1) <option>, Recommended (2) <option>`: option (1) is the
-recommended one, the question is asked in full, never its header alone, and nothing follows the block. Copy it under
-`## Open decisions` in your session file. A grant or a command is a draft here: name the call you would run on the
-answer, never run it. Then stop: no issue, no context doc, no ledger, no grant. The next interactive session asks them
-as the rounds.
+put each draft in its block line, not in prose, with one exception: print the drafted `## Verification plan` (§ 3) as
+its gate lines in a fenced block above the Decisions, and let the Verify item name it. Above the block, a few lines
+only: which reads returned, which a tool refused, that nothing was created, and, with no session file or no write
+tool, that the block is the only copy. End the reply with the plain line `Decisions` (not bold, not a heading) and one
+numbered line per question in `docs/carousel.md` § No tool's shape,
+`<n>. <question> — (1) <option>, Recommended (2) <option>`: option (1) is the recommended one, the question is asked
+in full, never its header alone, and nothing follows the block. Copy it under `## Open decisions` in your session
+file. A grant or a command is a draft here: name the call you would run on the answer, never run it. Then stop: no
+issue, no context doc, no ledger, no grant. The next interactive session asks them as the rounds.
 
 ## 3. The verification template
 
 The plan is the `## Verification plan` section of a template under `$BATON/docs/verification/`. Read each by its path
 with the Read tool, never a directory listing: `code-change.md` always, since its gates and § The gate format are the
-base of every plan, and `data-migration.md` for a migration epic, where a failed Read means it is absent. Copy the gate
-lines as written, then adapt them; never write the gates from memory.
+base of every plan, and `data-migration.md` for a migration epic, where a failed Read means it is absent. Copy the
+gate lines as written, then adapt them; never write the gates from memory. The preview, interactive or headless, is
+always the drafted `## Verification plan` itself: one `- [ ] VG-<n> … · kind: … · check: … · evidence: … · signer: …`
+line per gate (§ The gate format), the template's lines copied and the added gates in the same form, never a prose
+summary or a list of gate names.
 
 - **A data migration** (the epic moves, copies, backfills or transforms stored data, or changes where data lives):
   recommend `data-migration`; offer `code-change` and `custom` beside it. Where `docs/verification/data-migration.md`
