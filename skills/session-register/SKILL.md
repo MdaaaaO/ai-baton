@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate back when paste-started as a successor, re-arm PR-watch, rename, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "44"
+  version: "45"
   updated: "2026-11-05"
   reviewed: "2026-11-05"
 user-invocable: true
