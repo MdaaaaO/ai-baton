@@ -198,7 +198,7 @@ the same `setup.sh`.
 | Plugin | `claude plugin marketplace update ai-baton-kit && claude plugin update ai-baton@ai-baton-kit` |
 | Clone | `make claude_sync` (or `sh .claude/sync.sh --accept`). It only fast-forwards, to a release tag |
 
-`/kit-health` warns when a newer release is out, with the update command. [`docs/sync.md`](docs/sync.md)
+`/kit-health` warns of a newer release and names its update command. [`docs/sync.md`](docs/sync.md)
 explains the clone's hooks and guards.
 
 ## What's inside
@@ -211,7 +211,7 @@ explains the clone's hooks and guards.
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
-| Swarm mode | `swarm-run` · `swarm-inbox` · `swarm-status` |
+| Swarm mode | `epic-discover` · `swarm-run` · `swarm-inbox` · `swarm-status` |
 | Needs a system (`systems.*`) | `sign-queue` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
 It ships five agents (`triage`, `review-runner`, `auto-runner`, `verifier`, `builder`) and the `context-db/` engine
