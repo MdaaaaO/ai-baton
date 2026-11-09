@@ -47,10 +47,10 @@ Nothing is created until every round is answered.
 
 **Headless** (no `AskUserQuestion`): draft every round at once, later rounds from round 1's recommended options. End
 the reply with one numbered `Decisions` block in `docs/carousel.md` § No tool's shape, one line per question,
-`<n>. <question> — (1) <option>, Recommended (2) <option>`, and nothing after it; list the same items under
-`## Open decisions` in your session file. A grant or a command is a draft here: name the call you would run on the
-answer, never run it. Then stop: no issue, no context doc, no ledger, no grant. The next interactive session asks
-them as the rounds.
+`<n>. <question> — (1) <option>, Recommended (2) <option>`, the question asked in full, never its header alone, and
+nothing after it; list the same items under `## Open decisions` in your session file. A grant or a command is a
+draft here: name the call you would run on the answer, never run it. Then stop: no issue, no context doc, no ledger,
+no grant. The next interactive session asks them as the rounds.
 
 ## 3. The verification template
 
@@ -63,7 +63,7 @@ copy its gate lines as written, then adapt them; never write the gates from memo
   is not in this kit, draft it: code-change's gates plus `human` gates for the mapping, the tolerances, the cutover and
   the decommission, and say so in the option.
 - **Anything else**: recommend `code-change`, with its pipeline block only when the epic changes dbt models or DAGs;
-  offer `custom`. Never offer `data-migration` to an epic that moves no data.
+  offer `custom`. Never list `data-migration` for an epic that moves no data, not even as a conditional option.
 - **Custom**: the owner's own gates, drafted by you in the same format.
 
 Each `human` gate closes later on its own decision line, `YYYY-MM-DD · VG-<n> <question>? → sign; not hold — <why>`,
