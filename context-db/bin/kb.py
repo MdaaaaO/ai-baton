@@ -13,7 +13,7 @@ Layout (all under `.context/reference/env/`, created by `kb.py init`):
                        tz_default, domains, labels, self_assessment, diagrams, verify, length,
                        swarm.ack_minutes (20) / swarm.stall_minutes (90) / swarm.max_workers (4) /
                        swarm.lease_minutes (120) / swarm.standby_hours (24) / swarm.digest_hours (4) / swarm.resources ([]) / swarm.units ({}) /
-                       session.sweep_hours (24) / swarm.budget.{epic_usd,worker_usd,worker_minutes (none), worker_forks (4), split_turns (10),
+                       swarm.budget.{epic_usd,worker_usd,worker_minutes (none), worker_forks (4), split_turns (10),
                        hard_stop (false)}, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
   _templates/<type>.md optional overrides of the engine's doc templates (`new.sh` looks here first)
