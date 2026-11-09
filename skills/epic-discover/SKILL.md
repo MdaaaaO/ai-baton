@@ -14,7 +14,8 @@ argument-hint: "<the epic's request> [<owner/repo>]"
 The Discover step of `$BATON/docs/swarm.md` § Lifecycle: the owner answers every question a swarm would otherwise
 learn by incident, and the answers become artefacts a cold orchestrator resumes from. `ticket-open` is the ticket
 grammar and `$BATON/docs/carousel.md` the question shape; this skill extends the goal interview to an epic and restates
-neither. Scratch: `CTX=$(mktemp -d)`, spelled out in each call. `E=$BATON/context-db/bin`.
+neither. `$BATON` is the kit root, the directory that holds `skills/`. Scratch: `CTX=$(mktemp -d)`, spelled out in each
+call. `E=$BATON/context-db/bin`.
 
 ## 1. Read before asking
 
@@ -48,16 +49,18 @@ Nothing is created until every round is answered.
 
 **Headless** (no `AskUserQuestion`): draft every round at once, later rounds from round 1's recommended options. End
 the reply with one numbered `Decisions` block in `docs/carousel.md` § No tool's shape, one line per question,
-`<n>. <question> — (1) <option>, Recommended (2) <option>`, the question asked in full, never its header alone, and
-nothing after it; list the same items under `## Open decisions` in your session file. A grant or a command is a
-draft here: name the call you would run on the answer, never run it. Then stop: no issue, no context doc, no ledger,
-no grant. The next interactive session asks them as the rounds.
+`<n>. <question> — (1) <option>, Recommended (2) <option>`: the recommended option is (1), tagged right after it, the
+question asked in full, never its header alone, and nothing after the block. Above it, say which reads returned and
+which a tool refused, so the reply states only what a call showed; list the same items under `## Open decisions` in
+your session file. A grant or a command is a draft here: name the call you would run on the answer, never run it. Then
+stop: no issue, no context doc, no ledger, no grant. The next interactive session asks them as the rounds.
 
 ## 3. The verification template
 
-The plan is the `## Verification plan` section of a template under `$BATON/docs/verification/`: read the file and
-copy its gate lines as written, then adapt them; never write the gates from memory. The gate format is
-`$BATON/docs/verification/code-change.md` § The gate format.
+The plan is the `## Verification plan` section of a template under `$BATON/docs/verification/`. Read each by its path
+with the Read tool, never a directory listing: `code-change.md` always, since its gates and § The gate format are the
+base of every plan, and `data-migration.md` for a migration epic, where a failed Read means it is absent. Copy the gate
+lines as written, then adapt them; never write the gates from memory.
 
 - **A data migration** (the epic moves, copies, backfills or transforms stored data, or changes where data lives):
   recommend `data-migration`; offer `code-change` and `custom` beside it. Where `docs/verification/data-migration.md`
