@@ -223,7 +223,7 @@ BLOCKED 123 budget orchestrator v=1 id=7f3b from=worker-a
 | `RELEASE` | `<scope> [reason="…"]` (scope is a name, not a full ref) | a hold's named releaser, the owner, or a lease holder giving its lease back, also when it expires | The hold is over, or the holder has finished with the resource. | A held worker re-reads the source of truth and resumes. Orchestrator: marks the hold or lease free; the next tick grants the next holder. |
 | `STOP` | `<scope> reason="…"` | orchestrator, or the owner through `lease.py stop` | The owner's word, a budget hard stop or a safety doubt. | Receiver: stops at its next tool round and reports (§ STOP and the call in flight). |
 | `PARKED` | `<ticket> reason="…"` | orchestrator | Two stalls and one re-brief changed nothing, or the work waits on an answer. | Worker: pushes and stops work on the ticket. Row `parked`, with a task ledger entry. Only a new `ASSIGN`, not a re-brief, restarts it. |
-| `STANDBY` | `<lane> until=<time>` | orchestrator | The lane has no work now but may get some. | Worker: takes registry state `standby` and ends its turn, with no polling. A new `ASSIGN` wakes it. Past `until` (at most `swarm.standby_hours`, default 24) the sweep retires it. |
+| `STANDBY` | `<lane> until=<time>` | orchestrator | The lane has no work now but may get some. | Worker: takes registry state `standby` and ends its turn, with no polling. A new `ASSIGN` wakes it. The sweep retires it at the row's `expires`, set when it entered standby: `until` is capped at `swarm.standby_hours` (default 24) after that. |
 | `RETIRED` | `<lane> [reason="…"]` | orchestrator; the sweep for a standby row past its time | The lane gets no more work. | Worker: runs `session-handoff` and ends. Peers stop waiting for it. |
 | `NEEDS` | `NEEDS <system>.<kind> <name>`, one line, with a single-word name, as `docs/env-facts.md` § How a skill resolves a fact fixes it | worker | A fact it needs is missing. | Orchestrator: resolves the fact, then re-briefs. |
 | `DECISION` | `DECISION <question> \| <option> \| <option>` (two options at least, none empty), as `docs/carousel.md` § Collection fixes it | worker | A choice only the owner can make touches its step. | Orchestrator: folds it into the next carousel or `Decisions` block. |
@@ -388,6 +388,18 @@ rate-limited resource. The orchestrator grants with `ASSIGN … lease=<resource>
 and the owner pre-empts with `HOLD` or `STOP`. A dead pid means free. The holder enforces its own expiry and sends
 `RELEASE` itself. A hold names one releaser; only that releaser or the owner ends it, and the `RELEASE` goes in the task
 ledger, so the other authority sees it at the next tick.
+
+### Registry state, expiry and retire
+
+A lane's registry row carries `state` beside its `status`. `standby` is set by `STANDBY` or a `STATE=standby`
+register, and the row then carries `expires`, fixed when it enters standby at `swarm.standby_hours` (default 24) later; a touch, the
+backstop heartbeat or a re-register without `STATE=` leaves it, and a lane that wakes re-registers with `STATE=running`. The zombie
+sweep's `--kill` mode runs `session.py retire`, which marks every `standby` row past `expires` as `state: retired`
+(its `status` stays `active`) and prints `owns: <tickets, PRs>` for each, so the orchestrator moves or clears that
+work instead of probing for it. The list mode only previews the retire. A re-register on a row whose `working_on` is
+older than 12 hours marks it `unconfirmed` until it is restated. A successor's re-brief skips `standby`, `retired`
+and `ended` rows. Fields and commands: `skills/session-register/reference/lifecycle.md` § Fields and § Retire and
+`owns:`.
 
 ## The swarm tick
 

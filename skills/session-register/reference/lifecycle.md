@@ -135,8 +135,37 @@ after a fresh register it may not exist yet. A duplicate heading is merged on th
 ## Fields
 
 `session` (name) · `session_id` (auto: `$CLAUDE_CODE_SESSION_ID` at register — the key a hook matches on) · `ref`
-(ListAgents ref — the stable id) · `status` (`active`|`idle`|`ended`) · `epic` (the initiative's tracker key) ·
+(ListAgents ref — the stable id) · `status` (`active`|`idle`|`ended`) · `state` (`standby`|`retired`, optional; retired keeps `status: active`) · `expires` (standby only: set when the row enters standby, `swarm.standby_hours` later; a touch does not move it) · `confirmed` (when `working_on` was last set; older than 12 h at a re-register marks it `unconfirmed: <old>`) · `epic` (the initiative's tracker key) ·
 `repos` · `working_on` (one line) · `responsibilities` · `stats` (auto, § Stats) · `registered` (auto: when the
 lane started — set by a register that creates or reactivates the entry, never by touch/end) · `heartbeat` (auto) ·
 `updated` (auto). These are operational state, **not** knowledge — the registry is excluded from
 `make index`/`make verify` and the doc DB count.
+
+## Retire and `owns:`
+
+`session.py retire [--dry-run]` (run by the zombie sweep's `--kill` mode; the list mode only previews it) sets
+`state: retired` on every `standby` row past `expires` and prints `owns: <tickets, PRs>` for each, taken from the
+swarm ledgers and `sessions/<name>/prs.tsv`, so the owner of the leftovers is visible. A row that ends by
+supersession prints the same line. Rename and archive carry `sessions/<name>/` (the `prs.tsv`) with the row.
+
+## Liveness and failover
+
+**A successor orchestrator re-briefs.** For each worker in the `live assignments` block send one
+`ASSIGN <ticket> rebrief=1` (SendMessage by the worker's ref) and wait for its ack. Each row prints the worker's
+ref and heartbeat age; the registry heartbeat is not a liveness test (only a write under `.context/` or the 6-hourly
+backstop moves it). Probe the ref with `ListAgents`: a live ref gets one `ASSIGN <ticket> rebrief=1`; a gone ref goes to
+`swarm.py resume` (drive-to-merge when a PR is open, else respawn in place or reassign), no re-brief. Where the harness
+has no peer list, a heartbeat older than `swarm.stall_minutes` (default 90) counts as gone. A worker of kind `subagent`
+dies with the session that spawned it, so when the predecessor's process is gone it goes to `swarm.py resume` with no
+probe. Standby, retired and ended workers are skipped.
+**A resume re-confirms.** Re-registering a live row without `WORKING=` whose `working_on` was not touched within
+12 hours marks it `unconfirmed: <old>` and prints a line asking for `WORKING=`: restate the current work, or
+`session-touch` it, before trusting it; never keep a stale `working_on` silently.
+**One process per session id.** A register of the same session id under a new `ref` while the row's heartbeat is
+under 5 minutes old prints `DUPLICATE REGISTER` naming both refs and exits 3 without writing: the second process
+stands down and the row stays with the first ref. It probes the old ref with `ListAgents`: live, it stays down (tell
+the owner, do no work); gone (a crash resumed on the same transcript), it registers again with `REF_GONE=1`, which
+skips the check. With no peer list it retries after 5 minutes.
+A parked session registers `STATE=standby`; the row carries `expires`, fixed when it enters standby
+(`swarm.standby_hours`, default 24 h later; a touch or a re-register without `STATE=` keeps both) and the zombie
+sweep's `--kill` mode retires it past that (`session.py retire`). A lane that wakes re-registers with `STATE=running`.

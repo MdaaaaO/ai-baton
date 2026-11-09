@@ -60,5 +60,24 @@ class SessionIdExpansion(unittest.TestCase):
         self.assertNotIn("$(", out)
 
 
+class RefGonePassthrough(unittest.TestCase):
+    """`REF_GONE=1` on `make session-register` reaches `session.py register --ref-gone`; unset or empty it does not."""
+
+    def reg(self, *args: str) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = subprocess.run(["make", "-n", "-C", str(ENGINE), "session-register", "NAME=x",
+                                f"CONTEXT={Path(tmp) / '.context'}", "SUCCESSOR_OF=y", *args],
+                               env=clean_env(), capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        return p.stdout
+
+    def test_ref_gone_reaches_the_register_call(self):
+        self.assertIn("--ref-gone", self.reg("REF_GONE=1"))
+
+    def test_without_ref_gone_the_flag_is_absent(self):
+        self.assertNotIn("--ref-gone", self.reg())
+        self.assertNotIn("--ref-gone", self.reg("REF_GONE="))
+
+
 if __name__ == "__main__":
     unittest.main()

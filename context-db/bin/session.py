@@ -38,12 +38,15 @@ unchanged" so the Makefile can pass every flag unconditionally. Stdlib only.
 """
 from __future__ import annotations
 import argparse
+import glob
+import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kit_profile as profile  # noqa: E402  — same dir
@@ -58,8 +61,8 @@ CTX = str(profile.context_root())  # the one content-root resolver
 SESS_DIR = os.path.join(CTX, "sessions")
 
 # Frontmatter fields, in emit order.
-FIELDS = ["session", "session_id", "ref", "status", "lane", "role", "state", "epic", "repos",
-          "working_on", "responsibilities", "stats", "registered", "heartbeat", "updated"]
+FIELDS = ["session", "session_id", "ref", "status", "lane", "role", "state", "expires", "epic", "repos",
+          "working_on", "confirmed", "responsibilities", "stats", "registered", "heartbeat", "updated"]
 SWARM_ROLES = ("orchestrator", "worker", "verifier")  # docs/swarm.md § Lifecycle
 LANE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 SWARM_STATES = ("running", "blocked-on-human", "blocked-on-peer", "standby", "retired")  # docs/swarm.md § Lifecycle
@@ -100,6 +103,37 @@ def now_iso() -> str:
 
 def today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _cfg_number(key: str, default: float) -> float:
+    """A numeric `swarm.*` key, else `default` (an absent, null, negative or non-numeric value reads as the default)."""
+    v = profile.get(key, default)
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else default
+
+
+def standby_hours() -> float:
+    """`swarm.standby_hours` (default 24): how long a `standby` row may idle before the sweep retires it."""
+    return _cfg_number("swarm.standby_hours", 24)
+
+
+def _stamp(t: datetime) -> str:
+    return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_stamp(v) -> datetime | None:
+    try:
+        return datetime.strptime(str(v), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _age_seconds(v) -> float | None:
+    t = _parse_stamp(v)
+    return None if t is None else (datetime.now(timezone.utc) - t).total_seconds()
+
+
+EXIT_DUPLICATE_REGISTER = 3  # `register` refused: a second process holds the row
+DUP_REGISTER_SECONDS = 300  # a re-register under a new ref inside this window of the last heartbeat is a second process
 
 
 # A session name is a file stem under sessions/ (#132): `--name ../INDEX` must not write outside it.
@@ -221,6 +255,14 @@ def _archived_candidates(name: str) -> list:
     return sorted(cands)
 
 
+def _archive_dir(name: str) -> str:
+    """`sessions/archive/<stem>` for the newest archived lane of `name` (`archive_path` suffixes a taken name with
+    `-YYYYMMDD`, and the lane's directory follows its file's stem); the bare name when no archived doc is found."""
+    cands = _archived_candidates(name)
+    stem = max(cands)[1][:-3] if cands else name
+    return os.path.join(SESS_DIR, "archive", stem)
+
+
 def restore_from_archive(name: str) -> str:
     """The live path — moved back from sessions/archive/<name>.md when the sweep (gen_sessions.py) took it.
 
@@ -240,6 +282,8 @@ def restore_from_archive(name: str) -> str:
         except FileNotFoundError:
             return live  # heartbeat.sh and the resumed session restored it in the same second — live is back
         print(f"restored {name}.md from sessions/archive/{fn}")
+        stem = fn[:-3]
+        _move_session_dir(os.path.join(adir, stem), os.path.join(SESS_DIR, name))
     return live
 
 
@@ -450,6 +494,9 @@ def _predecessor_open_prs(name: str) -> str:
     cands = _archived_candidates(name)
     path = live if os.path.exists(live) else (os.path.join(SESS_DIR, "archive", cands[-1][1]) if cands else "")
     head = f"predecessor {name} open PRs:"
+    tsv = _prs_tsv_rows(name)
+    if tsv is not None:  # the machine-readable table `swarm.py render` keeps; the prose list is the fallback
+        return head + " (prs.tsv)\n" + ("\n".join(tsv) or "none")
     if not path:
         return f"{head}\nunknown (no session file for {name} — check `gh pr list --author @me`)"
     _, body = read_doc(path)
@@ -463,6 +510,100 @@ def _predecessor_open_prs(name: str) -> str:
                 sec.append(nxt.rstrip())
             return head + "\n" + ("\n".join(x for x in sec if x.strip()) or "none")
     return f"{head}\nunknown (no {OPEN_PRS_HEADING} heading — check `gh pr list --author @me`)"
+
+
+def _prs_tsv_rows(name: str):
+    """The data rows of `sessions/<name>/prs.tsv` (`repo<TAB>pr<TAB>head7<TAB>state<TAB>ticket`, as `swarm.py render` writes
+    it), live dir else the archived one; `None` when there is no such file."""
+    for d in (os.path.join(SESS_DIR, name), _archive_dir(name)):
+        f = os.path.join(d, "prs.tsv")
+        if os.path.isfile(f):
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
+            except OSError:
+                return None
+            return [ln for ln in lines if not ln.startswith("repo\t")]
+    return None
+
+
+def _ledgers():
+    """Every swarm task ledger under `state/swarm/`, read as plain JSON (an unreadable file is skipped)."""
+    for f in sorted(glob.glob(os.path.join(CTX, "state", "swarm", "*.json"))):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                led = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(led, dict) and isinstance(led.get("tickets"), dict):
+            yield led
+
+
+LIVE_TICKET = ("assigned", "claimed", "pr", "ready-to-merge", "blocked")  # a ticket someone still owes
+
+
+def _owned(name: str, meta: dict):
+    """(tickets, prs) a session still owns: the unfinished tickets of the ledgers it orchestrates, those whose worker is
+    this lane, and the open PRs of its `prs.tsv`."""
+    lane = (meta or {}).get("lane") or name
+    tickets, prs = [], []
+    for led in _ledgers():
+        orch = led.get("session") == name
+        for t, r in led["tickets"].items():
+            w = (r.get("worker") or {}).get("name")
+            if r.get("status") in LIVE_TICKET and (orch or w in (name, lane)):
+                tickets.append(str(t))
+                if r.get("pr") is not None and r.get("pr_state") == "open":
+                    prs.append(f"{r.get('repo') or led.get('repo') or ''}#{r['pr']}")
+    for ln in _prs_tsv_rows(name) or []:
+        c = ln.split("\t")
+        if len(c) >= 2:
+            prs.append(f"{c[0]}#{c[1]}")
+    return sorted(set(tickets), key=lambda x: (len(x), x)), sorted(set(prs))
+
+
+def _owns_line(name: str, meta: dict) -> str:
+    """`owns: <tickets, PRs>` — what a retired or superseded row still holds, so the owner can reassign it."""
+    tickets, prs = _owned(name, meta)
+    parts = [f"ticket {t}" for t in tickets] + [f"PR {p}" for p in prs]
+    return f"owns: {', '.join(parts) if parts else 'none'}"
+
+
+def _predecessor_assignments(pred: str) -> str:
+    """The `live assignments` block a successor orchestrator sees at registration: every assigned, claimed or pr ticket of
+    the ledgers the predecessor ran, minus workers whose registry row is standby, retired or ended. This script cannot call
+    `ListAgents`, so it never decides live or ended from a heartbeat age: each row prints the worker's ref and heartbeat age
+    and says to probe the ref (a live ref gets one `ASSIGN <ticket> rebrief=1`, a gone ref goes to `swarm.py resume`); with
+    no peer list, a heartbeat older than `swarm.stall_minutes` is gone. A background-subagent worker dies with the session
+    that spawned it, so once the predecessor's process is gone it goes to `swarm.py resume` with no probe."""
+    head = f"live assignments of predecessor {pred}:"
+    stall = int(_cfg_number("swarm.stall_minutes", 90))
+    pred_alive = None  # read lazily: only a subagent row needs it
+    out = []
+    for led in _ledgers():
+        if led.get("session") != pred:
+            continue
+        for t, r in led["tickets"].items():
+            if r.get("status") not in ("assigned", "claimed", "pr"):
+                continue
+            wk = r.get("worker") or {}
+            w = wk.get("name") or ""
+            wmeta, _ = read_doc(path_for(w)) if w else (None, None)
+            if wmeta and (wmeta.get("state") in ("standby", "retired") or wmeta.get("status") == "ended"):
+                continue
+            age = _age_seconds(wmeta.get("heartbeat", "")) if wmeta else None
+            hb = f"registry heartbeat {int(age)}s old" if age is not None else "no registry heartbeat"
+            ident = f"  {t} {r['status']} worker={w or '-'} ref={wk.get('ref') or '-'} kind={wk.get('kind') or '-'} ({hb})"
+            if wk.get("kind") == "subagent":
+                if pred_alive is None:
+                    pred_alive = _owner_alive(pred)
+                if not pred_alive:
+                    out.append(f"{ident}\n  no probe: a background subagent dies with the session that spawned it, and {pred}'s process is gone: "
+                               f"`swarm.py resume` classifies {t}")
+                    continue
+            out.append(f"{ident}\n  probe ref {wk.get('ref') or '-'} with `ListAgents`: live -> ASSIGN {t} rebrief=1 to {w or '(unassigned)'} once; "
+                       f"gone -> `swarm.py resume` classifies {t}. No peer list: a heartbeat older than {stall} min is gone")
+    return head + "\n" + ("\n".join(out) if out else "none")
 
 
 def _owner_alive(name: str) -> bool:
@@ -496,7 +637,7 @@ def _owner_alive(name: str) -> bool:
     return False
 
 
-def _supersede_predecessor(name: str, successor: str, a=None) -> None:
+def _supersede_predecessor(name: str, successor: str, a=None, ref_gone: bool = False) -> None:
     """A successor registered over a predecessor that died without a handoff: an `active` row with no heartbeat
     for over `gen_sessions.STALE_HOURS`, whose owner process is gone, is marked `ended` (reason `superseded by
     <successor>`; `gen_sessions.archive_reason` then takes it at once) and gets the stats block and ledger row
@@ -518,10 +659,12 @@ def _supersede_predecessor(name: str, successor: str, a=None) -> None:
         return
     from gen_sessions import STALE_HOURS, age_hours  # lazy: gen_sessions imports this module
     age = age_hours(str(meta.get("heartbeat", "")))
-    if age is None:
+    if age is None and not ref_gone:
         print(f"warning: {left}no readable heartbeat to judge it by", file=sys.stderr)
         return
-    if age <= STALE_HOURS:
+    # `ref_gone`: the caller probed the harness's peer list and the predecessor's ref is not live — the verdict a stale
+    # heartbeat gives, reached without waiting STALE_HOURS (a host restart brings a session back under a new ref)
+    if not ref_gone and age <= STALE_HOURS:
         print(f"warning: {left}still active (heartbeat {age:.1f}h old, under {STALE_HOURS}h) — "
               f"end it with `session.py end` if it is really gone", file=sys.stderr)
         return
@@ -547,7 +690,28 @@ def _supersede_predecessor(name: str, successor: str, a=None) -> None:
             _ledger_append(meta, st)
         except Exception as e:
             print(f"ledger row for superseded {name} failed ({e}) — row ended without it", file=sys.stderr)
-    print(f"ended predecessor {name} (stale, no handoff): superseded by {successor}")
+    print(f"ended predecessor {name} ({'its ref is not live' if ref_gone else 'stale'}, no handoff): superseded by {successor}")
+    print(_owns_line(name, meta))
+
+
+UNCONFIRMED = "unconfirmed: "
+
+
+def _reconfirm_working_on(meta: dict, name: str) -> None:
+    """A re-register (a resume) over a live row whose `working_on` no one has confirmed within `STALE_HOURS`: the fresh
+    heartbeat this register writes must not vouch for an old focus. The text is kept, marked `unconfirmed: …`, and a line
+    asks for `WORKING=`; a register or touch that names the focus clears the mark and stamps `confirmed`."""
+    from gen_sessions import STALE_HOURS  # lazy: gen_sessions imports this module
+    if not meta.get("confirmed"):  # a row written before `confirmed` existed: its focus is taken as confirmed
+        meta["confirmed"] = now_iso()
+        return
+    age = _age_seconds(meta.get("confirmed", ""))
+    old = str(meta.get("working_on", ""))
+    if old.startswith(UNCONFIRMED) or (age is not None and age <= STALE_HOURS * 3600):
+        return
+    meta["working_on"] = UNCONFIRMED + old
+    print(f"working_on of {name} was not confirmed since {meta.get('confirmed')}: marked `unconfirmed` "
+          f"- pass WORKING=\"...\" to session-register (or session-touch) to say what it is doing now", file=sys.stderr)
 
 
 def cmd_register(a) -> None:
@@ -557,6 +721,8 @@ def cmd_register(a) -> None:
         check_convention(a.name)
         check_no_private_value(a.name)
         meta, body = {}, DEFAULT_BODY.format(name=a.name)
+    prev_ref, prev_hb = meta.get("ref", ""), meta.get("heartbeat", "")
+    prev_live = meta.get("status") not in (None, "", "ended")
     meta["session"] = a.name
     meta.pop("ended_reason", None)  # a re-registered lane is no longer superseded
     # The harness session id, so a Claude Code hook — handed `session_id` on stdin, never the registry name — can
@@ -564,6 +730,19 @@ def cmd_register(a) -> None:
     # counts: --session-id / SESSION_ID may name another session's transcript for its stats.
     harness_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
     if harness_id:
+        # The same session_id under a new ref while the row's heartbeat is fresh is a second process on one transcript: each
+        # would re-spawn the workers, so the second stands down before any spawn or re-brief (session-register step 1).
+        age = _age_seconds(prev_hb)
+        if (not getattr(a, "ref_gone", False) and prev_live and meta.get("session_id") == harness_id and a.ref and prev_ref and a.ref != prev_ref
+                and age is not None and age < DUP_REGISTER_SECONDS):
+            print(f"DUPLICATE REGISTER: session_id {harness_id} is registering under ref {a.ref}, but {a.name} is held by "
+                  f"ref {prev_ref} with a heartbeat {int(age)}s old — two processes on one transcript each re-spawn the "
+                  f"workers. This process stands down: nothing was written and the row stays with {prev_ref} "
+                  f"(exit {EXIT_DUPLICATE_REGISTER}): no spawn, no re-brief. Probe ref {prev_ref} with `ListAgents`: live -> stand down; "
+                  f"gone (a resumed crash) -> register again with REF_GONE=1 (--ref-gone). With no peer list, retry after "
+                  f"{DUP_REGISTER_SECONDS} s.",
+                  file=sys.stderr)
+            sys.exit(EXIT_DUPLICATE_REGISTER)
         meta["session_id"] = one_line(harness_id)
     if a.ref:    meta["ref"] = a.ref
     # A session that registers is active by definition: registering over an ended (or restored) doc reactivates
@@ -582,11 +761,18 @@ def cmd_register(a) -> None:
         if a.state not in SWARM_STATES:
             sys.exit(f"session: --state must be one of {', '.join(SWARM_STATES)}, not {a.state!r}")
         meta["state"] = a.state
+        # a standby row carries the time the sweep retires it; any other state has no expiry
+        meta["expires"] = _stamp(datetime.now(timezone.utc) + timedelta(hours=standby_hours())) if a.state == "standby" else ""
     elif meta.get("state") == "retired":  # a lane registering again is not retired any more
         meta["state"] = ""
+        meta["expires"] = ""
     if a.epic:   meta["epic"] = a.epic
     if a.repos:  meta["repos"] = a.repos
-    if a.working is not None: meta["working_on"] = a.working
+    if a.working is not None:
+        meta["working_on"] = a.working
+        meta["confirmed"] = now_iso() if a.working else ""
+    elif not fresh and meta.get("working_on"):
+        _reconfirm_working_on(meta, a.name)
     if a.resp:   meta["responsibilities"] = a.resp
     if a.note:   body = _replace_section(body, NOTES_HEADING, a.note)  # never the whole body: `## Open PRs` lives there
     body = _merge_duplicate_sections(body)
@@ -603,8 +789,39 @@ def cmd_register(a) -> None:
     record_name(a.name)
     print(f"registered {os.path.relpath(path, CTX)}")
     if getattr(a, "successor_of", ""):
-        _supersede_predecessor(check_name(a.successor_of), a.name, a)
-        print(_predecessor_open_prs(check_name(a.successor_of)))
+        pred = check_name(a.successor_of)
+        _supersede_predecessor(pred, a.name, a, ref_gone=getattr(a, "ref_gone", False))
+        print(_predecessor_open_prs(pred))
+        print(_predecessor_assignments(pred))
+
+
+def cmd_retire(a) -> None:
+    """The sweep's retire step: every live row in registry state `standby` whose `expires` has passed becomes `retired`,
+    and one `owns:` line says which tickets and PRs it still holds. A standby row without `expires` (written before the
+    field) gets one, `swarm.standby_hours` after its last heartbeat. `--dry-run` writes nothing."""
+    now = datetime.now(timezone.utc)
+    n = 0
+    for f in sorted(glob.glob(os.path.join(SESS_DIR, "*.md"))):
+        name = os.path.basename(f)[:-3]
+        meta, body = read_doc(f)
+        if not meta or meta.get("status") == "ended" or meta.get("state") != "standby":
+            continue
+        exp = _parse_stamp(meta.get("expires", ""))
+        if exp is None:
+            hb = _parse_stamp(meta.get("heartbeat", "")) or now
+            exp = hb + timedelta(hours=standby_hours())
+            meta["expires"] = _stamp(exp)
+            if not a.dry_run:
+                write_doc(f, meta, body)
+        if exp > now:
+            continue
+        n += 1
+        print(f"{'would retire' if a.dry_run else 'retired'} {name} (standby past {standby_hours():g}h, since {_stamp(exp)})")
+        print(f"  {_owns_line(name, meta)}")
+        if a.dry_run:
+            continue
+        meta["state"], meta["expires"], meta["updated"] = "retired", "", today()
+        write_doc(f, meta, body)
 
 
 def cmd_touch(a) -> None:
@@ -617,10 +834,12 @@ def cmd_touch(a) -> None:
     if a.status:              meta["status"] = a.status
     if a.working is not None:
         meta["working_on"] = a.working
+        meta["confirmed"] = now_iso() if a.working else ""
     elif a.working_if_empty and not meta.get("working_on"):
         # heartbeat.sh's own first touch: its short positional focus argument fills a blank
         # working_on, never overwrites one already on file.
         meta["working_on"] = a.working_if_empty
+        meta["confirmed"] = now_iso()
     nxt = _next_prompt(a)
     if nxt is not None:
         body = _replace_section(body, NEXT_HEADING, nxt)
@@ -809,6 +1028,12 @@ def _restart_heartbeat(old_name: str, new_name: str, working: str, session_id: s
     return True
 
 
+def _move_session_dir(src: str, dst: str) -> None:
+    """`sessions/<old>/` (the `prs.tsv` `swarm.py render` keeps) follows its row to the new name; never over an existing dir."""
+    if os.path.isdir(src) and not os.path.exists(dst):
+        shutil.move(src, dst)
+
+
 def cmd_rename(a) -> None:
     old_path = restore_from_archive(a.old)
     meta, body = read_doc(old_path)
@@ -829,6 +1054,7 @@ def cmd_rename(a) -> None:
         os.remove(old_path)
     except FileNotFoundError:
         pass
+    _move_session_dir(os.path.join(SESS_DIR, a.old), os.path.join(SESS_DIR, a.new))  # prs.tsv follows the name
     record_name(a.new)
     # the caller's own session id, not the row's: the row may carry another session's (see _restart_heartbeat)
     restarted = _restart_heartbeat(a.old, a.new, working, os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip())
@@ -865,10 +1091,15 @@ def main() -> int:
     for name in ("register", "touch", "end", "stats"):
         sp = sub.add_parser(name)
         if name == "register":
-            sp.add_argument("--successor-of", default="", help="the predecessor's session name: print its `## Open PRs` "
-                            "list after registering (step 4 of session-register re-arms or drives each one); also ends that "
+            sp.add_argument("--successor-of", default="", help="the predecessor's session name: print its PR list (`prs.tsv`, "
+                            "else `## Open PRs`) after registering (step 4 of session-register re-arms or drives each one); also ends that "
                             "row as `superseded by <name>` when it is `active`, its heartbeat is over 12h old and its owner "
                             "process is gone, else leaves it and says why")
+        if name == "register":
+            sp.add_argument("--ref-gone", action="store_true", help="the caller probed the harness's peer list and a ref is "
+                            "not live: with --successor-of the predecessor is superseded without waiting STALE_HOURS "
+                            "(a live owner process still stops it); without it, a same-session-id register over a fresh "
+                            "row skips the duplicate-register check (the old ref is gone)")
         sp.add_argument("--name", required=(name != "stats"))
         sp.add_argument("--session-id", default="", help="transcript to derive stats from (default $CLAUDE_CODE_SESSION_ID)")
         sp.add_argument("--no-stats", action="store_true", help="do not refresh the stats field")
@@ -889,6 +1120,8 @@ def main() -> int:
         sp.add_argument("--note", default="", help="text for the body's `## Notes` section (replaces that section only)")
         sp.add_argument("--next", default="", help="file holding the paste-ready prompt for the successor session "
                         "(written to '## Next session'); 'none' withdraws a stored prompt instead")
+    rt = sub.add_parser("retire", help="retire every standby row past its `expires` (swarm.standby_hours); prints owns: per row")
+    rt.add_argument("--dry-run", action="store_true")
     rn = sub.add_parser("rename")
     rn.add_argument("--from", dest="old", required=True, help="the session's current registry name")
     rn.add_argument("--to", dest="new", required=True, help="the new name (must follow the naming convention)")
@@ -900,6 +1133,12 @@ def main() -> int:
         a.working = None
     if a.cmd == "stats":
         cmd_stats(a)
+        return 0
+    if a.cmd == "retire":
+        with locked(os.path.join(SESS_DIR, ".registry")):
+            cmd_retire(a)
+        if not a.dry_run:
+            regen()
         return 0
     if a.cmd == "rename":
         check_name(a.old)

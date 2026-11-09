@@ -31,7 +31,7 @@ These targets create, index, verify, and find docs.
 Live session registry (who is working on what, right now — see SESSION_INDEX.md):
   make -C $BATON/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
-      (a successor adds SUCCESSOR_OF=<predecessor>: prints that session's ## Open PRs list, and ends it as superseded when it is active, 12h+ stale and its owner is gone)
+      (a successor adds SUCCESSOR_OF=<predecessor>: prints that session's PR list (prs.tsv, else ## Open PRs), and ends it as superseded when it is active, 12h+ stale and its owner is gone)
   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + ## What this session did + sessions/_ledger.md row
   make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
@@ -101,7 +101,7 @@ Layout (all under `.context/reference/env/`, created by `kb.py init`):
                        github.org / review_bot / bots / owner_teams, slack.domain, systems.*,
                        tz_default, domains, labels, self_assessment, diagrams, verify, length,
                        swarm.ack_minutes (20) / swarm.stall_minutes (90) / swarm.max_workers (4) /
-                       swarm.lease_minutes (120) / swarm.digest_hours (4) / swarm.resources ([]) / swarm.units ({}) /
+                       swarm.lease_minutes (120) / swarm.standby_hours (24) / swarm.digest_hours (4) / swarm.resources ([]) / swarm.units ({}) /
                        swarm.budget.{epic_usd,worker_usd,worker_minutes (none), worker_forks (4), split_turns (10),
                        hard_stop (false)}, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
@@ -347,7 +347,7 @@ options:
 ## `session.py`
 
 ```text
-usage: session.py [-h] {register,touch,end,stats,rename} ...
+usage: session.py [-h] {register,touch,end,stats,retire,rename} ...
 
 session.py — maintain a session's self-reported entry in the live session
 registry. Each active Claude session that works on an epic/feature keeps ONE
@@ -387,7 +387,9 @@ default). Empty CLI values are treated as "leave unchanged" so the Makefile
 can pass every flag unconditionally. Stdlib only.
 
 positional arguments:
-  {register,touch,end,stats,rename}
+  {register,touch,end,stats,retire,rename}
+    retire              retire every standby row past its `expires`
+                        (swarm.standby_hours); prints owns: per row
 
 options:
   -h, --help            show this help message and exit
@@ -1184,7 +1186,7 @@ Every subcommand takes the epic key first:
   render    prints the `## Swarm` section and writes `sessions/<name>/prs.tsv` (repo, pr, head7, state, ticket; the state
             is the row's status; the header line alone means no open PR)
   resume    compares the ledger with `git ls-remote` and `gh pr list`, prints the difference and what to do with a lost
-            worker (drive-to-merge, respawn-in-place, reassign, record-merge), writes nothing without --apply. It never
+            worker (drive-to-merge, respawn-in-place, reassign, record-merge, update, ask), writes nothing without --apply. It never
             writes a pass or a READY head, so a restored row still needs its READY and its verifier (--json)
   grant, watch, decision, hold, budget   the epic's other records. A grant and a change to a cap need a --decision line;
             `budget --spent` records spend, which decides nothing, and needs none

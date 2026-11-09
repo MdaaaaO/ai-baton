@@ -18,7 +18,7 @@
 # Live session registry (who is working on what, right now — see SESSION_INDEX.md):
 #   make -C $BATON/context-db session-register NAME=<name> EPIC=KEY-123 REPOS=<repo> \
 #                         WORKING="KEY-456 go-live" RESP="<what this session owns>" REF=<ref>
-#       (a successor adds SUCCESSOR_OF=<predecessor>: prints that session's ## Open PRs list, and ends it as superseded when it is active, 12h+ stale and its owner is gone)
+#       (a successor adds SUCCESSOR_OF=<predecessor>: prints that session's PR list (prs.tsv, else ## Open PRs), and ends it as superseded when it is active, 12h+ stale and its owner is gone)
 #   make -C $BATON/context-db session-touch NAME=<name>  # <=12h keep-alive heartbeat; WORKING= records a new focus
 #   make -C $BATON/context-db session-end NAME=<name>    # mark ended; writes ## Session stats + ## What this session did + sessions/_ledger.md row
 #   make -C $BATON/context-db session-rename FROM=<old> TO=<new>  # move+re-frontmatter the entry; a running heartbeat restarts under TO
@@ -332,14 +332,14 @@ view:
 # Free text (WORKING="…", RESP="…") reaches session.py verbatim (#132): `$(call sq,VAR)` is the variable's
 # UNEXPANDED value as one single-quoted sh word, and `unexport` keeps make from expanding it into the recipe
 # environment (a `$(shell …)` inside the text would otherwise run). So quotes, `$(…)` and backticks are data.
-SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING WORKING_IF_EMPTY RESP NOTE ROLE STATE LANE NEXT SESSION_ID NOSTATS FROM TO
+SESSION_VARS := NAME REF STATUS EPIC REPOS WORKING WORKING_IF_EMPTY RESP NOTE ROLE STATE LANE NEXT SESSION_ID NOSTATS FROM TO REF_GONE
 unexport $(SESSION_VARS)
 override sq = '$(subst ','\'',$(value $(1)))'
 SESSION_ARGS = --ref $(call sq,REF) --status $(call sq,STATUS) --epic $(call sq,EPIC) --repos $(call sq,REPOS) \
                --resp $(call sq,RESP) --note $(call sq,NOTE)
 session-register:
-	@test -n $(call sq,NAME) || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=] [ROLE=] [STATE=] [LANE=] [SUCCESSOR_OF=<predecessor>]"; exit 2; }
-	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) $(if $(filter command line,$(origin ROLE)),--role $(call sq,ROLE)) $(if $(filter command line,$(origin STATE)),--state $(call sq,STATE)) $(if $(filter command line,$(origin LANE)),--lane $(call sq,LANE)) --successor-of $(call sq,SUCCESSOR_OF) $(STATSFLAGS)
+	@test -n $(call sq,NAME) || { echo "usage: make session-register NAME=<session> [EPIC=] [REPOS=] [WORKING=] [RESP=] [REF=] [STATUS=] [ROLE=] [STATE=] [LANE=] [SUCCESSOR_OF=<predecessor>] [REF_GONE=1]"; exit 2; }
+	@CONTEXT_ROOT="$(CONTEXT)" $(PY) $(BIN)/session.py register --name $(call sq,NAME) $(SESSION_ARGS) --working $(call sq,WORKING) $(if $(filter command line,$(origin ROLE)),--role $(call sq,ROLE)) $(if $(filter command line,$(origin STATE)),--state $(call sq,STATE)) $(if $(filter command line,$(origin LANE)),--lane $(call sq,LANE)) --successor-of $(call sq,SUCCESSOR_OF) $(if $(filter command line environment,$(origin REF_GONE)),$(if $(strip $(REF_GONE)),--ref-gone)) $(STATSFLAGS)
 	@sh $(ENGINE)../sync-check.sh || true
 
 session-touch:

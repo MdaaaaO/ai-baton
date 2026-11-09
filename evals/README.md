@@ -68,7 +68,7 @@ the suite is the acceptance test for shortening or rewording a trigger.
 
 ## Coverage
 
-One row per skill: its trigger suite size (positive+near-miss) and its behaviour cases, if any (48 total,
+One row per skill: its trigger suite size (positive+near-miss) and its behaviour cases, if any (50 total,
 counting every `evals/*behaviour*` directory: the six gated skills' one-line stop, the four create/merge/sign
 paths, `pr-review`'s Explainability small-fix gate, the cold-reader brief's two cases, the `pr-event-brief`
 diagrams-line pair, `ticket-update`'s Pivot-restates-not-delta near miss, `session-handoff`'s first-handoff
@@ -97,7 +97,7 @@ suite or a behaviour case is added or renamed.
 | `repo-docs` | 5+5 | — |
 | `self-assessment` | 5+5 | — |
 | `session-handoff` | 7+6 | `session-handoff-behaviour-first-handoff` |
-| `session-register` | 5+5 | `session-register-behaviour-narrate-back-first`, `session-register-behaviour-no-work-before-narrate-back` |
+| `session-register` | 5+5 | `session-register-behaviour-narrate-back-first`, `session-register-behaviour-no-work-before-narrate-back`, `session-register-behaviour-resume-reconfirms`, `session-register-behaviour-successor-rebriefs` |
 | `session-retro` | 5+5 | — |
 | `sign-queue` | 8+4 | `sign-queue-behaviour-enqueue-not-paste`, `sign-queue-behaviour-not-applicable` |
 | `slack-draft` | 5+5 | `slack-draft-behaviour-not-applicable` |

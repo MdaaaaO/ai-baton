@@ -292,6 +292,26 @@ def open_prs(text: str) -> list[dict]:
     return out
 
 
+def prs_tsv_entries(path: Path) -> list[dict] | None:
+    """The open PRs of the `prs.tsv` that sits in the directory named like the session file (`sessions/<name>/`, or
+    `sessions/archive/<stem>/` for an archived lane, whose stem may carry a `-YYYYMMDD` suffix); `None` when there is none.
+    Each data row is `repo<TAB>pr<TAB>head7<TAB>state<TAB>ticket`; the header line alone means no open PR."""
+    f = path.parent / path.stem / "prs.tsv"
+    try:
+        lines = f.read_text(encoding="utf-8", errors="replace").split("\n")
+    except OSError:
+        return None
+    out = []
+    for ln in lines:
+        c = ln.rstrip("\r").split("\t")
+        if len(c) < 2 or c[0] == "repo" or not c[1].isdigit():
+            continue
+        repo, num = c[0], int(c[1])
+        text = f"{repo}#{num}" + "".join(f" {x}" for x in c[2:] if x.strip())
+        out.append({"repo": repo, "number": num, "url": pr_url(repo, num), "text": text})
+    return out
+
+
 # ── readers ───────────────────────────────────────────────────────────────────────────────────────────────────
 def read_text(path: Path) -> str:
     """The file's text, "" when it is absent or unreadable. For the build's own output files only (last.sha):
@@ -384,7 +404,7 @@ def session_entry(path: Path, seen: list[str], problems: list[str]) -> dict | No
         "cost_usd": number(gen_sessions.cost_split(stats)[0], whole=False),
         "has_prompt": gen_sessions.has_next_prompt(m),
         "prompt": m["_next"],
-        "open_prs": open_prs(gen_sessions.section(body, OPEN_PRS_HEADING)),
+        "open_prs": (lambda t: t if t is not None else open_prs(gen_sessions.section(body, OPEN_PRS_HEADING)))(prs_tsv_entries(path)),
         "crons": [ln for ln in gen_sessions.section(body, CRONS_HEADING).split("\n") if ln.strip()],
         "path": rel,
     }

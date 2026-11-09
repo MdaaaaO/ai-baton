@@ -12,7 +12,7 @@ Layout (all under `.context/reference/env/`, created by `kb.py init`):
                        github.org / review_bot / bots / owner_teams, slack.domain, systems.*,
                        tz_default, domains, labels, self_assessment, diagrams, verify, length,
                        swarm.ack_minutes (20) / swarm.stall_minutes (90) / swarm.max_workers (4) /
-                       swarm.lease_minutes (120) / swarm.digest_hours (4) / swarm.resources ([]) / swarm.units ({}) /
+                       swarm.lease_minutes (120) / swarm.standby_hours (24) / swarm.digest_hours (4) / swarm.resources ([]) / swarm.units ({}) /
                        swarm.budget.{epic_usd,worker_usd,worker_minutes (none), worker_forks (4), split_turns (10),
                        hard_stop (false)}, kit.install_mode
                        (written by setup.sh: clone | plugin | dev-checkout)
@@ -1165,7 +1165,7 @@ def blank_config() -> dict:
         "length": {"repos": {}},
         "commits": {"default": "conventional", "repos": {}},
         "context": {"sync": "auto"},
-        "swarm": {"ack_minutes": 20, "lease_minutes": 120, "digest_hours": 4, "resources": [], "units": {},
+        "swarm": {"ack_minutes": 20, "lease_minutes": 120, "standby_hours": 24, "digest_hours": 4, "resources": [], "units": {},
                   "budget": {"epic_usd": None, "worker_usd": None, "worker_forks": 4, "worker_minutes": None,
                              "split_turns": 10, "hard_stop": False}},
     }
