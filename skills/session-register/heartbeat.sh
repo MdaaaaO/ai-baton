@@ -21,6 +21,11 @@
 # beat (`|| true`). Everything it prints lands in the log: one `mission:` line on a good tick; on a leak hit one
 # line per hit, a summary line and make's Error line, all of them again on every tick until the source doc is fixed.
 # Every minute it also frees its own lane's expired leases (lease.py expire) and logs the RELEASE line owed.
+# Once a day (session.sweep_hours, default 24; null turns it off) the same minute tick runs the zombie sweep
+# (`zombie-sweep.sh --kill`, unchanged kill rules): one machine-wide stamp `zombie-sweep.stamp` and lock
+# `zombie-sweep.lock` beside the logs, so loops due at the same moment sweep once. The sweep runs in the background
+# under a timeout where the host has one, each output line lands in this log prefixed `sweep:`, and a sweep that
+# fails or hangs never stops the beat. The sweep never kills this loop's own owner (its ancestry guard).
 # Log/pidfile: $TMPDIR/ai-baton-<uid>/heartbeat-<key>.{log,pid} where <key> is $CLAUDE_CODE_SESSION_ID
 # when the harness set one, else the session NAME. Keying on the session id — not the name alone —
 # means two live sessions that end up registered under the same NAME (a naming accident, not something
@@ -41,6 +46,35 @@ KITDIR=$(cd "$(dirname "$0")/../.." && pwd)  # the kit itself: a .claude/ clone 
 mk() { make -s -C "$KITDIR/context-db" "$@"; }
 BATON_TMP="${TMPDIR:-/tmp}/ai-baton-$(id -u 2>/dev/null || echo 0)"
 mkdir -p "$BATON_TMP" 2>/dev/null
+SWEEP_STAMP="$BATON_TMP/zombie-sweep.stamp"
+SWEEP_LOCK="$BATON_TMP/zombie-sweep.lock"
+SWEEP_SCRIPT=${HEARTBEAT_SWEEP_SCRIPT:-$KITDIR/skills/session-register/zombie-sweep.sh}  # a test stubs it
+
+# sweep_tick — once per minute: run the scheduled zombie sweep when the stamp is missing or older than
+# session.sweep_hours. Never blocks and never fails the caller.
+sweep_tick() {
+  hours=$(python3 -c "import sys; sys.path.insert(0, sys.argv[1]); import kit_profile as k; print(k.get('session.sweep_hours', 'unset'))" \
+    "$KITDIR/context-db/bin" 2>/dev/null) || return 0
+  case "$hours" in unset) hours=24;; None|''|*[!0-9.]*) return 0;; esac
+  secs=$(awk -v h="$hours" 'BEGIN { printf "%d", h * 3600 }' 2>/dev/null) || return 0
+  [ "${secs:-0}" -gt 0 ] || return 0
+  last=$(cat "$SWEEP_STAMP" 2>/dev/null)
+  case "$last" in ''|*[!0-9]*) last=0;; esac
+  [ $(( $(date +%s) - last )) -ge "$secs" ] || return 0
+  (
+    with_lock "$SWEEP_LOCK" || exit 0
+    last=$(cat "$SWEEP_STAMP" 2>/dev/null)   # re-check under the lock: another loop may have just swept
+    case "$last" in ''|*[!0-9]*) last=0;; esac
+    [ $(( $(date +%s) - last )) -ge "$secs" ] || exit 0
+    date +%s > "$SWEEP_STAMP"                # stamp first: a failing or hanging sweep is not retried every minute
+    tmo=""; command -v timeout >/dev/null 2>&1 && tmo="timeout 600"
+    command -v gtimeout >/dev/null 2>&1 && [ -z "$tmo" ] && tmo="gtimeout 600"
+    # shellcheck disable=SC2086
+    $tmo bash "$SWEEP_SCRIPT" --kill 2>&1 | sed 's/^/sweep: /'
+    exit 0
+  ) </dev/null &
+  return 0
+}
 SESSION_ID=${CLAUDE_CODE_SESSION_ID:-}
 KEY=${SESSION_ID:-$NAME}
 LOG="$BATON_TMP/heartbeat-$KEY.log"
@@ -99,6 +133,7 @@ while kill -0 "$CLAUDE_PID" 2>/dev/null; do
     # The holder enforces its own lease expiry (docs/swarm.md § Leases and holds): free this lane's expired
     # leases and log the RELEASE line it owes, with no model turn and no message to wait on.
     python3 "$KITDIR/context-db/bin/lease.py" expire --lane "$NAME" 2>&1 | sed 's/^/lease: /' || true
+    sweep_tick || true
   done
 done
 echo "$(TZ="$TZ_DEFAULT" date +'%Y-%m-%d %I:%M %p %Z') owner $CLAUDE_PID gone — ending $NAME"

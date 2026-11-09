@@ -53,6 +53,11 @@ string as the comm, the shape the desktop app's own binary reports) and detaches
 alive and marks the row `ended` within a minute of the session dying, so the registry never lies about liveness and
 no `/loop` wake-up re-bills the prefix for a heartbeat.
 
+The same minute tick runs the zombie sweep (`zombie-sweep.sh --kill`, § Zombie sweep) about every `session.sweep_hours`
+(default 24; `null` turns it off). A machine-wide stamp and lock (`zombie-sweep.stamp`, `zombie-sweep.lock`, beside the
+logs) keep loops that come due together to one sweep; its lines land in the heartbeat log prefixed `sweep:`. It runs in
+the background under a timeout where the host has one, so a failing or hanging sweep never stops the beat.
+
 A second start for the SAME session is a no-op, also under another key: the same name and the same owning process
 is one loop (pidfile `$TMPDIR/ai-baton-<uid>/heartbeat-<key>.pid`; log `…heartbeat-<key>.log` beside it, `<key>`
 your `$CLAUDE_CODE_SESSION_ID` else your name — namespaced per user and per session, never a bare

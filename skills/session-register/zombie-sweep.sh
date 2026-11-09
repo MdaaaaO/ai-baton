@@ -34,6 +34,7 @@
 # Leases: list mode names what a sweep would free ("would free", no write); --kill frees them.
 # Standby rows: the same split — list mode prints "would retire <name>" for a `standby` row past its `expires`
 # (`swarm.standby_hours`), --kill retires it; each is followed by `owns: <tickets, PRs>`.
+# heartbeat.sh runs `--kill` by itself about every `session.sweep_hours` (default 24); a manual run stays valid.
 # CONTEXT_ROOT overrides the workspace's .context/ root; TMPDIR the log dir, exactly as for heartbeat.sh.
 set -u
 KITDIR=$(cd "$(dirname "$0")/../.." && pwd)
