@@ -32,6 +32,8 @@
 # this script's own ancestry — printing KILLED / KILL FAILED per owner; exit 1 when a kill failed, else 0. The
 # heartbeats then end the rows on their own (final stats written) within a minute.
 # Leases: list mode names what a sweep would free ("would free", no write); --kill frees them.
+# Standby rows: the same split — list mode prints "would retire <name>" for a `standby` row past its `expires`
+# (`swarm.standby_hours`), --kill retires it; each is followed by `owns: <tickets, PRs>`.
 # CONTEXT_ROOT overrides the workspace's .context/ root; TMPDIR the log dir, exactly as for heartbeat.sh.
 set -u
 KITDIR=$(cd "$(dirname "$0")/../.." && pwd)
@@ -139,6 +141,12 @@ lease_rc=0
 if [ "$kill_mode" = 1 ]; then python3 "$KITDIR/context-db/bin/lease.py" sweep 2>/dev/null || lease_rc=$?
 else python3 "$KITDIR/context-db/bin/lease.py" sweep --dry-run 2>/dev/null || lease_rc=$?; fi
 [ "$lease_rc" = 0 ] || echo "lease sweep did not run (exit $lease_rc)"
+# Standby rows past `swarm.standby_hours`: list mode names them ("would retire", no write); --kill retires them, and
+# either way one `owns:` line per row says which tickets and PRs it still holds.
+retire_rc=0
+if [ "$kill_mode" = 1 ]; then python3 "$KITDIR/context-db/bin/session.py" retire 2>/dev/null || retire_rc=$?
+else python3 "$KITDIR/context-db/bin/session.py" retire --dry-run 2>/dev/null || retire_rc=$?; fi
+[ "$retire_rc" = 0 ] || echo "standby retire did not run (exit $retire_rc)"
 echo "zombie-sweep: $zombies zombie(s), $live live, $unreg unregistered, $stale stale, $reused reused, $dead dead, $unmapped unmapped"
 if [ "$kill_mode" = 1 ]; then [ "$failed" = 0 ] || exit 1; exit 0; fi
 [ "$zombies" = 0 ] || exit 3

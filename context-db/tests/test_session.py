@@ -190,6 +190,263 @@ class RegistryDoc(unittest.TestCase):
         self.assertIn("| `s1` |", text)
 
 
+
+class LivenessAndFailover(unittest.TestCase):
+    """Liveness and failover: standby expiry and the sweep's retire step, `owns:` on a retired or superseded row, the resume
+    re-confirm of `working_on`, a second process on one transcript, and the successor's live assignments."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".context"
+        (self.root / "sessions").mkdir(parents=True)
+        (self.root / "state" / "swarm").mkdir(parents=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _t(hours: float = 0, seconds: float = 0) -> str:
+        from datetime import datetime, timedelta, timezone
+        return (datetime.now(timezone.utc) + timedelta(hours=hours, seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _row(self, name: str, **f) -> Path:
+        meta = {"session": name, "status": "active", "heartbeat": self._t(), **f}
+        p = self.root / "sessions" / f"{name}.md"
+        p.write_text("---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + "---\n\n## Open PRs\n\nnone\n", encoding="utf-8")
+        return p
+
+    def _ledger(self, session: str, tickets: dict, key: str = "E-1") -> None:
+        (self.root / "state" / "swarm" / f"{key}.json").write_text(
+            json.dumps({"schema": 1, "key": key, "repo": "o/r", "session": session, "tickets": tickets}), encoding="utf-8")
+
+    def _reg(self, name: str, *args: str, env: dict | None = None):
+        return run("session.py", "register", "--name", name, "--no-stats", *args, root=self.root, env=env)
+
+    # -- standby expiry and the retire step
+    def test_a_standby_registration_carries_an_expiry_standby_hours_ahead(self):
+        r = self._reg("kit-w-1", "--role", "worker", "--state", "standby")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        doc = (self.root / "sessions" / "kit-w-1.md").read_text(encoding="utf-8")
+        exp = [ln for ln in doc.splitlines() if ln.startswith("expires:")]
+        self.assertEqual(len(exp), 1, doc)
+        self.assertGreater(exp[0].split(": ", 1)[1], self._t(hours=23))
+        self.assertLess(exp[0].split(": ", 1)[1], self._t(hours=25))
+        self._reg("kit-w-1", "--state", "running")  # any other state has no expiry
+        self.assertNotIn("expires: 2", (self.root / "sessions" / "kit-w-1.md").read_text(encoding="utf-8"))
+
+    def test_retire_takes_a_standby_row_past_its_time_and_only_that(self):
+        self._row("kit-w-late", state="standby", expires=self._t(hours=-1))
+        self._row("kit-w-early", state="standby", expires=self._t(hours=3))
+        self._row("kit-w-busy", state="running", expires=self._t(hours=-5))
+        r = run("session.py", "retire", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("retired kit-w-late", r.stdout)
+        self.assertNotIn("kit-w-early", r.stdout)
+        self.assertNotIn("kit-w-busy", r.stdout)
+        rd = lambda n: (self.root / "sessions" / f"{n}.md").read_text(encoding="utf-8")
+        self.assertIn("state: retired", rd("kit-w-late"))
+        self.assertIn("state: standby", rd("kit-w-early"))
+        self.assertIn("state: running", rd("kit-w-busy"))
+
+    def test_retire_dry_run_writes_nothing(self):
+        p = self._row("kit-w-late", state="standby", expires=self._t(hours=-1))
+        before = p.read_text(encoding="utf-8")
+        r = run("session.py", "retire", "--dry-run", root=self.root)
+        self.assertIn("would retire kit-w-late", r.stdout)
+        self.assertEqual(p.read_text(encoding="utf-8"), before)
+
+    def test_a_standby_row_without_an_expiry_gets_one_from_its_heartbeat(self):
+        self._row("kit-w-old", state="standby", heartbeat=self._t(hours=-30))
+        r = run("session.py", "retire", root=self.root)
+        self.assertIn("retired kit-w-old", r.stdout)  # 30 h idle is past the 24 h default
+        self._row("kit-w-new", state="standby", heartbeat=self._t(hours=-2))
+        r = run("session.py", "retire", root=self.root)
+        self.assertNotIn("kit-w-new", r.stdout)
+        self.assertRegex((self.root / "sessions" / "kit-w-new.md").read_text(encoding="utf-8"), r"expires: \d{4}-")
+
+    def test_a_retired_row_prints_what_it_owns(self):
+        self._ledger("kit-orch", {
+            "686": {"status": "assigned", "repo": "o/r", "pr": None, "pr_state": None, "worker": {"name": "kit-w-late"}},
+            "687": {"status": "pr", "repo": "o/r", "pr": 12, "pr_state": "open", "worker": {"name": "kit-w-late"}},
+            "688": {"status": "merged", "repo": "o/r", "pr": 9, "pr_state": "merged", "worker": {"name": "kit-w-late"}},
+            "689": {"status": "assigned", "repo": "o/r", "pr": None, "pr_state": None, "worker": {"name": "someone-else"}}})
+        self._row("kit-w-late", state="standby", expires=self._t(hours=-1))
+        out = run("session.py", "retire", root=self.root).stdout
+        self.assertIn("owns: ticket 686, ticket 687, PR o/r#12", out)
+        self.assertNotIn("688", out)
+        self.assertNotIn("689", out)
+
+    def test_a_retired_row_that_owns_nothing_says_none(self):
+        self._row("kit-w-late", state="standby", expires=self._t(hours=-1))
+        self.assertIn("owns: none", run("session.py", "retire", root=self.root).stdout)
+
+    # -- resume re-confirms working_on
+    def test_a_resume_without_a_focus_marks_an_unconfirmed_working_on(self):
+        self._reg("kit-r-1", "--working", "driving 686")
+        p = self.root / "sessions" / "kit-r-1.md"
+        doc = p.read_text(encoding="utf-8")
+        self.assertRegex(doc, r"confirmed: \d{4}-")
+        p.write_text(doc.replace([ln for ln in doc.splitlines() if ln.startswith("confirmed:")][0], f"confirmed: {self._t(hours=-20)}"),
+                     encoding="utf-8")
+        r = self._reg("kit-r-1")
+        self.assertIn("unconfirmed: driving 686", p.read_text(encoding="utf-8"))
+        self.assertIn("not confirmed", r.stderr)
+        self.assertIn("WORKING=", r.stderr)
+        self._reg("kit-r-1")  # a second silent resume does not stack the mark
+        self.assertNotIn("unconfirmed: unconfirmed", p.read_text(encoding="utf-8"))
+        self._reg("kit-r-1", "--working", "driving 686 to merge")  # naming the focus clears it
+        self.assertNotIn("unconfirmed", p.read_text(encoding="utf-8"))
+
+    def test_a_resume_within_the_stale_window_keeps_a_confirmed_working_on(self):
+        self._reg("kit-r-2", "--working", "driving 686")
+        r = self._reg("kit-r-2")
+        doc = (self.root / "sessions" / "kit-r-2.md").read_text(encoding="utf-8")
+        self.assertNotIn("unconfirmed", doc)
+        self.assertNotIn("not confirmed", r.stderr)
+
+    def test_a_touch_that_names_the_focus_confirms_it(self):
+        self._row("kit-r-3", working_on="old", confirmed=self._t(hours=-30))
+        run("session.py", "touch", "--name", "kit-r-3", "--no-stats", "--working", "new focus", root=self.root)
+        doc = (self.root / "sessions" / "kit-r-3.md").read_text(encoding="utf-8")
+        self.assertNotIn(self._t(hours=-30)[:13], doc)
+        self.assertIn("working_on: new focus", doc)
+
+    # -- a second process on one transcript
+    def test_the_same_session_id_under_a_new_ref_inside_five_minutes_warns_with_both_refs(self):
+        env = {"CLAUDE_CODE_SESSION_ID": "sid-dup"}
+        self.assertEqual(self._reg("kit-d-1", "--ref", "ref-first", env=env).returncode, 0)
+        r = self._reg("kit-d-1", "--ref", "ref-second", env=env)
+        self.assertIn("DUPLICATE REGISTER", r.stderr)
+        self.assertIn("ref-first", r.stderr)
+        self.assertIn("ref-second", r.stderr)
+        self.assertIn("stands down", r.stderr)
+        self.assertEqual(r.returncode, 3)
+        row = (self.root / "sessions" / "kit-d-1.md").read_text(encoding="utf-8")
+        self.assertIn("ref: ref-first", row)   # no register: the first process keeps the row
+        self.assertNotIn("ref-second", row)
+        self.assertIn("`ListAgents`", r.stderr)    # the refusal says how to find out the old ref is gone
+        self.assertIn("REF_GONE=1", r.stderr)
+        r = self._reg("kit-d-1", "--ref", "ref-second", "--ref-gone", env=env)  # the old ref probed gone: a real resume
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("DUPLICATE", r.stderr)
+        self.assertIn("ref: ref-second", (self.root / "sessions" / "kit-d-1.md").read_text(encoding="utf-8"))
+
+    def test_the_same_ref_or_an_old_heartbeat_or_another_session_id_does_not_warn(self):
+        env = {"CLAUDE_CODE_SESSION_ID": "sid-dup"}
+        self._reg("kit-d-2", "--ref", "ref-first", env=env)
+        self.assertNotIn("DUPLICATE", self._reg("kit-d-2", "--ref", "ref-first", env=env).stderr)
+        self.assertNotIn("DUPLICATE", self._reg("kit-d-2", "--ref", "ref-other", env={"CLAUDE_CODE_SESSION_ID": "sid-else"}).stderr)
+        p = self.root / "sessions" / "kit-d-2.md"
+        doc = p.read_text(encoding="utf-8")
+        hb = [ln for ln in doc.splitlines() if ln.startswith("heartbeat:")][0]
+        p.write_text(doc.replace(hb, f"heartbeat: {self._t(seconds=-600)}").replace("sid-else", "sid-dup"), encoding="utf-8")
+        self.assertNotIn("DUPLICATE", self._reg("kit-d-2", "--ref", "ref-third", env=env).stderr)
+
+    # -- the successor orchestrator
+    def test_a_successor_reads_prs_tsv_in_place_of_the_prose_list(self):
+        self._row("kit-o-1", status="ended")
+        (self.root / "sessions" / "kit-o-1").mkdir()
+        (self.root / "sessions" / "kit-o-1" / "prs.tsv").write_text("repo\tpr\thead7\tstate\tticket\no/r\t12\tabc1234\tpr\t686\n", encoding="utf-8")
+        out = self._reg("kit-o-2", "--successor-of", "kit-o-1").stdout
+        self.assertIn("o/r\t12\tabc1234\tpr\t686", out)
+        self.assertNotIn("none", out.split("live assignments")[0])  # the row's prose `none` is not what it read
+
+    def test_a_successor_prints_the_live_assignments_and_one_rebrief_per_live_worker(self):
+        self._row("kit-o-1", status="ended")
+        self._row("kit-w-live", heartbeat=self._t(seconds=-30))
+        self._row("kit-w-dead", heartbeat=self._t(hours=-3))
+        self._row("kit-w-idle", state="standby", expires=self._t(hours=5))
+        self._ledger("kit-o-1", {t: {"status": s, "repo": "o/r", "pr": None, "pr_state": None, "worker": {"name": w, "ref": "r-" + w}}
+                                 for t, s, w in (("1", "assigned", "kit-w-live"), ("2", "claimed", "kit-w-dead"),
+                                                 ("3", "assigned", "kit-w-idle"), ("4", "merged", "kit-w-live"),
+                                                 ("5", "pr", "kit-w-nobody"))})
+        out = self._reg("kit-o-2", "--successor-of", "kit-o-1").stdout
+        self.assertIn("live assignments of predecessor kit-o-1:", out)
+        self.assertEqual(out.count("ASSIGN 1 rebrief=1 to kit-w-live once"), 1)
+        self.assertIn("ref=r-kit-w-dead", out)             # an old heartbeat is not a verdict: the ref is probed
+        self.assertNotIn("no rebrief", out)
+        self.assertNotIn("reassign 2", out)
+        self.assertNotIn("kit-w-idle", out)                # standby is not a live run
+        self.assertNotIn("ASSIGN 4 ", out)                 # merged is not an assignment
+        self.assertIn("ASSIGN 5 rebrief=1 to kit-w-nobody once", out)  # no row: ListAgents decides
+        self.assertIn("`ListAgents`", out)
+
+    def test_a_ten_minute_old_heartbeat_is_probed_by_ref_never_called_ended(self):
+        self._row("kit-o-1", status="ended")
+        self._row("kit-w-slow", heartbeat=self._t(seconds=-600))
+        self._ledger("kit-o-1", {"7": {"status": "assigned", "repo": "o/r", "pr": None, "pr_state": None,
+                                       "worker": {"kind": "peer", "name": "kit-w-slow", "ref": "r-slow"}}})
+        out = self._reg("kit-o-2", "--successor-of", "kit-o-1").stdout
+        self.assertIn("ref=r-slow kind=peer (registry heartbeat 6", out)
+        self.assertIn("probe ref r-slow with `ListAgents`: live -> ASSIGN 7 rebrief=1", out)
+        self.assertIn("gone -> `swarm.py resume`", out)
+        self.assertIn("older than 90 min", out)
+        self.assertNotIn("ended with no return", out)
+
+    def test_a_subagent_worker_of_a_dead_predecessor_goes_to_resume_without_a_probe(self):
+        self._row("kit-o-1", status="ended")
+        self._row("kit-w-sub", heartbeat=self._t(seconds=-30))
+        self._ledger("kit-o-1", {"7": {"status": "assigned", "repo": "o/r", "pr": None, "pr_state": None,
+                                       "worker": {"kind": "subagent", "name": "kit-w-sub", "ref": "r-sub"}}})
+        out = self._reg("kit-o-2", "--successor-of", "kit-o-1").stdout
+        self.assertIn("no probe", out)
+        self.assertIn("`swarm.py resume` classifies 7", out)
+        self.assertNotIn("ASSIGN 7", out)
+
+    def test_an_archived_predecessor_reads_the_prs_table_of_its_newest_suffixed_lane(self):
+        arch = self.root / "sessions" / "archive"
+        for stem, hb, pr in (("kit-z", "2026-10-01T00:00:00Z", "1"), ("kit-z-20261104", "2026-11-04T00:00:00Z", "99")):
+            (arch / stem).mkdir(parents=True)
+            (arch / stem / "prs.tsv").write_text(f"repo\tpr\thead7\tstate\tticket\no/r\t{pr}\tabc1234\topen\t3\n", encoding="utf-8")
+            (arch / f"{stem}.md").write_text(f"---\nsession: kit-z\nstatus: ended\nheartbeat: {hb}\n---\n", encoding="utf-8")
+        out = self._reg("kit-o-2", "--successor-of", "kit-z").stdout
+        self.assertIn("o/r\t99\tabc1234", out)
+        self.assertNotIn("o/r\t1\t", out)
+
+    def test_a_row_written_before_confirmed_existed_is_confirmed_not_marked(self):
+        p = self._row("kit-r-9", working_on="legacy")
+        r = self._reg("kit-r-9")
+        doc = p.read_text(encoding="utf-8")
+        self.assertNotIn("unconfirmed", doc)
+        self.assertNotIn("not confirmed", r.stderr)
+        self.assertRegex(doc, r"confirmed: \d{4}-")
+
+    def test_a_reregister_without_state_keeps_standby_and_its_expiry(self):
+        self._reg("kit-w-3", "--state", "standby")
+        p = self.root / "sessions" / "kit-w-3.md"
+        exp = [ln for ln in p.read_text(encoding="utf-8").splitlines() if ln.startswith("expires:")][0]
+        run("session.py", "touch", "--name", "kit-w-3", "--no-stats", root=self.root)
+        self._reg("kit-w-3", "--working", "something new")
+        doc = p.read_text(encoding="utf-8")
+        self.assertIn("state: standby", doc)
+        self.assertIn(exp, doc)
+
+    def test_ref_gone_supersedes_a_predecessor_whose_heartbeat_is_still_young(self):
+        self._row("kit-o-1", heartbeat=self._t(hours=-1))
+        self.assertIn("left as is: still active", self._reg("kit-o-2", "--successor-of", "kit-o-1").stderr)
+        r = self._reg("kit-o-3", "--successor-of", "kit-o-1", "--ref-gone")
+        self.assertIn("ended predecessor kit-o-1 (its ref is not live", r.stdout)
+        self.assertIn("owns:", r.stdout)
+
+    def test_a_restored_row_brings_its_prs_table_back(self):
+        (self.root / "sessions" / "archive" / "kit-p-arch").mkdir(parents=True)
+        (self.root / "sessions" / "archive" / "kit-p-arch" / "prs.tsv").write_text("repo\tpr\thead7\tstate\tticket\n", encoding="utf-8")
+        (self.root / "sessions" / "archive" / "kit-p-arch.md").write_text("---\nsession: kit-p-arch\nstatus: ended\n---\n", encoding="utf-8")
+        run("session.py", "touch", "--name", "kit-p-arch", "--no-stats", root=self.root)
+        self.assertTrue((self.root / "sessions" / "kit-p-arch" / "prs.tsv").is_file())
+        self.assertFalse((self.root / "sessions" / "archive" / "kit-p-arch").exists())
+
+    # -- rename carries prs.tsv
+    def test_rename_carries_the_prs_table(self):
+        self._row("kit-p-old")
+        (self.root / "sessions" / "kit-p-old").mkdir()
+        (self.root / "sessions" / "kit-p-old" / "prs.tsv").write_text("repo\tpr\thead7\tstate\tticket\n", encoding="utf-8")
+        mod = _load_session_module(self.root)
+        with unittest.mock.patch.object(mod, "_restart_heartbeat", return_value=True):
+            mod.cmd_rename(argparse.Namespace(old="kit-p-old", new="kit-p-new"))
+        self.assertTrue((self.root / "sessions" / "kit-p-new" / "prs.tsv").is_file())
+        self.assertFalse((self.root / "sessions" / "kit-p-old").exists())
+
 if __name__ == "__main__":
     unittest.main()
 

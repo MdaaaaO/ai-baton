@@ -2,9 +2,9 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate back when paste-started as a successor, re-arm PR-watch, rename, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "43"
-  updated: "2026-11-04"
-  reviewed: "2026-11-04"
+  version: "44"
+  updated: "2026-11-05"
+  reviewed: "2026-11-05"
 user-invocable: true
 ---
 
@@ -31,7 +31,7 @@ entries before touching a shared epic, PR or worktree.
    prompt is in `<path>` § Next session."), the line is not the prompt: open `<path>` (relative to the workspace
    root; it may have moved under `sessions/archive/` — `reference/lifecycle.md` § Successor starters) and read
    its `## Next session` section. Register under the name it proposes, with `SUCCESSOR_OF=<name>` so the
-   predecessor's `## Open PRs` print, read what it lists, claim what it names.
+   predecessor's open PRs (`sessions/<name>/prs.tsv`) print, read what it lists, claim what it names.
    **Narrate back before touching anything else.** Right after reading `## Next session`, say the
    state back in five lines — Owns · Landed · Open · First step · Not known — before any edit,
    comment, worktree or push (only registration, the heartbeat and re-arming PR watches, steps 3-4
@@ -58,10 +58,19 @@ entries before touching a shared epic, PR or worktree.
         REPOS=<repo[,repo]> WORKING="<current ticket/PR in one line>" \
         RESP="<what you own; what others should coordinate with you on>"
    ```
-   A successor adds `SUCCESSOR_OF=<predecessor>`: registration then prints `predecessor <name> open PRs:` and that
-   session's `## Open PRs` lines (or `none`) — the list step 4 re-arms or drives. It also ends that predecessor's row
-   (`superseded by <name>`) when the row is `active`, has no heartbeat for over 12 hours and its owner process is gone;
-   any other predecessor is left as is and a line says why (`reference/lifecycle.md` § End and archiving).
+   A successor adds `SUCCESSOR_OF=<predecessor>`: registration then prints `predecessor <name> open PRs:` from that
+   session's `sessions/<name>/prs.tsv` (the prose `## Open PRs` only as a fallback; `none` when empty) - the list
+   step 4 re-arms or drives - and, for an orchestrator, a `live assignments` block from the swarm ledger. It also
+   ends that predecessor's row (`superseded by <name>`) when the row is `active`, has no heartbeat for over 12
+   hours and its owner process is gone, and prints `owns: <tickets, PRs>` for it; pass `REF_GONE=1` only after
+   `ListAgents` shows the predecessor's ref is not live (it skips the 12 h wait, never the owner-process check).
+   Any other predecessor is left as is and a line says why (`reference/lifecycle.md` § End and archiving).
+   **A successor orchestrator re-briefs** each live worker once (`ASSIGN <ticket> rebrief=1`, wait for the ack): probe each
+   printed ref with `ListAgents`; a gone ref (or, with no peer list, a heartbeat older than `swarm.stall_minutes`) goes to
+   `swarm.py resume`, as does a `subagent` worker once its predecessor's process is gone. **A resume re-confirms:** a live row
+   whose `working_on` is older than 12 h is marked `unconfirmed: <old>`; pass `WORKING=` or `session-touch` it, never
+   keep it silently. **`DUPLICATE REGISTER`** (same session id, new `ref`, heartbeat under 5 min) exits 3 with no write: probe the old ref with `ListAgents`; live, you stand
+   down; gone (a resumed crash), register again with `REF_GONE=1`. A `STATE=standby` row expires and the sweep retires it. Detail: `reference/lifecycle.md` § Liveness and failover.
    `make -C $BATON/context-db mission-build` rebuilds the private mission-control page from the registry (a local
    file, zero model turns, never a publish).
    Then fill the body of `.context/sessions/<name>.md` (a direct `Edit`, or the ctx tools naming your actor —
@@ -73,23 +82,22 @@ entries before touching a shared epic, PR or worktree.
    make -C $BATON/context-db session-rename FROM=<old-name> TO=<new-name>
    ```
 4. **Re-arm the PR watches.** `Monitor`s die with the session that armed them. For **every open PR you now own**
-   (the predecessor's `## Open PRs` list — `sessions/archive/<name>.md` once step 3 swept it, else
-   `sessions/<name>.md` — the context doc's *What was built* / *Remaining work*, or `gh pr list --author @me`;
-   a predecessor file with no `## Open PRs` heading at all means unknown, not "none" — check `gh`), verify the
+   (the predecessor's `sessions/<name>/prs.tsv` (`sessions/archive/<name>/prs.tsv` once swept; the prose
+   `## Open PRs` of `sessions/<name>.md` only where no tsv exists) - the context doc's *What was built* / *Remaining work*, or `gh pr list --author @me`;
+   a predecessor with neither a `prs.tsv` nor an `## Open PRs` heading means unknown, not "none" — check `gh`), verify the
    head with `gh api repos/<o>/<r>/pulls/<n> --jq .head.sha` and arm **one** multi-PR `pr-watch` Monitor per repo
    covering all of them (`PR_WATCH_WORKTREE=<checkout> bash …/pr-watch.sh <o>/<r> <n> <head> [<n> <head> …]`,
    `timeout_ms: 1800000` — the harness cap; each expiry is a billed wake-up).
    **Carve-out:** a PR this session drives to merge itself with `skills/pr-watch/pr-merge.sh` (it counts as that
-   PR's watch) needs no Monitor; record it as `driving to merge, no watcher` in `## Open PRs`. If `pr-merge.sh`
-   exits non-zero, arm the Monitor (or park) and rewrite the `## Open PRs` line. One watcher per PR (a Monitor or
+   PR's watch) needs no Monitor; record it as `driving to merge, no watcher` in `prs.tsv`'s state column. If `pr-merge.sh`
+   exits non-zero, arm the Monitor (or park) and rewrite that row. One watcher per PR (a Monitor or
    that `pr-merge.sh` run), never two, never none.
    On expiry, re-arm with the identical call — unless the last **two** windows brought zero actionable events,
    the user signed off, or the only pending event is a human approval / host-only gate: then park
    (`session-handoff` and end the session; `pr-watch` § Park when the gates are not yours).
    Skip a PR only if `SESSION_INDEX.md` shows another *active* session already watching it. Then list the armed
-   PRs in your session file (`repo#n head — what it waits on`): **replace** the `none` under the `## Open PRs`
-   heading (`ctx_str_replace`, with the heading line in `old_str` — never a bare `none`), never a second heading
-   (add it once if a fresh register has none yet). Registration is not complete until the watches are up.
+   PRs in `sessions/<name>/prs.tsv` (`repo\tpr\thead7\tstate\tticket`; a swarm orchestrator's `swarm.py` writes it,
+   anyone else appends the row). Registration is not complete until the watches are up.
 
 Registering records the name: `python3 $BATON/context-db/bin/kit_profile.py session-name` prints it, and the
 session self-identifier — `session \`<name>\`` — is the `footer:` line of the resolved-profile block the
@@ -138,8 +146,8 @@ finish the current step, run `session-handoff`, and continue in a successor sess
 
 ## 3. On end (part of `session-handoff`)
 
-First refresh the `## Open PRs` list in your session file (repo#n, current head, what each waits on) — your
-`Monitor`s stop with you, and that list is what the successor's step 4 re-arms from. Then:
+First refresh `sessions/<name>/prs.tsv` (repo, pr, current head, state, ticket; an orchestrator also leaves its
+ledger current) - your `Monitor`s stop with you, and that list is what the successor's step 4 re-arms from. Then:
 
 ```sh
 make -C $BATON/context-db session-end NAME=<name> NEXT=$(python3 $BATON/context-db/bin/kit_profile.py scratch)/next.md

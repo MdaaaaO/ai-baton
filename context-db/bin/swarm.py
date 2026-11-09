@@ -37,7 +37,7 @@ Every subcommand takes the epic key first:
   render    prints the `## Swarm` section and writes `sessions/<name>/prs.tsv` (repo, pr, head7, state, ticket; the state
             is the row's status; the header line alone means no open PR)
   resume    compares the ledger with `git ls-remote` and `gh pr list`, prints the difference and what to do with a lost
-            worker (drive-to-merge, respawn-in-place, reassign, record-merge), writes nothing without --apply. It never
+            worker (drive-to-merge, respawn-in-place, reassign, record-merge, update, ask), writes nothing without --apply. It never
             writes a pass or a READY head, so a restored row still needs its READY and its verifier (--json)
   grant, watch, decision, hold, budget   the epic's other records. A grant and a change to a cap need a --decision line;
             `budget --spent` records spend, which decides nothing, and needs none
@@ -635,6 +635,11 @@ def ticket_branch_re(ticket: str):
     return re.compile(rf"(?:^|/){re.escape(ticket)}(?:$|[-_/.])")
 
 
+RESPAWN_NOTE = ("respawn on the same worktree, never a fresh assignment: resume the saved transcript (worker.ref) with "
+                "`ASSIGN <ticket> rebrief=1`, and carry any review findings inline, as a review sheet in a temp dir does not "
+                "survive a restart")
+
+
 def compare_row(ticket: str, row: dict, heads: dict, prs: list, trees: dict) -> dict:
     """What the remote says about one row: the fields that differ and what to do if its worker is lost."""
     status, known = row["status"], row["worker"]["branch"]
@@ -687,15 +692,24 @@ def compare_row(ticket: str, row: dict, heads: dict, prs: list, trees: dict) -> 
         change("status", status, "claimed")
     result.update(branch=branch, worktree=worktree, dirty=dirty_count(worktree) if worktree else None,
                   pr=(pr or {}).get("number", row["pr"]))
-    if status in ("ready", "assigned", "claimed"):
+    if status in ("assigned", "claimed"):
+        # a worker run that ended with no return: only a row that has been assigned can have lost its worker. A live run
+        # is the re-brief's (`ASSIGN <ticket> rebrief=1`), never this list's.
         if state == "OPEN":
             result["action"] = "drive-to-merge"
         elif state == "MERGED":
             result["action"] = "record-merge"
         elif worktree:
-            result["action"] = "respawn-in-place"
-        elif status != "ready" or branch in heads:
+            result.update(action="respawn-in-place", note=RESPAWN_NOTE + (
+                f"; {result['dirty']} unsaved change(s) in it, read them before the worker goes on" if result["dirty"] else ""))
+        else:
             result["action"] = "reassign"
+    elif status == "ready":
+        # not assigned yet, so no worker to lose: a PR or a merge on the remote is a fact to record, nothing to drive
+        if state == "MERGED":
+            result["action"] = "record-merge"
+        elif changes:
+            result["action"] = "update"
     elif row["pr"] and not pr and status in ("pr", "ready-to-merge"):
         result.update(action="ask", note=None if closed else f"the ledger names PR #{row['pr']} and gh does not list it")
     elif changes:

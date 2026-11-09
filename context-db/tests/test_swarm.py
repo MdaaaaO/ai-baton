@@ -1681,6 +1681,41 @@ class Resume(CliCase):
         self.assertEqual((res["7"]["worktree"], res["7"]["dirty"]), (str(self.tmp / "wt7"), 1))
         self.assertEqual(res["8"]["action"], "reassign", "assigned, with no worktree and no PR")
 
+    def test_a_worker_stopped_by_a_restart_is_respawned_in_place_with_the_transcript_and_findings(self):
+        self.plan("7")
+        self.assign("7", "lane-7", "feat/7-x")
+        self.git("worktree", "add", "-q", "-b", "feat/7-x", str(self.tmp / "wt7"), "main")  # clean, branch never pushed
+        res = self.actions()["7"]
+        self.assertEqual((res["action"], res["dirty"], res["worktree"]), ("respawn-in-place", 0, str(self.tmp / "wt7")))
+        self.assertIn("same worktree", res["note"])
+        self.assertIn("never a fresh assignment", res["note"])
+        self.assertIn("saved transcript", res["note"])
+        self.assertIn("findings inline", res["note"])
+        self.assertIn("rebrief=1", res["note"])
+        self.assertNotIn("unsaved", res["note"])
+        (self.tmp / "wt7" / "unsaved").write_text("work", encoding="utf-8")
+        self.assertIn("1 unsaved change", self.actions()["7"]["note"])
+
+    def test_only_an_assigned_or_claimed_row_can_have_lost_its_worker(self):
+        self.plan("5", "7", max_workers=5)
+        self.git("worktree", "add", "-q", "-b", "feat/5-x", str(self.tmp / "wt5"), "main")
+        self.assertEqual(self.actions()["5"]["action"] if "5" in self.actions() else "none", "none",
+                         "a ready row has no worker to respawn, whatever worktree sits beside it")
+        head = self.push_branch("feat/7-x")
+        self.set_prs([self.pr(17, "feat/7-x", head)])
+        res = self.actions()["7"]
+        self.assertEqual(res["action"], "update", "a ready row with an open PR is a fact to record, not a PR to drive")
+        self.assertEqual(res["changes"]["status"], ["ready", "pr"])
+
+    def test_an_assigned_or_claimed_row_with_an_open_pr_is_driven_to_merge(self):
+        self.plan("6", "7", max_workers=4)
+        self.assign("6", "lane-6", "feat/6-x")
+        self.assign("7", "lane-7", "feat/7-x")
+        self.ok("apply", EPIC, status_line("CLAIMED", ticket="7", sender="lane-7", line_id="c07"))
+        self.set_prs([self.pr(16, "feat/6-x", self.push_branch("feat/6-x")), self.pr(17, "feat/7-x", self.push_branch("feat/7-x"))])
+        res = self.actions()
+        self.assertEqual((res["6"]["action"], res["7"]["action"]), ("drive-to-merge", "drive-to-merge"))
+
     def test_a_named_pr_gh_does_not_list_is_a_question(self):
         self.plan("7")
         self.to_pr()

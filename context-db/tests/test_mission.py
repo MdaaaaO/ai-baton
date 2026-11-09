@@ -970,6 +970,33 @@ class Sessions(unittest.TestCase):
             if name != "kit-beta":
                 self.assertEqual((entry["open_prs"], entry["crons"]), ([], []), name)
 
+    def test_prs_tsv_beside_the_session_file_wins_over_the_prose_list(self):
+        d = Path(tempfile.mkdtemp(prefix="kit-mission-tsv-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        self.assertIsNone(mission.prs_tsv_entries(d / "kit-x.md"))
+        (d / "kit-x").mkdir()
+        (d / "kit-x" / "prs.tsv").write_text("repo\tpr\thead7\tstate\tticket\nacme/widgets\t12\tabc1234\tpr\t686\n", encoding="utf-8")
+        got = mission.prs_tsv_entries(d / "kit-x.md")
+        self.assertEqual(got, [{"repo": "acme/widgets", "number": 12, "url": "https://github.com/acme/widgets/pull/12",
+                                "text": "acme/widgets#12 abc1234 pr 686"}])
+        (d / "kit-x-20261104").mkdir()   # an archived lane's suffixed stem
+        (d / "kit-x-20261104" / "prs.tsv").write_text("repo\tpr\thead7\tstate\tticket\n", encoding="utf-8")
+        self.assertEqual(mission.prs_tsv_entries(d / "kit-x-20261104.md"), [])  # header alone: no open PR
+
+    def test_a_session_with_prs_tsv_lists_those_prs_in_the_built_data(self):
+        tmp = Path(tempfile.mkdtemp(prefix="kit-mission-tsvb-"))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        root, out = tmp / ".context", tmp / "out"
+        shutil.copytree(BASE, root)
+        (root / "sessions" / "kit-beta").mkdir()
+        (root / "sessions" / "kit-beta" / "prs.tsv").write_text(
+            "repo\tpr\thead7\tstate\tticket\nacme/widgets\t77\tabc1234\tpr\t5\n", encoding="utf-8")
+        r = run_mission(root, "build", "--out", out, "--template", TPL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        data = json.loads((out / "data.json").read_text(encoding="utf-8"))
+        beta = {e["name"]: e for k in ("active", "ended", "archived") for e in data["sessions"][k]}["kit-beta"]
+        self.assertEqual([p["number"] for p in beta["open_prs"]], [77])
+
     def test_stale_is_decided_against_as_of_by_the_registry_rule(self):
         as_of = mission.parse_utc(DATA["as_of"])
         stale = {e["name"]: mission.is_stale(e["heartbeat"], as_of) for e in DATA["sessions"]["active"]}
