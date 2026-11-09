@@ -35,25 +35,28 @@ next round only once the last is answered, because its drafts read those answers
 
 | Round | `header` | Question | Recommended option (your read) | Becomes |
 |---|---|---|---|---|
-| 1 | `Goal` · `Out of scope` · `Done when` · `First slice` | the four of `docs/carousel.md` § Goal interview, asked of the epic | as there; the Done-when preview ends with a criterion that every `VG-<n>` gate is closed, check `gates.py status` | the opening block's first lines and `## Done when` |
+| 1 | `Goal` · `Out of scope` · `Done when` · `First slice` | the four of `docs/carousel.md` § Goal interview, asked of the epic | as there; the Done-when preview is `- [ ] DW-<n> <criterion> · check: …` lines, the last one that every `VG-<n>` gate is closed, check `gates.py status` | the opening block's first lines and `## Done when` |
 | 2 | `Constraints` | What must every child respect? | the serial resources it touches (`swarm.resources`), the capabilities and environments involved, a deadline, the protected paths (`swarm.protected_paths`), as the preview | `**Constraints**` |
 | 2 | `Risks` | What could go wrong, and how is it undone? | the top risks, each with its rollback shape (revert the PR, restore from a snapshot, re-run a backfill, flag off) | `**Risks**` |
-| 2 | `Verify` | How will the whole be verified? | the profile, § 3; the drafted `## Verification plan` as the preview | `## Verification plan` |
+| 2 | `Verify` | How will the whole be verified? | the template, § 3; the drafted `## Verification plan` as the preview | `## Verification plan` |
 | 2 | `Caps` | What may it spend, and how many workers at once? | an epic and a per-worker USD cap with your basis in the description, and `max_workers` (4 by default, fewer where a serial resource caps it). No cap is an option, never the recommended one | `**Budget**`, `swarm.py init` |
 | 3 | `Grants` | Which decisions do you pre-grant, and until when? | `multiSelect`, one option per grant § 4 allows, each naming its scope and expiry; "none: ask each time" is always an option | `## Grants`, the task ledger |
 | 3 | (open) | any tolerance or human gate the plan leaves for the owner, and any free-text re-ask | your read | the plan's gate text |
 
 Nothing is created until every round is answered.
 
-**Headless** (no `AskUserQuestion`): draft every round at once, later rounds from round 1's recommended options, and
-end the reply with one numbered `Decisions` block (`docs/carousel.md` § No tool), recommended option first; list the
-same items under `## Open decisions` in your session file. Then stop: no issue, no context doc, no ledger, no grant.
-The next interactive session asks them as the rounds.
+**Headless** (no `AskUserQuestion`): draft every round at once, later rounds from round 1's recommended options. End
+the reply with one numbered `Decisions` block in `docs/carousel.md` § No tool's shape, one line per question,
+`<n>. <question> — (1) <option>, Recommended (2) <option>`, and nothing after it; list the same items under
+`## Open decisions` in your session file. A grant or a command is a draft here: name the call you would run on the
+answer, never run it. Then stop: no issue, no context doc, no ledger, no grant. The next interactive session asks
+them as the rounds.
 
-## 3. The verification profile
+## 3. The verification template
 
-The plan is the `## Verification plan` section of a template under `$BATON/docs/verification/`, copied and adapted;
-the gate format is `$BATON/docs/verification/code-change.md` § The gate format.
+The plan is the `## Verification plan` section of a template under `$BATON/docs/verification/`: read the file and
+copy its gate lines as written, then adapt them; never write the gates from memory. The gate format is
+`$BATON/docs/verification/code-change.md` § The gate format.
 
 - **A data migration** (the epic moves, copies, backfills or transforms stored data, or changes where data lives):
   recommend `data-migration`; offer `code-change` and `custom` beside it. Where `docs/verification/data-migration.md`
@@ -101,7 +104,7 @@ owner who asks for one of these gets that reason in one line, and the grant is n
 5. **Grants**: per granted option, `python3 $E/swarm.py grant <key> --scope "<scope>" --by owner --expires
    <YYYY-MM-DD> --decision "<line>"`.
 6. **Decision lines** (`docs/carousel.md` § After the answer) under the doc's *Key decisions & gotchas*: the Goal when
-   the owner chose another than yours, the profile, the caps, and each grant, the same line `swarm.py grant` took.
+   the owner chose another than yours, the template, the caps, and each grant, the same line `swarm.py grant` took.
 7. **`## Swarm`**: `python3 $E/swarm.py render <key>` inserted with `ctx_insert` before `## Session log`.
 
 ## 6. Hand over
