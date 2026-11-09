@@ -50,15 +50,16 @@ Nothing is created until every round is answered.
 **Headless** (no `AskUserQuestion`): draft every round at once, later rounds from round 1's recommended options, and
 put each draft in its block line, not in prose, with one exception: print the drafted `## Verification plan` (§ 3) as
 its gate lines, a plain list (not fenced) above the Decisions after the line `Draft verification plan, not posted:`,
-and let the Verify item name it. Above the plan, at most three short sentences: which reads returned or were refused,
-that nothing was created, and, with no session file or no write tool, that the block is the only copy; no lists, no
-headings. End the reply with the plain line `Decisions` (not bold, not a heading) and one numbered line per question
-of every round, round 1's four each their own line, in `docs/carousel.md` § No tool's shape,
-`<n>. <question> — (1) <option>, Recommended (2) <option>`: option (1) is the recommended one, tagged `, Recommended`
-just before `(2)`, each option one clause of at most 15 words, the question asked in full, never its header alone, and
-nothing follows the block. Copy it under `## Open decisions` in your session file. A grant or a command is a draft
-here: name the call you would run on the answer above the block, never inside it, and never run it. Then stop: no
-issue, no context doc, no ledger, no grant. The next interactive session asks them as the rounds.
+and let the Verify item name it: its options are the templates by name, one per option, as § 3 orders them. Above the
+plan, at most three short sentences: which reads returned or were refused, that nothing was created, and, with no
+session file or no write tool, that the block is the only copy; no lists, no headings. End the reply with the plain
+line `Decisions` (not bold, not a heading) and one numbered line per question of every round, round 1's four each
+their own line, in `docs/carousel.md` § No tool's shape, `<n>. <question> — (1) <option>, Recommended (2) <option>`:
+option (1) is the recommended one, tagged `, Recommended` just before `(2)`, each option one short clause, the
+question asked in full, never its header alone, and nothing follows the block. Copy it under `## Open decisions` in
+your session file. A grant or a command is a draft here: name the call you would run on the answer above the block,
+never inside it, and never run it. Then stop: no issue, no context doc, no ledger, no grant. The next interactive
+session asks them as the rounds.
 
 ## 3. The verification template
 
