@@ -47,13 +47,15 @@ next round only once the last is answered, because its drafts read those answers
 
 Nothing is created until every round is answered.
 
-**Headless** (no `AskUserQuestion`): draft every round at once, later rounds from round 1's recommended options. End
-the reply with one numbered `Decisions` block in `docs/carousel.md` § No tool's shape, one line per question,
-`<n>. <question> — (1) <option>, Recommended (2) <option>`: the recommended option is (1), tagged right after it, the
-question asked in full, never its header alone, and nothing after the block. Above it, say which reads returned and
-which a tool refused, so the reply states only what a call showed; list the same items under `## Open decisions` in
-your session file. A grant or a command is a draft here: name the call you would run on the answer, never run it. Then
-stop: no issue, no context doc, no ledger, no grant. The next interactive session asks them as the rounds.
+**Headless** (no `AskUserQuestion`): draft every round at once, later rounds from round 1's recommended options, and
+put each draft in its block line, not in prose. Above the block, a few lines only: which reads returned, which a tool
+refused, that nothing was created, and, with no session file or no write tool, that the block is the only copy. End
+the reply with the plain line `Decisions` (not bold, not a heading) and one numbered line per question in
+`docs/carousel.md` § No tool's shape, `<n>. <question> — (1) <option>, Recommended (2) <option>`: option (1) is the
+recommended one, the question is asked in full, never its header alone, and nothing follows the block. Copy it under
+`## Open decisions` in your session file. A grant or a command is a draft here: name the call you would run on the
+answer, never run it. Then stop: no issue, no context doc, no ledger, no grant. The next interactive session asks them
+as the rounds.
 
 ## 3. The verification template
 
