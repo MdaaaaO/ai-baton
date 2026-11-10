@@ -66,6 +66,7 @@ is on `main` today. A status with a version means it shipped in that release. `p
 | `ticket-open`: Goal/Out of scope/Plan block, Sizing line | spec | ticket | n/a | existing |
 | `ticket-carousel`: a batch of candidates, one at a time | spec | ticket batch | #105 | existing |
 | `epic-discover`: the owner's epic interview: constraints, gates, caps, grants | spec | epic | #682 | existing |
+| `epic-decompose`: child tickets with disjoint areas, waves and caps, and the owner's go | spec | epic | #683 | existing |
 | `ticket-pickup`: checks the Sizing line against `main` | spec | ticket | n/a | existing |
 | `ticket-update`: one dated delta comment per step | spec | ticket | n/a | existing |
 | carousel: every open decision as one question set | spec | any step | #354 | existing |
@@ -127,9 +128,8 @@ orchestrator session owns an epic and runs `swarm-run` (#684), one swarm tick at
 ledger `swarm.py` (#677), the message grammar and inboxes `swarm_msg.py` (#678), leases and STOP files `lease.py`
 (#679), the budget brake `swarm_budget.py` (#680), the verification gates `gates.py` and the `verifier` agent, a role
 that never wrote the change and alone records a pass (#681), the `builder` agent with its worker brief (#685), and
-`swarm-run` with the assignment file (#684), the owner's epic interview `epic-discover` (#682), and liveness and
-failover (#686). Not built yet: the data-migration gates (#689), the spec skill `epic-decompose`, with the owner's go
-before any worker starts (#683), and the
+`swarm-run` with the assignment file (#684), the owner's epic interview `epic-discover` (#682), the spec skill `epic-decompose`, with the owner's go before any
+worker starts (#683), and liveness and failover (#686). Not built yet: the data-migration gates (#689) and the
 weekly report and the plan walkthrough (#690). The inbox sweep `swarm-inbox` and the digest `swarm-status` are built (#688). The contract is `docs/swarm.md` (#676), and
 it says what is built. Why the mode needs no server: `docs/decisions/0005-orchestrator-is-a-session.md`.
 

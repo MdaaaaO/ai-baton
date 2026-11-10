@@ -2,9 +2,9 @@
 name: epic-discover
 description: "Opens an epic with the owner: rounds of the goal interview plus constraints, risks, verification plan, caps and grants; writes the tracking issue, context doc and task ledger. Use when starting an epic or a swarm. Not for one ticket (`ticket-open`) or child tickets."
 metadata:
-  version: "1"
-  updated: "2026-11-09"
-  reviewed: "2026-11-09"
+  version: "2"
+  updated: "2026-11-10"
+  reviewed: "2026-11-10"
 user-invocable: true
 argument-hint: "<the epic's request> [<owner/repo>]"
 ---
@@ -124,7 +124,5 @@ owner who asks for one of these gets that reason in one line, and the grant is n
 ## 6. Hand over
 
 One carousel: `epic-decompose` now (Recommended) · a `walkthrough` of the epic first, so the owner reads the plan before
-decomposition asks for a go · stop here. Offer `epic-decompose` only when this session lists it among its skills; where
-it does not (until it ships), stop here is the recommended option and the report says decomposition waits
-for it. Report in one line: the issue link, the doc id, the ledger key, the gates
+decomposition asks for a go · stop here. Report in one line: the issue link, the doc id, the ledger key, the gates
 (`VG-1`…`VG-<n>`, how many human) and the grants.

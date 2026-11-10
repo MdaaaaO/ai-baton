@@ -10,7 +10,7 @@ ledger (`docs/carousel.md` § After the answer) is a different thing. Built so f
 `lease.py` (leases and STOP files), `gates.py` (the verification gates), `swarm_msg.py` (the grammar and the inbox and
 outbox), `swarm_budget.py` (the budget brake), the `verifier` agent, the `builder` agent, the `swarm-run` skill
 (the orchestrator's tick, with the assignment file), `swarm-inbox` (the inbox sweep, `inbox.py`) and `swarm-status`
-(the digest, `digest.py`). `epic-discover` (#682) runs the owner's epic interview. Still to be built: `epic-decompose`. `swarm-run` runs only when an orchestrator session calls it on an approved epic.
+(the digest, `digest.py`). `epic-discover` (#682) runs the owner's epic interview, and `epic-decompose` (#683) splits it into children with areas and waves and takes the owner's go. `swarm-run` runs only when an orchestrator session calls it on an approved epic.
 Why an orchestrator is a session and not a server, and when a worker is a subagent, a peer session or a headless
 process: `docs/decisions/0005-orchestrator-is-a-session.md`.
 

@@ -211,7 +211,7 @@ explains the clone's hooks and guards.
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
-| Swarm mode | `epic-discover` · `swarm-run` · `swarm-inbox` · `swarm-status` |
+| Swarm mode | `epic-discover` · `epic-decompose` · `swarm-run` · `swarm-inbox` · `swarm-status` |
 | Needs a system (`systems.*`) | `sign-queue` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
 It ships five agents (`triage`, `review-runner`, `auto-runner`, `verifier`, `builder`) and the `context-db/` engine
