@@ -133,8 +133,8 @@ Human gates go to the owner (step 3) and `gates.py sign --by owner`. The epic cl
 a malformed plan's 2 included, is no close.
 
 **The close comment's operator block.** Before `ticket-close` posts on the epic, write the four lines of
-`docs/operator-brief.md` for the epic as a whole: what the owner can now do, must do differently, checks with and
-still lacks. Draw them from the merged children's blocks (`python3 $BATON/skills/pr-open/operator_brief.py extract
+`docs/operator-brief.md` for the epic as a whole, labelled `Can now:`, `Do differently:`, `Check with:` and `Not covered:`:
+what the owner can now do, must do differently, checks with and still lacks. Draw them from the merged children's blocks (`python3 $BATON/skills/pr-open/operator_brief.py extract
 --pr <owner/repo> <n>` per child), never from a worker's return. Save them under `## For the operator` in `$CTX/close.md`
 and run `python3 $BATON/skills/pr-open/operator_brief.py check $CTX/close.md`: any warning is fixed before the post.
 The comment carries that block as written; it is drawn from the children's PR-body blocks, so the PR body stays the
