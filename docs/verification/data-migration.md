@@ -41,7 +41,7 @@ A tolerance is a threshold or an accepted difference that a gate reads. The epic
 | Decision | the owner's decision line that set it |
 
 - **Written before the first run.** `VG-4` is signed before the first reconciliation run starts, so a bound is never
-  fitted to a result. An agent gate's proof names a run that started after that signature.
+  fitted to a result. Every proof that reads a tolerance names a run that started after that signature.
 - **Only a human decision may loosen a tolerance**, or change one at all. The change is the owner's decision line,
   ledgered in the epic context doc's *Key decisions & gotchas* (`docs/carousel.md` § After the answer) and mirrored in
   the task ledger's `decisions` (`swarm.py decision`); the table's row and its decision line change together. No agent
@@ -120,12 +120,12 @@ the next free id.
 ## When each gate falls due
 
 The gates are in the order a migration meets them. A gate run names only the gates due (the verifier's `GATES:` line),
-so the orchestrator asks for one at each step below, with the children merged by then, and the next step's children
-start only once that step's gates are closed.
+so the orchestrator asks for one at each step below, with the children merged by then, and the next step starts only
+once that step's gates are closed.
 
 | Step | Gates | Closed before |
 |---|---|---|
-| Set before the work | `VG-1` to `VG-5` | the first reconciliation run; `VG-1` before any child builds a target table |
+| Before reconciliation | `VG-1` to `VG-5` | the first reconciliation run; `VG-1` before any child builds a target table |
 | Prove equivalence | `VG-6` to `VG-16` | the go/no-go |
 | Cut over | `VG-17` | the cutover wave |
 | After the cutover | `VG-18` to `VG-20` | the epic closes |
