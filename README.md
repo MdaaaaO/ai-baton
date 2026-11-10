@@ -16,7 +16,7 @@ What you get, from the top:
 - **Sessions choose their context.** The index names every doc and a brief per initiative; a session reads what it
   works on, not everything, so the loaded prefix and the cost stay small.
 - **Initiatives outlive sessions.** One context doc per initiative. A session ends with a handoff prompt; its
-  successor reads it back, checks each claim against the tracker and the PRs, and only then edits. A stale prompt is
+  successor reads it back, checks each claim against the tracker and PRs, and only then edits. A stale prompt is
   caught before it is acted on ([a real one](#a-handoff)).
 - **A live registry.** Who works on what right now: heartbeats, the PRs each session watches, what each session
   cost. A second session coordinates instead of colliding.
