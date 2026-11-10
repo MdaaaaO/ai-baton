@@ -669,6 +669,7 @@ def _supersede_predecessor(name: str, successor: str, a=None, ref_gone: bool = F
               f"end it with `session.py end` if it is really gone", file=sys.stderr)
         return
     meta["status"] = "ended"
+    meta["ended_at"] = now_iso()
     meta["ended_reason"] = f"superseded by {successor}"
     meta["updated"] = today()
     body = _normalize_body(body)
@@ -749,6 +750,8 @@ def cmd_register(a) -> None:
     # it, so the row shows under Active and the later session-end writes its stats + ledger row.
     fresh = meta.get("status") in (None, "", "ended")  # a new doc, or an ended/archived lane coming back to life
     meta["status"] = a.status or ("active" if meta.get("status") == "ended" else meta.get("status")) or "active"
+    if meta["status"] != "ended":
+        meta.pop("ended_at", None)   # a lane coming back to life is not ended; the next end writes a fresh one
     if getattr(a, "lane", ""):
         if not LANE_RE.fullmatch(a.lane):
             sys.exit(f"session: --lane is a name: letters, digits, `.`, `_` and `-`, starting with a letter or digit, not {a.lane!r}")
@@ -892,7 +895,7 @@ def cmd_end(a) -> None:
                   + (" (next-session prompt withdrawn)" if nxt == "" else ""))
         return
     meta["status"] = "ended"
-    meta["heartbeat"] = now_iso()
+    meta["ended_at"] = meta["heartbeat"] = now_iso()   # ended_at: a later touch moves the heartbeat, never this
     meta["updated"] = today()
     st = _stats(a)
     if st is not None:

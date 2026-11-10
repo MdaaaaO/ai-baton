@@ -1165,6 +1165,7 @@ def blank_config() -> dict:
         "length": {"repos": {}},
         "commits": {"default": "conventional", "repos": {}},
         "context": {"sync": "auto"},
+        "session": {"sweep_hours": 24},
         "swarm": {"ack_minutes": 20, "lease_minutes": 120, "standby_hours": 24, "digest_hours": 4, "resources": [], "units": {},
                   "budget": {"epic_usd": None, "worker_usd": None, "worker_forks": 4, "worker_minutes": None,
                              "split_turns": 10, "hard_stop": False}},

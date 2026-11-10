@@ -2,7 +2,7 @@
 name: session-register
 description: "Register this session in the live registry (`.context/SESSION_INDEX.md`), narrate back when paste-started as a successor, re-arm PR-watch, rename, keep heartbeat/stats fresh. Use when starting a session on an epic/feature, when responsibilities change, on every flush, and before ending."
 metadata:
-  version: "44"
+  version: "45"
   updated: "2026-11-05"
   reviewed: "2026-11-05"
 user-invocable: true
@@ -158,7 +158,7 @@ whether there is one; nothing to hand over → omit `NEXT`; `NEXT=none` withdraw
 reactivates it: `reference/lifecycle.md` § End and archiving. Then do the rest of the `session-handoff` close-out.
 A row that says `ended` while its claude process still runs (a pane never closed after the handoff) is a zombie:
 `bash $BATON/skills/session-register/zombie-sweep.sh` lists them, `--kill` ends them (`reference/lifecycle.md`
-§ Zombie sweep; `kit-health` § 4 reports them).
+§ Zombie sweep; `kit-health` § 4 reports them); the heartbeat runs `--kill --min-ended-minutes 30` itself every `session.sweep_hours` (24).
 
 Row fields: `reference/lifecycle.md` § Fields — operational state, **not** knowledge (excluded from
 `make index`/`make verify` and the doc DB count).

@@ -654,6 +654,25 @@ class NoSilentLoss(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("## Open PRs\n\nnone", doc_path.read_text(encoding="utf-8"))
 
+    def test_end_stamps_ended_at_and_a_touch_or_re_register_never_moves_it(self):
+        # zombie-sweep's --min-ended-minutes reads `ended_at:`: a heartbeat touch on an ended row moves
+        # `heartbeat`, so only this field says how long ago the session really ended (#726)
+        import re
+        run("session.py", "register", "--name", "t-end-at", "--no-stats", root=self.root)
+        doc_path = self.root / "sessions" / "t-end-at.md"
+        self.assertNotIn("ended_at", doc_path.read_text(encoding="utf-8"))
+        r = run("session.py", "end", "--name", "t-end-at", "--no-stats", root=self.root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        stamp = re.search(r"^ended_at: (\S+)$", doc_path.read_text(encoding="utf-8"), re.M)
+        self.assertIsNotNone(stamp, doc_path.read_text(encoding="utf-8"))
+        self.assertRegex(stamp.group(1).strip("'\""), r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        doc_path.write_text(doc_path.read_text(encoding="utf-8").replace(stamp.group(1), "2026-01-01T00:00:00Z"),
+                            encoding="utf-8")
+        run("session.py", "touch", "--name", "t-end-at", "--no-stats", root=self.root)
+        self.assertIn("ended_at: 2026-01-01T00:00:00Z", doc_path.read_text(encoding="utf-8").replace("'", "").replace('"', ""))
+        run("session.py", "register", "--name", "t-end-at", "--no-stats", root=self.root)
+        self.assertNotIn("ended_at", doc_path.read_text(encoding="utf-8"), "a lane back to life is not ended")
+
     def test_end_keeps_an_existing_open_prs_list(self):
         run("session.py", "register", "--name", "t-end-hasprs", "--no-stats", root=self.root)
         doc_path = self.root / "sessions" / "t-end-hasprs.md"

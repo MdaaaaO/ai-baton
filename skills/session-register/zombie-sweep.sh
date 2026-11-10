@@ -26,6 +26,9 @@
 #   REUSED <names> owner=<pid> comm=<comm>                         the pid's comm is no longer claude-shaped
 #   DEAD <names> owner=<pid>                                       owner gone (the loop ends the row itself)
 #   UNMAPPED <log>                                                 no start line
+#   RECENT <names> owner=<pid> row=<…> ended <m>m ago (under <N>m) a ZOMBIE whose youngest `ended` row ended under
+#                                                                  --min-ended-minutes ago (its `ended_at:`): a
+#                                                                  session may still be closing out its handoff
 # Exit 3 when at least one ZOMBIE was listed (list mode), else 0.
 # --kill sends SIGTERM to the ZOMBIE owners only — never to an unmapped, stale, reused, dead or unregistered pid
 # (an unregistered pane may be the user's own terminal), never to an owner with any active row, and never to
@@ -34,17 +37,25 @@
 # Leases: list mode names what a sweep would free ("would free", no write); --kill frees them.
 # Standby rows: the same split — list mode prints "would retire <name>" for a `standby` row past its `expires`
 # (`swarm.standby_hours`), --kill retires it; each is followed by `owns: <tickets, PRs>`.
+# --min-ended-minutes N (default 0, off) spares a ZOMBIE whose row ended under N minutes ago (RECENT); a row with no
+# `ended_at:` reads as ended long ago. heartbeat.sh runs `--kill --min-ended-minutes 30` by itself about every
+# `session.sweep_hours` (default 24), so a session closing out its handoff is never cut off; a manual run stays valid.
 # CONTEXT_ROOT overrides the workspace's .context/ root; TMPDIR the log dir, exactly as for heartbeat.sh.
 set -u
 KITDIR=$(cd "$(dirname "$0")/../.." && pwd)
-kill_mode=0
-for a in "$@"; do
-  case "$a" in
+kill_mode=0; min_ended=0
+usage() { echo "usage: zombie-sweep.sh [--kill] [--min-ended-minutes N]" >&2; exit 2; }
+while [ $# -gt 0 ]; do
+  case "$1" in
     --kill) kill_mode=1 ;;
+    --min-ended-minutes) [ $# -ge 2 ] || usage; min_ended=$2; shift ;;
+    --min-ended-minutes=*) min_ended=${1#*=} ;;
     -h|--help) awk 'NR > 1 && /^set -u$/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit 0 ;;
-    *) echo "usage: zombie-sweep.sh [--kill]" >&2; exit 2 ;;
+    *) usage ;;
   esac
+  shift
 done
+case "$min_ended" in ''|*[!0-9]*) usage;; esac
 CTX=${CONTEXT_ROOT:-$(python3 "$KITDIR/context-db/bin/kit_profile.py" context 2>/dev/null)}
 [ -n "$CTX" ] && [ -d "$CTX/sessions" ] || { echo "zombie-sweep: no sessions/ under '$CTX' (set CONTEXT_ROOT)" >&2; exit 2; }
 BATON_TMP="${TMPDIR:-/tmp}/ai-baton-$(id -u 2>/dev/null || echo 0)"
@@ -73,6 +84,20 @@ row_status() {
   echo ""
 }
 
+# ended_minutes <name>: whole minutes since the live row's `ended_at:` (session-end writes it), '' when the row has
+# none (ended before the field existed, or archived) or it does not parse — such a row reads as ended long ago.
+ended_minutes() {
+  local v
+  v=$(sed -n '2,/^---$/{s/^ended_at:[[:space:]]*//p;}' "$CTX/sessions/$1.md" 2>/dev/null | head -n 1 | tr -d '"'"'"' ')
+  [ -n "$v" ] || return 0
+  python3 -c 'import sys, datetime as d
+try:
+    t = d.datetime.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=d.timezone.utc)
+except ValueError:
+    sys.exit(0)
+print(max(0, int((d.datetime.now(d.timezone.utc) - t).total_seconds() // 60)))' "$v" 2>/dev/null
+}
+
 # Pass 1 — every mapped log, in glob order: its owner, its name, whether its heartbeat loop still runs.
 owners=(); names=(); fresh=(); unmapped=0
 for log in "$BATON_TMP"/heartbeat-*.log; do
@@ -91,7 +116,7 @@ for log in "$BATON_TMP"/heartbeat-*.log; do
 done
 
 # Pass 2 — one verdict per owner, first-seen order, over every log that names it.
-zombies=0; live=0; unreg=0; stale=0; reused=0; dead=0; failed=0; seen=" "
+zombies=0; live=0; unreg=0; stale=0; reused=0; dead=0; recent=0; failed=0; seen=" "
 total=${#owners[@]}
 for ((i = 0; i < total; i++)); do
   owner=${owners[$i]}
@@ -113,13 +138,18 @@ for ((i = 0; i < total; i++)); do
   # the rows behind every name: one active row keeps the owner LIVE — a dead-loop log's too, a loop can die
   # under a working session — else one live-loop name with no row UNREGISTERED (a dead-loop log's missing row
   # proves nothing: a name renamed away, a log from before a reboot), else every row ended or archived — a ZOMBIE
-  rows=""; active=0; missing=0; rest=$anames
+  rows=""; active=0; missing=0; young=""; rest=$anames
   while [ -n "$rest" ]; do
     nm=${rest%%,*}
     if [ "$nm" = "$rest" ]; then rest=""; else rest=${rest#*,}; fi
     st=$(row_status "$nm")
     case "$st" in
-      ended|archived) ;;
+      ended)
+        if [ "$min_ended" -gt 0 ]; then
+          m=$(ended_minutes "$nm")
+          [ -n "$m" ] && [ "$m" -lt "$min_ended" ] && { [ -z "$young" ] || [ "$m" -lt "$young" ]; } && young=$m
+        fi;;
+      archived) ;;
       '') st=none; case ",$fnames," in *",$nm,"*) missing=1;; esac;;
       *) active=1;;
     esac
@@ -127,6 +157,9 @@ for ((i = 0; i < total; i++)); do
   done
   if [ "$active" = 1 ]; then live=$((live+1)); echo "LIVE $anames owner=$owner row=$rows"; continue; fi
   if [ "$missing" = 1 ]; then unreg=$((unreg+1)); echo "UNREGISTERED $anames owner=$owner row=$rows"; continue; fi
+  if [ -n "$young" ]; then
+    recent=$((recent+1)); echo "RECENT $anames owner=$owner row=$rows ended ${young}m ago (under ${min_ended}m)"; continue
+  fi
   zombies=$((zombies+1))
   if [ "$kill_mode" = 1 ]; then
     if kill -TERM "$owner" 2>/dev/null; then echo "KILLED $anames owner=$owner comm=$comm row=$rows"
@@ -147,7 +180,7 @@ retire_rc=0
 if [ "$kill_mode" = 1 ]; then python3 "$KITDIR/context-db/bin/session.py" retire 2>/dev/null || retire_rc=$?
 else python3 "$KITDIR/context-db/bin/session.py" retire --dry-run 2>/dev/null || retire_rc=$?; fi
 [ "$retire_rc" = 0 ] || echo "standby retire did not run (exit $retire_rc)"
-echo "zombie-sweep: $zombies zombie(s), $live live, $unreg unregistered, $stale stale, $reused reused, $dead dead, $unmapped unmapped"
+echo "zombie-sweep: $zombies zombie(s), $live live, $unreg unregistered, $stale stale, $reused reused, $dead dead, $unmapped unmapped, $recent recent"
 if [ "$kill_mode" = 1 ]; then [ "$failed" = 0 ] || exit 1; exit 0; fi
 [ "$zombies" = 0 ] || exit 3
 exit 0

@@ -169,6 +169,10 @@
       }
     }
   },
+  "session": {
+    "_comment": "sweep_hours: hours between the scheduled zombie sweep (`zombie-sweep.sh --kill`) the backstop heartbeat runs; read by `skills/session-register/heartbeat.sh`. Optional; absent = 24; null turns the scheduled sweep off.",
+    "sweep_hours": 24
+  },
   "swarm": {
     "_comment": "ack_minutes: minutes a swarm line may stay unacked before `swarm_msg.py pending` lists it (docs/swarm.md § The ack rule). Optional; absent = 20.",
     "ack_minutes": 20,

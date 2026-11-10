@@ -10,6 +10,7 @@ the registry): in that order, never on a no-op start, and a failing build never 
 stub `make` on PATH stands in for the real context-db Makefile, so this never touches a live env store.
 Stdlib unittest. Run: make -C .claude/context-db test."""
 from __future__ import annotations
+import json
 import os
 import shutil
 import signal
@@ -281,6 +282,111 @@ class Heartbeat(unittest.TestCase):
         time.sleep(0.3)  # a loop that died on the failed build would have exited by now
         self.assertIsNone(proc.poll(), "the heartbeat must keep running after a failed build")
         self.assertEqual(self.called(), ["session-touch", "mission-build"])
+
+
+@unittest.skipUnless(shutil.which("bash") and shutil.which("sh"), "bash and sh needed")
+class ScheduledSweep(unittest.TestCase):
+    """The minute tick runs `zombie-sweep.sh --kill` when the machine-wide stamp is missing or older than
+    `session.sweep_hours`. A stub `sleep` ends the owner on its first call, so the inner loop runs exactly one
+    tick; a stub sweep script (HEARTBEAT_SWEEP_SCRIPT) counts its runs. The fake clock is the stamp's content (an
+    epoch). The grace for a row that ended minutes ago is proven by test_zombie_sweep's
+    test_min_ended_minutes_spares_a_row_that_ended_recently."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="kit-heartbeat-sweep."))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        (self.bin / "make").write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        (self.bin / "make").chmod(0o755)
+        self.tmphome = self.tmp / "tmphome"
+        self.tmphome.mkdir()
+        self.runs = self.tmp / "sweep-runs"
+        self.sweep = self.tmp / "sweep.sh"
+        self.set_sweep('echo "ZOMBIE demo owner=1"; echo "zombie-sweep: 1 zombie(s)"')
+        self.stamp = self.tmphome / f"ai-baton-{os.getuid()}" / "zombie-sweep.stamp"
+        self.stamp.parent.mkdir(parents=True)
+
+    def set_sweep(self, body: str, pause: str = "") -> None:
+        self.sweep.write_text(f'#!/bin/bash\necho run >> {self.runs}\n{pause}\n{body}\n', encoding="utf-8")
+
+    def config(self, value) -> None:
+        d = self.tmp / "ctx" / "reference" / "env"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "config.json").write_text(json.dumps({"session": {"sweep_hours": value}}), encoding="utf-8")
+
+    def count(self) -> int:
+        return len(self.runs.read_text().split()) if self.runs.exists() else 0
+
+    def tick(self, name: str = "sw") -> subprocess.Popen:
+        """Start one detached-loop body with a live owner whose `sleep` stub ends it after one tick."""
+        # the owner is a grandchild a shell reaps, so a kill leaves no zombie that `kill -0` would still see
+        holder = subprocess.Popen(["bash", "-c", "sleep 30 & echo $!; wait"], stdout=subprocess.PIPE, text=True)
+        self.addCleanup(holder.wait)
+        owner_pid = int(holder.stdout.readline())
+        self.addCleanup(lambda: subprocess.run(["kill", str(owner_pid)], capture_output=True))
+        mybin = self.tmp / f"bin-{owner_pid}"
+        mybin.mkdir()
+        shutil.copy(self.bin / "make", mybin / "make")
+        sleep = mybin / "sleep"
+        sleep.write_text(f"#!/bin/bash\nkill {owner_pid} 2>/dev/null\nwhile kill -0 {owner_pid} 2>/dev/null; do /bin/sleep 0.05; done\nexit 0\n",
+                         encoding="utf-8")
+        sleep.chmod(0o755)
+        env = {"PATH": f"{mybin}{os.pathsep}{os.environ['PATH']}", "TMPDIR": str(self.tmphome),
+               "CONTEXT_ROOT": str(self.tmp / "ctx"), "HEARTBEAT_DETACHED": "1", "CLAUDE_PID": str(owner_pid),
+               "CLAUDE_CODE_SESSION_ID": f"sess-{name}", "HEARTBEAT_SWEEP_SCRIPT": str(self.sweep)}
+        return subprocess.Popen(["bash", str(SCRIPT), name, "focus", "3600"], env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True)
+
+    def run_tick(self, name: str = "sw") -> str:
+        out = self.tick(name).communicate(timeout=30)[0]
+        return out
+
+    def test_missing_stamp_sweeps_and_prefixes_the_lines(self):
+        out = self.run_tick()
+        self.assertEqual(self.count(), 1)
+        self.assertIn("sweep: ZOMBIE demo owner=1", out.splitlines())
+        self.assertIn("sweep: zombie-sweep: 1 zombie(s)", out.splitlines())
+        self.assertLessEqual(time.time() - int(self.stamp.read_text()), 60, "the stamp is refreshed")
+
+    def test_fresh_stamp_skips_and_an_old_one_sweeps(self):
+        self.stamp.write_text(str(int(time.time()) - 3600), encoding="utf-8")
+        self.run_tick()
+        self.assertEqual(self.count(), 0, "swept 1h ago, due in 24h")
+        self.stamp.write_text(str(int(time.time()) - 25 * 3600), encoding="utf-8")
+        self.run_tick()
+        self.assertEqual(self.count(), 1)
+
+    def test_the_interval_is_session_sweep_hours_and_null_turns_it_off(self):
+        self.config(2)
+        self.stamp.write_text(str(int(time.time()) - 3 * 3600), encoding="utf-8")
+        self.run_tick()
+        self.assertEqual(self.count(), 1, "3h old, due every 2h")
+        self.config(None)
+        self.stamp.write_text("0", encoding="utf-8")
+        self.run_tick()
+        self.assertEqual(self.count(), 1, "null: never")
+
+    def test_two_loops_due_together_sweep_once(self):
+        self.set_sweep("echo swept", pause="sleep 1")  # the real sleep, not the stub: nothing on this script's PATH
+        self.sweep.write_text(self.sweep.read_text().replace("sleep 1", f"/bin/sleep 1"), encoding="utf-8")
+        a, b = self.tick("one"), self.tick("two")
+        outs = [a.communicate(timeout=30)[0], b.communicate(timeout=30)[0]]
+        self.assertEqual(self.count(), 1)
+        self.assertEqual(sum("sweep: swept" in o for o in outs), 1)
+
+    def test_the_scheduled_sweep_kills_with_a_30_minute_grace(self):
+        # a session marks its row ended, then finishes its handoff close-out: the scheduled run spares it (#726)
+        args = self.tmp / "sweep-args"
+        self.set_sweep(f'echo "$*" > {args}')
+        self.run_tick()
+        self.assertEqual(args.read_text().strip(), "--kill --min-ended-minutes 30")
+
+    def test_a_failing_sweep_never_stops_the_heartbeat(self):
+        self.set_sweep('echo "boom"; exit 7')
+        out = self.run_tick()
+        self.assertIn("sweep: boom", out.splitlines())
+        self.assertIn("gone — ending sw", out, "the loop still ends its row after a failed sweep")
 
 
 if __name__ == "__main__":

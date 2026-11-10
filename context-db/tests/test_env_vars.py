@@ -67,6 +67,7 @@ def is_platform(name: str) -> bool:
 # substitution or a literal), never from `${NAME:-…}` on its own right-hand side, before the line the scan
 # above matches — so the match is the script re-reading its OWN prior assignment, not an external override.
 SHELL_LOCAL_EXCLUDE = {
+    "HEARTBEAT_SWEEP_SCRIPT": "heartbeat.sh's test seam: test_heartbeat points it at a stub sweep; not an operator setting",
     "ENV_DOMAINS": "new.sh sets it from `kit_profile.py domains` output; the later ${ENV_DOMAINS:-…} is a "
                    "display fallback for that local string, never an external override",
     "PULLED": "sync.sh sets it from `git rev-parse` once the pull lands; ${PULLED:-…} formats that local value",
