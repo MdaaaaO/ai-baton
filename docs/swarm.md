@@ -68,7 +68,9 @@ The third run is `phase=gates`, once for the epic after every child's `phase=mer
 check of each `agent` gate due once per child, and signs each one that holds with `gates.py sign --by verifier`; a
 `human` gate is never its to sign. A `FAIL` at `phase=gates` leaves the failing gates open, so `gates.py status` still
 exits 3 and the epic does not close: it goes back to Run for a fix, and the next gate run names only the open gates. The
-line carries the epic as its ticket and `VG-<n>` as its ids, and the gates it already signed stay signed.
+line carries the epic as its ticket and `VG-<n>` as its ids, and the gates it already signed stay signed. A template
+whose gates are ordered, such as `docs/verification/data-migration.md`, reads them in steps: one gate run per step, with
+the children merged by then.
 
 ### One ticket's life
 

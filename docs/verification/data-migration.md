@@ -56,8 +56,9 @@ A tolerance is a threshold or an accepted difference that a gate reads. The epic
 
 ## The reconciliation report
 
-One report per run, written by the run itself where the environment keeps it. An agent gate's proof is the run's id,
-never a hand copy of its numbers.
+One report per run, written by the run itself where the environment keeps it. An agent gate's proof points at the
+runs, never a hand copy of their numbers: exactly `run <id>` where one run's report holds the proof, else a command that
+reads the reports, as `cmd` → `output`.
 
 | Field | Holds |
 |---|---|
@@ -105,45 +106,50 @@ where the grain changes, one old row that becomes many new ones.
 
 ## Strategies
 
-The cutover strategy is the owner's call in the epic interview. Each adds one gate to the twenty, written after them with
-the next free id.
+The cutover strategy is the owner's call in the epic interview. Each adds one gate to the twenty, written after
+code-change's four with the next free id, `VG-25`, and due in the step its row names (§ When each gate falls due).
 
-| Strategy | What it is | The gate it adds |
-|---|---|---|
-| Big-bang | everything moves in one cutover, with no parallel period | the whole cutover rehearsed on a production-size copy, inside the freeze window, before `VG-17` |
-| Strangler | consumers move one at a time behind a stable name | per consumer moved, its reads reach the new path only, and the old path's reads for it are zero |
-| Parallel run | both paths run on the same input for an agreed period | `<n>` consecutive daily reconciliations within tolerance, with `VG-11`'s business cycle inside them |
-| Dual-write | the producer writes both stores | every write on one path is on the other within `<lag>`, and a failed write on either side is counted, never retried silently |
-| Shadow | the new path runs on a copy of the input and no consumer reads it | no consumer reads the shadow output and it writes no shared target, read from the access log |
-| Blue-green | two complete environments, and a switch moves the readers | switching back restores the old reads within the rollback window, and the old environment takes no write until `VG-20` |
+| Strategy | What it is | The gate it adds | Due in |
+|---|---|---|---|
+| Big-bang | everything moves in one cutover, with no parallel period | the whole cutover rehearsed on a production-size copy, done within the freeze window's length | Prove equivalence |
+| Strangler | consumers move one at a time behind a stable name | per consumer moved, its reads reach the new path only, and the old path's reads for it are zero | After the cutover |
+| Parallel run | both paths run on the same input for an agreed period | `<n>` consecutive daily reconciliations within tolerance, with `VG-11`'s business cycle inside them | Prove equivalence |
+| Dual-write | the producer writes both stores | every write on one path is on the other within `<lag>`, and a failed write on either side is counted, never retried silently | Prove equivalence |
+| Shadow | the new path runs on a copy of the input and no consumer reads it | no consumer reads the shadow output and it writes no shared target, read from the access log | Prove equivalence |
+| Blue-green | two complete environments, and a switch moves the readers | the switch rehearsed both ways on the two environments: the readers reach the new one, and switching back restores the old reads within the rollback window | Prove equivalence |
 
 ## When each gate falls due
 
 The gates are in the order a migration meets them. A gate run names only the gates due (the verifier's `GATES:` line),
 so the orchestrator asks for one at each step below, with the children merged by then, and the next step starts only
-once that step's gates are closed.
+once that step's gates are closed. Every gate of the plan is due in one step: these twenty, the strategy's gate and
+code-change's four.
 
 | Step | Gates | Closed before |
 |---|---|---|
 | Before reconciliation | `VG-1` to `VG-5` | the first reconciliation run; `VG-1` before any child builds a target table |
-| Prove equivalence | `VG-6` to `VG-16` | the go/no-go |
+| Prove equivalence | `VG-6` to `VG-16`, and the strategy's gate `VG-25` where § Strategies names this step | the go/no-go, `VG-17` |
 | Cut over | `VG-17` | the cutover wave |
-| After the cutover | `VG-18` to `VG-20` | the epic closes |
+| After the cutover | `VG-18` to `VG-20`, and the strategy's gate `VG-25` where § Strategies names this step | the decommission: `VG-20` last, after the others of this step |
+| Every child merged | `VG-21` to `VG-24`, the code-change template's four | the epic closes, once every child has merged and recorded its passes, a cutover or decommission child too |
 
-The gates after the cutover fall due days or weeks after the last merge, so the orchestrator keeps a watch on each
-(`swarm.py watch`), names it in a later gate run, and the epic stays open until that run reads it.
+`VG-17` reads every gate due before the cutover, so the cutover is never signed without the strategy's proof where that
+proof can come first. The gates after the cutover fall due days or weeks after the cutover wave merges, so the
+orchestrator keeps a watch on each (`swarm.py watch`), names it in a later gate run, and the epic stays open until that
+run reads it.
 
 ## Verification plan
 
 Each gate holds for the epic's whole table set and takes one signature. Its check runs once over every target table of
-the set, and the proof is one line naming the tables it covers and the run behind it. A `<placeholder>` is filled in the
-epic: `<cycle>` the business cycle, `<dates>` the as-of dates, `<late>` the late-arrival window, `<window>` the rollback
-window, `<cycles>` the clean cycles, `<days>` the quiet days. A gate stands alone: the verifier signs those that hold, and
-the next run names only the ones still open.
+the set. An agent gate's proof is one item `gates.py sign` takes: exactly `run <id>` where one run's report covers
+every table of the set, its `table` field naming them, else one `cmd` → `output` line whose output names the tables and
+the runs it read. A `<placeholder>` is filled in the epic: `<cycle>` the business cycle, `<dates>` the as-of dates,
+`<late>` the late-arrival window, `<window>` the rollback window, `<cycles>` the clean cycles, `<days>` the quiet days.
+A gate stands alone: the verifier signs those that hold, and the next run names only the ones still open.
 
 - [ ] VG-1 every target table has a mapping document approved by the table's owner · kind: human · check: the owner reads each target table's mapping (source columns, transform, target column, grain, business key, and the columns dropped and why) with the table owner's approval of it · evidence: the owner's decision line, naming each target table and who approved its mapping · signer: owner
-- [ ] VG-2 the lineage generated from the code matches the mapping, with no unmapped column · kind: agent · check: generate each target table's column lineage from the merged code, never by hand, and diff it with the mapping · evidence: zero lineage edges the mapping lacks, zero target columns with no source, and zero source columns neither mapped nor listed as dropped · signer: verifier · when: systems.dbt | systems.datalake
-- [ ] VG-3 every consumer's schema and contract tests pass against the new path · kind: agent · check: run each consumer's contract (column names, types, nullability, keys, accepted values) against the new tables · evidence: a green run per consumer, as `run <id>` or `cmd` → `output`, naming the consumers covered · signer: verifier · when: systems.dbt | systems.datalake
+- [ ] VG-2 the lineage generated from the code matches the mapping, with no unmapped column · kind: agent · check: generate each target table's column lineage from the merged code, never by hand, and diff it with the mapping · evidence: `cmd` → `output` with zero lineage edges the mapping lacks, zero target columns with no source, and zero source columns neither mapped nor listed as dropped · signer: verifier · when: systems.dbt | systems.datalake
+- [ ] VG-3 every consumer's schema and contract tests pass against the new path · kind: agent · check: run each consumer's contract (column names, types, nullability, keys, accepted values) against the new tables · evidence: `run <id>` where one run tested every consumer's contract green, else `cmd` → `output` naming each consumer and its green run · signer: verifier · when: systems.dbt | systems.datalake
 - [ ] VG-4 the reconciliation tolerances are written per table and check and approved before the first reconciliation run, and only a human decision may loosen a tolerance, or change one at all, after that · kind: human · check: the owner reads the `### Tolerances` table (§ Tolerances); a later change is the owner's decision line, ledgered in the epic context doc's *Key decisions & gotchas* and mirrored in the task ledger's `decisions` · evidence: the owner's decision line, dated before the first reconciliation run started · signer: owner
 - [ ] VG-5 a golden dataset with the edge cases passes on the new path · kind: agent · check: run the new path on a fixed golden input that holds every case of § Edge cases, and compare it with the expected output written before the run · evidence: `run <id>` with zero differences from the expected output · signer: verifier · when: systems.dbt | systems.datalake
 - [ ] VG-6 every target table reconciles over the window, its counts, hash totals, column statistics and distributions within tolerance · kind: agent · check: read layers 2 to 5 of the reconciliation report of a run that started after `VG-4` was signed · evidence: `run <id>` whose report has every row `pass` for every target table, with its commit and watermark · signer: verifier · when: systems.datalake
@@ -153,14 +159,14 @@ the next run names only the ones still open.
 - [ ] VG-10 referential integrity and uniqueness hold on the new path · kind: agent · check: every foreign key resolves to its parent, and every declared unique or business key is unique · evidence: zero orphans and zero duplicates per target table, as `run <id>` or `cmd` → `output` · signer: verifier · when: systems.dbt | systems.datalake
 - [ ] VG-11 every business metric is signed by its owner over one full business cycle · kind: human · check: the owner reads the agent's comparison of each metric on both paths over `<cycle>` (layer 7), with each metric owner's sign-off · evidence: the owner's decision line, naming the cycle, the metrics and who signed each · signer: owner
 - [ ] VG-12 the top dashboards and queries are re-pointed to the new path and signed · kind: human · check: the agent re-points each dashboard and saved query on the epic's list and runs it on both paths; the owner reads the results side by side, with each dashboard owner's sign-off · evidence: the owner's decision line, naming the list and who signed each · signer: owner
-- [ ] VG-13 late-arriving rows are handled, with the watermark recorded · kind: agent · check: once `<late>` has passed, run layers 2 to 8 again on the last window (layer 9) and compare both runs' watermarks · evidence: two `run <id>` on the same window, before and after the late rows landed, both within tolerance and each with its watermark · signer: verifier · when: systems.datalake
+- [ ] VG-13 late-arriving rows are handled, with the watermark recorded · kind: agent · check: once `<late>` has passed, run layers 2 to 8 again on the last window (layer 9) and compare both runs' watermarks · evidence: `cmd` → `output` reading both runs' reports on the same window, before and after the late rows landed: both run ids, both within tolerance, each with its watermark · signer: verifier · when: systems.datalake
 - [ ] VG-14 every schema change and every run on the new path has an audit entry · kind: agent · check: match the schema changes the children merged and every pipeline run since the first against the audit log · evidence: zero schema changes and zero runs without an entry, as `cmd` → `output` · signer: verifier · when: systems.datalake | systems.airflow
 - [ ] VG-15 the verifier is independent of the author by access · kind: human · check: the owner reads the access the verifier's runs held: read-only on both paths, no write on the new one, and no child authored · evidence: the owner's decision line, naming the identity the verifier ran under and the access it held from the first reconciliation run on · signer: owner
 - [ ] VG-16 the rollback is rehearsed within its window · kind: human · check: the agent rehearses the rollback (the trigger, the readers moved back to the old path, the reconciliation after it) on a non-production copy and times it; the owner reads the time against `<window>` · evidence: the owner's decision line, naming the rehearsal's `run <id>` and how long it took · signer: owner
-- [ ] VG-17 the go/no-go is signed and the freeze announced · kind: human · check: the owner reads `gates.py status` with `VG-1` to `VG-16` closed, the cutover time, the freeze window, and the rollback trigger with its bound · evidence: the owner's decision line, naming the cutover time, the freeze window, the trigger and where the freeze was announced · signer: owner
-- [ ] VG-18 the post-cutover monitors run clean, under a trigger that rolls back first and informs after · kind: agent · check: read every monitor run since the cutover against the trigger `VG-17` agreed, and the trigger's set-up: a breach moves the readers back without waiting for a person, then sends the notice · evidence: every monitor `run <id>` since the cutover green for `<cycles>`; a trigger that fired leaves this gate open, with its rollback run timed before its notice · signer: verifier · when: systems.datalake | systems.airflow
+- [ ] VG-17 the go/no-go is signed and the freeze announced · kind: human · check: the owner reads `gates.py status` with every gate due before the cutover closed (§ When each gate falls due: `VG-1` to `VG-16`, and the strategy's gate where § Strategies names Prove equivalence), the cutover time, the freeze window, and the rollback trigger with its bound · evidence: the owner's decision line, naming the cutover time, the freeze window, the trigger and where the freeze was announced · signer: owner
+- [ ] VG-18 the post-cutover monitors run clean, under a trigger that rolls back first and informs after · kind: agent · check: read every monitor run since the cutover against the trigger `VG-17` agreed, and the trigger's set-up: a breach moves the readers back without waiting for a person, then sends the notice · evidence: `cmd` → `output` reading every monitor run since the cutover: `<cycles>` clean cycles, zero breaches, the first and the last run named; a trigger that fired leaves this gate open, with its rollback run timed before its notice · signer: verifier · when: systems.datalake | systems.airflow
 - [ ] VG-19 the old path has zero reads for the agreed days · kind: agent · check: read the old path's access log for `<days>` consecutive days after the cutover, every reader counted, jobs and people alike · evidence: `cmd` → `output` with zero reads on every day of the span, naming its first and last day · signer: verifier · when: systems.datalake
-- [ ] VG-20 the decommission is approved after the clean cycles and a verified archive · kind: human · check: the owner reads `VG-18`'s clean cycles, `VG-19`'s zero-read span, and the agent's restore test of the archive (layers 2 and 3 of the restored copy against the old path) · evidence: the owner's decision line, naming where the archive is, its restore `run <id>` and the decommission date · signer: owner
+- [ ] VG-20 the decommission is approved after the clean cycles and a verified archive · kind: human · check: the owner reads `VG-18`'s clean cycles, `VG-19`'s zero-read span, the strategy's gate where § Strategies names After the cutover, and the agent's restore test of the archive (layers 2 and 3 of the restored copy against the old path) · evidence: the owner's decision line, naming where the archive is, its restore `run <id>` and the decommission date · signer: owner
 
 ## Worked example
 
@@ -191,7 +197,7 @@ history. The owner chose a parallel run. The epic's section, with the gates the 
 - [ ] VG-8 every table whose grain changed is proven by a roll-up to the old grain and by business-key equality both ways · kind: agent · check: roll `<new>.order_line` up to one row per order and compare `amount` and the line count with `<old>.orders`; then every order id is on both paths · evidence: `run <id>` with the roll-up within tolerance and zero order ids missing in either direction · signer: verifier · when: systems.datalake
 - [ ] VG-9 every slowly changing dimension answers the same at each point in time · kind: agent · check: at each of `<dates>`, the version of each customer valid in `<new>.customer_dim` matches `<old>.customers`; no gap or overlap in its validity ranges; one current row per customer · evidence: `run <id>` with zero mismatches, gaps, overlaps and doubled current rows · signer: verifier · when: systems.datalake
 - [ ] VG-11 every business metric is signed by its owner over one full business cycle · kind: human · check: the owner reads the agent's comparison of `<revenue>` and `<order count>` on both paths over `<cycle>`, with each metric owner's sign-off · evidence: the owner's decision line, naming the cycle, both metrics and who signed each · signer: owner
-- [ ] VG-25 the parallel run holds `<n>` consecutive daily reconciliations within tolerance, with the business cycle of VG-11 inside them · kind: agent · check: read the reports of the last `<n>` daily runs · evidence: `<n>` consecutive `run <id>`, each with every row `pass` · signer: verifier · when: systems.datalake
+- [ ] VG-25 the parallel run holds `<n>` consecutive daily reconciliations within tolerance, with the business cycle of VG-11 inside them · kind: agent · check: read the reports of the last `<n>` daily runs · evidence: `cmd` → `output` reading the last `<n>` daily runs' reports, each with every row `pass`, the first and the last run named · signer: verifier · when: systems.datalake
 
 The other gates stay as the template writes them, and the code-change template's four follow as VG-21 to VG-24.
 ````
