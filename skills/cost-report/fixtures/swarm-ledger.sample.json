@@ -18,7 +18,24 @@
   "waves": [],
   "grants": [],
   "watches": [],
-  "decisions": [],
+  "decisions": [
+    {
+      "id": "d1",
+      "question": "split 103?",
+      "ticket": "103",
+      "opened": "2026-01-20T09:00:00Z",
+      "closed": "2026-01-21T09:00:00Z",
+      "line": "2026-01-21 \u00b7 split 103 \u2192 yes"
+    },
+    {
+      "id": "d2",
+      "question": "raise the cap?",
+      "ticket": "102",
+      "opened": "2026-01-22T09:00:00Z",
+      "closed": null,
+      "line": null
+    }
+  ],
   "holds": [],
   "seen": {},
   "log": [
@@ -36,6 +53,36 @@
       "at": "2026-01-19T09:07:00Z",
       "act": "assign",
       "ticket": "103"
+    },
+    {
+      "at": "2026-01-20T10:00:00Z",
+      "act": "stall",
+      "ticket": "102",
+      "note": "no commit in 90 min"
+    },
+    {
+      "at": "2026-01-20T11:30:00Z",
+      "act": "stall",
+      "ticket": "102",
+      "note": "second stall"
+    },
+    {
+      "at": "2026-01-21T09:00:00Z",
+      "act": "replan",
+      "ticket": "103",
+      "note": "a row changed on an approved plan: the plan needs a new go"
+    },
+    {
+      "at": "2026-01-22T09:00:00Z",
+      "act": "fail",
+      "ticket": "101",
+      "note": "verifier FAIL on the merged commit"
+    },
+    {
+      "at": "2026-01-12T09:00:00Z",
+      "act": "stall",
+      "ticket": "101",
+      "note": "before the window"
     }
   ],
   "spend": {

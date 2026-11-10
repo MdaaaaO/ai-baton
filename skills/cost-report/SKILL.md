@@ -2,9 +2,9 @@
 name: cost-report
 description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7, or named phases. Org mode reports billed cost (aggregate control); private mode estimates from local transcripts. Never names anyone. Invoke when asked for a \"cost report\" or \"how efficient was last week\"."
 metadata:
-  version: "18"
-  updated: "2026-11-04"
-  reviewed: "2026-11-04"
+  version: "19"
+  updated: "2026-11-10"
+  reviewed: "2026-11-10"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
 user-invocable: true
 ---
@@ -49,7 +49,11 @@ Private mode in one call: `make -C $BATON/context-db cost-report` (steps 1–5 b
 4. `cost_report.py report --daily daily.json [--control control.json] [--prs prs.tsv] [--tickets tickets.tsv] --view all --out report.md --json report.json`
    — `--view rolling7|weekly|phases` narrows; `--phase NAME=START..END` (repeatable) overrides `cost.phases`.
    A swarm's task ledger adds a `## Swarm` section, spend per epic and per worker: every ledger in the store, or
-   `--swarm-ledger <file>` (repeatable).
+   `--swarm-ledger <file>` (repeatable). Under it, the weekly swarm report: one row per epic with the seven measures,
+   merged PRs, rework, stalls, re-plans, verifier fails, decisions asked and answered, spend against the cap. The ledger
+   gives all but the first two; for those save `gh pr list -R <repo> --state merged --limit 200 --json
+   number,body,mergedAt,reviews` and pass it as `--swarm-prs <file>` (without it those cells print `–`, never 0).
+   `--swarm-since` and `--swarm-until` set the window (default: the 7 days to today). Never a worker's own claim.
 5. Deliver **the Basis block first**, then the table(s). Terminal reply: the Basis rows that matter
    (mode, cost basis, what was skipped) + the rolling-7 line + one sentence on the decomposition. The
    full markdown goes to a `.context/reference/` doc (`make -C $BATON/context-db new TYPE=reference …`)

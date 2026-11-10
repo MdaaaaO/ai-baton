@@ -2,9 +2,9 @@
 name: swarm-run
 description: "The swarm orchestrator's tick: assigns an approved epic's tickets, drains returns, integrates and verifies PRs, writes the digest. Use when running or resuming an epic's swarm, or on its tick wake-up. Not for one ticket (`ticket-pickup`) or a PR you own alone (`pr-watch`)."
 metadata:
-  version: "3"
-  updated: "2026-11-05"
-  reviewed: "2026-11-05"
+  version: "4"
+  updated: "2026-11-10"
+  reviewed: "2026-11-10"
 user-invocable: true
 argument-hint: "<epic key>"
 ---
@@ -132,12 +132,21 @@ status $CTX/plan.md`, a verifier `PHASE: gates` naming only the open agent gates
 Human gates go to the owner (step 3) and `gates.py sign --by owner`. The epic closes only on exit 0: any other exit,
 a malformed plan's 2 included, is no close.
 
+**The close comment's operator block.** Before `ticket-close` posts on the epic, write the four lines of
+`docs/operator-brief.md` for the epic as a whole: what the owner can now do, must do differently, checks with and
+still lacks. Draw them from the merged children's blocks (`python3 $BATON/skills/pr-open/operator_brief.py extract
+--pr <owner/repo> <n>` per child), never from a worker's return. Save them under `## For the operator` in `$CTX/close.md`
+and run `python3 $BATON/skills/pr-open/operator_brief.py check $CTX/close.md`: any warning is fixed before the post.
+The comment carries that block as written; the digest's block (step 9) is the same four lines. A close comment without
+it is not posted.
+
 ## 9. Digest
 
 `/swarm-status <key>` (`--wave-end` at a wave end): the first digest and every wave end post at once, any other tick
 only when `swarm.digest_hours` (default 4) have passed since the last. The digest goes on the epic through `ticket-update`,
 as rendered: shipped; blocked, with who must act; decisions open (the owner's asks of step 7 are there); spend against
-caps; stalls; next. Headless, it ends with the `Decisions` block.
+caps; stalls; next, then the `**For the operator**` block the script renders (four lines, `docs/operator-brief.md`), which you
+post as rendered and never rewrite. Headless, it ends with the `Decisions` block.
 
 ## 10. Flush
 

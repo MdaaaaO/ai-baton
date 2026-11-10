@@ -1084,6 +1084,38 @@ class HaikuShare(unittest.TestCase):
         self.assertAlmostEqual(data["buckets"][-1]["haiku_share"], 0.25)
 
 
+class SwarmMeasures(unittest.TestCase):
+    """DW-1: the swarm section's seven measures, from a fixture ledger and saved gh output, never a worker's claim."""
+
+    SKILL = KIT / "skills" / "cost-report"
+    SAMPLE = str(SKILL / "fixtures" / "swarm-ledger.sample.json")
+    PRS = str(SKILL / "fixtures" / "swarm-prs.sample.json")
+
+    def report(self, *args: str):
+        import subprocess
+        return subprocess.run([sys.executable, str(self.SKILL / "cost_report.py"), "report", "--daily", str(self.SKILL / "fixtures" / "daily.sample.json"),
+                               "--swarm-ledger", self.SAMPLE, "--swarm-since", "2026-01-19", "--swarm-until", "2026-01-23", *args],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def test_the_seven_measures_come_from_the_ledger_and_gh_fixtures(self):
+        p = self.report("--swarm-prs", self.PRS)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("| Epic | merged PRs | rework PRs | stalls | re-plans | verifier fails | decisions asked / answered | spend vs cap |", p.stdout)
+        # PR 12 closes two tickets (counts twice) and has two review rounds; #98 is no ticket; PR 14 merged before the window;
+        # the stall on 2026-01-12 is outside it; one decision is still open.
+        self.assertIn("| sample-epic | 3 | 2 | 2 | 1 | 1 | 2 / 1 | 26.00 / 40.00 (65%) |", p.stdout)
+
+    def test_without_a_pr_list_the_gh_cells_print_a_dash_never_a_zero(self):
+        p = self.report()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("| sample-epic | – | – | 2 | 1 | 1 | 2 / 1 | 26.00 / 40.00 (65%) |", p.stdout)
+
+    def test_a_pr_list_that_is_no_array_exits_2_naming_it(self):
+        p = self.report("--swarm-prs", self.SAMPLE)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("--swarm-prs", p.stderr)
+
+
 class DocstringLooseCoupling(unittest.TestCase):
     def test_module_docstring_lists_every_subcommand(self):
         # `sub.add_parser(...)` in main() is the one place subcommands are registered; the docstring
