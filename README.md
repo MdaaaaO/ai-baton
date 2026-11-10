@@ -16,7 +16,7 @@ What you get, from the top:
 - **Sessions choose their context.** The index names every doc and a brief per initiative; a session reads what it
   works on, not everything, so the loaded prefix and the cost stay small.
 - **Initiatives outlive sessions.** One context doc per initiative. A session ends with a handoff prompt; its
-  successor reads it back, checks each claim against the tracker and the PRs, and only then edits. A stale prompt is
+  successor reads it back, checks each claim against the tracker and PRs, and only then edits. A stale prompt is
   caught before it is acted on ([a real one](#a-handoff)).
 - **A live registry.** Who works on what right now: heartbeats, the PRs each session watches, what each session
   cost. A second session coordinates instead of colliding.
@@ -211,7 +211,7 @@ explains the clone's hooks and guards.
 | Pull requests | `pr-open` · `pr-watch` · `pr-event-brief` · `pr-scan` · `pr-review` · `gh-cli` |
 | Tracker | `ticket-open` · `ticket-update` · `ticket-close` · `ticket-carousel` |
 | Docs | `repo-docs` |
-| Swarm mode | `epic-discover` · `swarm-run` · `swarm-inbox` · `swarm-status` |
+| Swarm mode | `epic-discover` · `epic-decompose` · `swarm-run` · `swarm-inbox` · `swarm-status` |
 | Needs a system (`systems.*`) | `sign-queue` · `slack-draft` · `alerts-sweep` · `aws-sso-login` · `dbt-sqlfluff-fixes` · `notion-page-review` |
 
 It ships five agents (`triage`, `review-runner`, `auto-runner`, `verifier`, `builder`) and the `context-db/` engine

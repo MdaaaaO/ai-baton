@@ -59,9 +59,10 @@ which every swarm skill and agent cites instead of restating it.
 
 - **epic-discover** — the owner's epic interview in rounds: goal, constraints, risks, verification gates, caps and
   grants, written to the tracking issue, the context doc and the swarm ledger; headless, one `Decisions` block.
+- **epic-decompose** — splits a discovered epic into child tickets with areas, waves and caps; refuses overlapping
+  areas; ledgers the rows and asks the owner's go on the plan, and a second go on a re-plan.
 - **swarm-run** — the orchestrator's tick on an approved epic: assigns its tickets to `builder` workers, drains their
-  returns, integrates and verifies the PRs, writes the digest. The spec skill that splits an approved epic
-  into tickets (`epic-decompose`) is not built yet.
+  returns, integrates and verifies the PRs, writes the digest.
 - **swarm-inbox** — a forked sweep for the tick: every swarm channel (outboxes, the orchestrator's inbox, tracker
   comments, PR events, due watches, chat where enabled) as one `ITEM` line each, or `NO-OP`. It never writes.
 - **swarm-status** — the swarm digest once per `swarm.digest_hours` and at each wave end: shipped, blocked, decisions,
