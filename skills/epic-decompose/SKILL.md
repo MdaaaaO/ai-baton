@@ -116,7 +116,7 @@ A change after the go to children, areas, dependencies, waves, sizing or caps:
    --reason "delta YYYY-MM-DD: <what>"` on each, so `assign` refuses it. The second go releases a moved id's hold
    (`--release --by owner`); a dropped child's stays.
 3. **§ 3 and § 4** on the whole new plan; an added child's cap comes from the money left, as § 4 counts it.
-4. **A second go**: § 6 again, its preview the delta against the approved plan.
+4. **A second go**: say the add reset the go (`plan_approved` false); § 6 again, its preview the delta against the plan.
 
 A split or a moved `DW-<n>` that adds no scope and no area, under a recorded `re-plan inside an area` grant: the delta
 cites the grant, and `approve` and the hold's release take the grant's decision line, with no carousel. An incident
