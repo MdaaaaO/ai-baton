@@ -20,7 +20,7 @@ class WalkthroughSkill(unittest.TestCase):
         head = self.text.split("---", 2)[1]
         self.assertIn("name: walkthrough", head)
         self.assertIn("user-invocable: true", head)
-        self.assertRegex(head, r'version: "2"')
+        self.assertRegex(head, r'version: "3"')
         description = re.search(r'^description: "(.*)"$', head, re.M).group(1)
         self.assertLessEqual(len(description.encode("utf-8")), 250)
 
