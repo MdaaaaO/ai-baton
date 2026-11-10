@@ -121,8 +121,8 @@ cites the grant and `swarm.py approve` takes the grant's own decision line, with
 No `AskUserQuestion`: draft §§ 2–4 from what the reads and the request give, then print the plan after the line
 `Draft plan, not posted:` as a plain list, per wave each child's title, area, model, cap and dependencies, with every
 refusal on its own line; a re-plan's list starts with its dated delta line (§ 7). Above it, at most three short
-sentences: which reads returned or were refused, and that nothing was created. Name the calls you would run on the
-answers above the block, never run them. End the reply with the plain line `Decisions` (not bold, not a heading) and
+sentences: which reads returned or were refused, that nothing was created, and, with no session file or no write tool,
+that the block is the only copy. Name the calls you would run on the answers above the block, never run them. End the reply with the plain line `Decisions` (not bold, not a heading) and
 one numbered line per item, `<n>. <question> — (1) <option>, Recommended (2) <option>`: one item per child (Submit,
 Merge into #n or Skip), then the plan's go last, with Go recommended once a plan is drafted. With nothing to draft,
 the block still comes, its items the inputs the plan needs. Nothing follows the block. Copy it under `## Open
