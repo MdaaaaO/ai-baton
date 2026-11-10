@@ -37,13 +37,13 @@ Each child is `ticket-open`'s opening block (Goal, Out of scope, Plan, Links wit
 step 4, the Sizing line from `$BATON/docs/delegation.md` § Sizing) and its `## Done when`, plus two lines:
 
 ```
-**Area** — `<path>`, `<dir>/`, `+<new path>`, `<dir>/<prefix>-*/`
+**Area** — `<path>`, `<dir>/`, `+<new path>`
 **Wave** — <w>; depends on #<a> and #<b>        (or: <w>; no dependency)
 ```
 
 - **Area** is the paths the child alone may edit, in the Sketch marker's notation (`ticket-open/sketch.py`): a trailing
-  `/` is a directory, a leading `+` a path it creates, `*` a glob in the last segment. Take it from the Sketch marker's
-  `paths=`; with `Sketch: SKIP`, from every file the Plan names plus its tests.
+  `/` is a directory, a leading `+` a path it creates. There is no glob: nothing matches `*`, so name each directory or
+  file. Take it from the Sketch marker's `paths=`; with `Sketch: SKIP`, from every file the Plan names plus its tests.
 - **One child, one PR, one area, one worker.** More than six Plan steps, or two unrelated parts of the repo → split it.
   A `haiku`-sized child beside a neighbour in its own area → merge them.
 - **A shared index** (a count, a table row every child would add: a skill list, a loading table, an eval count) has one
@@ -56,8 +56,8 @@ step 4, the Sizing line from `$BATON/docs/delegation.md` § Sizing) and its `## 
 - **Waves.** Wave 1 holds the children with no dependency; a later wave, those whose dependencies are all in earlier
   waves. A wave holds at most `max_workers` children; the overflow opens the next wave. Two children of one wave never
   depend on each other.
-- **Overlap.** Two areas overlap when an entry of one equals, contains (a directory prefix) or glob-matches an entry
-  of the other, `+` ignored. Two children may overlap only when one depends on the other, directly or through others.
+- **Overlap.** Two areas overlap when an entry of one equals or contains (a directory prefix) an entry of the other,
+  `+` ignored. Two children may overlap only when one depends on the other, directly or through others.
   Anything else is refused as `OVERLAP #a #b <path>`, the shared path named, with the fix offered: make one depend on
   the other in a later wave, merge them, or give the shared file to one of them. An overlap is never put to the go.
 - **No area.** A child with no area in a wave of two or more is refused as `NO AREA #a`; alone in its wave it may run.
@@ -65,10 +65,12 @@ step 4, the Sizing line from `$BATON/docs/delegation.md` § Sizing) and its `## 
 
 ## 4. Budgets
 
-From the § 1 read. `budget.state` is `no-cap` → no split: each child takes `worker_usd` (none if null) and the plan
-says "no epic cap". Otherwise, of `epic_usd − spent` keep 20% in reserve (re-briefs, the verifier, an incident lane),
-split the rest by Sizing weight (`haiku` 1, `sonnet` 2, `opus` 4), and cap each child at `worker_usd` when that is
-set. A wave's budget is the sum of its children's caps, and the caps never add up past the money left.
+From the § 1 read. `budget.state` `over` → no plan: say `epic <key> at its cap ($<spent> of $<epic_usd>)` and stop; an
+epic cap raise is the owner's, never a grant. `no-cap` → no split: each child takes `worker_usd` (none if null) and the
+plan says "no epic cap". Otherwise the money left is `epic_usd − spent`, less what the caps of unmerged children still
+hold (each cap less its spent): keep 20% of it in reserve (re-briefs, the verifier, an incident lane), split the rest by
+Sizing weight (`haiku` 1, `sonnet` 2, `opus` 4), each child capped at `worker_usd` when set. A wave's budget is the sum
+of its children's caps; the caps never add up past the money left.
 
 ## 5. Walk, create, add
 
@@ -79,8 +81,9 @@ set. A wave's budget is the sum of its children's caps, and the caps never add u
    group, so they are not asked again; each card's preview carries the child's `## Done when`, Area and Wave. Its
    Create runs `ticket-open` per Submit, the parent link and task-list line included.
 3. **Rows**, in wave order so the ledger keeps the waves in order: `python3 $E/swarm.py add <key> <n> --title "<title>"
-   --area <path> … --dep <d> … --wave <w> --sizing <model> --ticket-file $CTX/child-<n>.md --cap-usd <cap>`, with
-   `--repo` when the child lives in another repo than the ledger's.
+   --area <path> [--area <path> …] [--dep <d> …] --wave <w> --sizing <model> --ticket-file $CTX/child-<n>.md --cap-usd
+   <cap>`, one `--area` per path and one `--dep` per dependency, with `--repo` when the child lives in another repo than
+   the ledger's.
 4. **The parent's `## Plan`**: one `**Wave <w>** — $<sum>` line per wave, then per child `- [ ] #<n> <title> · area
    `<path>`… · <model> · cap $<c> · depends on #<d>`, replacing the bare lines `ticket-open` appended. The public-text
    check, then `gh issue edit <key> -R <repo> --body-file <file>`.
@@ -107,28 +110,31 @@ A change after the go to children, areas, dependencies, waves, sizing or caps:
 
 1. **A dated delta on the parent**: a checkbox in its `## Plan`, `- [ ] #<n> … (delta YYYY-MM-DD: <what, why>)`, and
    one `ticket-update` comment that names it. Nothing starts from it.
-2. **The rows**: `swarm.py add` for a new child, `--update` for a changed one. On an approved plan either resets
-   `plan_approved` itself (`the plan needs a new go` on stderr); confirm with `swarm.py show <key>`.
-3. **§ 3 and § 4** on the whole new plan; an added child's cap comes from the money left.
+2. **The rows**: `swarm.py add` for a new child, `--update` for a changed area, dependency, wave, sizing or cap; on an
+   approved plan either resets `plan_approved` (`the plan needs a new go` on stderr). A moved `DW-<n>` or a dropped
+   child has no move (`--dw` only adds, no command removes a row): `python3 $E/swarm.py hold <key> <n> --releaser owner
+   --reason "delta YYYY-MM-DD: <what>"` on each, so `assign` refuses it. The second go releases a moved id's hold
+   (`--release --by owner`); a dropped child's stays.
+3. **§ 3 and § 4** on the whole new plan; an added child's cap comes from the money left, as § 4 counts it.
 4. **A second go**: § 6 again, its preview the delta against the approved plan.
 
 A split or a moved `DW-<n>` that adds no scope and no area, under a recorded `re-plan inside an area` grant: the delta
-cites the grant and `swarm.py approve` takes the grant's own decision line, with no carousel. An incident lane
-(`swarm.py add --incident`) leaves the go in place and its own assign open; the owner approves it after the fact.
+cites the grant, and `approve` and the hold's release take the grant's decision line, with no carousel. An incident
+lane (`swarm.py add --incident`) leaves the go in place and its own assign open; the owner approves it afterwards.
 
 ## Headless
 
 No `AskUserQuestion`: draft §§ 2–4 from what the reads and the request give, then print the plan after the line
-`Draft plan, not posted:` as a plain list, per wave each child's title, area, model, cap and dependencies, with every
+`Draft plan, not posted:` as a plain list, per wave each child's title, area, model, cap and dependencies, every
 refusal on its own line; a re-plan's list starts with its dated delta line (§ 7). Above it, at most three short
 sentences: which reads returned or were refused, that nothing was created, and, with no session file or no write tool,
-that the block is the only copy. Name the calls you would run on the answers above the block, never run them. End the reply with the plain line `Decisions` (not bold, not a heading) and
-one numbered line per item, `<n>. <question> — (1) <option>, Recommended (2) <option>`: one item per child (Submit,
-Merge into #n or Skip), then the plan's go last, with Go recommended once a plan is drafted. With nothing to draft,
-the block still comes, its items the inputs the plan needs. Nothing follows the block. Copy it under `## Open
-decisions` in your session file. Then stop: no issue, no `swarm.py add` or `approve`, no parent edit.
+that the block is the only copy. Name the calls you would run on the answers above the block, never run them. End the
+reply with the plain line `Decisions` (not bold, not a heading) and one numbered line per item,
+`<n>. <question> — (1) <option>, Recommended (2) <option> …`, one option per answer: one item per child, its options
+Submit (recommended), Merge into #n and Skip, then the plan's go last, Go recommended once a plan is drafted. With
+nothing to draft, the block still comes, its items the inputs the plan needs. Nothing follows the block. Copy it under
+`## Open decisions` in your session file. Then stop: no issue, no `swarm.py add` or `approve`, no parent edit.
 
 ## Report
 
-One line: the children (`#a`…), the waves, the caps against the epic cap, the go (approved, or waiting) and the next
-step.
+One line: the children (`#a`…), the waves, the caps against the epic cap, the go (approved or waiting), the next step.
