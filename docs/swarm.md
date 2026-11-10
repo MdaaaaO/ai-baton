@@ -10,7 +10,7 @@ ledger (`docs/carousel.md` § After the answer) is a different thing. Built so f
 `lease.py` (leases and STOP files), `gates.py` (the verification gates), `swarm_msg.py` (the grammar and the inbox and
 outbox), `swarm_budget.py` (the budget brake), the `verifier` agent, the `builder` agent, the `swarm-run` skill
 (the orchestrator's tick, with the assignment file), `swarm-inbox` (the inbox sweep, `inbox.py`) and `swarm-status`
-(the digest, `digest.py`). Still to be built: `epic-discover` and `epic-decompose`. `swarm-run` runs only when an orchestrator session calls it on an approved epic.
+(the digest, `digest.py`). `epic-discover` (#682) runs the owner's epic interview. Still to be built: `epic-decompose`. `swarm-run` runs only when an orchestrator session calls it on an approved epic.
 Why an orchestrator is a session and not a server, and when a worker is a subagent, a peer session or a headless
 process: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
@@ -38,9 +38,9 @@ ticket of every wave.
 
 | Step | Who acts | What happens | Artefact it leaves |
 |---|---|---|---|
-| Discover | orchestrator, owner | The epic interview: goal, constraints, gates, grants, budget. | **Epic issue**, with its `## Verification plan` of `VG-<n>` gates |
-| Decompose | orchestrator | Sized child tickets with `## Done when` ids, disjoint areas and waves. | **Context doc** with the plan, and the child tickets |
-| Owner go | owner | Approves the plan. No worker spawns before it. | **Task ledger**, `.context/state/swarm/<key>.json`, with the plan marked approved, rendered as a `## Swarm` table in the context doc |
+| Discover | orchestrator, owner | The epic interview: goal, constraints, gates, grants, budget. | **Epic issue**, with its `## Verification plan` of `VG-<n>` gates; the **context doc** and the **task ledger** (`.context/state/swarm/<key>.json`, plan not approved, grants only), both made here by `epic-discover` |
+| Decompose | orchestrator | Sized child tickets with `## Done when` ids, disjoint areas and waves. | The plan in the context doc, and the child tickets added to the task ledger |
+| Owner go | owner | Approves the plan. No worker spawns before it. | The task ledger with the plan marked approved, rendered as a `## Swarm` table in the context doc |
 | Run | orchestrator, workers | The swarm tick assigns the ready tickets of the current wave. Each worker builds, pushes and returns. | **Assignment file** per worker, and a pushed branch |
 | Verify | orchestrator, verifier | Per ticket: a draft PR from the worker's body file, review, CI, code-owner coverage, and the verifier's read of the `READY` head (`phase=read`). | **PR**, with the head sha the gates held on |
 | Integrate | orchestrator or owner, verifier | The merge, as § Authority matrix says, then the verifier checks the merged commit (`phase=merged`) and calls `swarm.py pass` per `DW-<n>`. | **Pass**: `DW-<n> → evidence` in the task ledger |
