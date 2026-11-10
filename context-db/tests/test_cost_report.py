@@ -1115,6 +1115,35 @@ class SwarmMeasures(unittest.TestCase):
         self.assertEqual(p.returncode, 2)
         self.assertIn("--swarm-prs", p.stderr)
 
+    def test_a_malformed_or_inverted_swarm_window_exits_2_without_a_traceback(self):
+        for args in (("--swarm-since", "20260101"), ("--swarm-until", "2026-13-40"), ("--swarm-since", "2026-02-01", "--swarm-until", "2026-01-01")):
+            import subprocess
+            p = subprocess.run([sys.executable, str(self.SKILL / "cost_report.py"), "report", "--daily", str(self.SKILL / "fixtures" / "daily.sample.json"),
+                                "--swarm-ledger", self.SAMPLE, *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(p.returncode, 2, args)
+            self.assertIn("--swarm-", p.stderr)
+            self.assertNotIn("Traceback", p.stderr)
+
+    def test_rework_leaves_out_the_authors_own_and_bot_reviews_and_counts_commits(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        rv = lambda who, oid, st="COMMENTED": {"author": {"login": who}, "state": st, "commit": {"oid": oid}}
+        pr = {"author": {"login": "dev"}, "reviews": [rv("dev", "a"), rv("dev", "b"), rv("ci[bot]", "c"), rv("rev", "a")]}
+        self.assertEqual(cr.review_rounds(pr), 1)
+        pr["reviews"].append(rv("rev", "b", "CHANGES_REQUESTED"))
+        self.assertEqual(cr.review_rounds(pr), 2)
+        pr["reviews"] = [rv("rev", "a"), rv("rev2", "a")]
+        self.assertEqual(cr.review_rounds(pr), 1)
+
+    def test_a_closes_key_of_another_repo_is_not_the_ledgers_ticket(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        led = {"repo": "acme/repo", "tickets": {"103": {}}}
+        prs = [{"number": 1, "body": "Closes other/repo#103", "mergedAt": "2026-01-20T00:00:00Z"},
+               {"number": 2, "body": "Closes acme/repo#103", "mergedAt": "2026-01-20T00:00:00Z"},
+               {"number": 3, "body": "Closes #103", "mergedAt": "2026-01-20T00:00:00Z"}]
+        self.assertEqual(cr.swarm_pr_measures(led, prs, None, None)["merged"], {"103": 2})
+
 
 class DocstringLooseCoupling(unittest.TestCase):
     def test_module_docstring_lists_every_subcommand(self):

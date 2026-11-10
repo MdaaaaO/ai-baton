@@ -51,9 +51,12 @@ Private mode in one call: `make -C $BATON/context-db cost-report` (steps 1–5 b
    A swarm's task ledger adds a `## Swarm` section, spend per epic and per worker: every ledger in the store, or
    `--swarm-ledger <file>` (repeatable). Under it, the weekly swarm report: one row per epic with the seven measures,
    merged PRs, rework, stalls, re-plans, verifier fails, decisions asked and answered, spend against the cap. The ledger
-   gives all but the first two; for those save `gh pr list -R <repo> --state merged --limit 200 --json
-   number,body,mergedAt,reviews` and pass it as `--swarm-prs <file>` (without it those cells print `–`, never 0).
-   `--swarm-since` and `--swarm-until` set the window (default: the 7 days to today). Never a worker's own claim.
+   gives all but the first two; for those save `gh pr list -R <owner/repo> --state merged --limit 200 --json
+   number,body,mergedAt,reviews,author` and pass it as `--swarm-prs <file>` (without it those cells print `–`, never 0).
+   `--swarm-since` and `--swarm-until` set the window (default: the 7 days to today; a bad or inverted one exits 2). Rework is
+   a merged PR with more than one review round: reviews in CHANGES_REQUESTED or COMMENTED, not by the PR author or a bot,
+   counted per reviewed commit. A PR counts for a ticket on `Closes #n` or the ledger's own repo prefix. Spend against the
+   cap is the epic to date, not windowed. Never a worker's own claim.
 5. Deliver **the Basis block first**, then the table(s). Terminal reply: the Basis rows that matter
    (mode, cost basis, what was skipped) + the rolling-7 line + one sentence on the decomposition. The
    full markdown goes to a `.context/reference/` doc (`make -C $BATON/context-db new TYPE=reference …`)

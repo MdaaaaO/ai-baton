@@ -873,7 +873,7 @@ def num(x, nd=0) -> str:
     return f"{x:,.{nd}f}"
 
 
-CLOSES_RE = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:[\w.-]+/[\w.-]+)?#(\d+)", re.I)
+CLOSES_RE = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+([\w.-]+/[\w.-]+)?#(\d+)", re.I)
 REVIEW_ROUND_STATES = ("CHANGES_REQUESTED", "COMMENTED")
 
 
@@ -885,18 +885,39 @@ def _in_window(ts: str | None, since: str | None, until: str | None) -> bool:
     return (not since or d >= since) and (not until or d <= until)
 
 
+def _is_bot(author: dict | None) -> bool:
+    login = str((author or {}).get("login") or "")
+    return bool((author or {}).get("is_bot")) or login.endswith("[bot]") or login.startswith("app/")
+
+
+def review_rounds(pr: dict) -> int:
+    """Review rounds on a PR: the reviews in state CHANGES_REQUESTED or COMMENTED, left out those by the PR's own author
+    and by bot accounts, counted as the distinct reviewed commits (`commit.oid`), so several comments on one commit are
+    one round."""
+    own = ((pr.get("author") or {}).get("login") or "").lower()
+    commits = set()
+    for r in pr.get("reviews") or []:
+        who = ((r.get("author") or {}).get("login") or "").lower()
+        if r.get("state") not in REVIEW_ROUND_STATES or _is_bot(r.get("author")) or (own and who == own):
+            continue
+        commits.add((r.get("commit") or {}).get("oid") or "")
+    return len(commits)
+
+
 def swarm_pr_measures(led: dict, prs: list[dict] | None, since: str | None, until: str | None) -> dict | None:
-    """Merged PRs and rework per ledger ticket, from `gh pr list --json number,body,mergedAt,reviews` output. A PR counts
-    once per ticket it closes (the `Closes` key in its body). Rework is a merged PR with more than one review round: the
-    reviews in state CHANGES_REQUESTED or COMMENTED. None when no PR list was supplied (the cells then print `–`)."""
+    """Merged PRs and rework per ledger ticket, from `gh pr list --json number,body,mergedAt,reviews,author` output. A PR
+    counts once per ticket it closes (the `Closes` key in its body, bare `#n` or the ledger's own repo). Rework is a merged
+    PR with more than one review round (`review_rounds`). None when no PR list was supplied (the cells then print `–`)."""
     if prs is None:
         return None
     tickets, merged, rework = set(led["tickets"]), {}, {}
+    repo = str(led.get("repo") or "").lower()
     for pr in prs:
         if not _in_window(pr.get("mergedAt"), since, until):
             continue
-        rounds = sum(1 for r in pr.get("reviews") or [] if r.get("state") in REVIEW_ROUND_STATES)
-        for key in {k for k in CLOSES_RE.findall(pr.get("body") or "") if k in tickets}:
+        rounds = review_rounds(pr)
+        keys = {k for r, k in CLOSES_RE.findall(pr.get("body") or "") if k in tickets and (not r or r.lower() == repo)}
+        for key in keys:
             merged[key] = merged.get(key, 0) + 1
             if rounds > 1:
                 rework[key] = rework.get(key, 0) + 1
@@ -967,8 +988,26 @@ def swarm_ledgers(explicit: list[str] | None, prs_file: str | None = None, since
     return epics, basis + (f"; skipped, not a ledger: {', '.join(skipped)}" if skipped else "")
 
 
+def _check_swarm_window(a) -> int | None:
+    """`--swarm-since`/`--swarm-until` as real `YYYY-MM-DD` dates, since not after until; 2 on a bad one, else None."""
+    since, until = getattr(a, "swarm_since", None), getattr(a, "swarm_until", None)
+    for k, v in (("swarm-since", since), ("swarm-until", until)):
+        if v:
+            try:
+                if not _FLAG_DAY_RE.fullmatch(v):
+                    raise ValueError(v)
+                date.fromisoformat(v)
+            except ValueError:
+                print(f"--{k} wants YYYY-MM-DD, got {v!r}", file=sys.stderr)
+                return 2
+    if since and until and since > until:
+        print(f"--swarm-since {since} is after --swarm-until {until}", file=sys.stderr)
+        return 2
+    return None
+
+
 def cmd_report(a) -> int:
-    if (rc := _check_since_until(a)) is not None:
+    if (rc := _check_since_until(a)) is not None or (rc := _check_swarm_window(a)) is not None:
         return rc
     swarm_until = getattr(a, "swarm_until", None) or a.until or date.today().isoformat()
     swarm_since = getattr(a, "swarm_since", None) or (date.fromisoformat(swarm_until) - timedelta(days=6)).isoformat()
@@ -1132,8 +1171,9 @@ def render_md(o: dict) -> str:
             L.append(f"| {e['epic']} | {tot(m['merged_prs'])} | {tot(m['rework'])} | {tot(m['stalls'])} | {tot(m['replans'])} | "
                      f"{tot(m['verifier_fails'])} | {m['decisions_asked']} / {m['decisions_answered']} | {spend} |")
         L += ["", "_Merged PRs count once per ticket they close; rework is a merged PR with more than one review round (reviews in "
-              "state CHANGES_REQUESTED or COMMENTED); `–` means gh could not answer. Stalls, re-plans and verifier fails are ledger "
-              "log events and decisions are ledger records, all inside the window the Basis names._", ""]
+              "state CHANGES_REQUESTED or COMMENTED, not by the PR author or a bot, counted per reviewed commit); `–` means gh could not "
+              "answer. Stalls, re-plans, verifier fails and decisions (asked / answered) are ledger events inside the window the Basis "
+              "names; spend vs cap is the epic to date, not windowed._", ""]
         lines = [(e["epic"], w) for e in o["swarm"] for w in e["workers"]]
         if lines:
             L += ["| Epic | ticket | worker | kind | status | spent $ | cap $ | forks |", "|---|---|---|---|---|---|---|---|"]
@@ -1206,7 +1246,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("--phase", action="append", help="NAME=YYYY-MM-DD..YYYY-MM-DD (repeatable; default from cost.phases)")
     p.add_argument("--view", choices=["rolling7", "weekly", "phases", "all"], default="all"); p.add_argument("--until")
     p.add_argument("--swarm-ledger", action="append", help="a swarm's task ledger for the swarm section (repeatable; default: every ledger under the content root's state/swarm)")
-    p.add_argument("--swarm-prs", help="a saved `gh pr list --state merged --json number,body,mergedAt,reviews` array for the swarm measures (default: none, the gh-backed cells print `–`)")
+    p.add_argument("--swarm-prs", help="a saved `gh pr list -R <owner/repo> --state merged --limit 200 --json number,body,mergedAt,reviews,author` array for the swarm measures (default: none, the gh-backed cells print `–`)")
     p.add_argument("--swarm-since", help="first day of the swarm measures' window (default: 6 days before --swarm-until)")
     p.add_argument("--swarm-until", help="last day of the window (default: --until, else today)")
     p.add_argument("--out"); p.add_argument("--json")

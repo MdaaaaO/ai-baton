@@ -137,8 +137,8 @@ a malformed plan's 2 included, is no close.
 still lacks. Draw them from the merged children's blocks (`python3 $BATON/skills/pr-open/operator_brief.py extract
 --pr <owner/repo> <n>` per child), never from a worker's return. Save them under `## For the operator` in `$CTX/close.md`
 and run `python3 $BATON/skills/pr-open/operator_brief.py check $CTX/close.md`: any warning is fixed before the post.
-The comment carries that block as written; the digest's block (step 9) is the same four lines. A close comment without
-it is not posted.
+The comment carries that block as written; it is drawn from the children's PR-body blocks, so the PR body stays the
+source (`docs/operator-brief.md`). A close comment without it is not posted.
 
 ## 9. Digest
 

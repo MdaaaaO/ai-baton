@@ -5,9 +5,18 @@
     "mergedAt": "2026-01-20T12:00:00Z",
     "reviews": [
       {
-        "state": "APPROVED"
+        "author": {
+          "login": "rev"
+        },
+        "state": "APPROVED",
+        "commit": {
+          "oid": "c1"
+        }
       }
-    ]
+    ],
+    "author": {
+      "login": "dev"
+    }
   },
   {
     "number": 12,
@@ -15,26 +24,71 @@
     "mergedAt": "2026-01-22T12:00:00Z",
     "reviews": [
       {
-        "state": "CHANGES_REQUESTED"
+        "author": {
+          "login": "rev"
+        },
+        "state": "CHANGES_REQUESTED",
+        "commit": {
+          "oid": "c1"
+        }
       },
       {
-        "state": "COMMENTED"
+        "author": {
+          "login": "dev"
+        },
+        "state": "COMMENTED",
+        "commit": {
+          "oid": "c1"
+        }
       },
       {
-        "state": "APPROVED"
+        "author": {
+          "login": "ci[bot]"
+        },
+        "state": "COMMENTED",
+        "commit": {
+          "oid": "c1"
+        }
+      },
+      {
+        "author": {
+          "login": "rev"
+        },
+        "state": "COMMENTED",
+        "commit": {
+          "oid": "c2"
+        }
+      },
+      {
+        "author": {
+          "login": "rev"
+        },
+        "state": "APPROVED",
+        "commit": {
+          "oid": "c2"
+        }
       }
-    ]
+    ],
+    "author": {
+      "login": "dev"
+    }
   },
   {
     "number": 13,
     "body": "Closes #98",
     "mergedAt": "2026-01-22T13:00:00Z",
-    "reviews": []
+    "reviews": [],
+    "author": {
+      "login": "dev"
+    }
   },
   {
     "number": 14,
     "body": "Closes #101",
     "mergedAt": "2026-01-05T12:00:00Z",
-    "reviews": []
+    "reviews": [],
+    "author": {
+      "login": "dev"
+    }
   }
 ]
