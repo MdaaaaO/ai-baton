@@ -885,38 +885,44 @@ def _in_window(ts: str | None, since: str | None, until: str | None) -> bool:
     return (not since or d >= since) and (not until or d <= until)
 
 
-def _is_bot(author: dict | None) -> bool:
+# `gh pr list --json reviews` gives a review author a `login` only: GitHub-app reviewers come back as plain logins, with
+# no `[bot]` suffix and no `is_bot`. These are the common ones; `--swarm-bot <login>` adds more.
+SWARM_BOT_LOGINS = frozenset({"github-actions", "claude", "copilot", "copilot-pull-request-reviewer", "dependabot", "coderabbitai"})
+
+
+def _is_bot(author: dict | None, bots: frozenset[str] = SWARM_BOT_LOGINS) -> bool:
     login = str((author or {}).get("login") or "")
-    return bool((author or {}).get("is_bot")) or login.endswith("[bot]") or login.startswith("app/")
+    return (bool((author or {}).get("is_bot")) or login.endswith("[bot]") or login.startswith("app/")
+            or login.lower() in bots)
 
 
-def review_rounds(pr: dict) -> int:
+def review_rounds(pr: dict, bots: frozenset[str] = SWARM_BOT_LOGINS) -> int:
     """Review rounds on a PR: the reviews in state CHANGES_REQUESTED or COMMENTED, left out those by the PR's own author
-    and by bot accounts, counted as the distinct reviewed commits (`commit.oid`), so several comments on one commit are
+    and by bot accounts (`SWARM_BOT_LOGINS` plus `--swarm-bot`), counted as the distinct reviewed commits (`commit.oid`), so several comments on one commit are
     one round."""
     own = ((pr.get("author") or {}).get("login") or "").lower()
     commits = set()
     for r in pr.get("reviews") or []:
         who = ((r.get("author") or {}).get("login") or "").lower()
-        if r.get("state") not in REVIEW_ROUND_STATES or _is_bot(r.get("author")) or (own and who == own):
+        if r.get("state") not in REVIEW_ROUND_STATES or _is_bot(r.get("author"), bots) or (own and who == own):
             continue
         commits.add((r.get("commit") or {}).get("oid") or "")
     return len(commits)
 
 
-def swarm_pr_measures(led: dict, prs: list[dict] | None, since: str | None, until: str | None) -> dict | None:
+def swarm_pr_measures(led: dict, prs: list[dict] | None, since: str | None, until: str | None, bots: frozenset[str] = SWARM_BOT_LOGINS) -> dict | None:
     """Merged PRs and rework per ledger ticket, from `gh pr list --json number,body,mergedAt,reviews,author` output. A PR
-    counts once per ticket it closes (the `Closes` key in its body, bare `#n` or the ledger's own repo). Rework is a merged
+    counts once per ticket it closes (the `Closes` key in its body, bare `#n` or the ticket row's own repo, else the ledger's). Rework is a merged
     PR with more than one review round (`review_rounds`). None when no PR list was supplied (the cells then print `–`)."""
     if prs is None:
         return None
-    tickets, merged, rework = set(led["tickets"]), {}, {}
-    repo = str(led.get("repo") or "").lower()
+    tickets, merged, rework = led["tickets"], {}, {}
     for pr in prs:
         if not _in_window(pr.get("mergedAt"), since, until):
             continue
-        rounds = review_rounds(pr)
-        keys = {k for r, k in CLOSES_RE.findall(pr.get("body") or "") if k in tickets and (not r or r.lower() == repo)}
+        rounds = review_rounds(pr, bots)
+        keys = {k for r, k in CLOSES_RE.findall(pr.get("body") or "")
+                if k in tickets and (not r or r.lower() == str(tickets[k].get("repo") or led.get("repo") or "").lower())}
         for key in keys:
             merged[key] = merged.get(key, 0) + 1
             if rounds > 1:
@@ -924,7 +930,7 @@ def swarm_pr_measures(led: dict, prs: list[dict] | None, since: str | None, unti
     return {"merged": merged, "rework": rework}
 
 
-def swarm_measures(led: dict, prs: list[dict] | None, since: str | None, until: str | None) -> dict:
+def swarm_measures(led: dict, prs: list[dict] | None, since: str | None, until: str | None, bots: frozenset[str] = SWARM_BOT_LOGINS) -> dict:
     """The seven measures of one epic, from the ledger's log and decisions and from `gh`, never a worker's own claim:
     merged PRs, rework, stalls, re-plans, verifier fails, decisions asked and answered, spend against the cap."""
     def events(act: str) -> dict[str, int]:
@@ -935,14 +941,14 @@ def swarm_measures(led: dict, prs: list[dict] | None, since: str | None, until: 
                 out[key] = out.get(key, 0) + 1
         return out
     decisions = led.get("decisions") or []
-    gh = swarm_pr_measures(led, prs, since, until)
+    gh = swarm_pr_measures(led, prs, since, until, bots)
     return {"merged_prs": None if gh is None else gh["merged"], "rework": None if gh is None else gh["rework"],
             "stalls": events("stall"), "replans": events("replan"), "verifier_fails": events("fail"),
             "decisions_asked": sum(_in_window(d.get("opened"), since, until) for d in decisions),
             "decisions_answered": sum(_in_window(d.get("closed"), since, until) for d in decisions)}
 
 
-def swarm_epic(path: str, prs: list[dict] | None = None, since: str | None = None, until: str | None = None) -> dict:
+def swarm_epic(path: str, prs: list[dict] | None = None, since: str | None = None, until: str | None = None, bots: frozenset[str] = SWARM_BOT_LOGINS) -> dict:
     """One task ledger as the report's rows: the epic's spend against its cap, then one line per worker. A ledger holds
     only what `swarm_budget.py sweep` or `swarm.py progress --spent` wrote, so these figures are estimates. Raises on a
     file that is not a ledger."""
@@ -959,10 +965,10 @@ def swarm_epic(path: str, prs: list[dict] | None = None, since: str | None = Non
                      "spent": r.get("spent") or 0, "cap": caps["spend_usd"], "forks": r.get("forks"), "fork_cap": caps["forks"]}
                     for r in readings]
     return {"epic": led.get("key") or Path(path).stem, "spent": budget["spent"], "cap": budget["epic_usd"], "state": budget["state"],
-            "over": len(budget["over"]), "workers": workers, "measures": swarm_measures(led, prs, since, until)}
+            "over": len(budget["over"]), "workers": workers, "measures": swarm_measures(led, prs, since, until, bots)}
 
 
-def swarm_ledgers(explicit: list[str] | None, prs_file: str | None = None, since: str | None = None, until: str | None = None) -> tuple[list[dict], str]:
+def swarm_ledgers(explicit: list[str] | None, prs_file: str | None = None, since: str | None = None, until: str | None = None, bots: frozenset[str] = SWARM_BOT_LOGINS) -> tuple[list[dict], str]:
     """The swarm section's epics and its Basis line. A file the user named must read, or the run exits 2 naming it. One found
     under the content root (`state/swarm/*.json`) that does not read is skipped, and the Basis says so. `prs_file` is a
     saved `gh pr list --json number,body,mergedAt,reviews` array; without it the gh-backed cells print `–`."""
@@ -978,7 +984,7 @@ def swarm_ledgers(explicit: list[str] | None, prs_file: str | None = None, since
             raise StrictParseError(f"--swarm-prs {prs_file}: {e}") from None
     for path in paths:
         try:
-            epics.append(swarm_epic(path, fixed, since, until))
+            epics.append(swarm_epic(path, fixed, since, until, bots))
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
             if explicit:
                 raise StrictParseError(f"--swarm-ledger {path}: {e}") from None
@@ -989,7 +995,8 @@ def swarm_ledgers(explicit: list[str] | None, prs_file: str | None = None, since
 
 
 def _check_swarm_window(a) -> int | None:
-    """`--swarm-since`/`--swarm-until` as real `YYYY-MM-DD` dates, since not after until; 2 on a bad one, else None."""
+    """`--swarm-since`/`--swarm-until` as real `YYYY-MM-DD` dates, and the window they give once the defaults fill in
+    (until: `--until`, else today; since: 6 days before it) not inverted; 2 on a bad one, else None."""
     since, until = getattr(a, "swarm_since", None), getattr(a, "swarm_until", None)
     for k, v in (("swarm-since", since), ("swarm-until", until)):
         if v:
@@ -1000,8 +1007,10 @@ def _check_swarm_window(a) -> int | None:
             except ValueError:
                 print(f"--{k} wants YYYY-MM-DD, got {v!r}", file=sys.stderr)
                 return 2
-    if since and until and since > until:
-        print(f"--swarm-since {since} is after --swarm-until {until}", file=sys.stderr)
+    until = until or getattr(a, "until", None) or date.today().isoformat()
+    since = since or (date.fromisoformat(until) - timedelta(days=6)).isoformat()
+    if since > until:
+        print(f"the swarm window {since}..{until} is inverted (--swarm-since is after the end, --swarm-until or --until)", file=sys.stderr)
         return 2
     return None
 
@@ -1011,7 +1020,8 @@ def cmd_report(a) -> int:
         return rc
     swarm_until = getattr(a, "swarm_until", None) or a.until or date.today().isoformat()
     swarm_since = getattr(a, "swarm_since", None) or (date.fromisoformat(swarm_until) - timedelta(days=6)).isoformat()
-    swarm_epics, swarm_basis = swarm_ledgers(getattr(a, "swarm_ledger", None), getattr(a, "swarm_prs", None), swarm_since, swarm_until)
+    swarm_epics, swarm_basis = swarm_ledgers(getattr(a, "swarm_ledger", None), getattr(a, "swarm_prs", None), swarm_since, swarm_until,
+                                              SWARM_BOT_LOGINS | {b.lower() for b in getattr(a, "swarm_bot", None) or []})
     rows, source = load_daily(a.daily)
     if not rows:
         raise SystemExit("daily file has no rows")
@@ -1247,6 +1257,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("--view", choices=["rolling7", "weekly", "phases", "all"], default="all"); p.add_argument("--until")
     p.add_argument("--swarm-ledger", action="append", help="a swarm's task ledger for the swarm section (repeatable; default: every ledger under the content root's state/swarm)")
     p.add_argument("--swarm-prs", help="a saved `gh pr list -R <owner/repo> --state merged --limit 200 --json number,body,mergedAt,reviews,author` array for the swarm measures (default: none, the gh-backed cells print `–`)")
+    p.add_argument("--swarm-bot", action="append", metavar="LOGIN", help="a GitHub-app reviewer login to leave out of the rework count, beside the built-in ones (repeatable)")
     p.add_argument("--swarm-since", help="first day of the swarm measures' window (default: 6 days before --swarm-until)")
     p.add_argument("--swarm-until", help="last day of the window (default: --until, else today)")
     p.add_argument("--out"); p.add_argument("--json")

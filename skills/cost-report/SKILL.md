@@ -2,7 +2,7 @@
 name: cost-report
 description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7, or named phases. Org mode reports billed cost (aggregate control); private mode estimates from local transcripts. Never names anyone. Invoke when asked for a \"cost report\" or \"how efficient was last week\"."
 metadata:
-  version: "19"
+  version: "20"
   updated: "2026-11-10"
   reviewed: "2026-11-10"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
@@ -53,9 +53,11 @@ Private mode in one call: `make -C $BATON/context-db cost-report` (steps 1–5 b
    merged PRs, rework, stalls, re-plans, verifier fails, decisions asked and answered, spend against the cap. The ledger
    gives all but the first two; for those save `gh pr list -R <owner/repo> --state merged --limit 200 --json
    number,body,mergedAt,reviews,author` and pass it as `--swarm-prs <file>` (without it those cells print `–`, never 0).
-   `--swarm-since` and `--swarm-until` set the window (default: the 7 days to today; a bad or inverted one exits 2). Rework is
-   a merged PR with more than one review round: reviews in CHANGES_REQUESTED or COMMENTED, not by the PR author or a bot,
-   counted per reviewed commit. A PR counts for a ticket on `Closes #n` or the ledger's own repo prefix. Spend against the
+   `--swarm-since` and `--swarm-until` set the window (default: the 7 days to `--until` when given, else to today; a bad window, or one inverted once the defaults fill in, exits 2). Rework is
+   a merged PR with more than one review round: reviews in CHANGES_REQUESTED or COMMENTED, not by the PR author or a bot
+   (gh gives app reviewers as plain logins: `github-actions`, `claude` and a few more are built in, `--swarm-bot <login>`
+   adds one; an app login outside that set still counts), counted per reviewed commit. A PR counts for a ticket on `Closes #n`
+   or a `Closes <owner>/<repo>#n` naming the ticket row's own repo (the ledger's when the row has none). Spend against the
    cap is the epic to date, not windowed. Never a worker's own claim.
 5. Deliver **the Basis block first**, then the table(s). Terminal reply: the Basis rows that matter
    (mode, cost basis, what was skipped) + the rolling-7 line + one sentence on the decomposition. The

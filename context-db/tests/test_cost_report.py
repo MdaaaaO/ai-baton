@@ -1128,12 +1128,36 @@ class SwarmMeasures(unittest.TestCase):
         sys.path.insert(0, str(self.SKILL))
         import cost_report as cr
         rv = lambda who, oid, st="COMMENTED": {"author": {"login": who}, "state": st, "commit": {"oid": oid}}
-        pr = {"author": {"login": "dev"}, "reviews": [rv("dev", "a"), rv("dev", "b"), rv("ci[bot]", "c"), rv("rev", "a")]}
+        pr = {"author": {"login": "dev"}, "reviews": [rv("dev", "a"), rv("dev", "b"), rv("github-actions", "c"), rv("claude", "d"), rv("rev", "a")]}
         self.assertEqual(cr.review_rounds(pr), 1)
         pr["reviews"].append(rv("rev", "b", "CHANGES_REQUESTED"))
         self.assertEqual(cr.review_rounds(pr), 2)
         pr["reviews"] = [rv("rev", "a"), rv("rev2", "a")]
         self.assertEqual(cr.review_rounds(pr), 1)
+
+    def test_an_app_login_outside_the_set_counts_until_named_with_swarm_bot(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        rv = lambda who, oid: {"author": {"login": who}, "state": "COMMENTED", "commit": {"oid": oid}}
+        pr = {"author": {"login": "dev"}, "reviews": [rv("rev", "a"), rv("newbot", "b")]}
+        self.assertEqual(cr.review_rounds(pr), 2)
+        self.assertEqual(cr.review_rounds(pr, cr.SWARM_BOT_LOGINS | {"newbot"}), 1)
+
+    def test_an_inverted_window_after_the_defaults_fill_in_exits_2(self):
+        import subprocess
+        for args in (("--swarm-since", "2099-12-01"), ("--until", "2026-01-10", "--swarm-since", "2026-01-19")):
+            p = subprocess.run([sys.executable, str(self.SKILL / "cost_report.py"), "report", "--daily", str(self.SKILL / "fixtures" / "daily.sample.json"),
+                                "--swarm-ledger", self.SAMPLE, *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(p.returncode, 2, args)
+            self.assertIn("inverted", p.stderr)
+
+    def test_a_row_of_another_repo_is_matched_by_its_own_repo(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        led = {"repo": "acme/repo", "tickets": {"103": {"repo": "acme/other"}}}
+        m = lambda body: cr.swarm_pr_measures(led, [{"body": body, "mergedAt": "2026-01-20T00:00:00Z"}], None, None)["merged"]
+        self.assertEqual(m("Closes acme/other#103"), {"103": 1})
+        self.assertEqual(m("Closes acme/repo#103"), {})
 
     def test_a_closes_key_of_another_repo_is_not_the_ledgers_ticket(self):
         sys.path.insert(0, str(self.SKILL))

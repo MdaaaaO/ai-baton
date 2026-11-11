@@ -8,4 +8,4 @@ renders, posted as rendered and not rewritten. The close comment carries a `## F
 (`Can now:`, `Do differently:`, `Check with:`, `Not covered:`) written for the epic as a whole from the merged children's
 blocks (`operator_brief.py extract`), saved to a file and checked with `operator_brief.py check` before the post. Flag a
 response that builds the block from the worker's claim, posts a close comment without the block, skips the check,
-or rewrites the digest's block.
+rewrites the digest's block, or omits or paraphrases one of the four labels.
