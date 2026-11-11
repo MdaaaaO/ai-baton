@@ -1084,6 +1084,100 @@ class HaikuShare(unittest.TestCase):
         self.assertAlmostEqual(data["buckets"][-1]["haiku_share"], 0.25)
 
 
+class SwarmMeasures(unittest.TestCase):
+    """DW-1: the swarm section's seven measures, from a fixture ledger and saved gh output, never a worker's claim."""
+
+    SKILL = KIT / "skills" / "cost-report"
+    SAMPLE = str(SKILL / "fixtures" / "swarm-ledger.sample.json")
+    PRS = str(SKILL / "fixtures" / "swarm-prs.sample.json")
+
+    def report(self, *args: str):
+        import subprocess
+        return subprocess.run([sys.executable, str(self.SKILL / "cost_report.py"), "report", "--daily", str(self.SKILL / "fixtures" / "daily.sample.json"),
+                               "--swarm-ledger", self.SAMPLE, "--swarm-since", "2026-01-19", "--swarm-until", "2026-01-23", *args],
+                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
+
+    def test_the_seven_measures_come_from_the_ledger_and_gh_fixtures(self):
+        p = self.report("--swarm-prs", self.PRS)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("| Epic | merged PRs | rework PRs | stalls | re-plans | verifier fails | decisions asked / answered | spend vs cap |", p.stdout)
+        # PR 12 closes two tickets (counts twice) and has two review rounds; #98 is no ticket; PR 14 merged before the window;
+        # the stall on 2026-01-12 is outside it; one decision is still open.
+        self.assertIn("| sample-epic | 3 | 2 | 2 | 1 | 1 | 2 / 1 | 26.00 / 40.00 (65%) |", p.stdout)
+
+    def test_without_a_pr_list_the_gh_cells_print_a_dash_never_a_zero(self):
+        p = self.report()
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("| sample-epic | – | – | 2 | 1 | 1 | 2 / 1 | 26.00 / 40.00 (65%) |", p.stdout)
+
+    def test_a_pr_list_that_is_no_array_exits_2_naming_it(self):
+        p = self.report("--swarm-prs", self.SAMPLE)
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("--swarm-prs", p.stderr)
+
+    def test_a_malformed_or_inverted_swarm_window_exits_2_without_a_traceback(self):
+        for args in (("--swarm-since", "20260101"), ("--swarm-until", "2026-13-40"), ("--swarm-since", "2026-02-01", "--swarm-until", "2026-01-01")):
+            import subprocess
+            p = subprocess.run([sys.executable, str(self.SKILL / "cost_report.py"), "report", "--daily", str(self.SKILL / "fixtures" / "daily.sample.json"),
+                                "--swarm-ledger", self.SAMPLE, *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(p.returncode, 2, args)
+            self.assertIn("--swarm-", p.stderr)
+            self.assertNotIn("Traceback", p.stderr)
+
+    def test_rework_leaves_out_the_authors_own_and_bot_reviews_and_counts_commits(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        rv = lambda who, oid, st="COMMENTED": {"author": {"login": who}, "state": st, "commit": {"oid": oid}}
+        pr = {"author": {"login": "dev"}, "reviews": [rv("dev", "a"), rv("dev", "b"), rv("github-actions", "c"), rv("claude", "d"), rv("rev", "a")]}
+        self.assertEqual(cr.review_rounds(pr), 1)
+        pr["reviews"].append(rv("rev", "b", "CHANGES_REQUESTED"))
+        self.assertEqual(cr.review_rounds(pr), 2)
+        pr["reviews"] = [rv("rev", "a"), rv("rev2", "a")]
+        self.assertEqual(cr.review_rounds(pr), 1)
+
+    def test_an_app_login_outside_the_set_counts_until_named_with_swarm_bot(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        rv = lambda who, oid: {"author": {"login": who}, "state": "COMMENTED", "commit": {"oid": oid}}
+        pr = {"author": {"login": "dev"}, "reviews": [rv("rev", "a"), rv("newbot", "b")]}
+        self.assertEqual(cr.review_rounds(pr), 2)
+        self.assertEqual(cr.review_rounds(pr, cr.SWARM_BOT_LOGINS | {"newbot"}), 1)
+
+    def test_an_inverted_window_after_the_defaults_fill_in_exits_2(self):
+        import subprocess
+        for args in (("--swarm-since", "2099-12-01"), ("--until", "2026-01-10", "--swarm-since", "2026-01-19")):
+            p = subprocess.run([sys.executable, str(self.SKILL / "cost_report.py"), "report", "--daily", str(self.SKILL / "fixtures" / "daily.sample.json"),
+                                "--swarm-ledger", self.SAMPLE, *args], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual(p.returncode, 2, args)
+            self.assertIn("inverted", p.stderr)
+
+    def test_a_row_of_another_repo_is_matched_by_its_own_repo(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        led = {"repo": "acme/repo", "tickets": {"103": {"repo": "acme/other"}}}
+        m = lambda body: cr.swarm_pr_measures(led, [{"body": body, "mergedAt": "2026-01-20T00:00:00Z"}], None, None)["merged"]
+        self.assertEqual(m("Closes acme/other#103"), {"103": 1})
+        self.assertEqual(m("Closes acme/repo#103"), {})
+        self.assertEqual(m("Closes #103"), {})  # a bare key is the listed (ledger's) repo, not this row's
+
+    def test_a_bare_key_counts_for_a_row_without_a_repo_or_of_the_ledgers(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        for row in ({}, {"repo": "acme/repo"}):
+            led = {"repo": "acme/repo", "tickets": {"103": row}}
+            got = cr.swarm_pr_measures(led, [{"body": "Closes #103", "mergedAt": "2026-01-20T00:00:00Z"}], None, None)["merged"]
+            self.assertEqual(got, {"103": 1})
+
+    def test_a_closes_key_of_another_repo_is_not_the_ledgers_ticket(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        led = {"repo": "acme/repo", "tickets": {"103": {}}}
+        prs = [{"number": 1, "body": "Closes other/repo#103", "mergedAt": "2026-01-20T00:00:00Z"},
+               {"number": 2, "body": "Closes acme/repo#103", "mergedAt": "2026-01-20T00:00:00Z"},
+               {"number": 3, "body": "Closes #103", "mergedAt": "2026-01-20T00:00:00Z"}]
+        self.assertEqual(cr.swarm_pr_measures(led, prs, None, None)["merged"], {"103": 2})
+
+
 class DocstringLooseCoupling(unittest.TestCase):
     def test_module_docstring_lists_every_subcommand(self):
         # `sub.add_parser(...)` in main() is the one place subcommands are registered; the docstring

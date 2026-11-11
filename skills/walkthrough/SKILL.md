@@ -2,11 +2,11 @@
 name: walkthrough
 description: "Leads a linear walkthrough of a PR, repo area or epic, then three questions in one carousel; confirmed answers land in the context doc's `## In plain words`. Use when asked to walk through, explain or teach back a change. Not for reviewing."
 metadata:
-  version: "2"
-  updated: "2026-10-23"
-  reviewed: "2026-10-23"
+  version: "3"
+  updated: "2026-11-10"
+  reviewed: "2026-11-10"
 user-invocable: true
-argument-hint: "<pr|area|epic>"
+argument-hint: "<pr|area|epic|epic plan>"
 ---
 
 # walkthrough — lead the operator through a change, then check it landed
@@ -19,6 +19,8 @@ in, and keeps only what they confirmed. One bounded conversation: three steps, o
 - `$ARGUMENTS` names a PR (`<owner/repo>#<n>`, URL, or a number in the current repo), an epic (ticket key or
   context doc) or a repo area (a repo and a path or topic). Anything else, or two readings: ask once through a
   carousel (`docs/carousel.md`), then go.
+- `epic plan <key>` is the plan walkthrough, run **before the owner's go** on a swarm epic: the target is the epic key
+  and the home doc is its context doc. Its gather and steps are in § The epic plan target.
 - `<target>` is the label used in every recorded line: `#<n>` for a PR, the key for an epic, the area name.
 - The **home doc** is where the result lands: the epic context doc for a PR or epic (found via `.context/INDEX.md`
   or `ctx_resolve`), the repo card for an area. No home doc: walk anyway, record nothing, and say so at the end.
@@ -43,6 +45,17 @@ answer from the artefacts, then continue).
 3. **Where it breaks** — the failure paths and guards, and what `## Verified` proves and does not.
 
 A step is at most 8 lines. It states claims the artefacts back, so the questions below have an answer in them.
+
+### The epic plan target
+
+Gather from the ledger (`python3 $BATON/context-db/bin/swarm.py show <key>`) and the epic's decompose delta, never from memory: the waves and each
+child's area, the dependencies, the caps (epic and per worker), the gates and who signs each, and the grants in force.
+Then the same three steps, 8 lines each: 1. **Purpose** — what the epic delivers and the order of the waves.
+2. **How it runs** — who builds what in which wave, which areas are disjoint, what the orchestrator does at a tick,
+   where the caps stop a worker. 3. **Where it breaks** — the stall, re-plan, FAIL and cap-breach paths, the
+   gates only the owner can sign, and what the go authorizes and does not. The three questions are the same kinds:
+   one behaviour (a wave or an assignment), one failure (a breach or a stall), one see-it (the status or digest the
+   owner reads). This walk never records the go: `swarm.py approve` takes its own decision line.
 
 ## 4. Ask — three questions, one carousel
 

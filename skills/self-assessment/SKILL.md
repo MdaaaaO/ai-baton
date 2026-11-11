@@ -2,9 +2,9 @@
 name: self-assessment
 description: "Composes the user's weekly self-assessment for a past ISO week or range from `.context/` and the systems of record, never live sessions: the week file plus the report block the env config asks for. Invoke when asked for \"self-assessment for last week\" or \"for W37\"."
 metadata:
-  version: "22"
-  updated: "2026-11-04"
-  reviewed: "2026-11-04"
+  version: "23"
+  updated: "2026-11-10"
+  reviewed: "2026-11-10"
   facts: "self_assessment.ledger,self_assessment.ledger_url,self_assessment.sections"
 user-invocable: true
 ---
@@ -55,6 +55,11 @@ in step 9; `ledger` (bool, absent = off) gates step 10; `ledger_url` is the page
      `` $(date +%Y) ``**: with `MON=<step 1's Monday YYYY-MM-DD>`,
      `` grep -rEn "${MON%%-*}-09-(0[7-9]|1[0-3])" <dirs> `` for a window of Sep 7–13 (`${MON%%-*}` is the year
      portably — no `date -d`). Exclusions, dedupe and the archive↔live pairing: `reference/sources.md` § .context history.
+   - **Swarm** — when a task ledger under `state/swarm/` logged an event inside the window, run `python3
+     $BATON/skills/cost-report/cost_report.py report --daily <daily.json> … --swarm-since <Mon> --swarm-until <Sun>` (`--daily` is the file `cost-report` step 2 (Spend rows) collects, so run the sweep after that collection, which must have rows; `--swarm-prs` from
+     `gh`, per `cost-report`) and take its swarm measures into *Shipped* and the reflection as the
+     report states them: merged PRs, rework, stalls, re-plans, verifier fails, decisions, spend against cap. No swarm ran
+     that week: skip the sweep silently. A figure that came from a worker's own claim does not go in.
    - **Jira, meetings / 1on1, on-call, datalake, inbox drops**: `reference/sources.md` (a meeting's empty
      outcome is itself a finding; drops are leads for *Collaboration*/*Learnings* only, never for *Shipped*).
 4. **Verify, don't trust — and tie-break conflicts explicitly.** Numbers and tracker keys come from evidence
