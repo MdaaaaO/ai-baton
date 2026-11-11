@@ -44,7 +44,7 @@ ticket of every wave.
 | Run | orchestrator, workers | The swarm tick assigns the ready tickets of the current wave. Each worker builds, pushes and returns. | **Assignment file** per worker, and a pushed branch |
 | Verify | orchestrator, verifier | Per ticket: a draft PR from the worker's body file, review, CI, code-owner coverage, and the verifier's read of the `READY` head (`phase=read`). | **PR**, with the head sha the gates held on |
 | Integrate | orchestrator or owner, verifier | The merge, as § Authority matrix says, then the verifier checks the merged commit (`phase=merged`) and calls `swarm.py pass` per `DW-<n>`. | **Pass**: `DW-<n> → evidence` in the task ledger |
-| Close | orchestrator, verifier, owner | Once every child has its passes, the verifier runs the epic's agent gates (`phase=gates`) and signs each that holds with `gates.py sign --by verifier`. The owner signs the human ones. Every `VG-<n>` gate is closed (`gates.py status` exits 0), and the last digest goes out. | **Digest** on the epic, with the measured turns and spend |
+| Close | orchestrator, verifier, owner | Once every child has its passes, the verifier runs the epic's agent gates (`phase=gates`): all of them, or, where the verification plan orders its gates in steps, the last step's, each earlier step having had its own run (the `phase=gates` paragraph below). It signs each that holds with `gates.py sign --by verifier`. The owner signs the human ones. Every `VG-<n>` gate is closed (`gates.py status` exits 0), and the last digest goes out. | **Digest** on the epic, with the measured turns and spend |
 
 **The assignment.** The orchestrator's order to one worker for one ticket, as a file the worker reads first:
 `.context/state/swarm/<key>/<worker>/assignment.md`. Its fields: ticket, worktree, branch, `DW` list with checks, budget
@@ -64,13 +64,15 @@ no row by itself and is not a grammar line. A `FAIL` on the `READY` head goes ba
 on the merged commit moves the row from `merged` to `blocked`. Its fix is a new assignment on a new branch, and the old
 worker is not reopened, because its branch is already merged.
 
-The third run is `phase=gates`, once for the epic after every child's `phase=merged` has recorded its passes. It runs the
-check of each `agent` gate due once per child, and signs each one that holds with `gates.py sign --by verifier`; a
-`human` gate is never its to sign. A `FAIL` at `phase=gates` leaves the failing gates open, so `gates.py status` still
-exits 3 and the epic does not close: it goes back to Run for a fix, and the next gate run names only the open gates. The
-line carries the epic as its ticket and `VG-<n>` as its ids, and the gates it already signed stay signed. A template
-whose gates are ordered, such as `docs/verification/data-migration.md`, reads them in steps: one gate run per step, with
-the children merged by then.
+The third run is `phase=gates`. An epic's gates run once, after every child's `phase=merged` has recorded its passes,
+unless its verification plan orders its gates in steps, as `docs/verification/data-migration.md` does. Then there is
+one gate run per step: each reads only the gates due in that step (the verifier's `GATES:`), after the children that
+step names as merged first have recorded their passes (its `CHILDREN:`), and the next step starts only once that step's
+gates are closed. A run checks each `agent` gate it names once per child, and signs each one that holds with
+`gates.py sign --by verifier`; a `human` gate is never its to sign. A `FAIL` at `phase=gates` leaves the failing gates
+open, so `gates.py status` still exits 3 and the epic does not close: it goes back to Run for a fix, and the next gate
+run names only the open gates. The line carries the epic as its ticket and `VG-<n>` as its ids, and the gates it already
+signed stay signed.
 
 ### One ticket's life
 

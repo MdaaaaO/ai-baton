@@ -7,9 +7,11 @@ a gate is `docs/swarm.md` § Authority matrix; when the epic may close is its §
 
 **Where it plugs in.** `epic-discover` recommends this template for an epic that moves, copies, backfills or transforms
 stored data. A migration's children merge code too, so the plan also takes the code-change template's four gates, as
-`VG-21` to `VG-24` after these twenty, and a strategy's gate (§ Strategies) takes the next free id: the ids on this page
-stay as written, and so do the gates that cite each other. The verifier signs the agent gates in its gate runs and the
-owner signs the human ones. `gates.py status` must exit 0 before the epic closes.
+`VG-21` to `VG-24` after these twenty, and a strategy's gate (§ Strategies) takes the next free id, `VG-25`. Where the
+epic changes dbt models or DAGs, code-change's optional pipeline block comes too, after the strategy's gate: its `VG-5`
+as `VG-26` and its `VG-6` as `VG-27`, so no copied gate collides with `VG-25`. The ids on this page stay as written, and
+so do the gates that cite each other. The verifier signs the agent gates in its gate runs and the owner signs the human
+ones. `gates.py status` must exit 0 before the epic closes.
 
 **What breaks if it is ignored.** A migration counts as done when the new tables fill, and the differences surface weeks
 later: a time zone shift, a null read as zero, a future timestamp, a key whose grain changed. A tolerance chosen after the
@@ -118,23 +120,32 @@ code-change's four with the next free id, `VG-25`, and due in the step its row n
 | Shadow | the new path runs on a copy of the input and no consumer reads it | no consumer reads the shadow output and it writes no shared target, read from the access log | Prove equivalence |
 | Blue-green | two complete environments, and a switch moves the readers | the switch rehearsed both ways on the two environments: the readers reach the new one, and switching back restores the old reads within the rollback window | Prove equivalence |
 
+The strangler's gate is the one that cannot come first: it reads consumers already moved, so it falls due after the
+cutover, and `VG-17` signs a strangler's cutover with `VG-16`'s rollback rehearsal as its only strategy proof.
+
 ## When each gate falls due
 
-The gates are in the order a migration meets them. A gate run names only the gates due (the verifier's `GATES:` line),
-so the orchestrator asks for one at each step below, with the children merged by then, and the next step starts only
-once that step's gates are closed. Every gate of the plan is due in one step: these twenty, the strategy's gate and
-code-change's four.
+The gates are in the order a migration meets them, and this plan orders them in steps: one gate run per step, not one
+for the epic. Each step's run reads only the gates due in that step (the verifier's `GATES:` line), after the children
+the step names under *Merged first* have merged and recorded their passes (its `CHILDREN:` line), and the next step
+starts only once that step's gates are closed. Every gate of the plan is due in one step: these twenty, the strategy's
+gate, code-change's four and, where the epic copied it, the pipeline block.
 
-| Step | Gates | Closed before |
-|---|---|---|
-| Before reconciliation | `VG-1` to `VG-5` | the first reconciliation run; `VG-1` before any child builds a target table |
-| Prove equivalence | `VG-6` to `VG-16`, and the strategy's gate `VG-25` where § Strategies names this step | the go/no-go, `VG-17` |
-| Cut over | `VG-17` | the cutover wave |
-| After the cutover | `VG-18` to `VG-20`, and the strategy's gate `VG-25` where § Strategies names this step | the decommission: `VG-20` last, after the others of this step |
-| Every child merged | `VG-21` to `VG-24`, the code-change template's four | the epic closes, once every child has merged and recorded its passes, a cutover or decommission child too |
+The step names a child by its kind, and the orchestrator puts that kind's tickets in the run's `CHILDREN:` line. A
+migration has three: the **build children**, which write the new path (its tables, transforms and backfills); the
+**cutover child**, which moves the readers, one per consumer under a strangler; and the **decommission child**, which
+drops the old path.
+
+| Step | Gates | Merged first | Closed before |
+|---|---|---|---|
+| Before reconciliation | `VG-1` to `VG-5` | every build child | the first reconciliation run; `VG-1`, the owner's, before any build child starts a target table |
+| Prove equivalence | `VG-6` to `VG-16`, and the strategy's gate `VG-25` where § Strategies names this step | every build child | the go/no-go, `VG-17` |
+| Cut over | `VG-17` | every build child, and no cutover child | the cutover child starts |
+| After the cutover | `VG-18` to `VG-20`, and the strategy's gate `VG-25` where § Strategies names this step | every build child and every cutover child | the decommission child starts; `VG-20` last, after the others of this step |
+| Every child merged | `VG-21` to `VG-24`, the code-change template's four, and `VG-26` and `VG-27` where the epic copied the pipeline block | every child, the decommission child too | the epic closes |
 
 `VG-17` reads every gate due before the cutover, so the cutover is never signed without the strategy's proof where that
-proof can come first. The gates after the cutover fall due days or weeks after the cutover wave merges, so the
+proof can come first. The gates after the cutover fall due days or weeks after the last cutover child merges, so the
 orchestrator keeps a watch on each (`swarm.py watch`), names it in a later gate run, and the epic stays open until that
 run reads it.
 

@@ -2,9 +2,9 @@
 name: verifier
 description: "Independent check of swarm work: a ticket's READY head (phase=read), its merged commit (phase=merged, alone calling swarm.py pass), an epic's agent gates (phase=gates). Use when swarm-run hands over a head, a merged PR or gates due. Not a PR review; never for the change's author."
 metadata:
-  version: "2"
-  updated: "2026-11-04"
-  reviewed: "2026-11-04"
+  version: "3"
+  updated: "2026-11-10"
+  reviewed: "2026-11-10"
 model: opus
 effort: medium
 omitClaudeMd: true
@@ -90,10 +90,11 @@ worker's line copied over. If any id fails, call it for no id. A refused call is
 
 ## 5. phase=gates
 
-Gates live on the epic, so they close in this run and never in a child's. It comes after every child's `phase=merged` has
-recorded its passes, so a gate that reads the ledger sees it complete. A pipeline gate that falls due days later gets its
-own later gate run. `PLAN` is the orchestrator's file of the epic issue's body. `GATES` names the gates due, so a gate it
-does not name is not yours this run. `CHILDREN` names each child as `<ticket>:<pr>`. Read:
+Gates live on the epic, so they close in this run and never in a child's. It comes after every child's `phase=merged` has recorded
+its passes, so a gate that reads the ledger sees it complete, unless the plan orders its gates in steps, as
+`$BATON/docs/verification/data-migration.md` does: then one run per step. A pipeline gate that falls due days later gets its own
+later gate run. `PLAN` is the orchestrator's file of the epic issue's body. `GATES` names the gates due, so a gate it does not
+name is not yours this run. `CHILDREN` names each child as `<ticket>:<pr>`, in a step's run those the step names as merged first. Read:
 
 - The tree. Take the default branch from `gh repo view <repo> --json defaultBranchRef --jq .defaultBranchRef.name`, run
   `git -C <CHECKOUT> fetch origin <default branch>`, and `HEAD` must be an ancestor of `FETCH_HEAD`, or `FAIL` with `-`.
