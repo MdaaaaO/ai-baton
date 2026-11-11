@@ -1158,6 +1158,15 @@ class SwarmMeasures(unittest.TestCase):
         m = lambda body: cr.swarm_pr_measures(led, [{"body": body, "mergedAt": "2026-01-20T00:00:00Z"}], None, None)["merged"]
         self.assertEqual(m("Closes acme/other#103"), {"103": 1})
         self.assertEqual(m("Closes acme/repo#103"), {})
+        self.assertEqual(m("Closes #103"), {})  # a bare key is the listed (ledger's) repo, not this row's
+
+    def test_a_bare_key_counts_for_a_row_without_a_repo_or_of_the_ledgers(self):
+        sys.path.insert(0, str(self.SKILL))
+        import cost_report as cr
+        for row in ({}, {"repo": "acme/repo"}):
+            led = {"repo": "acme/repo", "tickets": {"103": row}}
+            got = cr.swarm_pr_measures(led, [{"body": "Closes #103", "mergedAt": "2026-01-20T00:00:00Z"}], None, None)["merged"]
+            self.assertEqual(got, {"103": 1})
 
     def test_a_closes_key_of_another_repo_is_not_the_ledgers_ticket(self):
         sys.path.insert(0, str(self.SKILL))

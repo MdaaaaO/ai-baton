@@ -56,7 +56,7 @@ in step 9; `ledger` (bool, absent = off) gates step 10; `ledger_url` is the page
      `` grep -rEn "${MON%%-*}-09-(0[7-9]|1[0-3])" <dirs> `` for a window of Sep 7–13 (`${MON%%-*}` is the year
      portably — no `date -d`). Exclusions, dedupe and the archive↔live pairing: `reference/sources.md` § .context history.
    - **Swarm** — when a task ledger under `state/swarm/` logged an event inside the window, run `python3
-     $BATON/skills/cost-report/cost_report.py report … --swarm-since <Mon> --swarm-until <Sun>` (with `--swarm-prs` from
+     $BATON/skills/cost-report/cost_report.py report --daily <daily.json> … --swarm-since <Mon> --swarm-until <Sun>` (`--daily` is the file `cost-report` step 2 (Spend rows) collects, so run the sweep after that collection, which must have rows; `--swarm-prs` from
      `gh`, per `cost-report`) and take its swarm measures into *Shipped* and the reflection as the
      report states them: merged PRs, rework, stalls, re-plans, verifier fails, decisions, spend against cap. No swarm ran
      that week: skip the sweep silently. A figure that came from a worker's own claim does not go in.

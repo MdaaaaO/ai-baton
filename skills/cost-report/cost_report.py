@@ -910,6 +910,13 @@ def review_rounds(pr: dict, bots: frozenset[str] = SWARM_BOT_LOGINS) -> int:
     return len(commits)
 
 
+def _closes_row(key_repo: str, row: dict, led: dict) -> bool:
+    """A `Closes` key names a ledger row: `<owner>/<repo>#n` must be the row's own repo (else the ledger's); a bare `#n` only
+    counts for a row of the ledger's own repo or with none (the listed repo is the ledger's)."""
+    mine, own = str(led.get("repo") or "").lower(), str(row.get("repo") or "").lower()
+    return key_repo.lower() == (own or mine) if key_repo else own in ("", mine)
+
+
 def swarm_pr_measures(led: dict, prs: list[dict] | None, since: str | None, until: str | None, bots: frozenset[str] = SWARM_BOT_LOGINS) -> dict | None:
     """Merged PRs and rework per ledger ticket, from `gh pr list --json number,body,mergedAt,reviews,author` output. A PR
     counts once per ticket it closes (the `Closes` key in its body, bare `#n` or the ticket row's own repo, else the ledger's). Rework is a merged
@@ -921,8 +928,7 @@ def swarm_pr_measures(led: dict, prs: list[dict] | None, since: str | None, unti
         if not _in_window(pr.get("mergedAt"), since, until):
             continue
         rounds = review_rounds(pr, bots)
-        keys = {k for r, k in CLOSES_RE.findall(pr.get("body") or "")
-                if k in tickets and (not r or r.lower() == str(tickets[k].get("repo") or led.get("repo") or "").lower())}
+        keys = {k for r, k in CLOSES_RE.findall(pr.get("body") or "") if k in tickets and _closes_row(r, tickets[k], led)}
         for key in keys:
             merged[key] = merged.get(key, 0) + 1
             if rounds > 1:

@@ -48,7 +48,7 @@ A step is at most 8 lines. It states claims the artefacts back, so the questions
 
 ### The epic plan target
 
-Gather from the ledger (`swarm.py show <key>`) and the epic's decompose delta, never from memory: the waves and each
+Gather from the ledger (`python3 $BATON/context-db/bin/swarm.py show <key>`) and the epic's decompose delta, never from memory: the waves and each
 child's area, the dependencies, the caps (epic and per worker), the gates and who signs each, and the grants in force.
 Then the same three steps, 8 lines each: 1. **Purpose** — what the epic delivers and the order of the waves.
 2. **How it runs** — who builds what in which wave, which areas are disjoint, what the orchestrator does at a tick,
