@@ -7,7 +7,9 @@ and the block is where that understanding is written down.
 
 The block is one text in three places. `pr-open` writes it as `## For the operator` in the PR body.
 `ticket-close` copies it into the close comment. `session-handoff` copies it into the next-session prompt under
-`### What changed, in plain words`. Nobody rewrites it on the way: the PR body is the source.
+`### What changed, in plain words`. Nobody rewrites it on the way: the PR body is the source. An epic's close comment and the swarm digest carry a block of
+their own, written for the epic as a whole from its children's blocks by `swarm-run` (its close-comment paragraph); the
+children's PR bodies stay the source.
 
 ## The four lines
 
