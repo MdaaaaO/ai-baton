@@ -129,8 +129,8 @@ ledger `swarm.py` (#677), the message grammar and inboxes `swarm_msg.py` (#678),
 (#679), the budget brake `swarm_budget.py` (#680), the verification gates `gates.py` and the `verifier` agent, a role
 that never wrote the change and alone records a pass (#681), the `builder` agent with its worker brief (#685), and
 `swarm-run` with the assignment file (#684), the owner's epic interview `epic-discover` (#682), the spec skill `epic-decompose`, with the owner's go before any
-worker starts (#683), liveness and failover (#686), and the data-migration verification plan template (#689). Not built yet: the
-weekly report and the plan walkthrough (#690). The inbox sweep `swarm-inbox` and the digest `swarm-status` are built (#688). The contract is `docs/swarm.md` (#676), and
+worker starts (#683), liveness and failover (#686), and the data-migration verification plan template (#689). The weekly report
+(`cost-report`, `self-assessment`) and the plan walkthrough (`walkthrough epic plan`) are built (#690). The inbox sweep `swarm-inbox` and the digest `swarm-status` are built (#688). The contract is `docs/swarm.md` (#676), and
 it says what is built. Why the mode needs no server: `docs/decisions/0005-orchestrator-is-a-session.md`.
 
 ## Non-goals

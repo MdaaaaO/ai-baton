@@ -123,17 +123,14 @@ For each `integrate` entry (a `READY` with no PR) or a peer's `PR` line, in this
 
 ## 8. Verify
 
-Each `READY` head before its merge → a fresh `verifier`, `PHASE: read` (`reference/integrate.md` has the line):
-`FAIL` → a re-brief; `PASS` opens step 7's gate for that head only, at the next tick. Each merged PR → a fresh
-`verifier`, `PHASE: merged`; it alone calls `swarm.py pass`. A `FAIL` → `swarm.py status
-<key> <t> blocked --reason "…"`, and the fix is a new assignment on a new branch. All passed → `ticket-close`, then
-`swarm.py status <key> <t> done`. The epic's gate runs (`docs/swarm.md` § Lifecycle, `phase=gates`): where the plan
-orders its gates in steps, one per step as soon as the children that step names as merged first have recorded their
-passes, the next step only once that step's gates are closed (`GATES:` the step's open agent gates, `CHILDREN:` those
-children; a step of human gates alone has no run); else one after the last child's `phase=merged` (`GATES:` every open
-agent gate). Each: the epic body to `$CTX/plan.md`, `gates.py status $CTX/plan.md`, a verifier `PHASE: gates`, and the
-signed file posted back. Human gates go to the owner (step 3) and `gates.py sign --by owner`. The epic closes only on
-exit 0: any other exit, a malformed plan's 2 included, is no close.
+Each `READY` head before its merge → a fresh `verifier`, `PHASE: read` (`reference/integrate.md` has the line): `FAIL` → a
+re-brief; `PASS` opens step 7's gate for that head only, at the next tick. Each merged PR → a fresh `verifier`, `PHASE:
+merged`; it alone calls `swarm.py pass`. A `FAIL` → `swarm.py status <key> <t> blocked --reason "…"`, and the fix is a new
+assignment on a new branch. All passed → `ticket-close`, then `swarm.py status <key> <t> done`. Gate runs (`docs/swarm.md`
+§ Lifecycle): one after the last child's `phase=merged`, or one per step of a copied stepped template's § When each gate
+falls due (`GATES:` the step's open agent gates, `CHILDREN:` the epic's tickets of the kinds it needs merged); a gate due
+later is watched and run later. Each: the epic body to `$CTX/plan.md`, `gates.py status`, a verifier `PHASE: gates`, the
+signed file posted back; human gates to the owner (step 3) and `gates.py sign --by owner`. The epic closes only on exit 0.
 
 **The close comment's operator block.** Before `ticket-close` posts on the epic, write the four lines of
 `docs/operator-brief.md` for the epic as a whole, labelled `Can now:`, `Do differently:`, `Check with:` and `Not covered:`:
