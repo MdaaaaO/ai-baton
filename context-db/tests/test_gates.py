@@ -483,6 +483,19 @@ class MigrationTemplate(Base):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual([line.split("\t")[0] for line in p.stdout.splitlines()], ["VG-1", "VG-8", "VG-9", "VG-11", "VG-25"])
 
+    def test_the_steps_table_travels_in_the_plan_and_names_only_its_gates(self):
+        # The epic copies `## Verification plan` alone, so the steps a stepped gate run reads must sit inside it.
+        page = MIGRATION.read_text(encoding="utf-8")
+        plan = page.split("\n## Verification plan\n", 1)[1].split("\n## ", 1)[0]
+        table = plan.split("\n### Steps\n", 1)[1].strip().split("\n\n", 1)[0].splitlines()
+        self.assertEqual(table[0], "| Step | Gates | Merged first | Closed before |")
+        rows = [[c.strip() for c in line.strip("|").split("|")] for line in table[2:]]
+        named = [g for r in rows for g in re.findall(r"`(VG-\d+)`", r[1])]
+        p = self.gates("parse", str(MIGRATION))
+        self.assertEqual(sorted(named, key=lambda g: int(g[3:])), [line.split("\t")[0] for line in p.stdout.splitlines()])
+        for step, _gates, merged_first, _closed in rows:
+            self.assertRegex(merged_first, r"`<[^`>]+>`", step)  # a kind the epic fills with its ticket keys
+
 
 class DecisionGrammar(unittest.TestCase):
     def test_the_signer_rule_reads_the_grammar_the_carousel_page_fixes(self):

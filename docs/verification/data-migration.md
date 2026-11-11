@@ -111,7 +111,8 @@ where the grain changes, one old row that becomes many new ones.
 ## Strategies
 
 The cutover strategy is the owner's call in the epic interview. Each adds one gate to the twenty, written after
-code-change's four with the next free id, `VG-25`, and due in the step its row names (§ When each gate falls due).
+code-change's four with the next free id, `VG-25`, and due in the step its row names: the epic writes it in that step's
+`### Steps` row (§ Verification plan).
 
 | Strategy | What it is | The gate it adds | Due in |
 |---|---|---|---|
@@ -127,24 +128,18 @@ cutover, and `VG-17` signs a strangler's cutover with `VG-16`'s rollback rehears
 
 ## When each gate falls due
 
-The gates are in the order a migration meets them, and this plan orders them in steps: one gate run per step that holds
-an agent gate, not one for the epic. Each step's run reads only the gates due in that step (the verifier's `GATES:`
-line), after the children the step names under *Merged first* have merged and recorded their passes (its `CHILDREN:`
-line), and the next step starts only once that step's gates are closed. Every gate of the plan is due in one step: these
-twenty, the strategy's gate, code-change's four and, where the epic copied it, the pipeline block.
+The gates are in the order a migration meets them, and this plan orders them in steps: the `### Steps` table of
+§ Verification plan, which the epic copies with its gates. There is one gate run per step that holds an agent gate, not
+one for the epic. Each step's run reads only the gates its row names (the verifier's `GATES:` line), after the tickets
+its *Merged first* cell names have merged and recorded their passes (its `CHILDREN:` line), and the next step starts
+only once that step's gates are closed. Every gate of the plan is in one row: these twenty, the strategy's gate,
+code-change's four and, where the epic copied it, the pipeline block.
 
-The step names a child by its kind, and the orchestrator puts that kind's tickets in the run's `CHILDREN:` line. A
-migration has three: the **build children**, which write the new path (its tables, transforms and backfills); the
-**cutover child**, which moves the readers once `VG-17` is signed, the dashboards and saved queries of `VG-12` among
-them, one per consumer under a strangler; and the **decommission child**, which drops the old path.
-
-| Step | Gates | Merged first | Closed before |
-|---|---|---|---|
-| Before reconciliation | `VG-1` to `VG-5` | every build child | the first reconciliation run; `VG-1`, the owner's, before any build child starts a target table |
-| Prove equivalence | `VG-6` to `VG-16`, and the strategy's gate `VG-25` where § Strategies names this step | every build child | the go/no-go, `VG-17` |
-| Cut over | `VG-17` | every build child, and no cutover child | the cutover child starts |
-| After the cutover | `VG-18` to `VG-20`, and the strategy's gate `VG-25` where § Strategies names this step | every build child and every cutover child | the decommission child starts; `VG-20` last, after the others of this step |
-| Every child merged | `VG-21` to `VG-24`, the code-change template's four, and `VG-26` and `VG-27` where the epic copied the pipeline block | every child, the decommission child too | the epic closes |
+A *Merged first* cell of the template names children by kind, as a placeholder, and the orchestrator fills it with the
+epic's own ticket keys before the first gate run (`swarm-run` step 8). A migration has three kinds: the **build
+children**, which write the new path (its tables, transforms and backfills); the **cutover child**, which moves the
+readers once `VG-17` is signed, the dashboards and saved queries of `VG-12` among them, one per consumer under a
+strangler; and the **decommission child**, which drops the old path.
 
 Cut over has no gate run: it holds only the human `VG-17`, and the verifier never signs a human gate, so the owner's
 signature of `VG-17` is that step. `VG-17` reads every gate due before the cutover, so the cutover is never signed
@@ -177,10 +172,25 @@ A gate stands alone: the verifier signs those that hold, and the next run names 
 - [ ] VG-14 every schema change and every run on the new path has an audit entry · kind: agent · check: match the schema changes the children merged and every pipeline run since the first against the audit log · evidence: zero schema changes and zero runs without an entry, as `cmd` → `output` · signer: verifier · when: systems.datalake | systems.airflow
 - [ ] VG-15 the verifier is independent of the author by access · kind: human · check: the owner reads the access the verifier's runs held: read-only on both paths, no write on the new one, and no child authored · evidence: the owner's decision line, naming the identity the verifier ran under and the access it held from the first reconciliation run on · signer: owner
 - [ ] VG-16 the rollback is rehearsed within its window · kind: human · check: the agent rehearses the rollback (the trigger, the readers moved back to the old path, the reconciliation after it) on a non-production copy and times it; the owner reads the time against `<window>` · evidence: the owner's decision line, naming the rehearsal's `run <id>` and how long it took · signer: owner
-- [ ] VG-17 the go/no-go is signed and the freeze announced · kind: human · check: the owner reads `gates.py status` with every gate due before the cutover closed (§ When each gate falls due: `VG-1` to `VG-16`, and the strategy's gate where § Strategies names Prove equivalence), the cutover time, the freeze window, and the rollback trigger with its bound · evidence: the owner's decision line, naming the cutover time, the freeze window, the trigger and where the freeze was announced · signer: owner
+- [ ] VG-17 the go/no-go is signed and the freeze announced · kind: human · check: the owner reads `gates.py status` with every gate due before the cutover closed (the `### Steps` rows before Cut over: `VG-1` to `VG-16`, and the strategy's gate where § Strategies names Prove equivalence), the cutover time, the freeze window, and the rollback trigger with its bound · evidence: the owner's decision line, naming the cutover time, the freeze window, the trigger and where the freeze was announced · signer: owner
 - [ ] VG-18 the post-cutover monitors run clean, under a trigger that rolls back first and informs after · kind: agent · check: read every monitor run since the cutover against the trigger `VG-17` agreed, and the trigger's set-up: a breach moves the readers back without waiting for a person, then sends the notice · evidence: `cmd` → `output` reading every monitor run since the cutover: `<cycles>` clean cycles, zero breaches, the first and the last run named; a trigger that fired leaves this gate open, with its rollback run timed before its notice · signer: verifier · when: systems.datalake | systems.airflow
 - [ ] VG-19 the old path has zero reads for the agreed days · kind: agent · check: read the old path's access log for `<days>` consecutive days after the cutover, every reader counted, jobs and people alike · evidence: `cmd` → `output` with zero reads on every day of the span, naming its first and last day · signer: verifier · when: systems.datalake
 - [ ] VG-20 the decommission is approved after the clean cycles and a verified archive · kind: human · check: the owner reads `VG-18`'s clean cycles, `VG-19`'s zero-read span, the strategy's gate where § Strategies names After the cutover, and the agent's restore test of the archive (layers 2 and 3 of the restored copy against the old path) · evidence: the owner's decision line, naming where the archive is, its restore `run <id>` and the decommission date · signer: owner
+
+### Steps
+
+| Step | Gates | Merged first | Closed before |
+|---|---|---|---|
+| Before reconciliation | `VG-1`, `VG-2`, `VG-3`, `VG-4`, `VG-5` | `<build tickets>` | the first reconciliation run; `VG-1`, the owner's, before any build child starts a target table |
+| Prove equivalence | `VG-6`, `VG-7`, `VG-8`, `VG-9`, `VG-10`, `VG-11`, `VG-12`, `VG-13`, `VG-14`, `VG-15`, `VG-16`, `<strategy gate>` | `<build tickets>` | the go/no-go, `VG-17` |
+| Cut over | `VG-17`, the owner's alone: no gate run | `<build tickets>`, and no cutover ticket | the cutover child starts |
+| After the cutover | `VG-18`, `VG-19`, `VG-20`, `<strategy gate>` | `<build and cutover tickets>` | the decommission child starts; `VG-20` last, after the others of this step |
+| Every child merged | `<code-change gates>` | `<every child>` | the epic closes |
+
+The epic writes `VG-25` for `<strategy gate>` in the one row its strategy names (`docs/verification/data-migration.md`
+§ Strategies) and drops it from the other, writes `VG-21` to `VG-24` for `<code-change gates>`, with `VG-26` and `VG-27`
+where it copied the pipeline block, and names each gate by its own id. The orchestrator replaces each *Merged first*
+placeholder with the epic's ticket keys before the first gate run and posts the body back.
 
 ## Worked example
 
@@ -212,6 +222,16 @@ history. The owner chose a parallel run. The epic's section, with the gates the 
 - [ ] VG-9 every slowly changing dimension answers the same at each point in time · kind: agent · check: at each of `<dates>`, the version of each customer valid in `<new>.customer_dim` matches `<old>.customers`; no gap or overlap in its validity ranges; one current row per customer · evidence: `run <id>` with zero mismatches, gaps, overlaps and doubled current rows · signer: verifier · when: systems.datalake
 - [ ] VG-11 every business metric is signed by its owner over one full business cycle · kind: human · check: the owner reads the agent's comparison of `<revenue>` and `<order count>` on both paths over `<cycle>`, with each metric owner's sign-off · evidence: the owner's decision line, naming the cycle, both metrics and who signed each · signer: owner
 - [ ] VG-25 the parallel run holds `<n>` consecutive daily reconciliations within tolerance, with the business cycle of VG-11 inside them · kind: agent · check: read the reports of the last `<n>` daily runs · evidence: `cmd` → `output` reading the last `<n>` daily runs' reports, each with every row `pass`, the first and the last run named · signer: verifier · when: systems.datalake
+
+### Steps
+
+| Step | Gates | Merged first | Closed before |
+|---|---|---|---|
+| Before reconciliation | `VG-1`, `VG-2`, `VG-3`, `VG-4`, `VG-5` | `<build-1>`, `<build-2>` | the first reconciliation run; `VG-1` before `<build-1>` starts a target table |
+| Prove equivalence | `VG-6`, `VG-7`, `VG-8`, `VG-9`, `VG-10`, `VG-11`, `VG-12`, `VG-13`, `VG-14`, `VG-15`, `VG-16`, `VG-25` | `<build-1>`, `<build-2>` | the go/no-go, `VG-17` |
+| Cut over | `VG-17`, the owner's alone: no gate run | `<build-1>`, `<build-2>`, and no cutover ticket | `<cutover-1>` starts |
+| After the cutover | `VG-18`, `VG-19`, `VG-20` | `<build-1>`, `<build-2>`, `<cutover-1>` | `<decommission-1>` starts; `VG-20` last |
+| Every child merged | `VG-21`, `VG-22`, `VG-23`, `VG-24` | `<build-1>`, `<build-2>`, `<cutover-1>`, `<decommission-1>` | the epic closes |
 
 The other gates stay as the template writes them, and the code-change template's four follow as VG-21 to VG-24.
 ````

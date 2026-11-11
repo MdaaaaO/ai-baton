@@ -66,14 +66,16 @@ on the merged commit moves the row from `merged` to `blocked`. Its fix is a new 
 worker is not reopened, because its branch is already merged.
 
 The epic's runs are `phase=gates`. An epic's gates run once, after every child's `phase=merged` has recorded its passes,
-unless its verification plan orders its gates in steps, as `docs/verification/data-migration.md` does. Then there is
-one gate run per step: each reads only the gates due in that step (the verifier's `GATES:`), after the children that
-step names as merged first have recorded their passes (its `CHILDREN:`), and the next step starts only once that step's
-gates are closed. A step whose gates are all `human` has no run: the owner's signatures are that step. A run checks each `agent` gate it names once per child, and signs each one that holds with
-`gates.py sign --by verifier`; a `human` gate is never its to sign. A `FAIL` at `phase=gates` leaves the failing gates
-open, so `gates.py status` still exits 3 and the epic does not close: it goes back to Run for a fix, and the next gate
-run names only the open gates. The line carries the epic as its ticket and `VG-<n>` as its ids, and the gates it already
-signed stay signed.
+unless its verification plan orders its gates in steps: a `### Steps` table inside its `## Verification plan`, as
+`docs/verification/data-migration.md` has. Then there is one gate run per step, a row of that table: each reads only the
+gates due in that step (the verifier's `GATES:`), after the tickets its *Merged first* cell names, which the
+orchestrator fills in before the first run, have recorded their passes (its `CHILDREN:`), and the next step starts only
+once that step's gates are closed. A step whose gates are all `human` has no run: the owner's signatures are that step.
+A run checks each `agent` gate it names once per child, and signs each one that holds with `gates.py sign --by
+verifier`; a `human` gate is never its to sign. A `FAIL` at `phase=gates` leaves the failing gates open, so `gates.py
+status` still exits 3 and the epic does not close: it goes back to Run for a fix, and the next gate run names only the
+open gates. The line carries the epic as its ticket and `VG-<n>` as its ids, and the gates it already signed stay
+signed.
 
 ### One ticket's life
 

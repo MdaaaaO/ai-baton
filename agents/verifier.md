@@ -90,11 +90,11 @@ worker's line copied over. If any id fails, call it for no id. A refused call is
 ## 5. phase=gates
 
 Gates live on the epic, so they close in this run and never in a child's. It comes after every child's `phase=merged` has recorded
-its passes, so a gate that reads the ledger sees it complete, unless the plan orders its gates in steps, as
-`$BATON/docs/verification/data-migration.md` does: then one run per step, after the children that step names as merged first
+its passes, so a gate that reads the ledger sees it complete, unless `PLAN` orders its gates in steps (a `### Steps` table, as
+in `$BATON/docs/verification/data-migration.md`): then one run per step, after the tickets its row names as merged first
 have merged with their passes recorded. A pipeline gate that falls due days later gets its own later gate run. `PLAN` is the
 orchestrator's file of the epic issue's body. `GATES` names the gates due, so a gate it does not name is not yours this run.
-`CHILDREN` names each child as `<ticket>:<pr>`: in a step's run, the children that step names as merged first. Read:
+`CHILDREN` names each child as `<ticket>:<pr>`: in a step's run, the tickets of that `### Steps` row's *Merged first*. Read:
 
 - The tree. Take the default branch from `gh repo view <repo> --json defaultBranchRef --jq .defaultBranchRef.name`, run
   `git -C <CHECKOUT> fetch origin <default branch>`, and `HEAD` must be an ancestor of `FETCH_HEAD`, or `FAIL` with `-`.
