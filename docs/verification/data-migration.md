@@ -9,9 +9,11 @@ a gate is `docs/swarm.md` § Authority matrix; when the epic may close is its §
 stored data. A migration's children merge code too, so the plan also takes the code-change template's four gates, as
 `VG-21` to `VG-24` after these twenty, and a strategy's gate (§ Strategies) takes the next free id, `VG-25`. Where the
 epic changes dbt models or DAGs, code-change's optional pipeline block comes too, after the strategy's gate: its `VG-5`
-as `VG-26` and its `VG-6` as `VG-27`, so no copied gate collides with `VG-25`. The ids on this page stay as written, and
-so do the gates that cite each other. The verifier signs the agent gates in its gate runs and the owner signs the human
-ones. `gates.py status` must exit 0 before the epic closes.
+as `VG-26` and its `VG-6` as `VG-27`, so no copied gate collides with `VG-25`. The block's prose is renumbered with its
+gates: the copy keeps its watch on `VG-26`, not `VG-5`, and leaves `VG-27`, not `VG-6`, out where the deploy parses the
+project with the prod target. The ids on this page stay as written, and so do the gates that cite each other. The
+verifier signs the agent gates in its gate runs and the owner signs the human ones. `gates.py status` must exit 0 before
+the epic closes.
 
 **What breaks if it is ignored.** A migration counts as done when the new tables fill, and the differences surface weeks
 later: a time zone shift, a null read as zero, a future timestamp, a key whose grain changed. A tolerance chosen after the
@@ -125,16 +127,16 @@ cutover, and `VG-17` signs a strangler's cutover with `VG-16`'s rollback rehears
 
 ## When each gate falls due
 
-The gates are in the order a migration meets them, and this plan orders them in steps: one gate run per step, not one
-for the epic. Each step's run reads only the gates due in that step (the verifier's `GATES:` line), after the children
-the step names under *Merged first* have merged and recorded their passes (its `CHILDREN:` line), and the next step
-starts only once that step's gates are closed. Every gate of the plan is due in one step: these twenty, the strategy's
-gate, code-change's four and, where the epic copied it, the pipeline block.
+The gates are in the order a migration meets them, and this plan orders them in steps: one gate run per step that holds
+an agent gate, not one for the epic. Each step's run reads only the gates due in that step (the verifier's `GATES:`
+line), after the children the step names under *Merged first* have merged and recorded their passes (its `CHILDREN:`
+line), and the next step starts only once that step's gates are closed. Every gate of the plan is due in one step: these
+twenty, the strategy's gate, code-change's four and, where the epic copied it, the pipeline block.
 
 The step names a child by its kind, and the orchestrator puts that kind's tickets in the run's `CHILDREN:` line. A
 migration has three: the **build children**, which write the new path (its tables, transforms and backfills); the
-**cutover child**, which moves the readers, one per consumer under a strangler; and the **decommission child**, which
-drops the old path.
+**cutover child**, which moves the readers once `VG-17` is signed, the dashboards and saved queries of `VG-12` among
+them, one per consumer under a strangler; and the **decommission child**, which drops the old path.
 
 | Step | Gates | Merged first | Closed before |
 |---|---|---|---|
@@ -144,10 +146,11 @@ drops the old path.
 | After the cutover | `VG-18` to `VG-20`, and the strategy's gate `VG-25` where § Strategies names this step | every build child and every cutover child | the decommission child starts; `VG-20` last, after the others of this step |
 | Every child merged | `VG-21` to `VG-24`, the code-change template's four, and `VG-26` and `VG-27` where the epic copied the pipeline block | every child, the decommission child too | the epic closes |
 
-`VG-17` reads every gate due before the cutover, so the cutover is never signed without the strategy's proof where that
-proof can come first. The gates after the cutover fall due days or weeks after the last cutover child merges, so the
-orchestrator keeps a watch on each (`swarm.py watch`), names it in a later gate run, and the epic stays open until that
-run reads it.
+Cut over has no gate run: it holds only the human `VG-17`, and the verifier never signs a human gate, so the owner's
+signature of `VG-17` is that step. `VG-17` reads every gate due before the cutover, so the cutover is never signed
+without the strategy's proof where that proof can come first. The gates after the cutover fall due days or weeks after
+the last cutover child merges, so the orchestrator keeps a watch on each (`swarm.py watch`), names it in a later gate
+run, and the epic stays open until that run reads it.
 
 ## Verification plan
 
@@ -169,7 +172,7 @@ A gate stands alone: the verifier signs those that hold, and the next run names 
 - [ ] VG-9 every slowly changing dimension answers the same at each point in time · kind: agent · check: at each of `<dates>`, the version valid on each path is the same per key; the validity ranges have no gap and no overlap; each key has one current row · evidence: `run <id>` with zero mismatches, gaps, overlaps and doubled current rows per dimension · signer: verifier · when: systems.datalake
 - [ ] VG-10 referential integrity and uniqueness hold on the new path · kind: agent · check: every foreign key resolves to its parent, and every declared unique or business key is unique · evidence: zero orphans and zero duplicates per target table, as `run <id>` or `cmd` → `output` · signer: verifier · when: systems.dbt | systems.datalake
 - [ ] VG-11 every business metric is signed by its owner over one full business cycle · kind: human · check: the owner reads the agent's comparison of each metric on both paths over `<cycle>` (layer 7), with each metric owner's sign-off · evidence: the owner's decision line, naming the cycle, the metrics and who signed each · signer: owner
-- [ ] VG-12 the top dashboards and queries are re-pointed to the new path and signed · kind: human · check: the agent re-points each dashboard and saved query on the epic's list and runs it on both paths; the owner reads the results side by side, with each dashboard owner's sign-off · evidence: the owner's decision line, naming the list and who signed each · signer: owner
+- [ ] VG-12 the top dashboards and queries answer the same on the new path, signed · kind: human · check: the agent runs a copy of each dashboard and saved query on the epic's list against the new path, beside the original on the old one, and moves no reader; the owner reads the results side by side, with each dashboard owner's sign-off · evidence: the owner's decision line, naming the list and who signed each · signer: owner
 - [ ] VG-13 late-arriving rows are handled, with the watermark recorded · kind: agent · check: once `<late>` has passed, run layers 2 to 8 again on the last window (layer 9) and compare both runs' watermarks · evidence: `cmd` → `output` reading both runs' reports on the same window, before and after the late rows landed: both run ids, both within tolerance, each with its watermark · signer: verifier · when: systems.datalake
 - [ ] VG-14 every schema change and every run on the new path has an audit entry · kind: agent · check: match the schema changes the children merged and every pipeline run since the first against the audit log · evidence: zero schema changes and zero runs without an entry, as `cmd` → `output` · signer: verifier · when: systems.datalake | systems.airflow
 - [ ] VG-15 the verifier is independent of the author by access · kind: human · check: the owner reads the access the verifier's runs held: read-only on both paths, no write on the new one, and no child authored · evidence: the owner's decision line, naming the identity the verifier ran under and the access it held from the first reconciliation run on · signer: owner

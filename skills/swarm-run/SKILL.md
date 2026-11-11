@@ -2,9 +2,9 @@
 name: swarm-run
 description: "The swarm orchestrator's tick: assigns an approved epic's tickets, drains returns, integrates and verifies PRs, writes the digest. Use when running or resuming an epic's swarm, or on its tick wake-up. Not for one ticket (`ticket-pickup`) or a PR you own alone (`pr-watch`)."
 metadata:
-  version: "4"
-  updated: "2026-11-10"
-  reviewed: "2026-11-10"
+  version: "5"
+  updated: "2026-11-11"
+  reviewed: "2026-11-11"
 user-invocable: true
 argument-hint: "<epic key>"
 ---
@@ -127,10 +127,13 @@ Each `READY` head before its merge → a fresh `verifier`, `PHASE: read` (`refer
 `FAIL` → a re-brief; `PASS` opens step 7's gate for that head only, at the next tick. Each merged PR → a fresh
 `verifier`, `PHASE: merged`; it alone calls `swarm.py pass`. A `FAIL` → `swarm.py status
 <key> <t> blocked --reason "…"`, and the fix is a new assignment on a new branch. All passed → `ticket-close`, then
-`swarm.py status <key> <t> done`. After the last child's `phase=merged`: the epic body to `$CTX/plan.md`, `gates.py
-status $CTX/plan.md`, a verifier `PHASE: gates` naming only the open agent gates, and the signed file posted back.
-Human gates go to the owner (step 3) and `gates.py sign --by owner`. The epic closes only on exit 0: any other exit,
-a malformed plan's 2 included, is no close.
+`swarm.py status <key> <t> done`. The epic's gate runs (`docs/swarm.md` § Lifecycle, `phase=gates`): where the plan
+orders its gates in steps, one per step as soon as the children that step names as merged first have recorded their
+passes, the next step only once that step's gates are closed (`GATES:` the step's open agent gates, `CHILDREN:` those
+children; a step of human gates alone has no run); else one after the last child's `phase=merged` (`GATES:` every open
+agent gate). Each: the epic body to `$CTX/plan.md`, `gates.py status $CTX/plan.md`, a verifier `PHASE: gates`, and the
+signed file posted back. Human gates go to the owner (step 3) and `gates.py sign --by owner`. The epic closes only on
+exit 0: any other exit, a malformed plan's 2 included, is no close.
 
 **The close comment's operator block.** Before `ticket-close` posts on the epic, write the four lines of
 `docs/operator-brief.md` for the epic as a whole, labelled `Can now:`, `Do differently:`, `Check with:` and `Not covered:`:
