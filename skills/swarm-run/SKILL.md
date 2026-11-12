@@ -127,7 +127,7 @@ Each `READY` head before its merge → a fresh `verifier`, `PHASE: read` (`refer
 re-brief; `PASS` opens step 7's gate for that head only, at the next tick. Each merged PR → a fresh `verifier`, `PHASE:
 merged`; it alone calls `swarm.py pass`. A `FAIL` → `swarm.py status <key> <t> blocked --reason "…"`, and the fix is a new
 assignment on a new branch. All passed → `ticket-close`, then `swarm.py status <key> <t> done`. Gate runs (`docs/swarm.md`
-§ Lifecycle): the epic body to `$CTX/plan.md`; one per row of its `### Steps` (first fill the *Merged first* cells with ticket
+§ Lifecycle): the epic body to `$CTX/plan.md`; one per `### Steps` row that holds an open agent gate (first fill the *Merged first* cells with ticket
 keys and post the body back; `GATES:` the row's open agent gates, `CHILDREN:` its tickets), with no `### Steps` one after
 the last `phase=merged`; a gate due later is watched and run later. Each: `gates.py status`, a verifier `PHASE: gates`, the
 signed file posted back; human gates to the owner (step 3) and `gates.py sign --by owner`. The epic closes only on exit 0.
