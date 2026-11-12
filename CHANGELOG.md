@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.15.0 (2026-11-12)
+
+
+### Features
+
+* **memory-prune:** warn at 90 % of the index budget (NEAR_BUDGET) ([#693](https://github.com/MdaaaaO/ai-baton/issues/693)) ([c33f8fd](https://github.com/MdaaaaO/ai-baton/commit/c33f8fd28273e68c835ca34468a98485bed57510))
+* **engine:** swarm.py, the epic task ledger and its state machine ([#708](https://github.com/MdaaaaO/ai-baton/issues/708)) ([a8bcd76](https://github.com/MdaaaaO/ai-baton/commit/a8bcd76bfe0b1c9b134ceb3eea85f8b6d13151fa))
+* **engine:** lease.py, serial-resource leases and a STOP file ([#707](https://github.com/MdaaaaO/ai-baton/issues/707)) ([a9c6a4e](https://github.com/MdaaaaO/ai-baton/commit/a9c6a4e7dca846e49852b3af4ada74faee446391))
+* **engine:** verification gates, gates.py and the verifier agent ([#709](https://github.com/MdaaaaO/ai-baton/issues/709)) ([eac47a9](https://github.com/MdaaaaO/ai-baton/commit/eac47a97ff8a1e6d46c32cc3aaf187f82b24c6ab))
+* **engine:** swarm_msg.py, the message grammar and per-worker boxes ([#714](https://github.com/MdaaaaO/ai-baton/issues/714)) ([db94876](https://github.com/MdaaaaO/ai-baton/commit/db9487618e59ba1ca7d468567e417d5054eb443e))
+* **engine:** swarm budget, spend sweep and caps that close the pool ([#718](https://github.com/MdaaaaO/ai-baton/issues/718)) ([1c75ead](https://github.com/MdaaaaO/ai-baton/commit/1c75eadbada3fb3203d40b4d4e8d9082c0541cf8))
+* **agents:** add the builder worker agent and swarm brief ([#721](https://github.com/MdaaaaO/ai-baton/issues/721)) ([c614226](https://github.com/MdaaaaO/ai-baton/commit/c614226f846432ef2377ecbb43f665928df0fb93))
+* **swarm-run:** the orchestrator's tick, its assignment file and evals ([#722](https://github.com/MdaaaaO/ai-baton/issues/722)) ([57031b5](https://github.com/MdaaaaO/ai-baton/commit/57031b54d89ad11b3ece81a610d4d88888083943))
+* **engine:** liveness and failover — registry expiry, retire, resume ([#723](https://github.com/MdaaaaO/ai-baton/issues/723)) ([1701b59](https://github.com/MdaaaaO/ai-baton/commit/1701b590c7b5d7b6b780fb87b06493f3e644d3c3))
+* **skills:** swarm-inbox and swarm-status, the sweep and the digest ([#724](https://github.com/MdaaaaO/ai-baton/issues/724)) ([9b16bc5](https://github.com/MdaaaaO/ai-baton/commit/9b16bc550ea0dae46eeb874e74f0d94eae3b6efd))
+* **skills:** epic-discover, the owner's epic interview ([#728](https://github.com/MdaaaaO/ai-baton/issues/728)) ([280cf29](https://github.com/MdaaaaO/ai-baton/commit/280cf2999f42fc3e78e34a201b4984763980021a))
+* **skills:** the heartbeat runs the zombie sweep about every 24 hours ([#727](https://github.com/MdaaaaO/ai-baton/issues/727)) ([3268119](https://github.com/MdaaaaO/ai-baton/commit/3268119d6117a7b4bc093b6ad6062c805bdcc74d))
+* **skills:** epic-decompose, child tickets in areas and waves ([#729](https://github.com/MdaaaaO/ai-baton/issues/729)) ([4da7ae0](https://github.com/MdaaaaO/ai-baton/commit/4da7ae034c3fe41952ad966540179924821dab2d))
+* **skills:** swarm understanding layer, weekly report, operator block ([#735](https://github.com/MdaaaaO/ai-baton/issues/735)) ([7842440](https://github.com/MdaaaaO/ai-baton/commit/78424401578b4053c090846e5484c1084f4c7d7f))
+* **evals:** swarm agent suites for builder and verifier ([#737](https://github.com/MdaaaaO/ai-baton/issues/737)) ([da81245](https://github.com/MdaaaaO/ai-baton/commit/da812455ef4cff935b9583acd20710e038f98455))
+
+
+### Bug Fixes
+
+* **slack-draft:** per-conversation slot as observed; record results ([#694](https://github.com/MdaaaaO/ai-baton/issues/694)) ([88e3815](https://github.com/MdaaaaO/ai-baton/commit/88e38153f779a55896d921eddc3924c49416c0a9))
+* **pr-review:** ledger-append polls the lock five times a second ([#696](https://github.com/MdaaaaO/ai-baton/issues/696)) ([00b14a3](https://github.com/MdaaaaO/ai-baton/commit/00b14a3f64d65c927bbed6445fccbd692cf22a26))
+* **session:** a successor ends a stale predecessor that left no handoff ([#702](https://github.com/MdaaaaO/ai-baton/issues/702)) ([cb70f94](https://github.com/MdaaaaO/ai-baton/commit/cb70f941ad71472c724b35d18b74869f4cb4843e))
+* **docs:** a fork told to use no tool may still deliver its report ([#710](https://github.com/MdaaaaO/ai-baton/issues/710)) ([2a3f49f](https://github.com/MdaaaaO/ai-baton/commit/2a3f49f5259c2ff69009fb5a10ca4e61e5b3eca3))
+* **pr-watch:** read approval as GitHub decides it, pin the merge head ([#705](https://github.com/MdaaaaO/ai-baton/issues/705)) ([7395f47](https://github.com/MdaaaaO/ai-baton/commit/7395f4753dbcd2d8aeb432273cd5ea4758762995))
+* **engine:** let test_swarm pass with the temp dir behind a symlink ([#713](https://github.com/MdaaaaO/ai-baton/issues/713)) ([d290063](https://github.com/MdaaaaO/ai-baton/commit/d2900631dd70455e846b7d04afd69893eb6bc0ea))
+* **hooks:** a STOP reaches every work tool, not only file writes ([#715](https://github.com/MdaaaaO/ai-baton/issues/715)) ([4ffab41](https://github.com/MdaaaaO/ai-baton/commit/4ffab414349bbe9bad10885b05061563c928a429))
+* **ci:** auto-merge holds hooks/ and settings files for the owner ([#719](https://github.com/MdaaaaO/ai-baton/issues/719)) ([f6b7fc7](https://github.com/MdaaaaO/ai-baton/commit/f6b7fc73dfc9a53a3f4e24335c2653b5ebcc41db))
+* **engine:** public-text check reads a two-digit DW id as a ticket key ([#704](https://github.com/MdaaaaO/ai-baton/issues/704)) ([139d2e4](https://github.com/MdaaaaO/ai-baton/commit/139d2e456c2dc1db2359860406dceb647bf489b7))
+* **evals:** frame builder and verifier cases so a live run grades them ([#740](https://github.com/MdaaaaO/ai-baton/issues/740)) ([82160ec](https://github.com/MdaaaaO/ai-baton/commit/82160ec9bac90594805ecdeae5e474aa59cf716d))
+
+
+### Documentation
+
+* **decisions:** 0005, an orchestrator is a session, not a server ([#700](https://github.com/MdaaaaO/ai-baton/issues/700)) ([3c6a4dc](https://github.com/MdaaaaO/ai-baton/commit/3c6a4dc52df69f77b870ceb3739f6eb23574609d))
+* **swarm:** the swarm contract: roles, lifecycle, authority, grammar ([#699](https://github.com/MdaaaaO/ai-baton/issues/699)) ([61da92d](https://github.com/MdaaaaO/ai-baton/commit/61da92d7aec16c002f89fc4039f5bb465667cec3))
+* **swarm:** catch the docs and generated references up with the engine ([#720](https://github.com/MdaaaaO/ai-baton/issues/720)) ([0c93050](https://github.com/MdaaaaO/ai-baton/commit/0c930508919d24f98b73eba35298309c67237e83))
+* **verification:** the data-migration template, twenty gates ([#734](https://github.com/MdaaaaO/ai-baton/issues/734)) ([5652c1e](https://github.com/MdaaaaO/ai-baton/commit/5652c1e94977053f0ff6a30865435ae6d41b5e4f))
+* **evals:** list the builder and verifier agent suites in the README ([#739](https://github.com/MdaaaaO/ai-baton/issues/739)) ([9d1a04c](https://github.com/MdaaaaO/ai-baton/commit/9d1a04cda5ac8274eedbe92c94a8f0e5a25aadd4))
+
+
+### CI
+
+* run the macos leg on an x64 runner with a 30-minute budget ([#687](https://github.com/MdaaaaO/ai-baton/issues/687)) ([35818d1](https://github.com/MdaaaaO/ai-baton/commit/35818d1e44e75d504bd7f05951b5e829d299fe7e))
+* **deps:** bump anthropics/claude-code-action from 1.0.264 to 1.0.268 ([#725](https://github.com/MdaaaaO/ai-baton/issues/725)) ([9c450fd](https://github.com/MdaaaaO/ai-baton/commit/9c450fdfe6dba886e50a409d34fd67716409ab9b))
+
+
+### Chore
+
+* **skills:** trim descriptions to make room for the swarm skills ([#716](https://github.com/MdaaaaO/ai-baton/issues/716)) ([f29231a](https://github.com/MdaaaaO/ai-baton/commit/f29231a40581c1ddd02d293243ab368c40b57d40))
+
 ## 0.14.0 (2026-11-04)
 
 
