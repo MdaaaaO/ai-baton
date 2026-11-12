@@ -123,5 +123,16 @@ trigger suite nor the behaviour total above):
 | `builder` | 14 | 6 | `agents/builder.md` |
 | `verifier` | 10 | 3 | `agents/verifier.md` |
 
-`eval-check` checks these cases' format only: inside a `claude plugin eval` run the model cannot read the plugin's
-`agents/*.md`, so no agent case passes a live grade yet (#738 looks for a framing the harness grades).
+**Framing an agent case.** Inside a `claude plugin eval` run the model cannot search the plugin, so a prompt that only says
+"write what the builder returns" never reaches `agents/builder.md` and grades 0 (measured before the framing: `builder-stop-reports-ran`
+0/2, `verifier-head-moved-fail` 0/3, `builder-rebrief-ack-alone` 0/3; dispatching `ai-baton:builder` through the `Agent` tool
+was 0/2 too). The model can read its own working directory, so every `builder-*` and `verifier-*` case carries a
+`case.yaml` (`context: {scaffold_script: fixture.sh}`) whose `fixture.sh` runs `cp "$(dirname "$0")/../../agents/<role>.md"
+./<role>.md` in the scratch workspace, and its prompt ends with "The <role>'s contract is in ./<role>.md: read it first."
+The file is copied from the plugin under test at run time, so no copy of the contract is checked into `evals/` to drift,
+and `allowed_tools: [Read, Glob, Grep]` is enough (run with `ALLOW_TOOLS=`). The judge cannot read the plugin either, so an
+agent case's `criteria.md` states the pass line in full instead of leaning on a citation. `eval-check` enforces the framing
+(`scaffold_script` named, a fixture that copies `agents/<role>.md`, a prompt pointing at `./<role>.md`) for every case tagged
+`behaviour` plus `builder` or `verifier`. Live grades after the change (`RUNS=6`, local): `builder-stop-reports-ran` 6/6,
+`builder-rebrief-ack-alone` 6/6, `verifier-head-moved-fail` 6/6; the other agent cases are framed the same way and not all
+graded live yet.

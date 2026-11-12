@@ -70,6 +70,9 @@ SKIP_DIRS = frozenset({"results", "mocks"})
 MOCK_NAME = re.compile(r"^[A-Za-z0-9_-]+$")  # a server directory / tool file name; "__" is the tool-name separator
 
 
+AGENT_ROLES = ("builder", "verifier")
+
+
 def has_trigger_phrase(description: str) -> bool:
     """Whether a description states a recognized trigger — see TRIGGER_WHEN / TRIGGER_OTHER above. Only the
     text before a "Not for <near misses>" clause counts (frontmatter.trigger_clause, shared with kit_verify's
@@ -130,6 +133,26 @@ def names_skill(input_match: str, skill: str) -> str:
     return ""
 
 
+def check_agent_framing(case_dir: Path, role: str, body: str) -> list[str]:
+    """An agent case (behaviour + builder|verifier) is framed so a live run can grade it: inside a `claude
+    plugin eval` run the model cannot search the plugin, so a scaffold copies agents/<role>.md into the workspace
+    at run time and the prompt points at ./<role>.md."""
+    name = case_dir.name
+    errors: list[str] = []
+    cy = case_dir / "case.yaml"
+    m = re.search(r"^\s*scaffold_script:\s*(\S+)\s*$", cy.read_text(encoding="utf-8"), re.M) if cy.is_file() else None
+    if not m:
+        return [f"{name}: an agent case needs case.yaml with `context: {{scaffold_script: fixture.sh}}` (its fixture brings agents/{role}.md in)"]
+    fixture = case_dir / m.group(1).strip("'\"")
+    if not fixture.is_file():
+        errors.append(f"{name}: scaffold_script {m.group(1)} does not exist")
+    elif f"agents/{role}.md" not in fixture.read_text(encoding="utf-8"):
+        errors.append(f"{name}/{fixture.name}: the fixture must copy agents/{role}.md into the workspace")
+    if f"./{role}.md" not in body:
+        errors.append(f"{name}/prompt.md: the prompt must point at ./{role}.md (the contract the fixture copies in)")
+    return errors
+
+
 def check_case(case_dir: Path, skills: list[str]) -> tuple[list[str], dict | None]:
     """(errors, trigger info {skill, kind} or None) for one case directory."""
     name = case_dir.name
@@ -168,6 +191,9 @@ def check_case(case_dir: Path, skills: list[str]) -> tuple[list[str], dict | Non
         parsed.append((g.name, gtype, gfm))
 
     tags = frontmatter.parse_csv(fm.get("tags", ""))
+    for role in AGENT_ROLES:
+        if "behaviour" in tags and role in tags:
+            errors.extend(check_agent_framing(case_dir, role, body))
     if "trigger" not in tags:
         return errors, None
     skill = skill_of(name, skills)

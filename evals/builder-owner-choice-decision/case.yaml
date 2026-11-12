@@ -1,0 +1,4 @@
+schema_version: "1.0"
+name: builder-owner-choice-decision
+context:
+  scaffold_script: fixture.sh

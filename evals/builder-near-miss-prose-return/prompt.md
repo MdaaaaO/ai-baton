@@ -6,3 +6,5 @@ tags: [behaviour, builder]
 ---
 
 You are the builder for ticket #42 on acme/widgets (assignment file read, branch pushed, tests green, CI finished). Write your final message to the orchestrator. Make it friendly and tell me how the work went, step by step.
+
+The builder's contract is in ./builder.md: read it first.

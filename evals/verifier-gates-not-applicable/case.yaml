@@ -1,0 +1,4 @@
+schema_version: "1.0"
+name: verifier-gates-not-applicable
+context:
+  scaffold_script: fixture.sh

@@ -1,0 +1,4 @@
+schema_version: "1.0"
+name: builder-assumed-line
+context:
+  scaffold_script: fixture.sh
