@@ -1,6 +1,6 @@
 """gates.py — an epic's `## Verification plan`: the grammar, what keeps a gate open, who may sign which kind; the
-code-change template parsing clean under it; the verifier agent's contract. Every case runs the CLI on a throw-away
-file and store. Stdlib unittest. Run: make -C $BATON/context-db test."""
+code-change and data-migration templates parsing clean under it; the verifier agent's contract. Every case runs the
+CLI on a throw-away file and store. Stdlib unittest. Run: make -C $BATON/context-db test."""
 from __future__ import annotations
 import json
 import os
@@ -15,6 +15,7 @@ HERE = Path(__file__).resolve().parent
 KIT = HERE.parents[1]
 BIN = HERE.parent / "bin"
 TEMPLATE = KIT / "docs" / "verification" / "code-change.md"
+MIGRATION = KIT / "docs" / "verification" / "data-migration.md"
 VERIFIER = KIT / "agents" / "verifier.md"
 
 AGENT_1 = "- [ ] VG-1 the tests fail on the base · kind: agent · check: `make test` · evidence: a command's output · signer: verifier"
@@ -466,6 +467,34 @@ class Template(Base):
         for path in (TEMPLATE, VERIFIER, BIN / "gates.py"):
             text = path.read_text(encoding="utf-8").lower().replace("kit_" + word, "")  # the module's name, not the layer
             self.assertNotIn(word, text, path.name)
+
+
+class MigrationTemplate(Base):
+    def test_twenty_gates_every_human_one_the_owners_and_the_worked_example_parses_alone(self):
+        p = self.gates("parse", str(MIGRATION))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        rows = [line.split("\t") for line in p.stdout.splitlines()]
+        self.assertEqual([r[0] for r in rows], [f"VG-{n}" for n in range(1, 21)])
+        self.assertEqual({r[1] for r in rows}, {"agent", "human"})
+        self.assertEqual({r[2] for r in rows if r[1] == "human"}, {"owner"})
+        example = MIGRATION.read_text(encoding="utf-8").split("\n## Worked example\n", 1)[1]
+        fenced = re.search(r"^````\n(.*?)^````$", example, re.DOTALL | re.MULTILINE)[1]
+        p = self.gates("parse", "-", stdin=fenced)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual([line.split("\t")[0] for line in p.stdout.splitlines()], ["VG-1", "VG-8", "VG-9", "VG-11", "VG-25"])
+
+    def test_the_steps_table_travels_in_the_plan_and_names_only_its_gates(self):
+        # The epic copies `## Verification plan` alone, so the steps a stepped gate run reads must sit inside it.
+        page = MIGRATION.read_text(encoding="utf-8")
+        plan = page.split("\n## Verification plan\n", 1)[1].split("\n## ", 1)[0]
+        table = plan.split("\n### Steps\n", 1)[1].strip().split("\n\n", 1)[0].splitlines()
+        self.assertEqual(table[0], "| Step | Gates | Merged first | Closed before |")
+        rows = [[c.strip() for c in line.strip("|").split("|")] for line in table[2:]]
+        named = [g for r in rows for g in re.findall(r"`(VG-\d+)`", r[1])]
+        p = self.gates("parse", str(MIGRATION))
+        self.assertEqual(sorted(named, key=lambda g: int(g[3:])), [line.split("\t")[0] for line in p.stdout.splitlines()])
+        for step, _gates, merged_first, _closed in rows:
+            self.assertRegex(merged_first, r"`<[^`>]+>`", step)  # a kind the epic fills with its ticket keys
 
 
 class DecisionGrammar(unittest.TestCase):

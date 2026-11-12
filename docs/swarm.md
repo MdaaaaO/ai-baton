@@ -44,7 +44,7 @@ ticket of every wave.
 | Run | orchestrator, workers | The swarm tick assigns the ready tickets of the current wave. Each worker builds, pushes and returns. | **Assignment file** per worker, and a pushed branch |
 | Verify | orchestrator, verifier | Per ticket: a draft PR from the worker's body file, review, CI, code-owner coverage, and the verifier's read of the `READY` head (`phase=read`). | **PR**, with the head sha the gates held on |
 | Integrate | orchestrator or owner, verifier | The merge, as § Authority matrix says, then the verifier checks the merged commit (`phase=merged`) and calls `swarm.py pass` per `DW-<n>`. | **Pass**: `DW-<n> → evidence` in the task ledger |
-| Close | orchestrator, verifier, owner | Once every child has its passes, the verifier runs the epic's agent gates (`phase=gates`) and signs each that holds with `gates.py sign --by verifier`. The owner signs the human ones. Every `VG-<n>` gate is closed (`gates.py status` exits 0), and the last digest goes out. | **Digest** on the epic, with the measured turns and spend |
+| Close | orchestrator, verifier, owner | Once every child has its passes, the verifier runs the epic's agent gates (`phase=gates`): all of them, or, where the verification plan orders its gates in steps, the last step's, each earlier step having had its own run (the `phase=gates` paragraph below). It signs each that holds with `gates.py sign --by verifier`. The owner signs the human ones. Every `VG-<n>` gate is closed (`gates.py status` exits 0), and the last digest goes out. | **Digest** on the epic, with the measured turns and spend |
 
 **The assignment.** The orchestrator's order to one worker for one ticket, as a file the worker reads first:
 `.context/state/swarm/<key>/<worker>/assignment.md`. Its fields: ticket, worktree, branch, `DW` list with checks, budget
@@ -55,8 +55,9 @@ file list, report points, who can say go, stop conditions.
 done`. `blocked` and `parked` branch off at any point before `merged`, and a verifier's `FAIL` on the merged commit is
 the one edge back from `merged`, to `blocked`. § What moves a row says what moves each status.
 
-**The verifier works twice per ticket, and once more for the epic.** Before the merge it reads the `READY` head: `done_when.py probe` and `coverage`, the PR's
-`## Verified` and `## One honest limit`. Its positive read opens the merge gate and writes nothing to the task ledger.
+**The verifier works twice per ticket, then on the epic's gates**: once, or once per step where the plan orders its
+gates in steps (the `phase=gates` paragraph below). Before the merge it reads the `READY` head: `done_when.py probe` and
+`coverage`, the PR's `## Verified` and `## One honest limit`. Its positive read opens the merge gate and writes nothing to the task ledger.
 After the merge it checks the merged commit and only then calls `swarm.py pass`, so `verified` always follows `merged`.
 Its return (`PASS` or `FAIL`, fixed by the `verifier` agent) names the head and the phase: `phase=read` before the
 merge, `phase=merged` after, so a stale `PASS` cannot open the gate for a newer head. It goes to the orchestrator, moves
@@ -64,11 +65,17 @@ no row by itself and is not a grammar line. A `FAIL` on the `READY` head goes ba
 on the merged commit moves the row from `merged` to `blocked`. Its fix is a new assignment on a new branch, and the old
 worker is not reopened, because its branch is already merged.
 
-The third run is `phase=gates`, once for the epic after every child's `phase=merged` has recorded its passes. It runs the
-check of each `agent` gate due once per child, and signs each one that holds with `gates.py sign --by verifier`; a
-`human` gate is never its to sign. A `FAIL` at `phase=gates` leaves the failing gates open, so `gates.py status` still
-exits 3 and the epic does not close: it goes back to Run for a fix, and the next gate run names only the open gates. The
-line carries the epic as its ticket and `VG-<n>` as its ids, and the gates it already signed stay signed.
+The epic's runs are `phase=gates`. An epic's gates run once, after every child's `phase=merged` has recorded its passes,
+unless its verification plan orders its gates in steps: a `### Steps` table inside its `## Verification plan`, as
+`docs/verification/data-migration.md` has. Then there is one gate run per step, a row of that table: each reads only the
+gates due in that step (the verifier's `GATES:`), after the tickets its *Merged first* cell names, which the
+orchestrator fills in before the first run, have recorded their passes (its `CHILDREN:`), and the next step starts only
+once that step's gates are closed. A step whose gates are all `human` has no run: the owner's signatures are that step.
+A run checks each `agent` gate it names once per child, and signs each one that holds with `gates.py sign --by
+verifier`; a `human` gate is never its to sign. A `FAIL` at `phase=gates` leaves the failing gates open, so `gates.py
+status` still exits 3 and the epic does not close: it goes back to Run for a fix, and the next gate run names only the
+open gates. The line carries the epic as its ticket and `VG-<n>` as its ids, and the gates it already signed stay
+signed.
 
 ### One ticket's life
 
@@ -118,7 +125,7 @@ sequenceDiagram
     Ver-->>Orc: FAIL head phase=merged
     Orc->>Led: row blocked, new assignment on a new branch
   end
-  Note over Orc,Led: after every child is verified or done
+  Note over Orc,Led: after every child's passes, or per step once the children it names have theirs
   Orc->>Ver: the epic's gates due
   alt PASS phase=gates
     Ver->>Led: gates.py sign VG-n with evidence, by verifier
@@ -144,7 +151,7 @@ the owner answers.
 | Raising a budget cap | **owner** | At the epic cap the orchestrator spawns nothing and says so in the digest. A worker at its cap finishes the step, pushes and sends `BLOCKED`; it never extends its own cap. | the task ledger's budget |
 | Changing a tolerance: a threshold or an accepted difference that a gate reads | **owner** | No agent loosens one. | a decision line |
 | A pass on a `DW-<n>` | **verifier** | `swarm.py pass` refuses a call without `--evidence` or without `--by verifier`. A worker's `READY` and the orchestrator's opinion do not count. | the task ledger's `passes` |
-| A signature on an agent gate (`kind: agent`) | **verifier** | `gates.py sign --by verifier --evidence <item>`, in the `phase=gates` run, after every child's passes are recorded. A failing gate stays open. The orchestrator posts the rewritten plan back to the epic. | the epic's `## Verification plan` |
+| A signature on an agent gate (`kind: agent`) | **verifier** | `gates.py sign --by verifier --evidence <item>`, in a `phase=gates` run: one after every child's passes are recorded, or, where the plan orders its gates in steps, one per step after the children that step names as merged first have recorded theirs. A failing gate stays open. The orchestrator posts the rewritten plan back to the epic. | the epic's `## Verification plan` |
 | A routine merge | **orchestrator** | One standalone `pr-merge.sh` call pinned to the `READY` head, once review (`reviewDecision: APPROVED`, never one review alone), CI, code-owner coverage and the verifier's read of the `READY` head all hold. `swarm.merge.<owner/repo>` can hand this row to auto-merge or to the owner; it moves no other row. Where a repo's own auto-merge can merge a non-draft PR as soon as its gates hold, the PR stays a draft until the verifier's read and the review overview are back. | the PR, the task ledger |
 | Assign, re-brief, reassign, park | **orchestrator** | Workers take what the assignment names. | the task ledger, the assignment file |
 | Granting a lease, setting a `HOLD` | **orchestrator** | The owner can pre-empt either. Each hold names one releaser. | the lease file, the task ledger |
@@ -417,7 +424,7 @@ out; the order is fixed here.
 | 5 | Stalls | Stall and failover rules apply only to `assigned` and `claimed` rows. Rows in `pr`, `ready-to-merge`, `blocked`, `parked` or under a `HOLD` are exempt and have their own watches: the PR watch, the owner's decision, the hold's releaser. A worker with no new commit, status or comment past `swarm.stall_minutes` (default 90) has stalled. At two stalls it gets one re-brief, then the ticket is reassigned or parked, with a task ledger entry. An assignment whose worker is `unreachable`, whose registry row is `⚠ STALE`, that ended with no return or that lost its background task returns here: `swarm.py resume` shows whether to drive a PR it finds to merge, respawn it in place or reassign it. |
 | 6 | Budget | Reads spend per worker and per epic against the caps (`swarm_budget.py`); `swarm.py tick` runs the sweep itself. Past the epic cap it spawns nothing and the digest says so. A hard stop writes the STOP file. An epic cap with no orchestrator reading refuses the next spawn and closes the pool (`no_assign`, `assignable` empty): the sweep reads the orchestrator's session from `--session-id <id>`, or, without it, from this session only when its registry row says `role: orchestrator` on this epic. A cap that does not parse, a stop not written and a sweep that raises close the pool the same way. |
 | 7 | Integration | For a `READY` with no PR yet, or a peer's `PR`: a draft PR from the worker's body file, then the `review-runner` overview. Findings go back to the owning worker as `ASSIGN … rebrief=1`, carried inline; a clean review needs no wake. Owners per touched path come from the live code-owner rules; a path whose only reachable owner is the author is reported as `needs owner of <path>` at PR open, before any `READY` head counts toward the merge gate. With the overview back the orchestrator marks the PR ready and arms `pr-watch`; where a repo's own auto-merge could fire, the PR stays a draft until the verifier's read is back too. When the gates hold at that head the orchestrator moves the row to `ready-to-merge`. The merge is one standalone `pr-merge.sh` call pinned to the head the `READY` line carried. A moved head, a branch updated from its base included, needs a new `READY`, and the gates run again for it. Protected paths wait for the owner. |
-| 8 | Verify | Hands the verifier each `READY` head before its merge and each merged PR after it, and, once every child has its passes, the epic's gates due. A `PASS` with `phase=read` opens the merge gate for the head it names, at the next tick; a `FAIL` with `phase=read` goes back as a re-brief. A `FAIL` with `phase=merged` moves the row from `merged` to `blocked`, and the fix is a new assignment on a new branch. A `FAIL` with `phase=gates` leaves the gates it names open and sends the epic back to Run. |
+| 8 | Verify | Hands the verifier each `READY` head before its merge and each merged PR after it, and the epic's gates due: once every child has its passes, or, where the plan orders its gates in steps, each step's once the children that step names as merged first have theirs. A `PASS` with `phase=read` opens the merge gate for the head it names, at the next tick; a `FAIL` with `phase=read` goes back as a re-brief. A `FAIL` with `phase=merged` moves the row from `merged` to `blocked`, and the fix is a new assignment on a new branch. A `FAIL` with `phase=gates` leaves the gates it names open and sends the epic back to Run. |
 | 9 | Digest | Once per `swarm.digest_hours` (default 4) and at every wave end: shipped, blocked with who must act, decisions open, spend against caps, stalls, next. |
 | 10 | Flush | Writes the task ledger, renders the `## Swarm` table and `prs.tsv`, updates the context doc and the registry row. |
 

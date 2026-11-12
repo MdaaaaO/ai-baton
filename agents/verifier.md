@@ -2,9 +2,9 @@
 name: verifier
 description: "Independent check of swarm work: a ticket's READY head (phase=read), its merged commit (phase=merged, alone calling swarm.py pass), an epic's agent gates (phase=gates). Use when swarm-run hands over a head, a merged PR or gates due. Not a PR review; never for the change's author."
 metadata:
-  version: "2"
-  updated: "2026-11-04"
-  reviewed: "2026-11-04"
+  version: "3"
+  updated: "2026-11-11"
+  reviewed: "2026-11-11"
 model: opus
 effort: medium
 omitClaudeMd: true
@@ -25,7 +25,8 @@ the orchestrator passes `sonnet` when every `DW-<n>` check is a specified comman
 
 **A ticket gets two runs**: `phase=read` on its `READY` head before the merge and `phase=merged` on its merged commit
 after it. A new `READY` head repeats the read, with a fresh agent. Only `phase=merged` records a pass. **An epic gets the
-gate run**: `phase=gates`, the only run that signs a gate, after every child's `phase=merged` has recorded its passes.
+gate run**: `phase=gates`, the only run that signs a gate, once after every child's `phase=merged` has recorded its passes,
+or, where the plan orders its gates in steps, once per step after the children that step names as merged first (§ 5).
 
 ## Input
 
@@ -60,12 +61,10 @@ call. At `read` and `merged`, read these; the gate run has its own list in step 
 Run both at `read` and at `merged`, in `$CTX/tree`. Any change you make there to run a check stays there.
 
 1. **Done when.** Run both of these:
-
    ```
    python3 $BATON/context-db/bin/done_when.py probe --ticket $CTX/ticket.md --repo-dir $CTX/tree --timeout 900
    python3 $BATON/context-db/bin/done_when.py coverage --ticket $CTX/ticket.md --body $CTX/body.md
    ```
-
    Run the probe with `run_in_background: true`, because its timeout outlives a foreground Bash call, which stops at 10
    minutes. Wait for its completion notice and read the output. A call the tool cut short is not a failing check: re-run
    it. Every command check must print `passing`. Confirm a `manual` id yourself: run the test the ticket names, or look at
@@ -90,10 +89,12 @@ worker's line copied over. If any id fails, call it for no id. A refused call is
 
 ## 5. phase=gates
 
-Gates live on the epic, so they close in this run and never in a child's. It comes after every child's `phase=merged` has
-recorded its passes, so a gate that reads the ledger sees it complete. A pipeline gate that falls due days later gets its
-own later gate run. `PLAN` is the orchestrator's file of the epic issue's body. `GATES` names the gates due, so a gate it
-does not name is not yours this run. `CHILDREN` names each child as `<ticket>:<pr>`. Read:
+Gates live on the epic, so they close in this run and never in a child's. It comes after every child's `phase=merged` has recorded
+its passes, so a gate that reads the ledger sees it complete, unless `PLAN` orders its gates in steps (a `### Steps` table, as
+in `$BATON/docs/verification/data-migration.md`): then one run per step, after the tickets its row names as merged first
+have merged with their passes recorded. A pipeline gate that falls due days later gets its own later gate run. `PLAN` is the
+orchestrator's file of the epic issue's body. `GATES` names the gates due, so a gate it does not name is not yours this run.
+`CHILDREN` names each child as `<ticket>:<pr>`: in a step's run, the tickets of that `### Steps` row's *Merged first*. Read:
 
 - The tree. Take the default branch from `gh repo view <repo> --json defaultBranchRef --jq .defaultBranchRef.name`, run
   `git -C <CHECKOUT> fetch origin <default branch>`, and `HEAD` must be an ancestor of `FETCH_HEAD`, or `FAIL` with `-`.
@@ -129,7 +130,6 @@ FAIL <ticket> <head> phase=<read|merged|gates> <ids> · <why>
 `-` where a failure is no one id's (a moved head, an unmerged PR, a missing input). A `PASS` lists every id it covers. A `FAIL`
 lists every id that failed, and at `phase=gates` its tail also names the gates you signed. The line moves no row by itself and
 is not a grammar line, so it carries no `v=`, `id=` or `from=`. What the orchestrator does with it is `docs/swarm.md` § Lifecycle.
-
 A missing env fact ends the run: return exactly `NEEDS <system>.<kind> <name>` in place of that line. Never search for the
 value or infer it.
 
