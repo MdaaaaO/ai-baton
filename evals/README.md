@@ -114,3 +114,14 @@ suite or a behaviour case is added or renamed.
 | `walkthrough` | 6+6 | `walkthrough-behaviour-no-unconfirmed-plain-words`, `walkthrough-behaviour-second-miss-parks-step`, `walkthrough-behaviour-epic-plan` |
 
 Plus `kit-review-*` (8 cases, `docs/REVIEW.md` proof cases — not tied to one skill).
+
+Plus the swarm's two agents, whose cases are named `<agent>-<case>` and tagged `behaviour` (so they count in neither a
+trigger suite nor the behaviour total above):
+
+| agent | cases | of which near misses | graded against |
+|---|---|---|---|
+| `builder` | 14 | 6 | `agents/builder.md` |
+| `verifier` | 10 | 3 | `agents/verifier.md` |
+
+`eval-check` checks these cases' format only: inside a `claude plugin eval` run the model cannot read the plugin's
+`agents/*.md`, so no agent case passes a live grade yet (#738 looks for a framing the harness grades).
