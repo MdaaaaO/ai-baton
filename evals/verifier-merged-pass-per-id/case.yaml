@@ -1,0 +1,4 @@
+schema_version: "1.0"
+name: verifier-merged-pass-per-id
+context:
+  scaffold_script: fixture.sh

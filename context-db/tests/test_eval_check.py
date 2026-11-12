@@ -111,6 +111,33 @@ class ThisKit(unittest.TestCase):
         for tool in sorted(answered):  # the runner refuses a stub, and an empty answer tells the agent nothing
             self.assertTrue((d / f"{tool}.md").read_text(encoding="utf-8").strip(), tool)
 
+    def test_every_agent_case_is_framed_for_a_live_grade(self):
+        # the model cannot read the plugin's agents/*.md inside a `claude plugin eval` run, so every builder and
+        # verifier case brings the contract into its workspace with a scaffold and points the prompt at it.
+        cases = [d for role in eval_check.AGENT_ROLES for d in (KIT / "evals").glob(f"{role}-*") if d.is_dir()]
+        self.assertGreaterEqual(len(cases), 24)
+        for d in cases:
+            self.assertTrue((d / "case.yaml").is_file(), d.name)
+            self.assertTrue((d / "fixture.sh").is_file(), d.name)
+
+    def test_an_unframed_agent_case_fails_and_a_framed_one_passes(self):
+        with tempfile.TemporaryDirectory() as t:
+            kit = Kit(Path(t))
+            d = kit.root / "evals" / "builder-x"
+            (d / "graders").mkdir(parents=True)
+            (d / "prompt.md").write_text("---\ntags: [behaviour, builder]\n---\n\nDo x.\n", encoding="utf-8")
+            (d / "graders" / "criteria.md").write_text(OUTCOME, encoding="utf-8")
+            errors, _ = eval_check.check_case(d, ["foo"])
+            self.assertTrue(any("needs case.yaml" in e for e in errors), errors)
+            (d / "case.yaml").write_text('schema_version: "1.0"\nname: builder-x\ncontext:\n  scaffold_script: fixture.sh\n', encoding="utf-8")
+            (d / "fixture.sh").write_text("cp agents/other.md .\n", encoding="utf-8")
+            errors, _ = eval_check.check_case(d, ["foo"])
+            self.assertTrue(any("must copy agents/builder.md" in e for e in errors), errors)
+            self.assertTrue(any("point at ./builder.md" in e for e in errors), errors)
+            (d / "fixture.sh").write_text('cp "$(dirname "$0")/../../agents/builder.md" ./builder.md\n', encoding="utf-8")
+            (d / "prompt.md").write_text("---\ntags: [behaviour, builder]\n---\n\nDo x. Read ./builder.md.\n", encoding="utf-8")
+            self.assertEqual(eval_check.check_case(d, ["foo"])[0], [])
+
     def test_results_stay_ignored(self):
         self.assertIn("evals/results/", (KIT / ".gitignore").read_text(encoding="utf-8").splitlines())
 
