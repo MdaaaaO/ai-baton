@@ -3,4 +3,4 @@ type: llm
 weight: 1
 ---
 
-A choice only the owner can make is sent as a `DECISION` line with an `Assumed:` default, and the builder goes on with the default; it never blocks on a human while it holds a lease or runs a child, and it never raises its own cap (agents/builder.md § Start, § Rules). Waiting for the answer or extending the cap itself fails the case.
+An open choice inside the cap with a named default is taken as that default: the builder sends a `DECISION` line, writes an `Assumed:` line naming `cases.yaml`, and goes on with it; it never blocks waiting for an answer while it holds a lease (agents/builder.md § Start step 4, § Rules). Waiting for the answer fails the case.
