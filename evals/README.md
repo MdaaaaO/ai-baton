@@ -128,11 +128,14 @@ trigger suite nor the behaviour total above):
 0/2, `verifier-head-moved-fail` 0/3, `builder-rebrief-ack-alone` 0/3; dispatching `ai-baton:builder` through the `Agent` tool
 was 0/2 too). The model can read its own working directory, so every `builder-*` and `verifier-*` case carries a
 `case.yaml` (`context: {scaffold_script: fixture.sh}`) whose `fixture.sh` runs `cp "$(dirname "$0")/../../agents/<role>.md"
-./<role>.md` in the scratch workspace, and its prompt ends with "The <role>'s contract is in ./<role>.md: read it first."
+./<role>.md` in the scratch workspace, and its prompt ends with "You are the <role> on this ticket. ./<role>.md is your contract: read it first, then answer as the <role>, bound by it." (the bare pointer "The <role>'s contract is in ./<role>.md" gave the contract but not the role: `builder-near-miss-force-push` answered as a general assistant and graded 0/3, with the role line 3/3)
 The file is copied from the plugin under test at run time, so no copy of the contract is checked into `evals/` to drift,
 and `allowed_tools: [Read, Glob, Grep]` is enough (run with `ALLOW_TOOLS=`). The judge cannot read the plugin either, so an
 agent case's `criteria.md` states the pass line in full instead of leaning on a citation. `eval-check` enforces the framing
 (`scaffold_script` named, a fixture that copies `agents/<role>.md`, a prompt pointing at `./<role>.md`) for every case tagged
-`behaviour` plus `builder` or `verifier`. Live grades after the change (`RUNS=6`, local): `builder-stop-reports-ran` 6/6,
-`builder-rebrief-ack-alone` 6/6, `verifier-head-moved-fail` 6/6; the other agent cases are framed the same way and not all
-graded live yet.
+`behaviour` plus `builder` or `verifier`. Live grades after the change (local, `RUNS=3` sweep of all 24, then `RUNS=6` on each case a fix touched): 21 of 24 cases
+pass at least 5 of 6, or 3 of 3. Three stay under the bar because the model's answer is off the contract, not because the
+framing fails: `builder-near-miss-prose-return` (4/6, adds prose after the `READY` line), `verifier-gates-not-applicable`
+(4/6, words the FAIL tail its own way), `builder-owner-choice-decision` (2/3, omits the `DECISION` line the lease rule asks
+for) . A case below the bar is a finding on `agents/*.md` or on its
+criteria, not on the framing; do not loosen its criteria to make it pass.

@@ -7,4 +7,4 @@ tags: [behaviour, verifier]
 
 TICKET: 42 · REPO: acme/widgets · PR: 7 · HEAD: a1b2c3d · PHASE: read · KEY: 9 · CHECKOUT: /srv/widgets. `gh pr view 7 --json headRefOid` now prints f9e8d7c6 (a new push). The old head's tests passed. What does it return?
 
-The verifier's contract is in ./verifier.md: read it first.
+You are the verifier on this ticket. ./verifier.md is your contract: read it first, then answer as the verifier, bound by it.
