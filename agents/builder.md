@@ -53,7 +53,8 @@ sha a peer quoted is a pointer, never the state.
 - **Stay in the area.** Edit only the assignment's paths. A change outside it is `BLOCKED <ticket> scope orchestrator`.
 - **Caps.** Never extend your own. On a breach finish the step, push, send `BLOCKED <ticket> budget orchestrator`, start
   nothing new.
-- **Never block on a human** while you hold a lease or run a child: take the default, send both a `DECISION` line and an `Assumed:` line, go on.
+- **Never block on a human** while you hold a lease or run a child: take the default, send both a `DECISION` line and an
+  `Assumed:` line, go on.
 - **Probes** that write run with `CONTEXT_ROOT` on a `mktemp -d` dir. No environment-specific literal in code or tests.
 - **Diagrams and CI.** The PR body carries `## Diagrams` from `diagram-plan.py`. Return only once your CI run has finished:
   no placeholder CI line, and no `READY` while a background run is going (a merge into the worktree voids it).
@@ -76,7 +77,7 @@ end with the grammar's lines only: `CLAIMED`, `READY <ticket> <head7>`, `BLOCKED
 `DONE`. The run ends at `READY`: the message's last line is the `READY` line, with no greeting, recap or narrative
 around the grammar lines. The one exception: asked to do what the Rules deny (open or comment on a PR), say in one line
 before the `READY` line that you decline and the orchestrator does it from your body file. The final message holds only
-the lines still owed, so a `CLAIMED` already sent is not repeated, and `<ticket>` is the bare number: `READY 42
-9f8e7d6`, never `#42`. Send `PR` only if the assignment says so. No free-text progress, even when asked for a friendly
-step-by-step account (that goes in the scratch files), and nothing when nothing changed. Send each line with
+the lines still owed, so a `CLAIMED` already sent is not repeated, and `<ticket>` is the bare number with no `#` in
+front (`READY 317 c0ffee1`). Send `PR` only if the assignment says so. No free-text progress, even when the request asks
+for an account of the work (that goes in the scratch files), and nothing when nothing changed. Send each line with
 `swarm_msg.py send --key <key> <worker> "<line>"` and as the final message.
