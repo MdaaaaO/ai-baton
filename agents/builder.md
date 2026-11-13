@@ -73,5 +73,10 @@ Auto mode denies some acts to a worker. Ask the role that does them; never retry
 
 Write the return block and the PR body to the scratch files the assignment names (a path that outlives a restart), then
 end with the grammar's lines only: `CLAIMED`, `READY <ticket> <head7>`, `BLOCKED`, `NEEDS`, `DECISION`, `Assumed:`,
-`DONE`. The run ends at `READY`; send `PR` only if the assignment says so. No free-text progress, and nothing when nothing
-changed. Send each line with `swarm_msg.py send --key <key> <worker> "<line>"` and as the final message.
+`DONE`. The run ends at `READY`: the message's last line is the `READY` line, with no greeting, recap or narrative
+around the grammar lines. The one exception: asked to do what the Rules deny (open or comment on a PR), say in one line
+before the `READY` line that you decline and the orchestrator does it from your body file. The final message holds only
+the lines still owed, so a `CLAIMED` already sent is not repeated, and `<ticket>` is the bare number: `READY 42
+9f8e7d6`, never `#42`. Send `PR` only if the assignment says so. No free-text progress, even when asked for a friendly
+step-by-step account (that goes in the scratch files), and nothing when nothing changed. Send each line with
+`swarm_msg.py send --key <key> <worker> "<line>"` and as the final message.

@@ -133,9 +133,11 @@ The file is copied from the plugin under test at run time, so no copy of the con
 and `allowed_tools: [Read, Glob, Grep]` is enough (run with `ALLOW_TOOLS=`). The judge cannot read the plugin either, so an
 agent case's `criteria.md` states the pass line in full instead of leaning on a citation. `eval-check` enforces the framing
 (`scaffold_script` named, a fixture that copies `agents/<role>.md`, a prompt pointing at `./<role>.md`) for every case tagged
-`behaviour` plus `builder` or `verifier`. Live grades after the change (local, `RUNS=3` sweep of all 24, then `RUNS=6` on each case a fix touched): 21 of 24 cases
-pass at least 5 of 6, or 3 of 3. Three stay under the bar because the model's answer is off the contract, not because the
-framing fails: `builder-near-miss-prose-return` (4/6, adds prose after the `READY` line), `verifier-gates-not-applicable`
-(4/6, words the FAIL tail its own way), `builder-owner-choice-decision` (2/3, omits the `DECISION` line the lease rule asks
-for) . A case below the bar is a finding on `agents/*.md` or on its
+`behaviour` plus `builder` or `verifier`. Live grades after the change (local, `RUNS=6` sweep of the 14 `builder-*` and the 10 `verifier-*` cases): all 24 pass at least 5 of 6. The three that sat under the bar did so because the model's
+answer was off the contract, not because the framing failed, and each now lands from a contract sentence:
+`builder-owner-choice-decision` (6/6, `agents/builder.md` sends the `DECISION` line together with the `Assumed:` line while
+a lease is held), `verifier-gates-not-applicable` (5/6, `agents/verifier.md` spells the FAIL tail for a gate that is not
+applicable here) and `builder-near-miss-prose-return` (6/6, the builder's message ends at the `READY` line, bare ticket
+number, no `CLAIMED` repeated).
+A case below the bar is a finding on `agents/*.md` or on its
 criteria, not on the framing; do not loosen its criteria to make it pass.
