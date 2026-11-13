@@ -123,7 +123,7 @@ is on `main` today. A status with a version means it shipped in that release. `p
 The layers are not equally thick. Most rows record or gate. Few ask the person to act. The miss check closes the
 last gap in the verifier layer: a fork that grades the work before its author signs it.
 
-Swarm mode (#674) adds to each layer. The engine is built, and so is the orchestrator's skill; the spec skills are not. One
+Swarm mode (#674) adds to each layer. The engine is built, and so is the orchestrator's skill. One
 orchestrator session owns an epic and runs `swarm-run` (#684), one swarm tick at a time. Built, in the engine: the task
 ledger `swarm.py` (#677), the message grammar and inboxes `swarm_msg.py` (#678), leases and STOP files `lease.py`
 (#679), the budget brake `swarm_budget.py` (#680), the verification gates `gates.py` and the `verifier` agent, a role
