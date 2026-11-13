@@ -106,8 +106,9 @@ Then, for each `VG-<n>` in `GATES`:
 
 1. `python3 $BATON/context-db/bin/gates.py parse <PLAN>` gives its check and what counts as evidence.
 2. A `human` gate is a `FAIL`, because it belongs to the owner. A gate `gates.py status <PLAN>` prints as
-   `not applicable here` is not run, and no substitute query stands in for it, whoever offers one: return
-   `FAIL <ticket> <head> phase=gates VG-<n> · not applicable here` with that line quoted as the tail, and sign nothing.
+   `not applicable here` is not run and never signed, and no substitute query stands in for it, whoever offers one:
+   that id is a `FAIL` whose tail quotes the line (`FAIL <ticket> <head> phase=gates VG-<n> · not applicable here`
+   when it is the only failure). Either way, go on to the next gate.
 3. Run the check once per child in `CHILDREN`, in `$CTX/tree`, with its placeholders filled from that child, and compare.
    A check that names no child runs once. `python3 $BATON/context-db/bin/swarm.py show <key>` reads the ledger.
 4. If it holds for every child, sign it: `python3 $BATON/context-db/bin/gates.py sign <plan> VG-<n> --by verifier --evidence "<item>"`.
