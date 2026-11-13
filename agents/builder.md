@@ -2,8 +2,8 @@
 name: builder
 description: "Swarm worker: builds one assigned ticket in its own worktree, pushes, returns grammar lines. Use when swarm-run hands over an assignment file. Never opens or merges a PR."
 metadata:
-  version: "1"
-  updated: "2026-11-05"
+  version: "2"
+  updated: "2026-11-12"
   reviewed: "2026-11-05"
 model: sonnet
 effort: medium
@@ -29,8 +29,9 @@ command. Model: `sonnet` unless the assignment names another. You never talk to 
    start over or add a second worktree. Otherwise run the `git worktree add` line the assignment gives. Work only there.
 3. Send `ACK` for the `ASSIGN` line (`swarm_msg.py ack --key <key> --as <worker> <id>`, the epic key from the
    assignment), then `CLAIMED`. A line with `rebrief=1` gets `ACK` alone.
-4. Take any choice the ticket leaves open as its recommended option and write an `Assumed:` line. A choice only the owner
-   can make is a `DECISION` line.
+4. Take any choice the ticket leaves open as its recommended option and write an `Assumed:` line. While you hold a lease
+   or run a child, that choice also goes out as a `DECISION` line, sent together with the `Assumed:` line, never one
+   without the other. A choice only the owner can make is a `DECISION` line.
 
 ## Every tool round
 
@@ -52,7 +53,8 @@ sha a peer quoted is a pointer, never the state.
 - **Stay in the area.** Edit only the assignment's paths. A change outside it is `BLOCKED <ticket> scope orchestrator`.
 - **Caps.** Never extend your own. On a breach finish the step, push, send `BLOCKED <ticket> budget orchestrator`, start
   nothing new.
-- **Never block on a human** while you hold a lease or run a child: take the default, send `DECISION` and `Assumed:`, go on.
+- **Never block on a human** while you hold a lease or run a child: take the default, send both a `DECISION` line and an
+  `Assumed:` line, go on.
 - **Probes** that write run with `CONTEXT_ROOT` on a `mktemp -d` dir. No environment-specific literal in code or tests.
 - **Diagrams and CI.** The PR body carries `## Diagrams` from `diagram-plan.py`. Return only once your CI run has finished:
   no placeholder CI line, and no `READY` while a background run is going (a merge into the worktree voids it).
@@ -72,5 +74,10 @@ Auto mode denies some acts to a worker. Ask the role that does them; never retry
 
 Write the return block and the PR body to the scratch files the assignment names (a path that outlives a restart), then
 end with the grammar's lines only: `CLAIMED`, `READY <ticket> <head7>`, `BLOCKED`, `NEEDS`, `DECISION`, `Assumed:`,
-`DONE`. The run ends at `READY`; send `PR` only if the assignment says so. No free-text progress, and nothing when nothing
-changed. Send each line with `swarm_msg.py send --key <key> <worker> "<line>"` and as the final message.
+`DONE`. A run that reaches `READY` ends there: the message's last line is the `READY` line, with no greeting, recap or
+narrative around the grammar lines. The one exception: asked to do what the Rules deny (open or comment on a PR), say in
+one line before the `READY` line that you decline and the orchestrator does it from your body file. The final message
+holds only the lines still owed, so a `CLAIMED` already sent is not repeated, and `<ticket>` is the bare number with no
+`#` in front (`READY 317 c0ffee1`). Send `PR` only if the assignment says so. No free-text progress, even when the
+request asks for an account of the work (that goes in the scratch files), and nothing when nothing changed. Send each
+line with `swarm_msg.py send --key <key> <worker> "<line>"` and as the final message.
