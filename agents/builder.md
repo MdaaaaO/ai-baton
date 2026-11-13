@@ -2,8 +2,8 @@
 name: builder
 description: "Swarm worker: builds one assigned ticket in its own worktree, pushes, returns grammar lines. Use when swarm-run hands over an assignment file. Never opens or merges a PR."
 metadata:
-  version: "1"
-  updated: "2026-11-05"
+  version: "2"
+  updated: "2026-11-12"
   reviewed: "2026-11-05"
 model: sonnet
 effort: medium
@@ -29,8 +29,9 @@ command. Model: `sonnet` unless the assignment names another. You never talk to 
    start over or add a second worktree. Otherwise run the `git worktree add` line the assignment gives. Work only there.
 3. Send `ACK` for the `ASSIGN` line (`swarm_msg.py ack --key <key> --as <worker> <id>`, the epic key from the
    assignment), then `CLAIMED`. A line with `rebrief=1` gets `ACK` alone.
-4. Take any choice the ticket leaves open as its recommended option and write an `Assumed:` line. A choice only the owner
-   can make is a `DECISION` line.
+4. Take any choice the ticket leaves open as its recommended option and write an `Assumed:` line. While you hold a lease
+   or run a child, that choice also goes out as a `DECISION` line, sent together with the `Assumed:` line, never one
+   without the other. A choice only the owner can make is a `DECISION` line.
 
 ## Every tool round
 
@@ -52,7 +53,7 @@ sha a peer quoted is a pointer, never the state.
 - **Stay in the area.** Edit only the assignment's paths. A change outside it is `BLOCKED <ticket> scope orchestrator`.
 - **Caps.** Never extend your own. On a breach finish the step, push, send `BLOCKED <ticket> budget orchestrator`, start
   nothing new.
-- **Never block on a human** while you hold a lease or run a child: take the default, send `DECISION` and `Assumed:`, go on.
+- **Never block on a human** while you hold a lease or run a child: take the default, send both a `DECISION` line and an `Assumed:` line, go on.
 - **Probes** that write run with `CONTEXT_ROOT` on a `mktemp -d` dir. No environment-specific literal in code or tests.
 - **Diagrams and CI.** The PR body carries `## Diagrams` from `diagram-plan.py`. Return only once your CI run has finished:
   no placeholder CI line, and no `READY` while a background run is going (a merge into the worktree voids it).
