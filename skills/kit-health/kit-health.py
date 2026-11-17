@@ -1895,7 +1895,7 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
                 r.add(ERR, "engine", f"`{label}`: new.sh failed for " + "; ".join(failed))
             else:
                 r.add(OK, "engine", f"`{label}`: new.sh scaffolds all 9 doc types")
-                new_doc_takes_a_write(r, scratch, first, env)
+                new_doc_takes_a_write(r, first, env)
     rc, out, err = sh([sys.executable, str(BIN / "kb.py"), "list"])
     r.add(OK if rc == 0 else ERR, "engine", "`kb.py list` " + ("reads the env store" if rc == 0 else f"failed: {both(out, err)[-300:]}"))
     ctx_store(r)
@@ -1903,25 +1903,33 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
     template_override_check(r)
 
 
-def new_doc_takes_a_write(r: Report, scratch: Path, domain: str, env: dict) -> None:
-    """§5: the epic `new.sh` just scaffolded in the scratch root takes a `ctx log` with no migration first (#692: a doc
-    behind its type's schema version is refused MIGRATION_PENDING). Adopts the scratch root as a throw-away store;
-    no ctx installed is `ctx_store`'s finding, not this one's."""
-    env2 = dict(env, CONTEXT_ROOT=str(scratch), CTX_NO_WALK="1")
-    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "adopt"], env=env2, timeout=300)
-    if rc == 1:
-        return
-    if rc != 0:
-        r.add(WARN, "engine", f"new-doc write smoke skipped: `ctx_adapter.py adopt` on a scratch store exited {rc}: "
-                              f"{both(out, err)[-300:]}")
-        return
-    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "ctx", "log", f"{domain}/smoke-epic",
-                       "kit-health smoke"], env=env2)
-    if rc == 0:
-        r.add(OK, "engine", "a fresh `make new` epic takes a `ctx log` with no migration")
-    else:
-        r.add(ERR, "engine", "a fresh `make new` epic refuses a `ctx log` (a missing `schema_version` reads "
-                             f"MIGRATION_PENDING): {both(out, err)[-300:]}")
+def new_doc_takes_a_write(r: Report, domain: str, env: dict) -> None:
+    """§5: an epic `new.sh` scaffolds into an already adopted scratch store takes a `ctx log` with no migration first
+    (#692: a doc behind its type's schema version is refused MIGRATION_PENDING). The store is adopted while still
+    empty, since `adopt` itself migrates every doc it finds; no ctx installed is `ctx_store`'s finding, not this one's."""
+    with tempfile.TemporaryDirectory(prefix="kit-health-store-") as tmp:
+        scratch = Path(tmp)
+        (scratch / domain).mkdir(parents=True)
+        env2 = dict(env, CONTEXT_ROOT=str(scratch), CTX_NO_WALK="1", CTX_STORE="")
+        rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "adopt"], env=env2, timeout=300)
+        if rc == 1:
+            return
+        if rc != 0:
+            r.add(WARN, "engine", f"new-doc write smoke skipped: `ctx_adapter.py adopt` on a scratch store exited {rc}: "
+                                  f"{both(out, err)[-300:]}")
+            return
+        rc, out, err = sh(["sh", str(BIN / "new.sh")],
+                          env=dict(env2, TYPE="epic", DOMAIN=domain, SLUG="smoke-epic", TITLE="smoke epic"))
+        if rc != 0:
+            r.add(ERR, "engine", f"new.sh failed to scaffold an epic into an adopted store: {both(out, err)[-300:]}")
+            return
+        rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "ctx", "log", f"{domain}/smoke-epic",
+                           "kit-health smoke"], env=env2)
+        if rc == 0:
+            r.add(OK, "engine", "a fresh `make new` epic takes a `ctx log` with no migration")
+        else:
+            r.add(ERR, "engine", "a fresh `make new` epic refuses a `ctx log` (a missing `schema_version` reads "
+                                 f"MIGRATION_PENDING): {(both(out, err).strip().splitlines() or [f'exit {rc}'])[-1][-300:]}")
 
 
 def ctx_pin_check(r: Report) -> None:
