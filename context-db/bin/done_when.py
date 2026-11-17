@@ -15,7 +15,8 @@ Usage:
   done_when.py parse <ticket-file | ->
       One line per criterion: `DW-<n>`, `command` or `manual`, the check (a command is printed without its
       backticks), the criterion — tab-separated. Reads every `## Done when` section in the text (pass the body,
-      then the comments, oldest first, as `sizing.py` does).
+      then the comments, oldest first, as `sizing.py` does). A command check that diffs against a branch ref or `HEAD`
+      instead of a pinned commit is named on stderr (`DW-<n> diffs against <ref>`); the exit code is unchanged.
   done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | -> [--key <key>]
       Prints exactly `DONE WHEN: covered` or `DONE WHEN: gap DW-<n>[, DW-<n>…]`. An id is covered when
         - a line in the body's `## Verified` section reads `DW-<n>[, DW-<m>…] · <evidence>` and the evidence
@@ -73,6 +74,9 @@ IDS_LINE_RE = re.compile(
 )
 ID_RE = re.compile(r"DW-\d+")
 DEFAULT_PROBE_TIMEOUT = 120
+# A `git diff` operand that names a moving ref (HEAD, a remote branch, a default-branch name) — an "unchanged" check
+# against one passes before the work and again at the merge commit, whatever the change did (#749).
+MOVING_REF_RE = re.compile(r"^(?:HEAD(?:[~^@]\S*)?|(?:refs/\S+|origin/\S+|upstream/\S+)|main|master|develop|trunk)$")
 
 
 class Criterion:
@@ -84,6 +88,17 @@ class Criterion:
         self.check = check
         m = COMMAND_RE.match(check)
         self.command = m.group("cmd").strip() if m else None
+
+
+def moving_ref(command: str | None) -> str | None:
+    """The first moving ref a `git diff` command compares against (a branch or `HEAD`, not a pinned commit), else None."""
+    if not command or not re.search(r"\bgit\b.*\bdiff\b", command):
+        return None
+    for tok in re.split(r"[\s;&|]+", command.split("diff", 1)[1]):
+        for part in re.split(r"\.{2,3}", tok.strip("'\"")):
+            if MOVING_REF_RE.match(part):
+                return part
+    return None
 
 
 # ── sections ─────────────────────────────────────────────────────────────────────────────────
@@ -256,6 +271,10 @@ def _main(argv: list[str]) -> int:
         return rc
     if a.cmd == "parse":
         for c in crits:
+            ref = moving_ref(c.command)
+            if ref:
+                print(f"done_when: {c.id} diffs against {ref}, a moving ref — pin the base commit so the check can "
+                      "still fail after the merge", file=sys.stderr)
             print(f"{c.id}\t{'command' if c.command else 'manual'}\t{c.command or c.check}\t{c.text}")
         return 0
     if a.cmd == "probe":
