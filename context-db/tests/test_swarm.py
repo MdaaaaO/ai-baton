@@ -614,6 +614,52 @@ class Pass(CliCase):
         self.assertEqual(self.ledger_file().read_bytes(), before)
 
 
+class TickDigest(CliCase):
+    """#743 DW-1: the tick reports whether a digest is due, in its table and in `--json`."""
+    NOW = "2026-11-05T12:00:00Z"
+
+    def posted(self, at: str) -> None:
+        path = self.root / "state" / "swarm" / EPIC / "digest.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": at, "text": "x"}), encoding="utf-8")
+
+    def digest(self, now: str) -> dict:
+        return self.tick("--now", now)["digest"]
+
+    def test_due_before_the_first_digest(self):
+        self.plan("7")
+        self.assertEqual(self.digest(self.NOW), {"due": True, "why": "first", "next": None})
+
+    def test_not_due_inside_the_window_and_due_after_it(self):
+        self.plan("7")
+        self.posted(self.NOW)
+        self.assertEqual(self.digest("2026-11-05T15:59:00Z"), {"due": False, "why": None, "next": "2026-11-05T16:00:00Z"})
+        self.assertEqual(self.digest("2026-11-05T16:00:00Z"), {"due": True, "why": "window", "next": None})
+
+    def test_digest_hours_is_read_from_the_store(self):
+        self.plan("7")
+        self.store_config(digest_hours=1)
+        self.posted(self.NOW)
+        self.assertTrue(self.digest("2026-11-05T13:00:00Z")["due"])
+
+    def test_a_wave_end_is_due_inside_the_window_until_a_digest_covers_it(self):
+        self.plan("7", approve=False, waves="w1,w2")
+        self.ok("add", EPIC, "7", "--update", "--wave", "w1")
+        self.ok("approve", EPIC, "--decision", "go")
+        self.to_done("7")
+        self.posted("2000-01-01T00:00:00Z")
+        later = swarm.now_iso()
+        self.assertEqual(self.tick("--now", later)["digest"]["why"], "wave-end")
+        self.posted(swarm.now_iso())
+        self.assertFalse(self.tick("--now", swarm.now_iso())["digest"]["due"])
+
+    def test_the_table_carries_the_line(self):
+        self.plan("7")
+        self.assertIn("digest due (first)", self.ok("tick", EPIC, "--now", self.NOW))
+        self.posted(self.NOW)
+        self.assertIn("digest not-due next=2026-11-05T16:00:00Z", self.ok("tick", EPIC, "--now", "2026-11-05T13:00:00Z"))
+
+
 class Tick(CliCase):
     """DW-3 and DW-8: the tick's input."""
 
