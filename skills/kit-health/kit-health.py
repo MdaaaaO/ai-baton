@@ -30,7 +30,7 @@ Sections:
                   (`memory-prune`'s `memory_check.py`: a WARN past it, within 10 % of it, or on a secret-shaped value); one legacy
                   line: a leftover `.claude/profiles/` clone (the layer retired 2026-09-25) → delete it
   5. engine     — smoke: verify + index on the live `.context/`, kit_profile.py from the env store, new.sh
-                  scaffolds every doc type into a scratch content root; the ctx-store pin: `.context/` adopted,
+                  scaffolds every doc type into a scratch content root and its epic takes a `ctx log` unmigrated; the ctx-store pin: `.context/` adopted,
                   and the pinned `ctx --version` answers the API the adapter expects; an environment's
                   `_templates/<type>.md` override dropping a section its type declares
   6. stamp      — last green run of THIS environment: `.context/kit-health/HEALTH-<env>.md` (local; each
@@ -1895,11 +1895,33 @@ def sec_engine(r: Report, stamping: bool = False) -> None:
                 r.add(ERR, "engine", f"`{label}`: new.sh failed for " + "; ".join(failed))
             else:
                 r.add(OK, "engine", f"`{label}`: new.sh scaffolds all 9 doc types")
+                new_doc_takes_a_write(r, scratch, first, env)
     rc, out, err = sh([sys.executable, str(BIN / "kb.py"), "list"])
     r.add(OK if rc == 0 else ERR, "engine", "`kb.py list` " + ("reads the env store" if rc == 0 else f"failed: {both(out, err)[-300:]}"))
     ctx_store(r)
     ctx_pin_check(r)
     template_override_check(r)
+
+
+def new_doc_takes_a_write(r: Report, scratch: Path, domain: str, env: dict) -> None:
+    """§5: the epic `new.sh` just scaffolded in the scratch root takes a `ctx log` with no migration first (#692: a doc
+    behind its type's schema version is refused MIGRATION_PENDING). Adopts the scratch root as a throw-away store;
+    no ctx installed is `ctx_store`'s finding, not this one's."""
+    env2 = dict(env, CONTEXT_ROOT=str(scratch), CTX_NO_WALK="1")
+    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "adopt"], env=env2, timeout=300)
+    if rc == 1:
+        return
+    if rc != 0:
+        r.add(WARN, "engine", f"new-doc write smoke skipped: `ctx_adapter.py adopt` on a scratch store exited {rc}: "
+                              f"{both(out, err)[-300:]}")
+        return
+    rc, out, err = sh([sys.executable, str(BIN / "ctx_adapter.py"), "ctx", "log", f"{domain}/smoke-epic",
+                       "kit-health smoke"], env=env2)
+    if rc == 0:
+        r.add(OK, "engine", "a fresh `make new` epic takes a `ctx log` with no migration")
+    else:
+        r.add(ERR, "engine", "a fresh `make new` epic refuses a `ctx log` (a missing `schema_version` reads "
+                             f"MIGRATION_PENDING): {both(out, err)[-300:]}")
 
 
 def ctx_pin_check(r: Report) -> None:
