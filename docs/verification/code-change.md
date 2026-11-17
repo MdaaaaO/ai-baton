@@ -76,7 +76,7 @@ runs per child, and the proof is one line naming the children it covers. A gate 
 that hold, and the next run names only the ones still open.
 
 - [ ] VG-1 every child's new tests fail on the default branch where there was behaviour to fix · kind: agent · check: in a throw-away checkout, restore the base copy of each changed file and run the child's new tests · evidence: the failing run as `cmd` → `output`, or the PR's statement that the script is new and has no base copy · signer: verifier
-- [ ] VG-2 every child merged at a head with an approved review and green CI · kind: agent · check: `gh pr view <pr> --json reviewDecision,headRefOid,statusCheckRollup` · evidence: `reviewDecision: APPROVED` and every required check green, at the PR's `headRefOid` · signer: verifier
+- [ ] VG-2 every child merged at a head with an approved review and green CI · kind: agent · check: `gh pr view <pr> --json reviews,headRefOid,statusCheckRollup` · evidence: an `APPROVED` review whose `commit.oid` is the PR's `headRefOid`, and every required check green at that head · signer: verifier
 - [ ] VG-3 every `DW-<n>` of every child is covered and passed · kind: agent · check: `python3 $BATON/context-db/bin/done_when.py coverage --ticket <issue-body> --body <pr-body>` · evidence: `DONE WHEN: covered` per child, and a pass per `DW-<n>` in the task ledger · signer: verifier
 - [ ] VG-4 every child's PR body carries a miss check with nothing open and a clean operator brief · kind: agent · check: `python3 $BATON/skills/pr-open/operator_brief.py check --pr <owner/repo> <n>` · evidence: no warning from the command, and a `Miss check: clean` or `Miss check: fixed <n>, open 0` line in the body · signer: verifier
 
