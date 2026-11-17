@@ -40,7 +40,10 @@ concurrency:
 jobs:
   evals:
     name: evals
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest (#733): on ubuntu-26.04 a user namespace nested inside bwrap cannot write
+    # /proc/self/setgroups, so every case's Bash fails; 24.04 is the image of the last green run. The probe in
+    # "Run the suite" fails closed on an image that refuses it, before anything is spent.
+    runs-on: ubuntu-24.04
     # One skill's suite fits 30 minutes: every agent run is bounded by its case's `timeout_seconds`, and four run at
     # once (JOBS=4 below) — the 45 runs of one 15-case suite took 738 s. Every case at once is some 940 agent runs,
     # about 4.3 hours at that rate — hence the larger limit for an empty `skill`; that limit is an estimate from the
