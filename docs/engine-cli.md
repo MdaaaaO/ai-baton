@@ -1173,7 +1173,7 @@ Every subcommand takes the epic key first:
   apply     one grammar line, CLAIMED, PR, READY or BLOCKED. A second copy of an id changes nothing. A line from a sender
             that is not the row's worker is recorded and moves nothing. DONE moves no row and is refused
   progress  a new commit, status or comment restarts the clock (--head, --note); --spent records spend, which is not
-            progress; --stall counts a stall
+            progress; --ref records the worker's ref after the spawn and moves no row; --stall counts a stall
   pass      `DW-<n> --evidence "…" --by verifier`, on a merged row with no FAIL recorded. The last DW moves the row to
             verified
   tick      the orchestrator's input: ready and assignable tickets, stalled workers (assigned and claimed only), READY

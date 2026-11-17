@@ -570,6 +570,39 @@ class Progress(CliCase):
     def test_a_bad_sha_is_a_usage_error(self):
         self.refused("progress", EPIC, "7", "--head", "not-a-sha", code=2)
 
+    def test_a_ref_is_recorded_after_the_spawn_and_moves_no_row(self):
+        """DW-1: the ref exists only once the spawn has run, so it lands on the assigned row afterwards."""
+        self.ok("progress", EPIC, "7", "--stall")
+        before = self.row()
+        self.assertIsNone(before["worker"]["ref"])
+        self.ok("progress", EPIC, "7", "--ref", "agent-abc")
+        r = self.row()
+        self.assertEqual((r["status"], r["worker"]["ref"], r["worker"]["name"]), ("assigned", "agent-abc", "lane-7"))
+        self.assertEqual((r["stalls"], r["last_progress"]), (before["stalls"], before["last_progress"]), "a ref is not progress")
+
+    def test_a_ref_needs_a_worker_on_the_row(self):
+        self.ok("add", EPIC, "9")
+        self.refused("progress", EPIC, "9", "--ref", "agent-abc")
+
+
+class BudgetNone(CliCase):
+    """DW-3: `budget` takes `none` to remove a cap."""
+
+    def test_none_removes_either_cap_with_a_decision_line(self):
+        self.plan("7", epic_usd=50, worker_usd=8)
+        self.ok("budget", EPIC, "--epic-usd", "none", "--decision", "no epic cap")
+        self.assertEqual(self.ledger()["budget"], {"epic_usd": None, "worker_usd": 8.0})
+        self.ok("budget", EPIC, "--worker-usd", "none", "--decision", "no worker cap")
+        self.assertEqual(self.ledger()["budget"], {"epic_usd": None, "worker_usd": None})
+        self.assertEqual(self.tick()["budget"]["state"], "no-cap")
+        self.assertEqual([e["note"] for e in self.ledger()["log"] if e["act"] == "budget"], ["no epic cap", "no worker cap"])
+
+    def test_none_needs_its_decision_line_and_junk_is_a_usage_error(self):
+        self.plan("7", epic_usd=50)
+        self.refused("budget", EPIC, "--epic-usd", "none")
+        self.assertEqual(self.ledger()["budget"]["epic_usd"], 50.0)
+        self.refused("budget", EPIC, "--epic-usd", "lots", "--decision", "x", code=2)
+
 
 class Pass(CliCase):
     """DW-2 and DW-8: only the verifier, only with evidence, only on a merged row."""

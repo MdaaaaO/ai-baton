@@ -259,7 +259,7 @@ def read_worker(key: str, row: dict) -> tuple[dict, str | None]:
     elif ref:
         problems.append(f"no transcript for ref {ref}")
     elif kind != "headless":
-        problems.append("no ref on the row: `swarm.py assign --ref` names the transcript")
+        problems.append("no ref on the row: `swarm.py assign --ref`, or `progress --ref` after the spawn, names the transcript")
     if kind == "headless":
         try:
             reading["reported"], problem = read_result(result_path(key, name))

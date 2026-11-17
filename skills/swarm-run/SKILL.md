@@ -2,8 +2,8 @@
 name: swarm-run
 description: "The swarm orchestrator's tick: assigns an approved epic's tickets, drains returns, integrates and verifies PRs, writes the digest. Use when running or resuming an epic's swarm, or on its tick wake-up. Not for one ticket (`ticket-pickup`) or a PR you own alone (`pr-watch`)."
 metadata:
-  version: "5"
-  updated: "2026-11-11"
+  version: "6"
+  updated: "2026-11-17"
   reviewed: "2026-11-11"
 user-invocable: true
 argument-hint: "<epic key>"
@@ -67,6 +67,10 @@ under a `STOP`, and `no_assign` says why: assign nothing and put the reason in t
   field filled; the `ASSIGN` line into the worker's inbox (`swarm_msg.py format` + `send --inbox`).
 - **Spawn all in one message**, in the background, the model the Sizing line names, one worktree each. A headless
   worker takes the caps' `flag:` line (`--max-budget-usd`).
+- **Record each ref right after the spawn:** the spawn is what makes a worker's ref (a subagent's agent id, a peer's or
+  headless run's session id), so `assign` ran without one. For each spawned worker run
+  `swarm.py progress <key> <ticket> --ref <ref>` before anything else; it moves no row, and without it the budget sweep
+  prints `spend-unread` and the worker's row reads $0.
 - **An incident lane** is only for breakage in what is merged: `swarm.py add <key> <t> --incident`, a dated re-plan
   delta on the epic, the owner approves after. It pre-empts the queue. You never take the fix yourself.
 

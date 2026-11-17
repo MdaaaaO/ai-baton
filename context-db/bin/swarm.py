@@ -24,7 +24,7 @@ Every subcommand takes the epic key first:
   apply     one grammar line, CLAIMED, PR, READY or BLOCKED. A second copy of an id changes nothing. A line from a sender
             that is not the row's worker is recorded and moves nothing. DONE moves no row and is refused
   progress  a new commit, status or comment restarts the clock (--head, --note); --spent records spend, which is not
-            progress; --stall counts a stall
+            progress; --ref records the worker's ref after the spawn and moves no row; --stall counts a stall
   pass      `DW-<n> --evidence "…" --by verifier`, on a merged row with no FAIL recorded. The last DW moves the row to
             verified
   tick      the orchestrator's input: ready and assignable tickets, stalled workers (assigned and claimed only), READY
@@ -989,6 +989,10 @@ def cmd_progress(a) -> int:
         moved = bool(a.head and not same_sha(a.head, row["head"]))
         if a.spent is not None:
             row["spent"] = a.spent
+        if a.ref:  # the ref exists only once the spawn has run: recorded after it, it moves no row and is not progress
+            if not row["worker"]["name"]:
+                raise Refused(f"{ticket}: no worker on the row; `assign` first")
+            row["worker"]["ref"] = a.ref
         if a.head:
             row["head"] = a.head
         now = now_iso()
@@ -996,7 +1000,7 @@ def cmd_progress(a) -> int:
             row["stalls"] += 1
             row["stall_counted_at"] = now
             log(led, "stall", ticket, note=a.note)
-        elif moved or a.note or (a.head is None and a.spent is None):
+        elif moved or a.note or (a.head is None and a.spent is None and not a.ref):
             touch(row, now)
             if a.note:
                 log(led, "progress", ticket, note=a.note)
@@ -1249,8 +1253,17 @@ def cmd_hold(a) -> int:
     return 0
 
 
+def usd_or_none(text: str):
+    if text.strip().lower() == "none":
+        return "none"
+    try:
+        return float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"a number or `none`, not {text!r}") from None
+
+
 def cmd_budget(a) -> int:
-    caps = a.epic_usd is not None or a.worker_usd is not None
+    caps = a.epic_usd is not None or a.worker_usd is not None  # `none` removes a cap
     if not caps and a.spent is None:
         raise SwarmError("budget needs --epic-usd, --worker-usd or --spent")
     decision = (a.decision or "").strip()
@@ -1259,7 +1272,7 @@ def cmd_budget(a) -> int:
     with edit(a.key) as led:
         for field, value in (("epic_usd", a.epic_usd), ("worker_usd", a.worker_usd)):
             if value is not None:
-                led["budget"][field] = value
+                led["budget"][field] = None if value == "none" else value
         if a.spent is not None:
             led["spent"] = a.spent
         if caps:
@@ -1339,6 +1352,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("ticket")
     p.add_argument("--head")
     p.add_argument("--spent", type=float, help="the worker's spend so far, USD; not progress on its own")
+    p.add_argument("--ref", help="the worker's ref, once the spawn has made it: the transcript the budget sweep reads; moves no row")
     p.add_argument("--stall", action="store_true", help="count a stall; the stall window restarts")
     p.add_argument("--note")
 
@@ -1393,8 +1407,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--by", help="who releases: the named releaser or the owner")
 
     p = command("budget", cmd_budget, "change a cap, on the owner's decision line; or record the epic's spend")
-    p.add_argument("--epic-usd", type=float)
-    p.add_argument("--worker-usd", type=float)
+    p.add_argument("--epic-usd", type=usd_or_none, help="a number, or `none` to remove the cap")
+    p.add_argument("--worker-usd", type=usd_or_none, help="a number, or `none` to remove the cap")
     p.add_argument("--spent", type=float, help="the epic's spend so far, USD; needs no decision line")
     p.add_argument("--decision", help="the decision line; a change to a cap needs it")
 
