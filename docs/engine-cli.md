@@ -1177,7 +1177,7 @@ Every subcommand takes the epic key first:
   pass      `DW-<n> --evidence "…" --by verifier`, on a merged row with no FAIL recorded. The last DW moves the row to
             verified
   tick      the orchestrator's input: ready and assignable tickets, stalled workers (assigned and claimed only), READY
-            lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions, STOPs and HOLDs
+            lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, whether a digest is due, open decisions, STOPs and HOLDs
             (--json). It writes what `swarm_budget.py sweep` writes: `spent`, each row's `spend` reading, the
             epic's `spend` map and, when `swarm.budget.hard_stop` is armed, a STOP and its log line. A breach of a fork, minute or split cap, a cap that does not parse, a stop not
             written, an epic cap with no orchestrator reading or a sweep that raises goes in `no_assign` and empties
