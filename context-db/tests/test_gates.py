@@ -434,8 +434,8 @@ class Template(Base):
         # gate could not be signed from its own evidence line; reviews carry the commit they were left on
         line = next(ln for ln in TEMPLATE.read_text(encoding="utf-8").splitlines() if ln.startswith("- [ ] VG-2 "))
         self.assertIn("check: `gh pr view <pr> --json reviews,headRefOid,statusCheckRollup`", line)
-        self.assertIn("evidence: an `APPROVED` review whose `commit.oid` is the PR's `headRefOid`, and every required "
-                      "check green at that head", line)
+        self.assertIn("evidence: an `APPROVED` review whose `commit.oid` is the PR's `headRefOid`, no later "
+                      "`CHANGES_REQUESTED` at that head, and every required check green at that head", line)
         for page in (KIT / "docs" / "verification").glob("*.md"):
             self.assertNotIn("reviewDecision", page.read_text(encoding="utf-8"), page.name)
 
