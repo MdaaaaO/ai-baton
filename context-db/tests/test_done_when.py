@@ -292,7 +292,8 @@ class MovingRef(unittest.TestCase):
             self.assertIn("DW-1\tcommand", p.stdout)
 
     def test_silent_on_a_pinned_commit_and_on_other_commands(self):
-        for cmd in ("git diff --quiet bcae7ac1 -- a b", "git diff --quiet " + "a" * 40 + " -- a", "make test"):
+        for cmd in ("git diff --quiet bcae7ac1 -- a b", "git diff --quiet " + "a" * 40 + " -- a", "make test",
+                    "git diff --quiet bcae7ac1 -- main develop refs/x", "git diff --quiet bcae7ac1 -- a && git log main"):
             p = run("parse", "-", stdin=self.ticket(cmd))
             self.assertEqual((p.returncode, p.stderr), (0, ""), cmd)
 

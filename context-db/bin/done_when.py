@@ -91,10 +91,13 @@ class Criterion:
 
 
 def moving_ref(command: str | None) -> str | None:
-    """The first moving ref a `git diff` command compares against (a branch or `HEAD`, not a pinned commit), else None."""
+    """The first moving ref a `git diff` command compares against (a branch or `HEAD`, not a pinned commit), else None.
+    Only the revision operands are read: the scan ends at the `--` before the paths and at the end of that command."""
     if not command or not re.search(r"\bgit\b.*\bdiff\b", command):
         return None
-    for tok in re.split(r"[\s;&|]+", command.split("diff", 1)[1]):
+    for tok in re.split(r"[;&|]", command.split("diff", 1)[1], maxsplit=1)[0].split():
+        if tok == "--":
+            break
         for part in re.split(r"\.{2,3}", tok.strip("'\"")):
             if MOVING_REF_RE.match(part):
                 return part
