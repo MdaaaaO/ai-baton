@@ -1958,6 +1958,33 @@ class NewEpicKey(Base):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertTrue(r.stdout.startswith("d/proj-123-x"), r.stdout)
 
+    def test_the_scaffold_carries_its_type_schema_version(self):
+        # #692: no `schema_version` reads as v0, behind the epic type, and ctx refused the first write
+        version = json.loads((ENGINE / "ctx-store" / "types" / "epic.json").read_text(encoding="utf-8"))["version"]
+        text = self.new().read_text(encoding="utf-8")
+        self.assertIn(f"\nschema_version: epic.v{version}\n---\n", text)
+
+    def test_a_type_at_version_zero_gets_no_stamp(self):
+        r = subprocess.run(["make", "-C", str(ENGINE), "new", "TYPE=reference", "SLUG=plain-note",
+                            f"CONTEXT={self.root}"], env={k: v for k, v in self.env.items() if k not in MAKE_VARS},
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("schema_version", (self.root / "reference" / "plain-note.md").read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(REAL_CTX, "the pinned ctx is not installed on this machine")
+    def test_a_fresh_epic_takes_a_log_with_no_migration(self):
+        # #692 DW-1/DW-2: the first `ctx log` on a `make new` doc succeeds and migrate finds nothing to do
+        env = dict(KIT_CTX=str(REAL_CTX), CTX_NO_WALK="1")
+        self.env["KIT_CTX"], self.env["CTX_NO_WALK"] = env["KIT_CTX"], env["CTX_NO_WALK"]
+        self.assertEqual(self.adapter("adopt", **env).returncode, 0)
+        self.new("KEY=example/repo#6")
+        r = self.adapter("ctx", "migrate", "--dry-run", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("d/proj-123-x", r.stdout + r.stderr)
+        r = self.adapter("ctx", "log", "d/proj-123-x", "first entry", **env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("MIGRATION_PENDING", r.stdout + r.stderr)
+
 
 SESSION_FOR_BRIEF = (
     "---\nsession: lane-topic\nsession_id: {sid}\nstatus: active\nepic: {epic}\nworking_on: step three\n"
