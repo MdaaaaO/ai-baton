@@ -21,19 +21,17 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "context-db", "bin"))
 import fsutil  # noqa: E402
-import kit_profile as profile  # noqa: E402
 import swarm  # noqa: E402
 import swarm_budget  # noqa: E402
-import swarm_msg  # noqa: E402
 
 MARK = "<!-- swarm-digest -->"
 SECTIONS = ("Shipped", "Blocked", "Decisions open", "Spend", "Stalls", "Next")
 DONE = swarm.SHIPPED
-DEFAULT_HOURS = 4
+DEFAULT_HOURS = swarm.DIGEST_HOURS
 
 
 def ref(t: str) -> str:
@@ -41,20 +39,15 @@ def ref(t: str) -> str:
 
 
 def hours() -> float:
-    v = profile.get("swarm.digest_hours", DEFAULT_HOURS)
-    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else DEFAULT_HOURS
+    return swarm.digest_hours()
 
 
 def digest_path(key: str):
-    return swarm_msg.swarm_dir(key) / "digest.json"
+    return swarm.digest_path(key)
 
 
 def last_posted(key: str) -> dict | None:
-    try:
-        d = json.loads(digest_path(key).read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) and d.get("at") else None
-    except (OSError, ValueError):
-        return None
+    return swarm.last_digest(key)
 
 
 def sections(led: dict, now: datetime) -> dict:
@@ -138,14 +131,10 @@ def cmd_render(a) -> int:
 
 
 def cmd_due(a) -> int:
-    swarm.load(a.key)
+    led = swarm.load(a.key)
     now = swarm.parse_time(a.now) if a.now else datetime.now(timezone.utc)
-    last = last_posted(a.key)
-    if a.wave_end or last is None:
-        print("due")
-        return 0
-    nxt = swarm.parse_time(last["at"]) + timedelta(hours=hours())
-    print("due" if now >= nxt else f"not due: next {nxt.astimezone(timezone.utc).strftime(swarm.LEDGER_TIME)}")
+    st = swarm.digest_state(led, now, a.wave_end)
+    print("due" if st["due"] else f"not due: next {st['next']}")
     return 0
 
 
