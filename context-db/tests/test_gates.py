@@ -429,6 +429,16 @@ class Template(Base):
         for word in ("fail on the default branch", "approved review", "green ci", "dw-<n>", "miss check", "operator brief"):
             self.assertIn(word, text)
 
+    def test_vg2_reads_the_approving_review_at_the_merged_head(self):
+        # #746: `reviewDecision` came back empty on merged PRs that carry an approving review at their head, so the
+        # gate could not be signed from its own evidence line; reviews carry the commit they were left on
+        line = next(ln for ln in TEMPLATE.read_text(encoding="utf-8").splitlines() if ln.startswith("- [ ] VG-2 "))
+        self.assertIn("check: `gh pr view <pr> --json reviews,headRefOid,statusCheckRollup`", line)
+        self.assertIn("evidence: an `APPROVED` review whose `commit.oid` is the PR's `headRefOid`, no later "
+                      "`CHANGES_REQUESTED` at that head, and every required check green at that head", line)
+        for page in (KIT / "docs" / "verification").glob("*.md"):
+            self.assertNotIn("reviewDecision", page.read_text(encoding="utf-8"), page.name)
+
     def test_the_pipeline_block_holds_both_gates_with_their_flags(self):
         flagged = {r[-1]: r[6] for r in self.rows() if r[6] != "-"}
         prod_run = next(flags for gate, flags in flagged.items() if "prod run" in gate)
