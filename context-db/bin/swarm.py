@@ -1329,7 +1329,7 @@ def usd_or_none(text: str):
 
 
 def cmd_budget(a) -> int:
-    caps = a.epic_usd is not None or a.worker_usd is not None  # `none` removes a cap
+    caps = a.epic_usd is not None or a.worker_usd is not None  # `none` removes the ledger's cap
     if not caps and a.spent is None:
         raise SwarmError("budget needs --epic-usd, --worker-usd or --spent")
     decision = (a.decision or "").strip()
@@ -1473,8 +1473,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--by", help="who releases: the named releaser or the owner")
 
     p = command("budget", cmd_budget, "change a cap, on the owner's decision line; or record the epic's spend")
-    p.add_argument("--epic-usd", type=usd_or_none, help="a number, or `none` to remove the cap")
-    p.add_argument("--worker-usd", type=usd_or_none, help="a number, or `none` to remove the cap")
+    p.add_argument("--epic-usd", type=usd_or_none,
+                   help="a number, or `none` to remove the ledger's cap (the config default, if set, then applies)")
+    p.add_argument("--worker-usd", type=usd_or_none,
+                   help="a number, or `none` to remove the ledger's cap (the config default, if set, then applies)")
     p.add_argument("--spent", type=float, help="the epic's spend so far, USD; needs no decision line")
     p.add_argument("--decision", help="the decision line; a change to a cap needs it")
 
