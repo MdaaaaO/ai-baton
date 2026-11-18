@@ -657,6 +657,13 @@ class TickDigest(CliCase):
         self.ok("add", EPIC, "7", "--update", "--title", "renamed")
         self.assertFalse(self.tick("--now", swarm.now_iso())["digest"]["due"], "a later entry on a done row is no wave end")
 
+    def test_a_cap_entry_on_a_done_row_does_not_hide_its_wave_end(self):
+        led = {"waves": ["w1"], "tickets": {"7": {"wave": "w1", "status": "done"}},
+               "log": [{"at": "2026-11-05T10:00:00Z", "act": "status", "ticket": "7", "to": "done"},
+                       {"at": "2026-11-05T11:00:00Z", "act": "cap", "ticket": "7", "from": 5.0, "to": 8.0}]}
+        self.assertEqual(swarm.wave_ended_at(led, swarm.parse_time("2026-11-05T09:00:00Z")), "w1")
+        self.assertIsNone(swarm.wave_ended_at(led, swarm.parse_time("2026-11-05T10:30:00Z")))
+
     def test_an_unreadable_at_reads_as_no_digest_and_the_tick_still_reports(self):
         self.plan("7")
         self.posted("not a time")

@@ -456,7 +456,7 @@ def wave_ended_at(led: dict, last_at: datetime | None) -> str | None:
             continue
         arrived: dict[str, str] = {}  # member -> the entry that brought it to `done`, not a later one that left it there
         for e in led["log"]:
-            if e.get("ticket") in members and "to" in e:
+            if e.get("ticket") in members and e.get("to") in STATUSES:  # a `cap` entry's `to` is an amount
                 if e["to"] != "done":
                     arrived.pop(e["ticket"], None)
                 else:
