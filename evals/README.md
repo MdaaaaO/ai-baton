@@ -120,8 +120,8 @@ trigger suite nor the behaviour total above):
 
 | agent | cases | of which near misses | graded against |
 |---|---|---|---|
-| `builder` | 14 | 6 | `agents/builder.md` |
-| `verifier` | 10 | 3 | `agents/verifier.md` |
+| `builder` | 15 | 6 | `agents/builder.md` |
+| `verifier` | 11 | 3 | `agents/verifier.md` |
 
 **Framing an agent case.** Inside a `claude plugin eval` run the model cannot search the plugin, so a prompt that only says
 "write what the builder returns" never reaches `agents/builder.md` and grades 0 (measured before the framing: `builder-stop-reports-ran`
