@@ -2,8 +2,8 @@
 name: swarm-run
 description: "The swarm orchestrator's tick: assigns an approved epic's tickets, drains returns, integrates and verifies PRs, writes the digest. Use when running or resuming an epic's swarm, or on its tick wake-up. Not for one ticket (`ticket-pickup`) or a PR you own alone (`pr-watch`)."
 metadata:
-  version: "5"
-  updated: "2026-11-11"
+  version: "6"
+  updated: "2026-11-17"
   reviewed: "2026-11-11"
 user-invocable: true
 argument-hint: "<epic key>"
@@ -142,8 +142,10 @@ source (`docs/operator-brief.md`). A close comment without it is not posted.
 
 ## 9. Digest
 
-`/swarm-status <key>` (`--wave-end` at a wave end): the first digest and every wave end post at once, any other tick
-only when `swarm.digest_hours` (default 4) have passed since the last. The digest goes on the epic through `ticket-update`,
+The tick's `digest` line decides, never memory: `digest due (first|wave-end|window)` means post on this tick, `digest
+not-due next=<iso>` means post nothing (`tick.json`'s `digest.due`). It is due before the first digest, at a wave end and once
+`swarm.digest_hours` (default 4) have passed since the last. Due → `/swarm-status <key>` (`--wave-end` when the line says
+`wave-end`), which agrees with `digest.py due`. The digest goes on the epic through `ticket-update`,
 as rendered: shipped; blocked, with who must act; decisions open (the owner's asks of step 7 are there); spend against
 caps; stalls; next, then the `**For the operator**` block the script renders (four lines, `docs/operator-brief.md`), which you
 post as rendered and never rewrite. Headless, it ends with the `Decisions` block.

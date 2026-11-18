@@ -158,6 +158,22 @@ class Due(Case):
         self.assertEqual(self.due("2026-11-05T15:59:00Z"), "not due: next 2026-11-05T16:00:00Z")
         self.assertEqual(self.due("2026-11-05T16:00:00Z"), "due")
 
+    def test_the_tick_and_due_give_the_same_answer(self):
+        """#743 DW-2: one rule behind `digest.py due` and the tick's `digest` field."""
+        self.fixture()
+        cases = [(NOW, None, ()), ("2026-11-05T15:59:00Z", NOW, ()), ("2026-11-05T16:00:00Z", NOW, ()),
+                 ("2026-11-05T12:30:00Z", NOW, ("--wave-end",))]
+        for now, posted, extra in cases:
+            with self.subTest(now=now, posted=posted, extra=extra):
+                if posted:
+                    self.ok(DIGEST, "posted", KEY, "--now", posted, stdin="text\n")
+                said = self.due(now, *extra)
+                tick = json.loads(self.ok(SWARM, "tick", KEY, "--json", "--now", now))["digest"]
+                if not extra:
+                    self.assertEqual(said, "due" if tick["due"] else f"not due: next {tick['next']}")
+                else:
+                    self.assertEqual(said, "due")
+
     def test_a_wave_end_is_due_inside_the_window(self):
         self.fixture()
         self.ok(DIGEST, "posted", KEY, "--now", NOW, stdin="text\n")
