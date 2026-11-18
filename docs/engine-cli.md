@@ -964,7 +964,8 @@ Usage:
   done_when.py parse <ticket-file | ->
       One line per criterion: `DW-<n>`, `command` or `manual`, the check (a command is printed without its
       backticks), the criterion — tab-separated. Reads every `## Done when` section in the text (pass the body,
-      then the comments, oldest first, as `sizing.py` does).
+      then the comments, oldest first, as `sizing.py` does). A command check that diffs against a branch ref or `HEAD`
+      instead of a pinned commit is named on stderr (`DW-<n> diffs against <ref>`); the exit code is unchanged.
   done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | -> [--key <key>]
       Prints exactly `DONE WHEN: covered` or `DONE WHEN: gap DW-<n>[, DW-<n>…]`. An id is covered when
         - a line in the body's `## Verified` section reads `DW-<n>[, DW-<m>…] · <evidence>` and the evidence

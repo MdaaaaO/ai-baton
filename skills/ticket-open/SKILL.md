@@ -2,8 +2,8 @@
 name: ticket-open
 description: "Checklist for CREATING a ticket (Jira or GitHub issues): goal interview gate, placement, labels, epic/parent link, a lean opening block plus the required `## Done when` ids, cold-reader and length gates, the .context/ doc. Use when creating a ticket, right before/after posting it."
 metadata:
-  version: "23"
-  updated: "2026-11-04"
+  version: "24"
+  updated: "2026-11-17"
   reviewed: "2026-11-04"
   facts: "tracker.kind"
 user-invocable: true
@@ -41,7 +41,9 @@ kind X in this environment" and stop — never improvise.
    ```
    Then a `## Done when` block — required, one line per criterion, each with a stable id and how it is checked: `- [ ] DW-<n>
    <criterion> · check: <command | test | observation>`. A command is one backticked span (`` `make test` ``) so `ticket-pickup`
-   can run it; a test or an observation is plain words. Ids start at `DW-1`, are never renumbered or reused, and a criterion
+   can run it; a test or an observation is plain words. Ids start at `DW-1`, are never renumbered or reused, and an
+   "unchanged" check pins the base commit (`git diff --quiet <sha> -- <paths>`), since a branch ref or `HEAD` moves with the merge
+   and the check then passes whatever the PR did; a criterion
    added later takes the next number, is edited into the ticket body's `## Done when` (`ticket-pickup` probes the body only; a
    comment is anyone's text) and announced with a dated `ticket-update` line. Every later surface cites the ids, never restates
    the criteria. Check the drafted block with `python3 $BATON/context-db/bin/done_when.py parse <file>` (exit 0 → post; exit 2 →
