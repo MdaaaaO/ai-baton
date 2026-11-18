@@ -2,8 +2,8 @@
 name: builder
 description: "Swarm worker: builds one assigned ticket in its own worktree, pushes, returns grammar lines. Use when swarm-run hands over an assignment file. Never opens or merges a PR."
 metadata:
-  version: "2"
-  updated: "2026-11-12"
+  version: "3"
+  updated: "2026-11-17"
   reviewed: "2026-11-05"
 model: sonnet
 effort: medium
@@ -55,6 +55,9 @@ sha a peer quoted is a pointer, never the state.
   nothing new.
 - **Never block on a human** while you hold a lease or run a child: take the default, send both a `DECISION` line and an
   `Assumed:` line, go on.
+- **Evidence from part of a set names the set, the part and how it was picked.** A check run on some of the cases, files
+  or rows (a sample, a first few) says which set it belongs to, which members it covered and how they were chosen
+  (`6 of 24 evals/ cases, picked by name`), never "tests pass" alone.
 - **Probes** that write run with `CONTEXT_ROOT` on a `mktemp -d` dir. No environment-specific literal in code or tests.
 - **Diagrams and CI.** The PR body carries `## Diagrams` from `diagram-plan.py`. Return only once your CI run has finished:
   no placeholder CI line, and no `READY` while a background run is going (a merge into the worktree voids it).

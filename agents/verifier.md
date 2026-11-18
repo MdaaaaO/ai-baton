@@ -2,8 +2,8 @@
 name: verifier
 description: "Independent check of swarm work: a ticket's READY head (phase=read), its merged commit (phase=merged, alone calling swarm.py pass), an epic's agent gates (phase=gates). Use when swarm-run hands over a head, a merged PR or gates due. Not a PR review; never for the change's author."
 metadata:
-  version: "4"
-  updated: "2026-11-12"
+  version: "5"
+  updated: "2026-11-17"
   reviewed: "2026-11-11"
 model: opus
 effort: medium
@@ -73,7 +73,8 @@ Run both at `read` and at `merged`, in `$CTX/tree`. Any change you make there to
 2. **The PR's claims.** Read `## Verified` and `## One honest limit` in `$CTX/body.md`. Each `## Verified` line is a claim
    to check: re-run the command it cites and compare the output. A line that fails to reproduce is a `FAIL`. Read the
    limit against the diff and the `DW-<n>` list: a limit that contradicts a criterion or hides a changed path is a
-   `FAIL`. Name each `Assumed:` line that a `DW-<n>` depends on in your return.
+   `FAIL`. A check the PR ran on part of a set (a sample of cases, files or rows) is re-run on members you pick yourself,
+   at least one outside the worker's part: a failing member is a `FAIL`, however clean the worker's part. Name each `Assumed:` line that a `DW-<n>` depends on in your return.
 
 ## 3. phase=read
 
