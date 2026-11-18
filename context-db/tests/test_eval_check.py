@@ -642,5 +642,77 @@ class Wiring(unittest.TestCase):
         self.assertIn(f"else limit={every}; ", text)
 
 
+class ReadmeCounts(unittest.TestCase):
+    """The counts evals/README.md states by hand are compared with the case directories; a wrong row fails by name."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.kit = Kit(Path(self.tmp.name), skills=("foo", "bar"))
+        self.kit.suite("foo", pos=2, miss=1)
+        for n in ("foo-behaviour-a", "foo-behaviour-b", "builder-x", "builder-near-miss-y", "builder-near-miss-z",
+                  "verifier-q", "kit-review-one"):
+            (self.kit.root / "evals" / n).mkdir()
+        self.rows = {"foo": "| `foo` | 2+1 | `foo-behaviour-a`, `foo-behaviour-b` |", "bar": "| `bar` | 0+0 | — |",
+                     "total": "2", "review": "1", "builder": "| `builder` | 3 | 2 | `agents/builder.md` |",
+                     "verifier": "| `verifier` | 1 | 0 | `agents/verifier.md` |"}
+
+    def errors(self, **over):
+        r = {**self.rows, **over}
+        text = (f"intro ({r['total']} total, counting every `evals/*behaviour*` directory)\n\n"
+                "| skill | trigger suite (pos+near) | behaviour cases |\n|---|---|---|\n"
+                f"{r['foo']}\n{r['bar']}\n\nPlus `kit-review-*` ({r['review']} cases, proof cases).\n\n"
+                "| agent | cases | of which near misses | graded against |\n|---|---|---|---|\n"
+                f"{r['builder']}\n{r['verifier']}\n")
+        (self.kit.root / "evals" / "README.md").write_text(text, encoding="utf-8")
+        return [e for e in self.kit.run()[0] if "README.md" in e]
+
+    def test_a_readme_that_matches_passes(self):
+        self.assertEqual(self.errors(), [])
+
+    def test_no_readme_is_not_an_error(self):
+        self.assertEqual([e for e in self.kit.run()[0] if "README" in e], [])
+
+    def test_a_wrong_trigger_suite_size_names_the_row(self):
+        errs = self.errors(foo="| `foo` | 3+1 | `foo-behaviour-a`, `foo-behaviour-b` |")
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("row `foo`", errs[0])
+        self.assertIn("3+1", errs[0])
+        self.assertIn("2+1", errs[0])
+
+    def test_a_missing_or_extra_behaviour_case_names_the_row(self):
+        errs = self.errors(foo="| `foo` | 2+1 | `foo-behaviour-a` |", bar="| `bar` | 0+0 | `bar-behaviour-ghost` |")
+        self.assertEqual(len(errs), 2, errs)
+        self.assertTrue(any("row `foo`" in e and "foo-behaviour-b" in e for e in errs), errs)
+        self.assertTrue(any("row `bar`" in e and "bar-behaviour-ghost" in e for e in errs), errs)
+
+    def test_a_wrong_stated_total_fails(self):
+        errs = self.errors(total="63")
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("behaviour total is 63 but 2", errs[0])
+
+    def test_a_wrong_review_count_fails(self):
+        errs = self.errors(review="8")
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("kit-review-*", errs[0])
+
+    def test_a_wrong_agent_row_names_the_agent(self):
+        errs = self.errors(builder="| `builder` | 4 | 1 | `agents/builder.md` |")
+        self.assertEqual(len(errs), 2, errs)
+        self.assertTrue(any("`builder` states 4 cases but 3" in e for e in errs), errs)
+        self.assertTrue(any("`builder` states 1 near misses but 2" in e for e in errs), errs)
+
+    def test_a_skill_with_cases_and_no_row_fails(self):
+        errs = self.errors(foo="")
+        self.assertTrue(any("skill `foo` has cases but no row" in e for e in errs), errs)
+
+    def test_the_cli_exits_1_naming_the_row(self):
+        self.errors(foo="| `foo` | 9+9 | — |")
+        r = subprocess.run([sys.executable, str(KIT / "context-db" / "bin" / "eval_check.py"), "--kit", str(self.kit.root)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("row `foo`", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

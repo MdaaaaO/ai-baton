@@ -16,6 +16,11 @@ reads the eval dir the plugin manifest names (`experimental.evals`, else `evals/
     to load (a name with `__` or characters outside letters, digits, `_` and `-`), or a saved `_tools.json` that
     disagrees with the `<tool>.md` files beside it.
 
+  - a count `evals/README.md` states by hand that differs from the case directories: a skill's `pos+near` trigger
+    suite size or its behaviour case names (§ Coverage table), the stated behaviour total, the `kit-review-*` count,
+    and each agent row's case and near-miss counts. The failure names the row. Counts written as words in prose are
+    not read.
+
 Skills without a suite yet, and descriptions without a recognized trigger phrase, are printed as notes — not
 failures — until every skill has one (`--require-all` turns both into failures; the eventual gate). Stdlib only;
 frontmatter is read with the kit's one parser (`frontmatter.py`).
@@ -286,6 +291,67 @@ def check_mocks(kit: Path, root: Path) -> list[str]:
     return errors
 
 
+def case_dirs(root: Path) -> list[str]:
+    return sorted(p.name for p in root.iterdir() if p.is_dir() and p.name not in SKIP_DIRS and not p.name.startswith("."))
+
+
+def check_readme_counts(kit: Path, root: Path, skills: list[str], suites: dict[str, dict[str, int]]) -> list[str]:
+    """Errors for the counts `<eval dir>/README.md` states by hand, each compared with the case directories. No README,
+    no errors. A row it states and the tree contradicts fails naming that row: the per-skill table (`pos+near` trigger
+    suite and the behaviour case names), the stated behaviour total (`N total, counting every evals/*behaviour*`),
+    the `kit-review-*` count, and the agent table (cases, and near misses = `<role>-near-miss-*`)."""
+    readme = root / "README.md"
+    if not readme.is_file():
+        return []
+    text = readme.read_text(encoding="utf-8")
+    where = f"{readme.relative_to(kit)}"
+    names = case_dirs(root)
+    errors: list[str] = []
+    behaviour = [n for n in names if "behaviour" in n]
+    m = re.search(r"\((\d+) total,\s+counting every", text)
+    if m and int(m.group(1)) != len(behaviour):
+        errors.append(f"{where}: the stated behaviour total is {m.group(1)} but {len(behaviour)} `*behaviour*` case directories exist")
+    m = re.search(r"`kit-review-\*` \((\d+) cases", text)
+    n_review = sum(1 for n in names if n.startswith("kit-review-"))
+    if m and int(m.group(1)) != n_review:
+        errors.append(f"{where}: row `kit-review-*` states {m.group(1)} cases but {n_review} directories exist")
+    seen: set[str] = set()
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")] if line.lstrip().startswith("|") else []
+        if len(cells) >= 3 and re.fullmatch(r"`[\w-]+`", cells[0]):
+            row = cells[0].strip("`")
+            ts = re.fullmatch(r"(\d+)\+(\d+)", cells[1])
+            if ts and len(cells) == 3:  # a Coverage row: skill | pos+near | behaviour cases
+                seen.add(row)
+                have = suites.get(row)
+                if row not in skills:
+                    errors.append(f"{where}: row `{row}` names no skill under skills/")
+                    continue
+                got = (have["positive"], have["near-miss"]) if have else (0, 0)
+                if (int(ts.group(1)), int(ts.group(2))) != got:
+                    errors.append(f"{where}: row `{row}` states trigger suite {cells[1]} but the case directories give {got[0]}+{got[1]}")
+                stated = sorted(re.findall(r"`([^`]+)`", cells[2]))
+                actual = [n for n in names if n.startswith(f"{row}-behaviour-")]
+                if stated != actual:
+                    errors.append(f"{where}: row `{row}` lists behaviour cases {', '.join(stated) or '(none)'} "
+                                  f"but the directories are {', '.join(actual) or '(none)'}")
+            elif row in AGENT_ROLES and cells[1].isdigit() and cells[2].isdigit():  # an agent row: agent | cases | near misses | graded against
+                cases = [n for n in names if n.startswith(row + "-")]
+                near = [n for n in cases if n.startswith(f"{row}-near-miss-")]
+                if int(cells[1]) != len(cases):
+                    errors.append(f"{where}: agent row `{row}` states {cells[1]} cases but {len(cases)} `{row}-*` directories exist")
+                if int(cells[2]) != len(near):
+                    errors.append(f"{where}: agent row `{row}` states {cells[2]} near misses but {len(near)} `{row}-near-miss-*` directories exist")
+                seen.add("agent:" + row)
+    for s in sorted(set(skills) - seen):
+        if s in suites or any(n.startswith(f"{s}-behaviour-") for n in names):
+            errors.append(f"{where}: skill `{s}` has cases but no row in the Coverage table")
+    for role in AGENT_ROLES:
+        if f"agent:{role}" not in seen and any(n.startswith(role + "-") for n in names) and re.search(r"\| agent \|", text):
+            errors.append(f"{where}: agent `{role}` has cases but no row in the agent table")
+    return errors
+
+
 def check(kit: Path, require_all: bool = False) -> tuple[list[str], list[str], dict[str, dict[str, int]]]:
     """(errors, notes, per-skill counts {skill: {positive: n, near-miss: n}})."""
     skills = skill_names(kit)
@@ -311,6 +377,7 @@ def check(kit: Path, require_all: bool = False) -> tuple[list[str], list[str], d
         if total < MIN_CASES or any(n[k] < MIN_EACH for k in KINDS):
             errors.append(f"{skill}: {total} trigger case(s) ({n['positive']} positive, {n['near-miss']} near miss) — "
                           f"a suite needs >= {MIN_CASES}, with >= {MIN_EACH} of each")
+    errors += check_readme_counts(kit, root, skills, suites)
     missing = [s for s in skills if s not in suites]
     if missing:
         (errors if require_all else notes).append(f"no trigger suite yet ({len(missing)}): {', '.join(missing)}")
