@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -652,6 +653,14 @@ class TickDigest(CliCase):
         self.assertEqual(self.tick("--now", later)["digest"]["why"], "wave-end")
         self.posted(swarm.now_iso())
         self.assertFalse(self.tick("--now", swarm.now_iso())["digest"]["due"])
+        time.sleep(1.1)  # ledger times have one-second resolution
+        self.ok("add", EPIC, "7", "--update", "--title", "renamed")
+        self.assertFalse(self.tick("--now", swarm.now_iso())["digest"]["due"], "a later entry on a done row is no wave end")
+
+    def test_an_unreadable_at_reads_as_no_digest_and_the_tick_still_reports(self):
+        self.plan("7")
+        self.posted("not a time")
+        self.assertEqual(self.digest(self.NOW), {"due": True, "why": "first", "next": None})
 
     def test_the_table_carries_the_line(self):
         self.plan("7")

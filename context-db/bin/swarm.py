@@ -433,23 +433,35 @@ def digest_path(key: str) -> Path:
 
 
 def last_digest(key: str) -> dict | None:
-    """The record `digest.py posted` wrote, or None when no digest was posted."""
+    """The record `digest.py posted` wrote, or None when no digest was posted. A record whose `at` is not a time
+    (hand-edited, truncated) reads as none posted: the digest is then due, and the tick still reports."""
     try:
         d = json.loads(digest_path(key).read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) and d.get("at") else None
-    except (OSError, ValueError):
+        if not (isinstance(d, dict) and d.get("at")):
+            return None
+        parse_time(d["at"])
+        return d
+    except (OSError, ValueError, SwarmError):
         return None
 
 
 def wave_ended_at(led: dict, last_at: datetime | None) -> str | None:
-    """A wave whose rows are all `done` and whose last log entry is later than the last digest: a wave end no digest has
-    covered yet. None when there is none."""
+    """A wave whose rows are all `done` and whose last move to `done` is later than the last digest: a wave end no
+    digest has covered yet. None when there is none. A later log entry on a `done` row (`add --update`, `resume`) is
+    not a second wave end."""
     rows = led["tickets"]
     for wave in led["waves"]:
         members = [t for t, r in rows.items() if r["wave"] == wave]
         if not members or any(rows[t]["status"] != "done" for t in members):
             continue
-        ended = max((parse_time(e["at"]) for e in led["log"] if e.get("ticket") in members), default=None)
+        arrived: dict[str, str] = {}  # member -> the entry that brought it to `done`, not a later one that left it there
+        for e in led["log"]:
+            if e.get("ticket") in members and "to" in e:
+                if e["to"] != "done":
+                    arrived.pop(e["ticket"], None)
+                else:
+                    arrived.setdefault(e["ticket"], e["at"])
+        ended = max((parse_time(at) for at in arrived.values()), default=None)
         if last_at is None or (ended is not None and ended > last_at):
             return wave
     return None
