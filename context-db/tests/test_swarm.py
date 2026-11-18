@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -612,6 +613,67 @@ class Pass(CliCase):
         before = self.ledger_file().read_bytes()
         self.assertIn("no change", self.ok("pass", EPIC, "7", "DW-1", "--evidence", "seen", "--by", "verifier"))
         self.assertEqual(self.ledger_file().read_bytes(), before)
+
+
+class TickDigest(CliCase):
+    """#743 DW-1: the tick reports whether a digest is due, in its table and in `--json`."""
+    NOW = "2026-11-05T12:00:00Z"
+
+    def posted(self, at: str) -> None:
+        path = self.root / "state" / "swarm" / EPIC / "digest.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": at, "text": "x"}), encoding="utf-8")
+
+    def digest(self, now: str) -> dict:
+        return self.tick("--now", now)["digest"]
+
+    def test_due_before_the_first_digest(self):
+        self.plan("7")
+        self.assertEqual(self.digest(self.NOW), {"due": True, "why": "first", "next": None})
+
+    def test_not_due_inside_the_window_and_due_after_it(self):
+        self.plan("7")
+        self.posted(self.NOW)
+        self.assertEqual(self.digest("2026-11-05T15:59:00Z"), {"due": False, "why": None, "next": "2026-11-05T16:00:00Z"})
+        self.assertEqual(self.digest("2026-11-05T16:00:00Z"), {"due": True, "why": "window", "next": None})
+
+    def test_digest_hours_is_read_from_the_store(self):
+        self.plan("7")
+        self.store_config(digest_hours=1)
+        self.posted(self.NOW)
+        self.assertTrue(self.digest("2026-11-05T13:00:00Z")["due"])
+
+    def test_a_wave_end_is_due_inside_the_window_until_a_digest_covers_it(self):
+        self.plan("7", approve=False, waves="w1,w2")
+        self.ok("add", EPIC, "7", "--update", "--wave", "w1")
+        self.ok("approve", EPIC, "--decision", "go")
+        self.to_done("7")
+        self.posted("2000-01-01T00:00:00Z")
+        later = swarm.now_iso()
+        self.assertEqual(self.tick("--now", later)["digest"]["why"], "wave-end")
+        self.posted(swarm.now_iso())
+        self.assertFalse(self.tick("--now", swarm.now_iso())["digest"]["due"])
+        time.sleep(1.1)  # ledger times have one-second resolution
+        self.ok("add", EPIC, "7", "--update", "--title", "renamed")
+        self.assertFalse(self.tick("--now", swarm.now_iso())["digest"]["due"], "a later entry on a done row is no wave end")
+
+    def test_a_cap_entry_on_a_done_row_does_not_hide_its_wave_end(self):
+        led = {"waves": ["w1"], "tickets": {"7": {"wave": "w1", "status": "done"}},
+               "log": [{"at": "2026-11-05T10:00:00Z", "act": "status", "ticket": "7", "to": "done"},
+                       {"at": "2026-11-05T11:00:00Z", "act": "cap", "ticket": "7", "from": 5.0, "to": 8.0}]}
+        self.assertEqual(swarm.wave_ended_at(led, swarm.parse_time("2026-11-05T09:00:00Z")), "w1")
+        self.assertIsNone(swarm.wave_ended_at(led, swarm.parse_time("2026-11-05T10:30:00Z")))
+
+    def test_an_unreadable_at_reads_as_no_digest_and_the_tick_still_reports(self):
+        self.plan("7")
+        self.posted("not a time")
+        self.assertEqual(self.digest(self.NOW), {"due": True, "why": "first", "next": None})
+
+    def test_the_table_carries_the_line(self):
+        self.plan("7")
+        self.assertIn("digest due (first)", self.ok("tick", EPIC, "--now", self.NOW))
+        self.posted(self.NOW)
+        self.assertIn("digest not-due next=2026-11-05T16:00:00Z", self.ok("tick", EPIC, "--now", "2026-11-05T13:00:00Z"))
 
 
 class Tick(CliCase):
