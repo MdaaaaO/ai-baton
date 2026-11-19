@@ -77,4 +77,23 @@ sed -e "s|{{TITLE}}|$(sed_esc "$TITLE")|g" \
     -e 's|^key: $|key:|' \
     "$TMPL" > "$DEST"
 
+# Stamp the type's current schema version (#692): a doc without `schema_version` reads as v0, and ctx refuses
+# writes to a doc behind its type (MIGRATION_PENDING) until `ctx migrate --apply` runs. The version comes from the
+# kit's own type schema (ctx-store/types/<type>.json `version`, the file `ctx_adapter.py adopt` hands the store);
+# a type at v0, or a template that already names a version, is left as written.
+python3 - "$DEST" "$ENGINE/ctx-store/types" <<'PY' || { rm -f "$DEST"; echo "new.sh: could not stamp schema_version on $DEST" >&2; exit 1; }
+import json, re, sys
+from pathlib import Path
+dest, types = Path(sys.argv[1]), Path(sys.argv[2])
+text = dest.read_text(encoding="utf-8")
+m = re.match(r"---\n(.*?\n)---\n", text, re.S)
+if m and not re.search(r"(?m)^schema_version:", m.group(1)):
+    t = re.search(r"(?m)^type:\s*(\S+)\s*$", m.group(1))
+    schema = types / f"{t.group(1)}.json" if t else None
+    version = json.loads(schema.read_text(encoding="utf-8")).get("version") if schema and schema.is_file() else None
+    if isinstance(version, int) and version > 0:
+        end = m.end(1)
+        dest.write_text(f"{text[:end]}schema_version: {t.group(1)}.v{version}\n{text[end:]}", encoding="utf-8")
+PY
+
 echo "$DEST"

@@ -73,6 +73,18 @@ class Parse(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("plain old line", problems[0])
 
+    def test_an_escaped_checkbox_reads_like_a_plain_one(self):
+        plain, _ = dw.parse_ticket("## Done when\n\n- [ ] DW-1 a · check: `b`\n- [x] DW-2 c · check: d\n")
+        esc, problems = dw.parse_ticket("## Done when\n\n* \\[ \\] DW-1 a · check: `b`\n* \\[x\\] DW-2 c · check: d\n")
+        self.assertEqual(problems, [])
+        self.assertEqual([(c.id, c.text, c.check, c.command) for c in esc],
+                         [(c.id, c.text, c.check, c.command) for c in plain])
+
+    def test_a_plain_escaped_checkbox_beside_id_lines_is_a_problem(self):
+        _, problems = dw.parse_ticket("## Done when\n\n* \\[ \\] DW-1 a · check: b\n* \\[ \\] plain old line\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("plain old line", problems[0])
+
     def test_an_id_without_a_check_is_a_problem(self):
         _, problems = dw.parse_ticket("## Done when\n\n- [ ] DW-1 criterion with no check\n")
         self.assertEqual(len(problems), 1)
@@ -225,6 +237,11 @@ class Cli(unittest.TestCase):
         p = run("parse", "-", stdin="## Done when\n\n- [ ] DW-1 criterion with no check\n")
         self.assertEqual(p.returncode, 2)
 
+    def test_parse_reads_an_escaped_checkbox_block(self):
+        p = run("parse", "-", stdin="## Done when\n\n* \\[ \\] DW-1 a · check: b\n* \\[ \\] DW-2 c · check: `d`\n")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual([r.split("\t")[0] for r in p.stdout.splitlines()], ["DW-1", "DW-2"])
+
     def test_parse_exits_2_on_a_repeated_id(self):
         p = run("parse", "-", stdin="## Done when\n\n- [ ] DW-1 a · check: b\n- [ ] DW-1 c · check: d\n")
         self.assertEqual(p.returncode, 2)
@@ -276,6 +293,26 @@ class Cli(unittest.TestCase):
         self.assertEqual((p.returncode, p.stdout), (0, "DONE WHEN: covered\n"))
         self.assertIn("#654, #650", p.stderr)
         self.assertIn("--key", p.stderr)
+
+
+class MovingRef(unittest.TestCase):
+    def ticket(self, cmd: str) -> str:
+        return f"## Done when\n\n- [ ] DW-1 the paths are unchanged · check: `{cmd}`\n"
+
+    def test_warns_naming_the_id_on_branch_refs_and_head(self):
+        for cmd in ("git diff --quiet origin/main -- a b", "git diff --exit-code main...HEAD -- a",
+                    "git diff --quiet HEAD~1 -- a", "git diff --quiet HEAD -- a"):
+            p = run("parse", "-", stdin=self.ticket(cmd))
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn("DW-1", p.stderr, cmd)
+            self.assertIn("moving ref", p.stderr, cmd)
+            self.assertIn("DW-1\tcommand", p.stdout)
+
+    def test_silent_on_a_pinned_commit_and_on_other_commands(self):
+        for cmd in ("git diff --quiet bcae7ac1 -- a b", "git diff --quiet " + "a" * 40 + " -- a", "make test",
+                    "git diff --quiet bcae7ac1 -- main develop refs/x", "git diff --quiet bcae7ac1 -- a && git log main"):
+            p = run("parse", "-", stdin=self.ticket(cmd))
+            self.assertEqual((p.returncode, p.stderr), (0, ""), cmd)
 
 
 class Probe(unittest.TestCase):

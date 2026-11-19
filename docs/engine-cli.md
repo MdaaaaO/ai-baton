@@ -964,7 +964,8 @@ Usage:
   done_when.py parse <ticket-file | ->
       One line per criterion: `DW-<n>`, `command` or `manual`, the check (a command is printed without its
       backticks), the criterion — tab-separated. Reads every `## Done when` section in the text (pass the body,
-      then the comments, oldest first, as `sizing.py` does).
+      then the comments, oldest first, as `sizing.py` does). A command check that diffs against a branch ref or `HEAD`
+      instead of a pinned commit is named on stderr (`DW-<n> diffs against <ref>`); the exit code is unchanged.
   done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | -> [--key <key>]
       Prints exactly `DONE WHEN: covered` or `DONE WHEN: gap DW-<n>[, DW-<n>…]`. An id is covered when
         - a line in the body's `## Verified` section reads `DW-<n>[, DW-<m>…] · <evidence>` and the evidence
@@ -1173,11 +1174,11 @@ Every subcommand takes the epic key first:
   apply     one grammar line, CLAIMED, PR, READY or BLOCKED. A second copy of an id changes nothing. A line from a sender
             that is not the row's worker is recorded and moves nothing. DONE moves no row and is refused
   progress  a new commit, status or comment restarts the clock (--head, --note); --spent records spend, which is not
-            progress; --stall counts a stall
+            progress; --ref records the worker's ref after the spawn and moves no row; --stall counts a stall
   pass      `DW-<n> --evidence "…" --by verifier`, on a merged row with no FAIL recorded. The last DW moves the row to
             verified
   tick      the orchestrator's input: ready and assignable tickets, stalled workers (assigned and claimed only), READY
-            lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions, STOPs and HOLDs
+            lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, whether a digest is due, open decisions, STOPs and HOLDs
             (--json). It writes what `swarm_budget.py sweep` writes: `spent`, each row's `spend` reading, the
             epic's `spend` map and, when `swarm.budget.hard_stop` is armed, a STOP and its log line. A breach of a fork, minute or split cap, a cap that does not parse, a stop not
             written, an epic cap with no orchestrator reading or a sweep that raises goes in `no_assign` and empties

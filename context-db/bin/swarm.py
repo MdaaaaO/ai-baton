@@ -24,11 +24,11 @@ Every subcommand takes the epic key first:
   apply     one grammar line, CLAIMED, PR, READY or BLOCKED. A second copy of an id changes nothing. A line from a sender
             that is not the row's worker is recorded and moves nothing. DONE moves no row and is refused
   progress  a new commit, status or comment restarts the clock (--head, --note); --spent records spend, which is not
-            progress; --stall counts a stall
+            progress; --ref records the worker's ref after the spawn and moves no row; --stall counts a stall
   pass      `DW-<n> --evidence "…" --by verifier`, on a merged row with no FAIL recorded. The last DW moves the row to
             verified
   tick      the orchestrator's input: ready and assignable tickets, stalled workers (assigned and claimed only), READY
-            lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, open decisions, STOPs and HOLDs
+            lines with no PR yet, open re-briefs, recorded FAILs, budget state, watches due, whether a digest is due, open decisions, STOPs and HOLDs
             (--json). It writes what `swarm_budget.py sweep` writes: `spent`, each row's `spend` reading, the
             epic's `spend` map and, when `swarm.budget.hard_stop` is armed, a STOP and its log line. A breach of a fork, minute or split cap, a cap that does not parse, a stop not
             written, an epic cap with no orchestrator reading or a sweep that raises goes in `no_assign` and empties
@@ -84,7 +84,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -419,6 +419,70 @@ def stall_step(row: dict) -> str:
     return "rebrief" if not row["rebriefs"] else "reassign-or-park"
 
 
+# ── the digest's due rule ───────────────────────────────────────────────────────────────────
+DIGEST_HOURS = 4
+
+
+def digest_hours() -> float:
+    v = profile.get("swarm.digest_hours", DIGEST_HOURS)
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 else DIGEST_HOURS
+
+
+def digest_path(key: str) -> Path:
+    return swarm_msg.swarm_dir(key) / "digest.json"
+
+
+def last_digest(key: str) -> dict | None:
+    """The record `digest.py posted` wrote, or None when no digest was posted. A record whose `at` is not a time
+    (hand-edited, truncated) reads as none posted: the digest is then due, and the tick still reports."""
+    try:
+        d = json.loads(digest_path(key).read_text(encoding="utf-8"))
+        if not (isinstance(d, dict) and d.get("at")):
+            return None
+        parse_time(d["at"])
+        return d
+    except (OSError, ValueError, SwarmError):
+        return None
+
+
+def wave_ended_at(led: dict, last_at: datetime | None) -> str | None:
+    """A wave whose rows are all `done` and whose last move to `done` is later than the last digest: a wave end no
+    digest has covered yet. None when there is none. A later log entry on a `done` row (`add --update`, `resume`) is
+    not a second wave end."""
+    rows = led["tickets"]
+    for wave in led["waves"]:
+        members = [t for t, r in rows.items() if r["wave"] == wave]
+        if not members or any(rows[t]["status"] != "done" for t in members):
+            continue
+        arrived: dict[str, str] = {}  # member -> the entry that brought it to `done`, not a later one that left it there
+        for e in led["log"]:
+            if e.get("ticket") in members and e.get("to") in STATUSES:  # a `cap` entry's `to` is an amount
+                if e["to"] != "done":
+                    arrived.pop(e["ticket"], None)
+                else:
+                    arrived.setdefault(e["ticket"], e["at"])
+        ended = max((parse_time(at) for at in arrived.values()), default=None)
+        if last_at is None or (ended is not None and ended > last_at):
+            return wave
+    return None
+
+
+def digest_state(led: dict, now: datetime, wave_end: bool = False) -> dict:
+    """The one rule behind `digest.py due` and the tick: `{"due": bool, "why": first|wave-end|window|None, "next": iso|None}`.
+    Due when no digest was posted, at a wave end (the caller says so with `wave_end`, and the tick finds one itself) and
+    once `swarm.digest_hours` have passed since the last."""
+    last = last_digest(led["key"])
+    if last is None:
+        return {"due": True, "why": "first", "next": None}
+    last_at = parse_time(last["at"])
+    if wave_end or wave_ended_at(led, last_at) is not None:
+        return {"due": True, "why": "wave-end", "next": None}
+    nxt = last_at + timedelta(hours=digest_hours())
+    if now >= nxt:
+        return {"due": True, "why": "window", "next": None}
+    return {"due": False, "why": None, "next": nxt.astimezone(timezone.utc).strftime(LEDGER_TIME)}
+
+
 def tick_report(led: dict, now: datetime | None = None) -> dict:
     """The orchestrator's input at a tick. Reads the ledger and the STOP files; writes nothing."""
     moment = now or datetime.now(timezone.utc)
@@ -463,7 +527,7 @@ def tick_report(led: dict, now: datetime | None = None) -> dict:
             "rebriefs_open": [{"ticket": t, "worker": r["worker"]["name"], "since": r["rebrief_open"]}
                               for t, r in rows.items() if r.get("rebrief_open")],
             "failed": [{"ticket": t, "status": r["status"], **r["fail"]} for t, r in rows.items() if r.get("fail")],
-            "budget": budget_state(led),
+            "budget": budget_state(led), "digest": digest_state(led, moment),
             "watches_due": [w for w in led["watches"] if not w.get("closed") and parse_time(w["due"]) <= moment],
             "decisions_open": [d for d in led["decisions"] if not d.get("closed")],
             "grants_expired": [g for g in led["grants"] if g.get("expires") and parse_time(g["expires"]) <= moment],
@@ -989,6 +1053,10 @@ def cmd_progress(a) -> int:
         moved = bool(a.head and not same_sha(a.head, row["head"]))
         if a.spent is not None:
             row["spent"] = a.spent
+        if a.ref:  # the ref exists only once the spawn has run: recorded after it, it moves no row and is not progress
+            if not row["worker"]["name"]:
+                raise Refused(f"{ticket}: no worker on the row; `assign` first")
+            row["worker"]["ref"] = a.ref
         if a.head:
             row["head"] = a.head
         now = now_iso()
@@ -996,7 +1064,7 @@ def cmd_progress(a) -> int:
             row["stalls"] += 1
             row["stall_counted_at"] = now
             log(led, "stall", ticket, note=a.note)
-        elif moved or a.note or (a.head is None and a.spent is None):
+        elif moved or a.note or (a.head is None and a.spent is None and not a.ref):
             touch(row, now)
             if a.note:
                 log(led, "progress", ticket, note=a.note)
@@ -1069,6 +1137,8 @@ def print_tick(rep: dict) -> None:
         print(f"over-budget {o['ticket']} spent={o['spent']:.2f} cap={o['cap']:.2f}")
     for line in rep.get("budget_sweep", {}).get("lines", []):
         print(line)
+    d = rep["digest"]
+    print(f"digest due ({d['why']})" if d["due"] else f"digest not-due next={d['next']}")
     for w in rep["watches_due"]:
         print(f"watch-due {w['id']} due={w['due']} owner={w['owner']} what={w['what']}")
     for d in rep["decisions_open"]:
@@ -1249,8 +1319,17 @@ def cmd_hold(a) -> int:
     return 0
 
 
+def usd_or_none(text: str):
+    if text.strip().lower() == "none":
+        return "none"
+    try:
+        return float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"a number or `none`, not {text!r}") from None
+
+
 def cmd_budget(a) -> int:
-    caps = a.epic_usd is not None or a.worker_usd is not None
+    caps = a.epic_usd is not None or a.worker_usd is not None  # `none` removes the ledger's cap
     if not caps and a.spent is None:
         raise SwarmError("budget needs --epic-usd, --worker-usd or --spent")
     decision = (a.decision or "").strip()
@@ -1259,7 +1338,7 @@ def cmd_budget(a) -> int:
     with edit(a.key) as led:
         for field, value in (("epic_usd", a.epic_usd), ("worker_usd", a.worker_usd)):
             if value is not None:
-                led["budget"][field] = value
+                led["budget"][field] = None if value == "none" else value
         if a.spent is not None:
             led["spent"] = a.spent
         if caps:
@@ -1339,6 +1418,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("ticket")
     p.add_argument("--head")
     p.add_argument("--spent", type=float, help="the worker's spend so far, USD; not progress on its own")
+    p.add_argument("--ref", help="the worker's ref, once the spawn has made it: the transcript the budget sweep reads; moves no row")
     p.add_argument("--stall", action="store_true", help="count a stall; the stall window restarts")
     p.add_argument("--note")
 
@@ -1393,8 +1473,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--by", help="who releases: the named releaser or the owner")
 
     p = command("budget", cmd_budget, "change a cap, on the owner's decision line; or record the epic's spend")
-    p.add_argument("--epic-usd", type=float)
-    p.add_argument("--worker-usd", type=float)
+    p.add_argument("--epic-usd", type=usd_or_none,
+                   help="a number, or `none` to remove the ledger's cap (the config default, if set, then applies)")
+    p.add_argument("--worker-usd", type=usd_or_none,
+                   help="a number, or `none` to remove the ledger's cap (the config default, if set, then applies)")
     p.add_argument("--spent", type=float, help="the epic's spend so far, USD; needs no decision line")
     p.add_argument("--decision", help="the decision line; a change to a cap needs it")
 

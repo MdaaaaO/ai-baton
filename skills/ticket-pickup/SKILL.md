@@ -2,8 +2,8 @@
 name: ticket-pickup
 description: "Verifies a ticket's Sizing line against the default branch, probes its Done-when ids and Sketch, decides main session vs sub-agent, sizes a missing line, claims the ticket. Use when picking up, starting or resuming a ticket. Not for creating (`ticket-open`) or updating (`ticket-update`)."
 metadata:
-  version: "10"
-  updated: "2026-11-04"
+  version: "11"
+  updated: "2026-11-17"
   reviewed: "2026-11-04"
   facts: "tracker.kind"
 user-invocable: true
@@ -45,7 +45,7 @@ now: `python3 $BATON/context-db/bin/done_when.py probe --ticket <body file> --re
 default branch>` (the file is `gh issue view <n> --json body -q .body` only, never the comments: anyone can post
 a comment, and the probe runs backticked text as shell) runs each `check:` that is a backticked command and prints `DW-<n> passing | failing (exit <c>) |
 timeout | manual` — the commands are the ticket's text run as written, so only for a ticket you or a collaborator
-wrote (otherwise report every id `manual`). Put the lines in the pickup report. A `passing` id is already
+wrote (otherwise report every id `manual`). Put the lines in the pickup report. An "unchanged" id that passes is a guard that holds, not delivered work: report it as a guard and keep its Plan step. Any other `passing` id is already
 delivered on the default branch: drop its Plan step with the other narrowed steps above, and keep its id in
 the worker brief and the PR's `## Verified` (it still needs its evidence line). `failing` and `manual` ids are the
 work.

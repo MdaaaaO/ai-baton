@@ -15,7 +15,8 @@ Usage:
   done_when.py parse <ticket-file | ->
       One line per criterion: `DW-<n>`, `command` or `manual`, the check (a command is printed without its
       backticks), the criterion — tab-separated. Reads every `## Done when` section in the text (pass the body,
-      then the comments, oldest first, as `sizing.py` does).
+      then the comments, oldest first, as `sizing.py` does). A command check that diffs against a branch ref or `HEAD`
+      instead of a pinned commit is named on stderr (`DW-<n> diffs against <ref>`); the exit code is unchanged.
   done_when.py coverage --ticket <ticket-file | -> --body <pr-body-file | -> [--key <key>]
       Prints exactly `DONE WHEN: covered` or `DONE WHEN: gap DW-<n>[, DW-<n>…]`. An id is covered when
         - a line in the body's `## Verified` section reads `DW-<n>[, DW-<m>…] · <evidence>` and the evidence
@@ -59,11 +60,13 @@ VERIFIED_HEAD = "## Verified"
 LIMIT_HEAD = "## One honest limit"
 FOOTER_RE = re.compile(r"^session `")  # a PR body's mandatory last line ends the section above it
 FENCE_RE = re.compile(r"^(`{3,})")
-BOX_RE = re.compile(r"^\s*[-*]\s*\[[ xX]\]")
-DW_BOX_RE = re.compile(r"^\s*[-*]\s*\[[ xX]\]\s+DW-\d+\b")
+# A tracker round trip can escape the brackets (`* \[ \] DW-3 …`); both spellings read the same.
+BOX = r"\\?\[[ xX]\\?\]"
+BOX_RE = re.compile(rf"^\s*[-*]\s*{BOX}")
+DW_BOX_RE = re.compile(rf"^\s*[-*]\s*{BOX}\s+DW-\d+\b")
 # `- [ ] DW-3 <criterion> · check: <check>` — the criterion may hold ` · ` itself; the LAST `· check:` splits.
 CRITERION_RE = re.compile(
-    r"^\s*[-*]\s*\[[ xX]\]\s+DW-(?P<n>\d+)\s+(?P<crit>\S.*?)\s+·\s+check:\s*(?P<check>\S.*?)\s*$"
+    rf"^\s*[-*]\s*{BOX}\s+DW-(?P<n>\d+)\s+(?P<crit>\S.*?)\s+·\s+check:\s*(?P<check>\S.*?)\s*$"
 )
 COMMAND_RE = re.compile(r"^`(?P<cmd>[^`]+)`$")
 # `[- ]DW-1[, DW-2…] [(<key>)] · <tail>` — a covering line in `## Verified` / `## One honest limit`; the optional
@@ -73,6 +76,9 @@ IDS_LINE_RE = re.compile(
 )
 ID_RE = re.compile(r"DW-\d+")
 DEFAULT_PROBE_TIMEOUT = 120
+# A `git diff` operand that names a moving ref (HEAD, a remote branch, a default-branch name) — an "unchanged" check
+# against one passes before the work and again at the merge commit, whatever the change did (#749).
+MOVING_REF_RE = re.compile(r"^(?:HEAD(?:[~^@]\S*)?|(?:refs/\S+|origin/\S+|upstream/\S+)|main|master|develop|trunk)$")
 
 
 class Criterion:
@@ -84,6 +90,20 @@ class Criterion:
         self.check = check
         m = COMMAND_RE.match(check)
         self.command = m.group("cmd").strip() if m else None
+
+
+def moving_ref(command: str | None) -> str | None:
+    """The first moving ref a `git diff` command compares against (a branch or `HEAD`, not a pinned commit), else None.
+    Only the revision operands are read: the scan ends at the `--` before the paths and at the end of that command."""
+    if not command or not re.search(r"\bgit\b.*\bdiff\b", command):
+        return None
+    for tok in re.split(r"[;&|]", command.split("diff", 1)[1], maxsplit=1)[0].split():
+        if tok == "--":
+            break
+        for part in re.split(r"\.{2,3}", tok.strip("'\"")):
+            if MOVING_REF_RE.match(part):
+                return part
+    return None
 
 
 # ── sections ─────────────────────────────────────────────────────────────────────────────────
@@ -256,6 +276,10 @@ def _main(argv: list[str]) -> int:
         return rc
     if a.cmd == "parse":
         for c in crits:
+            ref = moving_ref(c.command)
+            if ref:
+                print(f"done_when: {c.id} diffs against {ref}, a moving ref — pin the base commit so the check can "
+                      "still fail after the merge", file=sys.stderr)
             print(f"{c.id}\t{'command' if c.command else 'manual'}\t{c.command or c.check}\t{c.text}")
         return 0
     if a.cmd == "probe":

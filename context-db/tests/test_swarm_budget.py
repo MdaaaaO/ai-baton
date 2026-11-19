@@ -173,6 +173,18 @@ class SpendReading(BudgetCase):
         self.assertEqual((reading["worker"], reading["kind"], reading["usage"], reading["forks"], reading["under"]),
                          ("lane-7", "subagent", 2.5, 1, ORCH))
 
+    def test_a_ref_recorded_after_the_spawn_is_read_at_the_next_sweep(self):
+        """DW-2: assign runs before the spawn, so the ref comes with `progress --ref` and the next sweep reads it."""
+        self.write_subagent(ORCH, "w7", [turn("w7-1", usd=2.0)])
+        self.plan("7")
+        self.assign("7", None)
+        self.assertRegex(self.sweep(), r"(?m)^spend-unread 7 why=.*no ref on the row")
+        self.assertEqual(self.row()["spent"], 0)
+        self.ok(SWARM, "progress", EPIC, "7", "--ref", "w7")
+        out = self.sweep()
+        self.assertNotIn("spend-unread 7", out)
+        self.assertEqual(self.row()["spent"], 2.0)
+
     def test_a_fork_with_no_meta_stays_out_of_the_worker_but_in_the_epic(self):
         self.write_session(ORCH, [turn("o1", usd=1.0)])
         self.write_subagent(ORCH, "w7", [turn("w7-1", usd=2.0, tools=("toolu_f1",))])
