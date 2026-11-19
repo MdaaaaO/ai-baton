@@ -1867,5 +1867,169 @@ class Resume(CliCase):
         self.assertEqual(self.actions(), {})
 
 
+class ReplanMoves(CliCase):
+    """DW-1 of the re-plan moves ticket: a dropped row is never assignable and stays in the log, a moved `DW-<n>` leaves
+    the old row and joins the new one, and on an approved plan both reset `plan_approved`."""
+
+    def drop(self, ticket: str, *extra: str) -> str:
+        return self.ok("add", EPIC, ticket, "--update", "--drop", "--reason", "delta: not needed", *extra)
+
+    def move(self, dw: str, src: str, dst: str) -> subprocess.CompletedProcess:
+        return self.run_cli("add", EPIC, src, "--update", "--move-dw", dw, "--to", dst, "--reason", "delta: split differently")
+
+    def test_dw1_a_dropped_row_is_never_assigned_and_stays_in_the_log(self):
+        self.plan("5", "6")
+        self.drop("5")
+        self.assertEqual(self.row("5")["dropped"]["reason"], "delta: not needed")
+        self.assertIn(("drop", "5"), [(e["act"], e.get("ticket")) for e in self.ledger()["log"]])
+        err = self.refused("assign", EPIC, "5", "--kind", "subagent", "--name", "lane-5", "--branch", "feat/5-x")
+        self.assertIn("dropped from the plan", err)
+        self.assertIn("dropped from the plan", self.refused("assign", EPIC, "5", "--rebrief"))
+        self.assertIn("dropped from the plan", self.refused("status", EPIC, "5", "parked", "--reason", "x"))
+        t = self.tick()
+        self.assertNotIn("5", t["ready"] + [w["ticket"] for w in t["waiting"]] + t["assignable"])
+        self.assertIn("ready (dropped)", self.ok("render", EPIC))
+
+    def test_dw1_a_dropped_row_cannot_be_revived_or_named_as_a_dependency(self):
+        self.plan("5", "6")
+        self.drop("5")
+        self.assertIn("dropped", self.refused("add", EPIC, "5", "--update", "--wave", "w1"))
+        self.assertIn("dropped", self.refused("add", EPIC, "6", "--update", "--dep", "5"))
+        self.assertIn("dropped", self.refused("add", EPIC, "5", "--update", "--drop", "--reason", "again"))
+        self.assertTrue(self.row("5")["dropped"])
+
+    def test_dw1_a_dropped_row_holds_no_wave_no_slot_and_no_cap(self):
+        self.ok("init", EPIC, "--repo", "owner/repo", "--waves", "w1,w2", "--max-workers", "1", "--worker-usd", "10")
+        self.ok("add", EPIC, "5", "--wave", "w1", "--cap-usd", "4")
+        self.ok("add", EPIC, "6", "--wave", "w2")
+        self.ok("approve", EPIC, "--decision", "go")
+        self.drop("5")
+        self.ok("approve", EPIC, "--decision", "go again")
+        t = self.tick()
+        self.assertEqual((t["wave"], t["assignable"], t["workers"]), ("w2", ["6"], 0))
+        self.assertEqual(t["budget"]["over"], [])
+        led = self.ledger()
+        led["tickets"]["5"]["spent"] = 9
+        self.ledger_file().write_text(json.dumps(led), encoding="utf-8")
+        self.assertEqual(self.tick()["budget"]["over"], [], "a dropped row is at no cap")
+
+    def test_dw1_a_dropped_row_does_not_keep_a_wave_from_ending(self):
+        self.plan("7", approve=False, waves="w1")
+        self.ok("add", EPIC, "7", "--update", "--wave", "w1")
+        self.ok("add", EPIC, "8", "--wave", "w1")
+        self.drop("8")
+        self.ok("approve", EPIC, "--decision", "go")
+        self.to_done("7")
+        self.assertEqual(swarm.wave_ended_at(self.ledger(), None), "w1")
+
+    def test_dw1_a_drop_is_refused_while_the_row_has_work_or_dependents(self):
+        self.plan("5", "6", "7", "8")
+        self.ok("add", EPIC, "6", "--update", "--dep", "5")
+        self.ok("approve", EPIC, "--decision", "go")
+        err = self.refused("add", EPIC, "5", "--update", "--drop", "--reason", "x")
+        self.assertIn("6 still depend on it", err)
+        self.assertEqual(self.row("5")["dropped"], None)
+        self.assign("7", "lane-7", "feat/7-x")
+        self.assertIn("live worker", self.refused("add", EPIC, "7", "--update", "--drop", "--reason", "x"))
+        self.to_pr("8")
+        self.assertIn("close the PR and park the row first", self.refused("add", EPIC, "8", "--update", "--drop", "--reason", "x"))
+        self.ok("status", EPIC, "8", "ready-to-merge", "--head", SHA_A)
+        self.ok("status", EPIC, "8", "merged", "--sha", SHA_C)
+        self.assertIn("shipped", self.refused("add", EPIC, "8", "--update", "--drop", "--reason", "x"))
+        self.ok("add", EPIC, "6", "--update", "--dep", "7")  # re-pointed: the drop of 5 goes through
+        self.ok("add", EPIC, "5", "--update", "--drop", "--reason", "x")
+        self.assertTrue(self.row("5")["dropped"])
+
+    def test_dw1_a_parked_row_can_be_dropped(self):
+        self.plan("5")
+        self.ok("status", EPIC, "5", "parked", "--reason", "waiting on the owner")
+        self.drop("5")
+        self.assertEqual((self.row("5")["status"], bool(self.row("5")["dropped"])), ("parked", True))
+
+    def test_dw1_a_dw_id_leaves_the_old_row_and_joins_the_new_one(self):
+        self.plan("5", "6", approve=False)
+        self.ok("add", EPIC, "5", "--update", "--dw", "DW-1", "--dw", "DW-2")
+        self.ok("add", EPIC, "6", "--update", "--dw", "DW-3")
+        p = self.move("DW-2", "5", "6")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual((self.row("5")["dws"], self.row("6")["dws"]), (["DW-1"], ["DW-3", "DW-2"]))
+        notes = [(e["ticket"], e["note"]) for e in self.ledger()["log"] if e["act"] == "move-dw"]
+        self.assertEqual([t for t, _ in notes], ["5", "6"], "the move logs on both rows")
+        self.assertTrue(all("DW-2" in n and "delta: split differently" in n for _, n in notes))
+        self.assertFalse(self.ledger()["plan_approved"])
+
+    def test_dw1_the_moves_reset_an_approved_plan_like_any_replan_field(self):
+        self.plan("5", "6", approve=False)
+        self.ok("add", EPIC, "5", "--update", "--dw", "DW-1")
+        self.ok("approve", EPIC, "--decision", "go")
+        p = self.move("DW-1", "5", "6")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("5: the plan needs a new go", p.stderr)
+        led = self.ledger()
+        self.assertFalse(led["plan_approved"])
+        self.assertEqual(led["log"][-1]["act"], "replan")
+        self.ok("approve", EPIC, "--decision", "go")
+        err = self.run_cli("add", EPIC, "6", "--update", "--drop", "--reason", "gone").stderr
+        self.assertIn("6: the plan needs a new go", err)
+        self.assertFalse(self.ledger()["plan_approved"])
+        self.assertEqual(self.ledger()["log"][-1]["act"], "replan")
+
+    def test_dw1_a_move_or_drop_on_an_incident_lane_leaves_the_go_in_place(self):
+        self.plan("5", approve=False)
+        self.ok("add", EPIC, "8", "--incident", "--dw", "DW-1")
+        self.ok("add", EPIC, "9", "--incident")
+        self.ok("approve", EPIC, "--decision", "go")
+        self.assertEqual(self.move("DW-1", "8", "9").returncode, 0)
+        self.drop("9")
+        self.assertTrue(self.ledger()["plan_approved"])
+
+    def test_dw1_a_move_is_refused_for_a_bad_source_target_or_status(self):
+        self.plan("5", "6", "7", approve=False)
+        self.ok("add", EPIC, "5", "--update", "--dw", "DW-1")
+        self.ok("add", EPIC, "6", "--update", "--dw", "DW-1")
+        self.drop("7")
+        self.assertIn("not on 6", self.move("DW-9", "6", "5").stderr)
+        self.assertIn("same row", self.move("DW-1", "5", "5").stderr)
+        self.assertIn("already on 6", self.move("DW-1", "5", "6").stderr)
+        self.assertIn("is dropped", self.move("DW-1", "5", "7").stderr)
+        self.assertEqual(self.run_cli("add", EPIC, "5", "--update", "--move-dw", "DW-1", "--to", "99", "--reason", "x").returncode, 1)
+        self.assertEqual(self.row("5")["dws"], ["DW-1"])
+
+    def test_dw1_an_id_with_a_pass_or_a_shipped_row_does_not_move(self):
+        self.plan("5", "6", approve=False)
+        self.ok("add", EPIC, "5", "--update", "--dw", "DW-1", "--dw", "DW-2")
+        self.ok("approve", EPIC, "--decision", "go")
+        self.to_merged("5")
+        self.ok("pass", EPIC, "5", "DW-1", "--evidence", "seen", "--by", "verifier")
+        p = self.move("DW-1", "5", "6")
+        self.assertEqual(p.returncode, 3)
+        self.assertIn("recorded pass", p.stderr)
+        self.assertIn("is merged", self.move("DW-2", "5", "6").stderr)
+        self.ok("add", EPIC, "6", "--update", "--dw", "DW-4")
+        self.assertIn("is merged", self.move("DW-4", "6", "5").stderr)
+        self.assertEqual((self.row("5")["dws"], self.row("6")["dws"]), (["DW-1", "DW-2"], ["DW-4"]))
+
+    def test_dw1_flag_combinations_that_make_no_sense_are_usage_errors(self):
+        self.plan("5", "6")
+        before = self.ledger()
+        bad = [("--drop", "--reason", "x"),                                   # no --update
+               ("--update", "--drop"),                                        # no --reason
+               ("--update", "--drop", "--reason", " "),
+               ("--update", "--drop", "--reason", "x", "--wave", "w2"),       # field changes
+               ("--update", "--drop", "--reason", "x", "--dw", "DW-1"),
+               ("--update", "--drop", "--reason", "x", "--incident"),
+               ("--update", "--drop", "--move-dw", "DW-1", "--to", "6", "--reason", "x"),
+               ("--update", "--move-dw", "DW-1", "--reason", "x"),            # no --to
+               ("--move-dw", "DW-1", "--to", "6", "--reason", "x"),           # no --update
+               ("--update", "--move-dw", "DW-1", "--to", "6"),                # no --reason
+               ("--update", "--move-dw", "one", "--to", "6", "--reason", "x"),
+               ("--update", "--to", "6", "--reason", "x"),                    # --to alone
+               ("--update", "--reason", "x")]                                 # --reason alone
+        for args in bad:
+            self.refused("add", EPIC, "5", *args, code=2)
+        self.assertEqual(self.ledger()["tickets"], before["tickets"])
+        self.assertTrue(self.ledger()["plan_approved"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,13 @@ Every subcommand takes the epic key first:
   init      create the ledger (--repo, --session, --waves, the budget caps, --max-workers)
   add       a row per ticket: --area, --dep, --wave, --sizing, --dw or --ticket-file, --cap-usd. A new row on an approved
             plan, or a changed area, dep, wave, sizing or cap, resets `plan_approved`, unless it is an --incident lane or
-            --already-done bookkeeping
+            --already-done bookkeeping. Two moves a re-plan needs, each with `--update` and `--reason "<delta line>"` and
+            no other field: `--drop` marks the row dropped (see `dropped` below) and `--move-dw DW-<n> --to <m>` takes the
+            id off this row and puts it on row <m>. Both reset `plan_approved` on an approved plan, like any re-plan field,
+            unless every row they touch is an incident lane. A drop is refused for a row with a worker, a PR, a merge or a
+            live dependent; a move is refused for an id with a recorded pass, from or to a row that is merged or later, or
+            to a dropped row. A dropped row is never assigned, re-briefed or moved, `add --update` cannot change it, and no
+            row can name it as a dependency
   approve   the owner's go on the plan, with its --decision line. `assign` refuses until then
   assign    a worker takes the row: --kind, --name, --ref, --worktree, --branch. --rebrief moves no row. Either way the
             READY in force ends, because the head it named is about to move. Refused before the plan's go, under a STOP or
@@ -64,6 +70,8 @@ The file is `<content root>/state/swarm/<key>.json`. Times are UTC, `YYYY-MM-DDT
       "stall_counted_at", "rebriefs": n, "rebrief_open": <time>|null, a re-brief with no READY or BLOCKED since,
       "fail": {"at", "merged_sha", "branch", "reason"}|null, a FAIL on the merged commit until a fix is assigned,
       "dws": [DW-n, …], "passes": {DW-n: {"evidence", "by", "at"}},
+      "dropped": {"reason", "at"}|null, a row the plan no longer holds: it keeps its status, its log and its ids, takes no
+      worker and counts for no wave, no slot and no budget,
       "blocked": {"reason", "who", "sha", "ran", "at"}|null, "parked_reason",
       "lines": {<sender>: {<WORD>: {"id", "at", …the line's fields}}}, "restored": true when `resume --apply` wrote it}}}
 
@@ -270,8 +278,8 @@ def new_row(ticket: str) -> dict:
             "worker": {"kind": None, "name": None, "ref": None, "worktree": None, "branch": None},
             "head": None, "ready_head": None, "body": None, "pr": None, "pr_state": None, "merged_sha": None, "merged_by": None,
             "budget_cap": None, "cap_decision": None, "spent": 0, "last_progress": None, "stalls": 0, "stall_counted_at": None,
-            "rebriefs": 0, "rebrief_open": None, "fail": None, "dws": [], "passes": {}, "blocked": None, "parked_reason": None,
-            "lines": {}}
+            "rebriefs": 0, "rebrief_open": None, "fail": None, "dws": [], "passes": {}, "dropped": None, "blocked": None,
+            "parked_reason": None, "lines": {}}
 
 
 def row_of(led: dict, ticket: str) -> dict:
@@ -315,6 +323,15 @@ def row_held(led: dict, row: dict) -> bool:
     return bool(scopes & {row["ticket"], row["worker"]["name"], led["key"]})
 
 
+def dropped(row: dict) -> bool:
+    return bool(row.get("dropped"))
+
+
+def refuse_dropped(ticket: str, row: dict) -> None:
+    if dropped(row):
+        raise Refused(f"{ticket}: dropped from the plan ({row['dropped'].get('reason')}); it takes no worker and no change")
+
+
 def unmet_deps(led: dict, row: dict) -> list[str]:
     rows = led["tickets"]
     return [d for d in row["deps"] if d not in rows or rows[d]["status"] != "done"]
@@ -333,7 +350,7 @@ def current_wave(led: dict) -> str | None:
                                                 if d not in rows or rows[d]["status"] != "done")
 
     for wave in led["waves"]:
-        if any(r["wave"] == wave and r["status"] != "done" and not stuck(t) for t, r in rows.items()):
+        if any(r["wave"] == wave and r["status"] != "done" and not dropped(r) and not stuck(t) for t, r in rows.items()):
             return wave
     return None
 
@@ -451,7 +468,7 @@ def wave_ended_at(led: dict, last_at: datetime | None) -> str | None:
     not a second wave end."""
     rows = led["tickets"]
     for wave in led["waves"]:
-        members = [t for t, r in rows.items() if r["wave"] == wave]
+        members = [t for t, r in rows.items() if r["wave"] == wave and not dropped(r)]
         if not members or any(rows[t]["status"] != "done" for t in members):
             continue
         arrived: dict[str, str] = {}  # member -> the entry that brought it to `done`, not a later one that left it there
@@ -491,7 +508,7 @@ def tick_report(led: dict, now: datetime | None = None) -> dict:
     wave = current_wave(led)
     ready, waiting = [], []
     for t, r in rows.items():
-        if r["status"] == "ready":
+        if r["status"] == "ready" and not dropped(r):
             unmet = unmet_deps(led, r)
             if unmet and not r["incident"]:
                 waiting.append({"ticket": t, "on": unmet})
@@ -556,7 +573,9 @@ def render_table(led: dict) -> str:
            "|---|---|---|---|---|---|---|---|---|---|---|"]
     for t, r in led["tickets"].items():
         status = r["status"]
-        if status == "blocked" and r.get("blocked"):
+        if dropped(r):
+            status = f"{status} (dropped)"
+        elif status == "blocked" and r.get("blocked"):
             status = f"blocked ({r['blocked'].get('reason')}, {r['blocked'].get('who')})"
         w = r["worker"]
         worker = f"{w['name']} ({w['kind']})" if w.get("name") else None
@@ -829,8 +848,100 @@ def cmd_init(a) -> int:
     return 0
 
 
+def reset_plan(led: dict, ticket: str) -> None:
+    led["plan_approved"] = False
+    log(led, "replan", ticket, note="a row changed on an approved plan: the plan needs a new go")
+    print(f"{ticket}: the plan needs a new go", file=sys.stderr)
+
+
+def drop_blockers(led: dict, ticket: str, row: dict) -> list[str]:
+    """Why a row cannot be dropped: what it holds that someone must settle first."""
+    out = []
+    if row["status"] in STALL_STATUSES:
+        out.append(f"it has a live worker ({row['worker']['name']}); stop it and park the row first (`swarm.py status {ticket} parked --reason …`)")
+    elif row["status"] in ("pr", "ready-to-merge", "blocked") or pr_open(row):
+        out.append(f"it is at {row['status']} with a PR or a block to settle; close the PR and park the row first")
+    elif row["status"] in SHIPPED + ("done",):
+        out.append(f"it is {row['status']}: shipped work cannot be dropped")
+    live = [t for t, r in led["tickets"].items() if ticket in r["deps"] and not dropped(r) and r["status"] != "done"]
+    if live:
+        out.append(f"{', '.join(live)} still depend on it; re-point them first (`swarm.py add <key> <n> --update --dep …`)")
+    return out
+
+
+def drop_row(led: dict, ticket: str, a) -> None:
+    row = row_of(led, ticket)
+    refuse_dropped(ticket, row)
+    blockers = drop_blockers(led, ticket, row)
+    if blockers:
+        raise Refused(f"{ticket}: not dropped: {'; '.join(blockers)}")
+    row["dropped"] = {"reason": a.reason.strip(), "at": now_iso()}
+    log(led, "drop", ticket, note=a.reason.strip())
+    if led["plan_approved"] and not row["incident"]:
+        reset_plan(led, ticket)
+    print(f"{ticket}: dropped")
+
+
+def move_dw(led: dict, ticket: str, a) -> None:
+    dw, target = a.move_dw, clean_ticket(a.to)
+    src, dst = row_of(led, ticket), row_of(led, target)
+    refuse_dropped(ticket, src)
+    reasons = []
+    if target == ticket:
+        reasons.append("the target is the same row")
+    if dw not in src["dws"]:
+        reasons.append(f"{dw} is not on {ticket} (it has {', '.join(src['dws']) or 'no ids'})")
+    if dropped(dst):
+        reasons.append(f"{target} is dropped")
+    if dw in src["passes"]:
+        reasons.append(f"{dw} has a recorded pass on {ticket}; a pass is evidence for the commit that earned it")
+    for t, r in ((ticket, src), (target, dst)):
+        if r["status"] in SHIPPED + ("done",):
+            reasons.append(f"{t} is {r['status']}: its ids are settled")
+    if dw in dst["dws"] and target != ticket:
+        reasons.append(f"{dw} is already on {target}")
+    if reasons:
+        raise Refused(f"{ticket}: {dw} not moved to {target}: {'; '.join(reasons)}")
+    src["dws"].remove(dw)
+    dst["dws"].append(dw)
+    log(led, "move-dw", ticket, note=f"{dw} -> {target}: {a.reason.strip()}")
+    log(led, "move-dw", target, note=f"{dw} <- {ticket}: {a.reason.strip()}")
+    if led["plan_approved"] and not (src["incident"] and dst["incident"]):
+        reset_plan(led, ticket)
+    print(f"{ticket}: {dw} moved to {target}")
+
+
+def check_move_usage(a) -> None:
+    """The flags of `--drop` and `--move-dw`: each alone with `--update` and `--reason`, no other change."""
+    if a.to and not a.move_dw:
+        raise SwarmError("--to goes with --move-dw")
+    if not (a.drop or a.move_dw):
+        if a.reason:
+            raise SwarmError("--reason goes with --drop or --move-dw")
+        return
+    name = "--drop" if a.drop else "--move-dw"
+    if a.drop and a.move_dw:
+        raise SwarmError("--drop and --move-dw are two moves: one per call")
+    if not a.update:
+        raise SwarmError(f"{name} changes a row that exists: it needs --update")
+    if a.move_dw and not (a.to and DW_RE.fullmatch(a.move_dw)):
+        raise SwarmError("--move-dw needs a DW-<n> id and --to <ticket>")
+    if not (a.reason or "").strip():
+        raise SwarmError(f"{name} needs --reason with the delta line")
+    others = [f for f, v in (("--title", a.title), ("--repo", a.repo), ("--area", a.area), ("--dep", a.dep), ("--sizing", a.sizing),
+                             ("--wave", a.wave), ("--dw", a.dw), ("--ticket-file", a.ticket_file), ("--cap-usd", a.cap_usd),
+                             ("--incident", a.incident), ("--already-done", a.already_done)) if v not in (None, False)]
+    if others:
+        raise SwarmError(f"{name} takes no other change in the same call ({', '.join(others)})")
+
+
 def cmd_add(a) -> int:
     ticket = clean_ticket(a.ticket)
+    check_move_usage(a)
+    if a.drop or a.move_dw:
+        with edit(a.key) as led:
+            (drop_row if a.drop else move_dw)(led, ticket, a)
+        return 0
     deps = [clean_ticket(d) for d in a.dep] if a.dep is not None else None
     if deps and ticket in deps:
         raise SwarmError(f"{ticket} cannot depend on itself")
@@ -849,6 +960,11 @@ def cmd_add(a) -> int:
             raise Refused(f"{ticket} already has a row; --update changes it")
         if old is not None and a.already_done:
             raise Refused(f"{ticket} already has a row; --already-done is for a new one")
+        if old is not None:
+            refuse_dropped(ticket, old)
+        gone = [d for d in deps or [] if d in led["tickets"] and dropped(led["tickets"][d])]
+        if gone:
+            raise Refused(f"{ticket}: depends on {', '.join(gone)}, dropped from the plan")
         row = json.loads(json.dumps(old)) if old is not None else new_row(ticket)
         for field, value in (("title", a.title), ("repo", a.repo), ("area", a.area), ("deps", deps), ("sizing", a.sizing),
                              ("wave", a.wave), ("budget_cap", a.cap_usd)):
@@ -869,9 +985,7 @@ def cmd_add(a) -> int:
         current = row_cap(led, old) if old is not None else None
         cap_raised = current is not None and a.cap_usd is not None and a.cap_usd > current  # an incident widens no cap
         if led["plan_approved"] and (cap_raised or (replanned and not (a.incident or a.already_done))):
-            led["plan_approved"] = False
-            log(led, "replan", ticket, note="a row changed on an approved plan: the plan needs a new go")
-            print(f"{ticket}: the plan needs a new go", file=sys.stderr)
+            reset_plan(led, ticket)
     print(f"{ticket}: {row['status']}")
     return 0
 
@@ -928,6 +1042,7 @@ def cmd_assign(a) -> int:
     ticket = clean_ticket(a.ticket)
     with edit(a.key) as led:
         row = row_of(led, ticket)
+        refuse_dropped(ticket, row)
         cap = checked_cap(led, ticket, row, a)
         if a.rebrief:
             refuse_after_fail(ticket, row)
@@ -977,6 +1092,7 @@ def cmd_status(a) -> int:
         raise Refused(f"{ticket}: status {a.status} refused: {pointers[a.status]}")
     with edit(a.key) as led:
         row = row_of(led, ticket)
+        refuse_dropped(ticket, row)
         before = row["status"]
         act, extra = status_act(a, row, ticket)
         if act == "MERGED" and before in MERGED_OBSERVED_FROM and a.merged_by in ("owner", "auto"):
@@ -1211,7 +1327,7 @@ def cmd_resume(a) -> int:
 
     def compare(ledger: dict) -> list[dict]:
         rows = ledger["tickets"]
-        keys = [t for t, r in rows.items() if not r["repo"] or not repo or r["repo"] == repo]
+        keys = [t for t, r in rows.items() if not dropped(r) and (not r["repo"] or not repo or r["repo"] == repo)]
         keys += [t for t in extra if t not in rows]
         return [compare_row(t, rows[t] if t in rows else new_row(t), heads, prs, trees) for t in keys]
 
@@ -1390,6 +1506,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--incident", action="store_true", help="an incident lane: starts past the plan and leaves the go in place")
     p.add_argument("--already-done", action="store_true", help="a ticket closed before this ledger: a dependency to count as done")
     p.add_argument("--update", action="store_true")
+    p.add_argument("--drop", action="store_true", help="with --update and --reason: the plan no longer holds this row")
+    p.add_argument("--move-dw", metavar="DW-<n>", help="with --update, --to and --reason: take this id off the row")
+    p.add_argument("--to", help="with --move-dw: the ticket whose row takes the id")
+    p.add_argument("--reason", help="with --drop or --move-dw: the delta line")
 
     p = command("approve", cmd_approve, "the owner's go on the plan")
     p.add_argument("--decision", required=True, help="the decision line (docs/carousel.md § After the answer)")
