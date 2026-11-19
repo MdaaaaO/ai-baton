@@ -51,6 +51,7 @@ TOOLS = (
     "mission.py",
     "commit_style.py",
     "sizing.py",
+    "plan_check.py",
     "evidence_check.py",
     "done_when.py",
     "length_check.py",

@@ -2,9 +2,9 @@
 name: epic-decompose
 description: "Splits a discovered epic into child tickets with areas, waves and budgets, refuses overlapping areas, ledgers them and asks the owner's go on the plan. Use when decomposing or re-planning an epic. Not for opening one (`epic-discover`) or running it (`swarm-run`)."
 metadata:
-  version: "1"
-  updated: "2026-11-10"
-  reviewed: "2026-11-10"
+  version: "2"
+  updated: "2026-11-19"
+  reviewed: "2026-11-19"
 user-invocable: true
 argument-hint: "<epic key> [<owner/repo>]"
 ---
@@ -75,7 +75,11 @@ of its children's caps; the caps never add up past the money left.
 ## 5. Walk, create, add
 
 1. **Drafts**: each child to `$CTX/child-<n>.md`; check each with `python3 $E/done_when.py parse`, `python3
-   $E/sizing.py parse` and `python3 $E/length_check.py <file> --surface ticket`, and the § 3 rules on the whole plan.
+   $E/sizing.py parse` and `python3 $E/length_check.py <file> --surface ticket`. Then the § 3 and § 4 refusals on the
+   whole plan, before the walk and the go: `python3 $E/plan_check.py --key <key> --cap <n>=<usd> … $CTX/child-*.md`
+   (`--worker-limit <n> --money-left <usd>` instead of `--key` when there is no ledger). Its lines are `OVERLAP #a #b
+   <path>`, `NO AREA #a`, `WIDE WAVE <w> <n> > <limit>` and `OVER BUDGET $<sum> > $<left>`, exit 3. Quote each one and
+   redraft; a refusal never reaches a card, and no walk or go starts until it prints `OK`.
 2. **The walk**: `ticket-carousel` with these drafts as its list and `<key>` as its parent: its Dedup, its cards, its
    rule that nothing is created until the walk ends. The epic's interview answered Goal and Out of scope for the
    group, so they are not asked again; each card's preview carries the child's `## Done when`, Area and Wave. Its
