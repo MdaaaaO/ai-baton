@@ -73,6 +73,18 @@ class Parse(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("plain old line", problems[0])
 
+    def test_an_escaped_checkbox_reads_like_a_plain_one(self):
+        plain, _ = dw.parse_ticket("## Done when\n\n- [ ] DW-1 a · check: `b`\n- [x] DW-2 c · check: d\n")
+        esc, problems = dw.parse_ticket("## Done when\n\n* \\[ \\] DW-1 a · check: `b`\n* \\[x\\] DW-2 c · check: d\n")
+        self.assertEqual(problems, [])
+        self.assertEqual([(c.id, c.text, c.check, c.command) for c in esc],
+                         [(c.id, c.text, c.check, c.command) for c in plain])
+
+    def test_a_plain_escaped_checkbox_beside_id_lines_is_a_problem(self):
+        _, problems = dw.parse_ticket("## Done when\n\n* \\[ \\] DW-1 a · check: b\n* \\[ \\] plain old line\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("plain old line", problems[0])
+
     def test_an_id_without_a_check_is_a_problem(self):
         _, problems = dw.parse_ticket("## Done when\n\n- [ ] DW-1 criterion with no check\n")
         self.assertEqual(len(problems), 1)
@@ -224,6 +236,11 @@ class Cli(unittest.TestCase):
     def test_parse_exits_2_on_an_id_line_without_a_check(self):
         p = run("parse", "-", stdin="## Done when\n\n- [ ] DW-1 criterion with no check\n")
         self.assertEqual(p.returncode, 2)
+
+    def test_parse_reads_an_escaped_checkbox_block(self):
+        p = run("parse", "-", stdin="## Done when\n\n* \\[ \\] DW-1 a · check: b\n* \\[ \\] DW-2 c · check: `d`\n")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual([r.split("\t")[0] for r in p.stdout.splitlines()], ["DW-1", "DW-2"])
 
     def test_parse_exits_2_on_a_repeated_id(self):
         p = run("parse", "-", stdin="## Done when\n\n- [ ] DW-1 a · check: b\n- [ ] DW-1 c · check: d\n")

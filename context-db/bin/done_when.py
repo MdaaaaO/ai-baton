@@ -60,11 +60,13 @@ VERIFIED_HEAD = "## Verified"
 LIMIT_HEAD = "## One honest limit"
 FOOTER_RE = re.compile(r"^session `")  # a PR body's mandatory last line ends the section above it
 FENCE_RE = re.compile(r"^(`{3,})")
-BOX_RE = re.compile(r"^\s*[-*]\s*\[[ xX]\]")
-DW_BOX_RE = re.compile(r"^\s*[-*]\s*\[[ xX]\]\s+DW-\d+\b")
+# A tracker round trip can escape the brackets (`* \[ \] DW-3 …`); both spellings read the same.
+BOX = r"\\?\[[ xX]\\?\]"
+BOX_RE = re.compile(rf"^\s*[-*]\s*{BOX}")
+DW_BOX_RE = re.compile(rf"^\s*[-*]\s*{BOX}\s+DW-\d+\b")
 # `- [ ] DW-3 <criterion> · check: <check>` — the criterion may hold ` · ` itself; the LAST `· check:` splits.
 CRITERION_RE = re.compile(
-    r"^\s*[-*]\s*\[[ xX]\]\s+DW-(?P<n>\d+)\s+(?P<crit>\S.*?)\s+·\s+check:\s*(?P<check>\S.*?)\s*$"
+    rf"^\s*[-*]\s*{BOX}\s+DW-(?P<n>\d+)\s+(?P<crit>\S.*?)\s+·\s+check:\s*(?P<check>\S.*?)\s*$"
 )
 COMMAND_RE = re.compile(r"^`(?P<cmd>[^`]+)`$")
 # `[- ]DW-1[, DW-2…] [(<key>)] · <tail>` — a covering line in `## Verified` / `## One honest limit`; the optional
