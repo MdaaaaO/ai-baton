@@ -951,7 +951,7 @@ Usage:
 
 The four refusals, in this order (an area entry overlaps another when it equals it or is a directory prefix of it, a
 leading `+` ignored, no glob; two children may overlap when one depends on the other, directly or through others):
-  OVERLAP #<a> #<b> <path>            two children of one wave share the path, with no dependency between them
+  OVERLAP #<a> #<b> <path>            two children share the path, in one wave or across waves, and neither depends on the other
   NO AREA #<a>                        a child with no area in a wave of two or more
   WIDE WAVE <w> <n> > <limit>         wave <w> holds <n> children, more than the worker limit
   OVER BUDGET $<sum> > $<left>        the caps add up past the money left

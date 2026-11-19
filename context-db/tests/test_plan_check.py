@@ -68,10 +68,16 @@ class Refusals(PlanCase):
         p = self.run_plan("--worker-limit", 4, a, b, c)
         self.assertEqual((p.returncode, self.lines(p)), (0, ["OK 3 children, 3 waves"]))
 
-    def test_overlap_is_only_checked_inside_one_wave(self):
+    def test_dw1_overlap_across_waves_is_refused_without_a_dependency(self):
         a = self.child(1, "`src/`")
         b = self.child(2, "`src/x.py`", "2; no dependency")
-        self.assertEqual(self.run_plan("--worker-limit", 4, a, b).returncode, 0)
+        p = self.run_plan("--worker-limit", 4, a, b)
+        self.assertEqual((p.returncode, self.lines(p)), (3, ["OVERLAP #1 #2 src/x.py"]))
+
+    def test_money_prints_cents_and_no_exponent(self):
+        a = self.child(1, "`a.py`")
+        p = self.run_plan("--worker-limit", 4, "--money-left", 1000000, "--cap", "1=1000000.5", a)
+        self.assertEqual(self.lines(p), ["OVER BUDGET $1000000.5 > $1000000"])
 
     def test_dw1_no_area_in_a_wave_of_two_is_refused(self):
         a = self.child(7, None)

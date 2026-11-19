@@ -19,7 +19,7 @@ Usage:
 
 The four refusals, in this order (an area entry overlaps another when it equals it or is a directory prefix of it, a
 leading `+` ignored, no glob; two children may overlap when one depends on the other, directly or through others):
-  OVERLAP #<a> #<b> <path>            two children of one wave share the path, with no dependency between them
+  OVERLAP #<a> #<b> <path>            two children share the path, in one wave or across waves, and neither depends on the other
   NO AREA #<a>                        a child with no area in a wave of two or more
   WIDE WAVE <w> <n> > <limit>         wave <w> holds <n> children, more than the worker limit
   OVER BUDGET $<sum> > $<left>        the caps add up past the money left
@@ -95,7 +95,7 @@ def reach(children: dict[int, dict]) -> dict[int, set[int]]:
 
 
 def money(value: float) -> str:
-    return f"{value:g}"
+    return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
 def check(children: dict[int, dict], limit: int, caps: dict[int, float], left: float | None) -> list[str]:
@@ -104,14 +104,15 @@ def check(children: dict[int, dict], limit: int, caps: dict[int, float], left: f
     for n in sorted(children):
         waves.setdefault(children[n]["wave"], []).append(n)
     lines = []
+    order = sorted(children)
+    for i, a in enumerate(order):
+        for b in order[i + 1:]:
+            if b in deps[a] or a in deps[b]:
+                continue
+            path = shared(children[a]["area"], children[b]["area"])
+            if path:
+                lines.append(f"OVERLAP #{a} #{b} {path}")
     for w, members in waves.items():
-        for i, a in enumerate(members):
-            for b in members[i + 1:]:
-                if b in deps[a] or a in deps[b]:
-                    continue
-                path = shared(children[a]["area"], children[b]["area"])
-                if path:
-                    lines.append(f"OVERLAP #{a} #{b} {path}")
         if len(members) >= 2:
             lines += [f"NO AREA #{n}" for n in members if not children[n]["area"]]
         if len(members) > limit:
