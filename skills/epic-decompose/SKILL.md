@@ -2,9 +2,9 @@
 name: epic-decompose
 description: "Splits a discovered epic into child tickets with areas, waves and budgets, refuses overlapping areas, ledgers them and asks the owner's go on the plan. Use when decomposing or re-planning an epic. Not for opening one (`epic-discover`) or running it (`swarm-run`)."
 metadata:
-  version: "1"
-  updated: "2026-11-10"
-  reviewed: "2026-11-10"
+  version: "2"
+  updated: "2026-11-19"
+  reviewed: "2026-11-19"
 user-invocable: true
 argument-hint: "<epic key> [<owner/repo>]"
 ---
@@ -111,15 +111,16 @@ A change after the go to children, areas, dependencies, waves, sizing or caps:
 1. **A dated delta on the parent**: a checkbox in its `## Plan`, `- [ ] #<n> … (delta YYYY-MM-DD: <what, why>)`, and
    one `ticket-update` comment that names it. Nothing starts from it.
 2. **The rows**: `swarm.py add` for a new child, `--update` for a changed area, dependency, wave, sizing or cap; on an
-   approved plan either resets `plan_approved` (`the plan needs a new go` on stderr). A moved `DW-<n>` or a dropped
-   child has no move (`--dw` only adds, no command removes a row): `python3 $E/swarm.py hold <key> <n> --releaser owner
-   --reason "delta YYYY-MM-DD: <what>"` on each, so `assign` refuses it. The second go releases a moved id's hold
-   (`--release --by owner`); a dropped child's stays.
+   approved plan either resets `plan_approved` (`the plan needs a new go` on stderr). A dropped child is
+   `swarm.py add <key> <n> --update --drop --reason "delta YYYY-MM-DD: <what>"` and a moved `DW-<n>` is
+   `swarm.py add <key> <n> --update --move-dw DW-<k> --to <m> --reason "delta YYYY-MM-DD: <what>"`, each its own call
+   and each resetting the go the same way. A drop is refused while the child has a worker, a PR, a merge or a child that
+   depends on it: stop or re-point those first. No hold is needed; `assign` refuses a dropped row itself.
 3. **§ 3 and § 4** on the whole new plan; an added child's cap comes from the money left, as § 4 counts it.
 4. **A second go**: say the add reset the go (`plan_approved` false); § 6 again, its preview the delta against the plan.
 
 A split or a moved `DW-<n>` that adds no scope and no area, under a recorded `re-plan inside an area` grant: the delta
-cites the grant, and `approve` and the hold's release take the grant's decision line, with no carousel. An incident
+cites the grant, and `approve` takes the grant's decision line, with no carousel. An incident
 lane (`swarm.py add --incident`) leaves the go in place and its own assign open; the owner approves it afterwards.
 
 ## Headless
