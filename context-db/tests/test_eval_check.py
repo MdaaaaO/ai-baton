@@ -680,6 +680,13 @@ class ReadmeCounts(unittest.TestCase):
         self.assertIn("3+1", errs[0])
         self.assertIn("2+1", errs[0])
 
+    def test_an_unreadable_suite_cell_names_the_row_and_not_a_missing_row(self):
+        errs = self.errors(foo="| `foo` | — | `foo-behaviour-a`, `foo-behaviour-b` |")
+        self.assertEqual(len(errs), 1, errs)
+        self.assertIn("row `foo` has an unreadable suite cell", errs[0])
+        self.assertIn("2+1", errs[0])
+        self.assertEqual(self.errors(bar="| `bar` | — | — |"), [], "a dash is fine for a skill with no suite")
+
     def test_a_missing_or_extra_behaviour_case_names_the_row(self):
         errs = self.errors(foo="| `foo` | 2+1 | `foo-behaviour-a` |", bar="| `bar` | 0+0 | `bar-behaviour-ghost` |")
         self.assertEqual(len(errs), 2, errs)

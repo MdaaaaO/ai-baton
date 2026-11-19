@@ -321,14 +321,17 @@ def check_readme_counts(kit: Path, root: Path, skills: list[str], suites: dict[s
         if len(cells) >= 3 and re.fullmatch(r"`[\w-]+`", cells[0]):
             row = cells[0].strip("`")
             ts = re.fullmatch(r"(\d+)\+(\d+)", cells[1])
-            if ts and len(cells) == 3:  # a Coverage row: skill | pos+near | behaviour cases
+            if len(cells) == 3 and (ts or row in skills):  # a Coverage row: skill | pos+near | behaviour cases
                 seen.add(row)
                 have = suites.get(row)
                 if row not in skills:
                     errors.append(f"{where}: row `{row}` names no skill under skills/")
                     continue
                 got = (have["positive"], have["near-miss"]) if have else (0, 0)
-                if (int(ts.group(1)), int(ts.group(2))) != got:
+                if not ts and have:  # a cell that is not `N+N` is read as "no suite", and this skill has one
+                    errors.append(f"{where}: row `{row}` has an unreadable suite cell `{cells[1]}` — "
+                                  f"the case directories give {got[0]}+{got[1]}")
+                elif ts and (int(ts.group(1)), int(ts.group(2))) != got:
                     errors.append(f"{where}: row `{row}` states trigger suite {cells[1]} but the case directories give {got[0]}+{got[1]}")
                 stated = sorted(re.findall(r"`([^`]+)`", cells[2]))
                 actual = [n for n in names if n.startswith(f"{row}-behaviour-")]
