@@ -48,7 +48,8 @@ ticket of every wave.
 
 **A criterion lives where it closes.** A child ticket closes on its own PR, so its `## Done when` holds only ids that PR
 can verify. A criterion the orchestrator delivers (the epic's close, a release, a gate signature) lives on the epic's own
-`## Done when`, never on a child: `epic-decompose` § 3 refuses it on a child and offers the move.
+`## Done when`, never on a child: `epic-decompose` § 3 refuses it on a child and offers the move. The
+orchestrator answers each of those ids in the epic's close comment, one evidence line per id (`ticket-close`).
 
 **The assignment.** The orchestrator's order to one worker for one ticket, as a file the worker reads first:
 `.context/state/swarm/<key>/<worker>/assignment.md`. Its fields: ticket, worktree, branch, `DW` list with checks, budget

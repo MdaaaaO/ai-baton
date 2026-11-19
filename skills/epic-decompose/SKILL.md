@@ -3,7 +3,7 @@ name: epic-decompose
 description: "Splits a discovered epic into child tickets with areas, waves and budgets, refuses overlapping areas, ledgers them and asks the owner's go on the plan. Use when decomposing or re-planning an epic. Not for opening one (`epic-discover`) or running it (`swarm-run`)."
 metadata:
   version: "2"
-  updated: "2026-11-17"
+  updated: "2026-11-19"
   reviewed: "2026-11-10"
 user-invocable: true
 argument-hint: "<epic key> [<owner/repo>]"
@@ -48,7 +48,8 @@ step 4, the Sizing line from `$BATON/docs/delegation.md` § Sizing) and its `## 
   A `haiku`-sized child beside a neighbour in its own area → merge them.
 - **A shared index** (a count, a table row every child would add: a skill list, a loading table, an eval count) has one
   owner, the orchestrator; every other child names the row it wants in its return, never edits it.
-- **Coverage.** Every parent `DW-<n>` but the gates line lands in at least one child, named in the plan.
+- **Coverage.** Every parent `DW-<n>` lands in at least one child, named in the plan, but for the gates line and the
+  criteria § 3 keeps on the epic (its close, a release, a gate signature).
 
 ## 3. Areas, dependencies, waves — the refusals
 
