@@ -2,9 +2,9 @@
 name: cost-report
 description: "The user's own Claude Code spend against the work shipped: rolling 7 days vs the prior 7, or named phases. Org mode reports billed cost (aggregate control); private mode estimates from local transcripts. Never names anyone. Invoke when asked for a \"cost report\" or \"how efficient was last week\"."
 metadata:
-  version: "20"
-  updated: "2026-11-10"
-  reviewed: "2026-11-10"
+  version: "21"
+  updated: "2026-11-19"
+  reviewed: "2026-11-19"
   facts: "cost.spend_table,cost.columns,datalake.tool sql,tracker.kind,tracker.repos,tracker.query resolved_by_me,github.org"
 user-invocable: true
 ---
