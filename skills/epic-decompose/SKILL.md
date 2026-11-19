@@ -116,7 +116,8 @@ A change after the go to children, areas, dependencies, waves, sizing or caps:
    `swarm.py add <key> <n> --update --move-dw DW-<k> --to <m> --reason "delta YYYY-MM-DD: <what>"`, each its own call
    and each resetting the go the same way. A drop is refused while the child has a worker, a PR, a merge or a child that
    depends on it: stop or re-point those first. No hold is needed; `assign` refuses a dropped row itself.
-3. **§ 3 and § 4** on the whole new plan; an added child's cap comes from the money left, as § 4 counts it.
+3. **§ 3 and § 4** on the whole new plan, the dropped children left out (a dropped child's unspent cap is money left
+   again); an added child's cap comes from the money left, as § 4 counts it.
 4. **A second go**: say the add reset the go (`plan_approved` false); § 6 again, its preview the delta against the plan.
 
 A split or a moved `DW-<n>` that adds no scope and no area, under a recorded `re-plan inside an area` grant: the delta
