@@ -30,7 +30,6 @@ import os
 import re
 import sys
 
-import transcripts  # same dir — the shared transcript reader
 
 CAROUSEL_TOOL = "AskUserQuestion"
 TAIL_BYTES = 4_000_000  # the hook reads only the end of a transcript: the last turn is always near it
