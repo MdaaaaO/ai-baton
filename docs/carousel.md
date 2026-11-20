@@ -11,6 +11,23 @@ A choice only the owner can make, that changes what happens next, and that nothi
 settles — not the request, not the code, not a default, not the standing-go rule (`WORKSPACE.md` §
 Rules → Workflow & scope). Anything else is decided and reported, not asked.
 
+## Two leaks that are breaches too
+
+A decision left in prose breaks the rule whatever its wording. Two forms get past a rule that only says
+"question":
+
+- **The optional offer** — a reply that ends "tell me if you want X", "let me know if …", "want me to …?" or
+  "say the word". The offer is a decision the owner has not been asked: put it in the carousel, or, when
+  standing go already settles it, do it (or leave it out) and report.
+- **The "waits for you" list** — a closing list of items that need the owner's word, go or sign-off ("Waits
+  for you", "Needs your decision", "Open decisions"). Each item is one question; the list is the carousel.
+
+Both end a turn with no `AskUserQuestion` call, which is what the `Stop` hook looks for: `context-db/bin/carousel_check.py`
+reads the end of the final reply (a question mark, an offer phrase in the last three lines, a "waits for you"
+heading in the last fifteen), skips code, and warns — it never blocks. It stays silent when the turn called the
+carousel and when the reply ends with the numbered `Decisions` block of § No tool. `carousel_stats.py` counts
+carousel calls and prose asks per session, before and after a compaction.
+
 ## Assumptions — a decision the session took itself
 
 An assumption is one of the decisions above, taken by the session itself under standing-go

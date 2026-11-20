@@ -80,6 +80,16 @@ re-run `setup.sh`, which adds the server to the workspace `.mcp.json`), the same
 ctx tool answering `NO_STORE` means the store is not adopted: `python3 $BATON/context-db/bin/ctx_adapter.py adopt`
 (once; it writes the kit's store settings where there are none and never overwrites; `/kit-health` § 5 reports it).
 
+### Stop (`hooks/hooks.json` and `settings.json` — both install paths)
+
+When a turn ends, `context-db/bin/carousel_check.py hook` reads the end of the final reply. A reply that ends on a
+prose ask (a question, an offer such as "tell me if you want X", a "waits for you" list) in a turn with no
+`AskUserQuestion` call gets one `carousel check: …` line as the hook's `systemMessage`. It only warns: it exits 0
+on any input, never blocks the stop and prints nothing when the turn called the carousel, when the reply ends with
+a numbered `Decisions` block, or when `stop_hook_active` is set. Its stderr is discarded. To see what it makes of a
+reply, save the reply's text and run `python3 $BATON/context-db/bin/carousel_check.py check <file>`: it prints the
+ask kind, or nothing (`docs/carousel.md` § Two leaks that are breaches too).
+
 ## 2. Start here: `/kit-health`
 
 Whenever something about the kit seems off — a skill misbehaves, a session looks like it's missing rules, a hook

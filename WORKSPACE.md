@@ -9,17 +9,18 @@ Kit reference: `$BATON/README.md`.
 ## Rules (always on)
 
 **Communication**
-- Open decisions go in one `AskUserQuestion` carousel (top option marked `(Recommended)`), never a
-  prose question; no tool → a numbered `Decisions` block (`docs/carousel.md`).
+- Open decisions go in one `AskUserQuestion` carousel (top option `(Recommended)`), never prose — no
+  question, offer ("tell me if you want X") or a "waits for you" list; no tool → a numbered
+  `Decisions` block (`docs/carousel.md`).
 - No AI attribution anywhere; own PRs/comments end with `kit_profile.py footer` only.
-- Asks/status pings default to 1–3 plain sentences — link + one clause + who must act, no bold
-  templates; point to existing detail, never restate it. Save headers/bullets/tables for messages
-  that bundle several items.
+- Asks/status pings: 1–3 plain sentences — link + one clause + who must act, no bold
+  templates; link existing detail, never restate it. Headers/bullets/tables only for messages
+  bundling several items.
 - Refer to work by its tracker key (`ABC-123`, `#123`), never a bare nickname; every tracker key and
   PR reference is a **clickable link on every surface** (`[KEY](url)`); only PR titles stay bare.
 - Right-size to the reader: experts get the TLDR; detail on request.
 - Don't pester: one ask in the right channel, no nudge DMs, batch per person; remove the
-  dependency rather than chase it.
+  dependency, don't chase it.
 - Never cite local `.context/` or workspace paths on any external surface — link the ticket/PR or
   inline the evidence.
 - Never print secret values (parameter-store, tokens, `settings.local.json`) —
