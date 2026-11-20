@@ -1658,6 +1658,15 @@ class Resume(CliCase):
         self.assertIn("7 pr: - -> 12", out)
         self.assertIn("nothing written", out)
 
+    def test_dw1_a_dropped_row_is_left_out_of_the_comparison(self):
+        self.plan("7")
+        self.ok("add", EPIC, "8")
+        head = self.push_branch("feat/8-y")
+        self.set_prs([self.pr(13, "feat/8-y", head, body="Closes #8")])
+        self.assertIn("8", self.actions(), "the row is compared while the plan holds it")
+        self.ok("add", EPIC, "8", "--update", "--drop", "--reason", "delta: not needed")
+        self.assertNotIn("8", self.actions())
+
     def test_apply_rebuilds_the_row_from_the_pushed_branch_and_the_pr(self):
         self.plan("7")
         self.assign()
