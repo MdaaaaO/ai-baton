@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file. Generated b
 [conventional-release](https://github.com/MdaaaaO/conventional-release) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## 0.16.0 (2026-11-20)
+
+
+### Features
+
+* **agents:** a sampled check passes only on members the verifier picked ([#760](https://github.com/MdaaaaO/ai-baton/issues/760)) ([eec2e3c](https://github.com/MdaaaaO/ai-baton/commit/eec2e3c78d3f91b66d937f27be96e64d82236517))
+* **evals:** eval-check compares the README counts with the cases ([#763](https://github.com/MdaaaaO/ai-baton/issues/763)) ([994e68d](https://github.com/MdaaaaO/ai-baton/commit/994e68db254536564fdfc511b51bd7be4a395b55))
+* **hooks:** warn when a turn ends on a prose ask ([#765](https://github.com/MdaaaaO/ai-baton/issues/765)) ([5277321](https://github.com/MdaaaaO/ai-baton/commit/527732142dd3712e90ee842afd4bae39fdd39926))
+* **engine:** plan_check.py makes the epic-decompose refusals mechanical ([#767](https://github.com/MdaaaaO/ai-baton/issues/767)) ([b7f6125](https://github.com/MdaaaaO/ai-baton/commit/b7f6125cb56a6093687be3078b9811af3c7d8430))
+* **engine:** swarm.py re-plan moves, drop a child and move a DW id ([#768](https://github.com/MdaaaaO/ai-baton/issues/768)) ([c910553](https://github.com/MdaaaaO/ai-baton/commit/c91055355de584eb99a9369949ed216b116e7fb2))
+
+
+### Bug Fixes
+
+* **agents:** pin the three contract answers under the eval bar ([#751](https://github.com/MdaaaaO/ai-baton/issues/751)) ([20acf8e](https://github.com/MdaaaaO/ai-baton/commit/20acf8e2d91ddd77dea6b97c88badeb6cfe4df48))
+* **verification:** vg-2 reads the approving review at the merged head ([#755](https://github.com/MdaaaaO/ai-baton/issues/755)) ([8ad86e8](https://github.com/MdaaaaO/ai-baton/commit/8ad86e8e23166150ccbea01c220aa0cd44d916d2))
+* **engine:** make new stamps the type's schema_version ([#754](https://github.com/MdaaaaO/ai-baton/issues/754)) ([cbdebf1](https://github.com/MdaaaaO/ai-baton/commit/cbdebf13bc79f579126c620baaa833ef1b74355a))
+* **done-when:** warn on an unchanged check that diffs a moving ref ([#756](https://github.com/MdaaaaO/ai-baton/issues/756)) ([c41a0f4](https://github.com/MdaaaaO/ai-baton/commit/c41a0f461269ecbb83007a959678f9f112d1d8c8))
+* **swarm:** the tick reports when the digest is due ([#757](https://github.com/MdaaaaO/ai-baton/issues/757)) ([e25a69d](https://github.com/MdaaaaO/ai-baton/commit/e25a69d4f6aa5ce45e3397474dac260c81037712))
+* **swarm:** record a worker's ref after the spawn; a cap can be removed ([#759](https://github.com/MdaaaaO/ai-baton/issues/759)) ([8b37de2](https://github.com/MdaaaaO/ai-baton/commit/8b37de29fd437eccce29c00674759e1dad6b2e95))
+* **done-when:** read checkboxes with escaped brackets ([#764](https://github.com/MdaaaaO/ai-baton/issues/764)) ([78c3dec](https://github.com/MdaaaaO/ai-baton/commit/78c3dec716cfea6124645835ca4f3f1e79acc155))
+* **ci:** pin the evals runner and probe the nested userns step ([#753](https://github.com/MdaaaaO/ai-baton/issues/753)) ([030b5d7](https://github.com/MdaaaaO/ai-baton/commit/030b5d703e0ac0edf8edc4ab2071be81c33caea8))
+* **epic-decompose:** refuse a child criterion that needs the epic ([#766](https://github.com/MdaaaaO/ai-baton/issues/766)) ([08cedaf](https://github.com/MdaaaaO/ai-baton/commit/08cedafbb592e34835e3a78ffff410819c16053c))
+
+
+### Documentation
+
+* **vision:** the four layers no longer say the spec skills are unbuilt ([#750](https://github.com/MdaaaaO/ai-baton/issues/750)) ([9412aec](https://github.com/MdaaaaO/ai-baton/commit/9412aeca1eb9ecab8daeadd75bda192119b861ee))
+* **skills:** align four skill descriptions with their bodies ([#758](https://github.com/MdaaaaO/ai-baton/issues/758)) ([ecf9fa3](https://github.com/MdaaaaO/ai-baton/commit/ecf9fa350f53e68b3042431f111f11a3166a2088))
+
+
+### CI
+
+* **deps:** bump anthropics/claude-code-action from 1.0.268 to 1.0.271 ([#752](https://github.com/MdaaaaO/ai-baton/issues/752)) ([bcae7ac](https://github.com/MdaaaaO/ai-baton/commit/bcae7acdb45a7dcaf6a459a6518e157b440e577e))
+
 ## 0.15.0 (2026-11-12)
 
 
