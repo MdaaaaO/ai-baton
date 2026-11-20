@@ -58,6 +58,8 @@ def sections(led: dict, now: datetime) -> dict:
                for t, r in rows.items() if r["status"] in DONE]
     blocked = []
     for t, r in rows.items():
+        if swarm.dropped(r):  # the plan no longer holds it: nobody must act on it
+            continue
         if r["status"] == "blocked" and r.get("blocked"):
             blocked.append(f"{ref(t)}: {r['blocked'].get('reason')}; {r['blocked'].get('who')} must act")
         elif r["status"] == "parked":

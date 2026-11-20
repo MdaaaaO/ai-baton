@@ -131,6 +131,13 @@ class Render(Case):
         self.assertIn("needs owner of infra/deploy.yaml", out)
         self.assertIn("needs the owner's merge of PR 12", out)
 
+    def test_a_dropped_row_is_not_in_blocked(self):
+        self.fixture()
+        self.ok(SWARM, "status", KEY, "4", "parked", "--reason", "scope cut")
+        self.assertIn("#4: parked, scope cut", self.render())
+        self.ok(SWARM, "add", KEY, "4", "--update", "--drop", "--reason", "delta: not needed")
+        self.assertNotIn("#4: parked", self.render())
+
     def test_a_verified_row_is_shipped(self):
         self.fixture()
         self.patch("4", status="verified", title="the fourth")
