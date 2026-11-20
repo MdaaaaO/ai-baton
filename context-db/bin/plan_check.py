@@ -18,8 +18,9 @@ Usage:
   --cap <n>=<usd> the cap the plan gives child <n>; repeat per child
 
 The four refusals, in this order (an area entry overlaps another when it equals it or is a directory prefix of it, a
-leading `+` ignored, no glob; two children may overlap when one depends on the other, directly or through others):
-  OVERLAP #<a> #<b> <path>            two children share the path, in one wave or across waves, and neither depends on the other
+leading `+` ignored, no glob; two children may overlap when one depends on the other, directly or through others, and
+sits in another wave; a dependency inside one wave, or one that runs both ways, orders nothing and permits nothing):
+  OVERLAP #<a> #<b> <path>            two children share the path and no dependency puts one after the other
   NO AREA #<a>                        a child with no area in a wave of two or more
   WIDE WAVE <w> <n> > <limit>         wave <w> holds <n> children, more than the worker limit
   OVER BUDGET $<sum> > $<left>        the caps add up past the money left
@@ -107,7 +108,8 @@ def check(children: dict[int, dict], limit: int, caps: dict[int, float], left: f
     order = sorted(children)
     for i, a in enumerate(order):
         for b in order[i + 1:]:
-            if b in deps[a] or a in deps[b]:
+            ordered = (b in deps[a]) != (a in deps[b])  # one way only: a cycle orders nothing
+            if ordered and children[a]["wave"] != children[b]["wave"]:  # and the dependency puts one in a later wave
                 continue
             path = shared(children[a]["area"], children[b]["area"])
             if path:

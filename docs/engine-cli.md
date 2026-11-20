@@ -950,8 +950,9 @@ Usage:
   --cap <n>=<usd> the cap the plan gives child <n>; repeat per child
 
 The four refusals, in this order (an area entry overlaps another when it equals it or is a directory prefix of it, a
-leading `+` ignored, no glob; two children may overlap when one depends on the other, directly or through others):
-  OVERLAP #<a> #<b> <path>            two children share the path, in one wave or across waves, and neither depends on the other
+leading `+` ignored, no glob; two children may overlap when one depends on the other, directly or through others, and
+sits in another wave; a dependency inside one wave, or one that runs both ways, orders nothing and permits nothing):
+  OVERLAP #<a> #<b> <path>            two children share the path and no dependency puts one after the other
   NO AREA #<a>                        a child with no area in a wave of two or more
   WIDE WAVE <w> <n> > <limit>         wave <w> holds <n> children, more than the worker limit
   OVER BUDGET $<sum> > $<left>        the caps add up past the money left

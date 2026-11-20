@@ -68,6 +68,14 @@ class Refusals(PlanCase):
         p = self.run_plan("--worker-limit", 4, a, b, c)
         self.assertEqual((p.returncode, self.lines(p)), (0, ["OK 3 children, 3 waves"]))
 
+    def test_dw1_a_dependency_inside_one_wave_or_a_cycle_permits_nothing(self):
+        same = [self.child(1, "`src/`"), self.child(2, "`src/x.py`", "1; depends on #1")]
+        p = self.run_plan("--worker-limit", 4, *same)
+        self.assertEqual((p.returncode, self.lines(p)), (3, ["OVERLAP #1 #2 src/x.py"]))
+        cycle = [self.child(1, "`src/`", "1; depends on #2"), self.child(2, "`src/x.py`", "2; depends on #1")]
+        p = self.run_plan("--worker-limit", 4, *cycle)
+        self.assertEqual((p.returncode, self.lines(p)), (3, ["OVERLAP #1 #2 src/x.py"]))
+
     def test_dw1_overlap_across_waves_is_refused_without_a_dependency(self):
         a = self.child(1, "`src/`")
         b = self.child(2, "`src/x.py`", "2; no dependency")

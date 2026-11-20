@@ -83,7 +83,8 @@ of its children's caps; the caps never add up past the money left.
    whole plan, before the walk and the go: `python3 $E/plan_check.py --key <key> --cap <n>=<usd> … $CTX/child-*.md`
    (`--worker-limit <n> --money-left <usd>` instead of `--key` when there is no ledger). Its lines are `OVERLAP #a #b
    <path>`, `NO AREA #a`, `WIDE WAVE <w> <n> > <limit>` and `OVER BUDGET $<sum> > $<left>`, exit 3. Quote each one and
-   redraft; a refusal never reaches a card, and no walk or go starts until it prints `OK`.
+   redraft; a refusal never reaches a card, and no walk or go starts until it prints `OK`. `OK` clears those four only:
+   a dependency cycle, a dependency inside one wave and `CRITERION #a DW-<n>` stay this session's own § 3 checks.
 2. **The walk**: `ticket-carousel` with these drafts as its list and `<key>` as its parent: its Dedup, its cards, its
    rule that nothing is created until the walk ends. The epic's interview answered Goal and Out of scope for the
    group, so they are not asked again; each card's preview carries the child's `## Done when`, Area and Wave. Its
