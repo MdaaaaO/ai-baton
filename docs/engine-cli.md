@@ -924,6 +924,53 @@ options:
   -h, --help            show this help message and exit
 ```
 
+## `plan_check.py`
+
+```text
+usage: plan_check.py [-h] [--key KEY] [--worker-limit WORKER_LIMIT]
+                     [--money-left MONEY_LEFT] [--cap CAP]
+                     children [children ...]
+
+plan_check.py — the mechanical refusals of a drafted epic plan (skills/epic-decompose § 3 and § 4).
+
+Reads the child drafts `epic-decompose` writes (`child-<n>.md`, each with its `**Area**` and `**Wave**` lines) and the caps,
+and prints one line per refusal; it changes nothing. The child's number is the `<n>` of its file name, the `#<n>` the
+refusal lines and the `depends on #<n>` text of the other drafts use.
+
+  **Area** — `<path>`, `<dir>/`, `+<new path>`
+  **Wave** — <w>; depends on #<a> and #<b>        (or: <w>; no dependency)
+
+Usage:
+  plan_check.py [--key <epic> | --worker-limit <n> [--money-left <usd>]] [--cap <n>=<usd> ...] <child-n.md> ...
+
+  --key           read the worker limit and the money left from the epic's task ledger, through the swarm module
+  --worker-limit  the most children one wave holds; with no ledger, or to override it
+  --money-left    the epic cap less what is spent, less the unspent caps of the unmerged children outside this plan
+                  (§ 4); with no ledger, or to override it. Without it and without a capped ledger the caps are not checked
+  --cap <n>=<usd> the cap the plan gives child <n>; repeat per child
+
+The four refusals, in this order (an area entry overlaps another when it equals it or is a directory prefix of it, a
+leading `+` ignored, no glob; two children may overlap when one depends on the other, directly or through others, and
+sits in another wave; a dependency inside one wave, or one that runs both ways, orders nothing and permits nothing):
+  OVERLAP #<a> #<b> <path>            two children share the path and no dependency puts one after the other
+  NO AREA #<a>                        a child with no area in a wave of two or more
+  WIDE WAVE <w> <n> > <limit>         wave <w> holds <n> children, more than the worker limit
+  OVER BUDGET $<sum> > $<left>        the caps add up past the money left
+
+Prints `OK <n> children, <w> waves` and exits 0 when nothing is refused.
+Exit codes: 0 nothing refused; 2 bad usage or a draft or ledger that cannot be read; 3 at least one refusal. Stdlib only.
+
+positional arguments:
+  children
+
+options:
+  -h, --help            show this help message and exit
+  --key KEY
+  --worker-limit WORKER_LIMIT
+  --money-left MONEY_LEFT
+  --cap CAP
+```
+
 ## `evidence_check.py`
 
 ```text
