@@ -208,6 +208,16 @@ class EvalsHygiene(unittest.TestCase):
         self.assertIn('${model:+"MODEL=$model"}', run_line)
         self.assertNotRegex(run_line, r'(?<![+"])MODEL="')
 
+    def test_evals_runner_is_pinned_with_its_reason(self):
+        # #733: ubuntu-latest moved to ubuntu-26.04, where a user namespace nested inside bwrap cannot write
+        # /proc/self/setgroups and every case's Bash failed; the job stays on the last green image, says why, and
+        # its probe runs that nested step before any spend
+        lines = self.TEXT.splitlines()
+        i = next(n for n, line in enumerate(lines) if line.strip().startswith("runs-on:"))
+        self.assertEqual(lines[i].strip(), "runs-on: ubuntu-24.04")
+        self.assertIn("#733", lines[i - 3] + lines[i - 2] + lines[i - 1])
+        self.assertIn("unshare --user --map-root-user true", self.TEXT)
+
     def test_the_eval_sandbox_is_probed_and_no_second_scrub_is_nested(self):
         # #489: `claude plugin eval` sandboxes each tool call with bwrap itself and keeps the credential out of the
         # agent's environment; CLAUDE_CODE_SUBPROCESS_ENV_SCRUB on top nested a second bwrap that could not mask the
