@@ -171,6 +171,13 @@ that record treats the message as no go. An `ASSIGN` hands over work the approve
 the plan, a cap or a permission. The incident lane in the re-plan row is the one exception to the plan, and it widens no
 cap or permission.
 
+A re-plan records its two moves in the task ledger, each with the delta line as its `--reason`: `swarm.py add <key> <n>
+--update --drop --reason "…"` marks a row dropped, and `--update --move-dw DW-<n> --to <m> --reason "…"` moves an id to
+another row. A dropped row keeps its status, its ids and its log, is never assigned, re-briefed or changed again, and
+counts for no wave, no worker slot and no budget; a drop is refused while the row has a worker, a PR, a merge or a live
+dependent. A move is refused for an id with a recorded pass and for a row that is merged or later. On an approved plan
+either one resets the plan's go like any other re-plan field, so the owner's second go is still needed.
+
 ### Admin or bypass merge
 
 Owner-only. The owner makes this merge, or gives one **bypass go** for a session to carry it out for them. No session

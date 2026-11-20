@@ -618,14 +618,15 @@ def swarm_epic(led: dict, digest: dict | None) -> dict:
     tickets, by_status, blocked, shipped = [], {}, [], []
     for t, row in sorted(rows.items(), key=lambda kv: (len(str(kv[0])), str(kv[0]))):
         row = row if isinstance(row, dict) else {}
-        status = str(row.get("status") or "?")
+        gone = swarm.dropped(row)
+        status = "dropped" if gone else str(row.get("status") or "?")
         by_status[status] = by_status.get(status, 0) + 1
         spend = row.get("spend") if isinstance(row.get("spend"), dict) else {}
         entry = {"ticket": str(t), "title": row.get("title"), "status": status, "wave": row.get("wave"),
                  "pr": row.get("pr"), "spent": row.get("spent") or 0, "readings": len(spend)}
         tickets.append(entry)
         who = row.get("blocked") if isinstance(row.get("blocked"), dict) else None
-        if who or row.get("parked_reason"):
+        if not gone and (who or row.get("parked_reason")):
             blocked.append({"ticket": str(t), "reason": (who or {}).get("reason") or row.get("parked_reason"),
                             "who": (who or {}).get("who")})
         if status in swarm.SHIPPED:

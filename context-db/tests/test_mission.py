@@ -1378,6 +1378,14 @@ class Pointers(unittest.TestCase):
         self.assertEqual([t["ticket"] for t in row["shipped"]], ["1"])
 
 
+    def test_a_dropped_row_is_not_blocked_in_the_panel(self):
+        led = {"key": "ep-3", "budget": {}, "tickets": {
+            "1": {"status": "parked", "parked_reason": "scope cut"},
+            "2": {"status": "parked", "parked_reason": "scope cut", "dropped": {"reason": "delta", "at": "2026-11-05T08:00:00Z"}}}}
+        row = mission.swarm_epic(led, None)
+        self.assertEqual([b["ticket"] for b in row["blocked"]], ["1"])
+        self.assertEqual(row["by_status"], {"parked": 1, "dropped": 1})
+
 # ── pure helpers, called in process ───────────────────────────────────────────────────────────────────────────
 @contextlib.contextmanager
 def link_config(template: str = "", org: str = "", repos=()):

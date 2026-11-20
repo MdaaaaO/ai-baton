@@ -153,6 +153,17 @@ class FromLedger(PlanCase):
         self.assertEqual(self.lines(p), ["WIDE WAVE 1 3 > 2", "OVER BUDGET $18 > $15"])
         self.assertEqual(p.returncode, 3)
 
+    def test_a_dropped_row_holds_no_money(self):
+        self.swarm("init", "epic-1", "--repo", "o/r", "--session", "s", "--max-workers", "2", "--epic-usd", "20")
+        self.swarm("add", "epic-1", "90", "--cap-usd", "5")
+        self.swarm("add", "epic-1", "91", "--cap-usd", "5")
+        kids = [self.child(n, f"`src/f{n}.py`") for n in (1, 2)]
+        p = self.run_plan("--key", "epic-1", "--cap", "1=6", "--cap", "2=6", *kids)
+        self.assertEqual(self.lines(p), ["OVER BUDGET $12 > $10"], "two unmerged rows hold $10 of the $20")
+        self.swarm("add", "epic-1", "91", "--update", "--drop", "--reason", "delta: not needed")
+        p = self.run_plan("--key", "epic-1", "--cap", "1=6", "--cap", "2=6", *kids)
+        self.assertEqual((p.returncode, self.lines(p)), (0, ["OK 2 children, 1 waves"]), "the dropped row's $5 is money left again")
+
     def test_an_unknown_ledger_is_a_read_error(self):
         p = self.run_plan("--key", "nope", self.child(1, "`a`"))
         self.assertEqual(p.returncode, 2)

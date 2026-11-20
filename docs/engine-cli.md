@@ -945,7 +945,8 @@ Usage:
 
   --key           read the worker limit and the money left from the epic's task ledger, through the swarm module
   --worker-limit  the most children one wave holds; with no ledger, or to override it
-  --money-left    the epic cap less what is spent, less the unspent caps of the unmerged children outside this plan
+  --money-left    the epic cap less what is spent, less the unspent caps of the unmerged children outside this plan,
+                  a dropped row left out
                   (§ 4); with no ledger, or to override it. Without it and without a capped ledger the caps are not checked
   --cap <n>=<usd> the cap the plan gives child <n>; repeat per child
 
@@ -1207,7 +1208,13 @@ Every subcommand takes the epic key first:
   init      create the ledger (--repo, --session, --waves, the budget caps, --max-workers)
   add       a row per ticket: --area, --dep, --wave, --sizing, --dw or --ticket-file, --cap-usd. A new row on an approved
             plan, or a changed area, dep, wave, sizing or cap, resets `plan_approved`, unless it is an --incident lane or
-            --already-done bookkeeping
+            --already-done bookkeeping. Two moves a re-plan needs, each with `--update` and `--reason "<delta line>"` and
+            no other field: `--drop` marks the row dropped (see `dropped` below) and `--move-dw DW-<n> --to <m>` takes the
+            id off this row and puts it on row <m>. Both reset `plan_approved` on an approved plan, like any re-plan field,
+            unless every row they touch is an incident lane. A drop is refused for a row with a worker, a PR, a merge or a
+            live dependent; a move is refused for an id with a recorded pass, from or to a row that is merged or later, or
+            to a dropped row. A dropped row is never assigned, re-briefed or moved, `add --update` cannot change it, and no
+            row can name it as a dependency
   approve   the owner's go on the plan, with its --decision line. `assign` refuses until then
   assign    a worker takes the row: --kind, --name, --ref, --worktree, --branch. --rebrief moves no row. Either way the
             READY in force ends, because the head it named is about to move. Refused before the plan's go, under a STOP or
@@ -1261,6 +1268,8 @@ The file is `<content root>/state/swarm/<key>.json`. Times are UTC, `YYYY-MM-DDT
       "stall_counted_at", "rebriefs": n, "rebrief_open": <time>|null, a re-brief with no READY or BLOCKED since,
       "fail": {"at", "merged_sha", "branch", "reason"}|null, a FAIL on the merged commit until a fix is assigned,
       "dws": [DW-n, …], "passes": {DW-n: {"evidence", "by", "at"}},
+      "dropped": {"reason", "at"}|null, a row the plan no longer holds: it keeps its status, its log and its ids, takes no
+      worker and counts for no wave, no slot and no budget,
       "blocked": {"reason", "who", "sha", "ran", "at"}|null, "parked_reason",
       "lines": {<sender>: {<WORD>: {"id", "at", …the line's fields}}}, "restored": true when `resume --apply` wrote it}}}
 

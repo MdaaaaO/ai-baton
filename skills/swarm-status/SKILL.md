@@ -2,8 +2,8 @@
 name: swarm-status
 description: "Posts the swarm digest: shipped, blocked, decisions open, spend, stalls, next, plus the operator lines, once per swarm.digest_hours and at each wave end. Use when the swarm tick reaches its digest step."
 metadata:
-  version: "2"
-  updated: "2026-11-17"
+  version: "3"
+  updated: "2026-11-20"
   reviewed: "2026-11-05"
 argument-hint: "<epic key> [--wave-end]"
 ---
