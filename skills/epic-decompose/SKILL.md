@@ -2,9 +2,9 @@
 name: epic-decompose
 description: "Splits a discovered epic into child tickets with areas, waves and budgets, refuses overlapping areas, ledgers them and asks the owner's go on the plan. Use when decomposing or re-planning an epic. Not for opening one (`epic-discover`) or running it (`swarm-run`)."
 metadata:
-  version: "2"
-  updated: "2026-11-19"
-  reviewed: "2026-11-19"
+  version: "4"
+  updated: "2026-11-20"
+  reviewed: "2026-11-20"
 user-invocable: true
 argument-hint: "<epic key> [<owner/repo>]"
 ---
@@ -48,7 +48,8 @@ step 4, the Sizing line from `$BATON/docs/delegation.md` § Sizing) and its `## 
   A `haiku`-sized child beside a neighbour in its own area → merge them.
 - **A shared index** (a count, a table row every child would add: a skill list, a loading table, an eval count) has one
   owner, the orchestrator; every other child names the row it wants in its return, never edits it.
-- **Coverage.** Every parent `DW-<n>` but the gates line lands in at least one child, named in the plan.
+- **Coverage.** Every parent `DW-<n>` lands in at least one child, named in the plan, but for the gates line and the
+  criteria § 3 keeps on the epic (its close, a release, a gate signature).
 
 ## 3. Areas, dependencies, waves — the refusals
 
@@ -61,6 +62,9 @@ step 4, the Sizing line from `$BATON/docs/delegation.md` § Sizing) and its `## 
   Anything else is refused as `OVERLAP #a #b <path>`, the shared path named, with the fix offered: make one depend on
   the other in a later wave, merge them, or give the shared file to one of them. An overlap is never put to the go.
 - **No area.** A child with no area in a wave of two or more is refused as `NO AREA #a`; alone in its wave it may run.
+- **Criterion.** A child closes on its own PR. A child `## Done when` id that needs the epic's close, a release or a gate
+  signature (a human `VG-<n>`) is refused as `CRITERION #a DW-<n>`, with the fix offered: move it to the epic's own
+  `## Done when`, which the orchestrator delivers. Never put it to the go on the child.
 - A refusal redrafts the plan and says what changed; it never reaches a card. An incident lane is `swarm-run`'s.
 
 ## 4. Budgets

@@ -36,6 +36,17 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/context-db/bin/carousel_check.py\" hook 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "^(Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|Task|mcp__.*)$",

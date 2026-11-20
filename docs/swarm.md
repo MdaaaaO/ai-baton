@@ -46,6 +46,11 @@ ticket of every wave.
 | Integrate | orchestrator or owner, verifier | The merge, as § Authority matrix says, then the verifier checks the merged commit (`phase=merged`) and calls `swarm.py pass` per `DW-<n>`. | **Pass**: `DW-<n> → evidence` in the task ledger |
 | Close | orchestrator, verifier, owner | Once every child has its passes, the verifier runs the epic's agent gates (`phase=gates`): all of them, or, where the verification plan orders its gates in steps, the last step's, each earlier step having had its own run (the `phase=gates` paragraph below). It signs each that holds with `gates.py sign --by verifier`. The owner signs the human ones. Every `VG-<n>` gate is closed (`gates.py status` exits 0), and the last digest goes out. | **Digest** on the epic, with the measured turns and spend |
 
+**A criterion lives where it closes.** A child ticket closes on its own PR, so its `## Done when` holds only ids that PR
+can verify. A criterion the orchestrator delivers (the epic's close, a release, a gate signature) lives on the epic's own
+`## Done when`, never on a child: `epic-decompose` § 3 refuses it on a child and offers the move. The
+orchestrator answers each of those ids in the epic's close comment, one evidence line per id (`ticket-close`).
+
 **The assignment.** The orchestrator's order to one worker for one ticket, as a file the worker reads first:
 `.context/state/swarm/<key>/<worker>/assignment.md`. Its fields: ticket, worktree, branch, `DW` list with checks, budget
 caps (spend, forks, minutes, split turns), merge mode and why, accepted evidence, sibling areas, decision links, scratch
