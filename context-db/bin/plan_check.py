@@ -13,7 +13,8 @@ Usage:
 
   --key           read the worker limit and the money left from the epic's task ledger, through the swarm module
   --worker-limit  the most children one wave holds; with no ledger, or to override it
-  --money-left    the epic cap less what is spent, less the unspent caps of the unmerged children outside this plan
+  --money-left    the epic cap less what is spent, less the unspent caps of the unmerged children outside this plan,
+                  a dropped row left out
                   (§ 4); with no ledger, or to override it. Without it and without a capped ledger the caps are not checked
   --cap <n>=<usd> the cap the plan gives child <n>; repeat per child
 
@@ -136,7 +137,7 @@ def ledger_values(key: str, plan: set[int]) -> tuple[int, float | None]:
         return swarm.worker_limit(led), None
     held = 0.0
     for t, row in led["tickets"].items():
-        if row["status"] in swarm.BEFORE_MERGED and not (t.isdigit() and int(t) in plan):
+        if row["status"] in swarm.BEFORE_MERGED and not swarm.dropped(row) and not (t.isdigit() and int(t) in plan):
             cap = swarm.row_cap(led, row)
             held += max(cap - (row.get("spent") or 0), 0) if cap is not None else 0
     return swarm.worker_limit(led), epic - spent - held

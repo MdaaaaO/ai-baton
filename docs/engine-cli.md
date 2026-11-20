@@ -945,7 +945,8 @@ Usage:
 
   --key           read the worker limit and the money left from the epic's task ledger, through the swarm module
   --worker-limit  the most children one wave holds; with no ledger, or to override it
-  --money-left    the epic cap less what is spent, less the unspent caps of the unmerged children outside this plan
+  --money-left    the epic cap less what is spent, less the unspent caps of the unmerged children outside this plan,
+                  a dropped row left out
                   (§ 4); with no ledger, or to override it. Without it and without a capped ledger the caps are not checked
   --cap <n>=<usd> the cap the plan gives child <n>; repeat per child
 
